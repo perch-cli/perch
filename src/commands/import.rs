@@ -45,8 +45,8 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
         placed.undo(host);
         error.with_note(
             "Nothing was imported. The Credentials this had already restored \
-             have been taken back out again, so the machine is as it was and \
-             the file can be imported again.",
+             have been taken back out again, and the file can be imported \
+             again.",
         )
     })?;
 

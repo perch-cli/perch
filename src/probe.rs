@@ -264,7 +264,10 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
         vec![String::new()]
     };
 
-    for dir in path.split(separator).filter(|dir| !dir.is_empty()) {
+    // Rooted directories only, as `curl_at` takes them: an empty element and a
+    // `.` both mean the working directory, and `perch upgrade` runs what it
+    // finds here.
+    for dir in path.split(separator).filter(|dir| rooted(dir, on_windows)) {
         for extension in &extensions {
             // Joined with '/' rather than `Path::join`, which picks the
             // separator of whatever platform this build runs on: Windows
@@ -276,6 +279,26 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Whether a `PATH` element names a directory from the root rather than from
+/// wherever Perch was run. Asked of the platform the host reports rather than
+/// through `Path::is_absolute`, which reads the separator of the platform this
+/// build runs on — the reason the search above joins with `/` by hand.
+fn rooted(dir: &str, on_windows: bool) -> bool {
+    if dir.starts_with('/') {
+        return true;
+    }
+    // A root of the current drive, and a drive named outright. `C:name` with no
+    // separator is relative to that drive's own working directory, which is what
+    // is being refused rather than a spelling of the root.
+    on_windows
+        && (dir.starts_with('\\')
+            || matches!(
+                dir.as_bytes(),
+                [drive, b':', separator, ..]
+                    if drive.is_ascii_alphabetic() && matches!(separator, b'\\' | b'/')
+            ))
 }
 
 /// Reads the installed version, refusing when there is nothing to read.
@@ -556,12 +579,15 @@ pub fn credential_after_rotation(
             )
         })?;
 
-    block.insert("accessToken".into(), access_token.into());
+    // Each `insert` hands back the token it displaced, which is the retired
+    // generation: dropped as it comes, it would be freed untouched, which is
+    // what the tree is emptied by hand below to prevent.
+    wipe(block.insert("accessToken".into(), access_token.into()));
     // A refresh that hands back no new refresh token has not Rotated: the one
     // already stored is still the live one, and replacing it with nothing would
     // throw away the only way back.
     if let Some(token) = refresh_token {
-        block.insert("refreshToken".into(), token.into());
+        wipe(block.insert("refreshToken".into(), token.into()));
     }
     // Taken out rather than left alone where the renewal gave no lifetime: a
     // Credential is renewed *because* its `expiresAt` had passed, so leaving
@@ -592,6 +618,17 @@ pub fn credential_after_rotation(
     written
 }
 
+/// Wipes a token a `serde_json::Map` handed back, if it handed one back.
+///
+/// Taking a `Value` rather than a `String` because that is what `insert` and
+/// `remove` return, and a caller that has to match before it can wipe is a
+/// caller that will one day forget to.
+fn wipe(displaced: Option<serde_json::Value>) {
+    if let Some(serde_json::Value::String(mut held)) = displaced {
+        held.zeroize();
+    }
+}
+
 /// Reads the Identity out of a store's `.claude.json`.
 pub fn read_identity(
     host: &dyn Host,
@@ -612,14 +649,16 @@ pub fn read_identity(
         Ok(contents) => contents,
     };
 
-    // The identity file is Claude Code's, not Perch's: one it writes in a shape
-    // Perch cannot parse is an assumption failing, not a corrupt file.
+    // Claude Code's file, not Perch's: a shape Perch cannot parse is an
+    // assumption failing rather than a corrupt file. Through `where_it_is_wrong`
+    // for the reason the Credential is — serde quotes the value it tripped on.
     let parsed: IdentityFile = serde_json::from_str(&contents).map_err(|err| {
         refusal(
             assumption::IDENTITY_BLOCK,
             &format!(
-                "{} is not JSON Perch understands: {err}",
-                store.identity_file.display()
+                "{} is not JSON Perch understands: {}",
+                store.identity_file.display(),
+                where_it_is_wrong(&err)
             ),
             installed.version(),
         )
@@ -990,7 +1029,12 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
 
         match host.process_started_at(pid) {
             Some(process_began) => {
-                if process_began.timestamp_millis() <= session_began + CLOCK_STEP_MARGIN_MILLIS {
+                // Saturating, for the reason `usable` is: `startedAt` comes out
+                // of a file Perch does not own, and an `i64::MAX` in it would
+                // wrap a Live Profile into "nothing running" in a release build.
+                if process_began.timestamp_millis()
+                    <= session_began.saturating_add(CLOCK_STEP_MARGIN_MILLIS)
+                {
                     running.push(pid);
                 }
             }
@@ -1273,6 +1317,36 @@ mod tests {
             claude_bin(&host).unwrap(),
             PathBuf::from("C:/npm/claude.cmd")
         );
+    }
+
+    /// `perch upgrade` runs what this finds, so a `PATH` element that resolves
+    /// against the working directory hands the machine to whatever `npm` or
+    /// `brew` the shell happened to be sitting in.
+    #[test]
+    fn a_path_element_that_means_the_working_directory_is_not_searched() {
+        for (platform, path, relative) in [
+            (Platform::Other, ".:/usr/bin", "./claude"),
+            (Platform::Other, ":/usr/bin", "claude"),
+            (Platform::Other, "tools:/usr/bin", "tools/claude"),
+            (Platform::Windows, ".;C:/bin", "./claude.exe"),
+            (Platform::Windows, "C:tools;C:/bin", "C:tools/claude.exe"),
+        ] {
+            let wanted = match platform {
+                Platform::Windows => "C:/bin/claude.exe",
+                _ => "/usr/bin/claude",
+            };
+            let host = FakeHost::new()
+                .with_platform(platform)
+                .with_env("PATH", path)
+                .with_file(relative, "")
+                .with_file(wanted, "");
+
+            assert_eq!(
+                claude_bin(&host).unwrap(),
+                PathBuf::from(wanted),
+                "the case this is about: {path}"
+            );
+        }
     }
 
     #[test]
@@ -1692,6 +1766,27 @@ mod tests {
         );
     }
 
+    /// `startedAt` is a number out of a file Perch does not own, so the margin
+    /// added to it is arithmetic on a stranger's input.
+    #[test]
+    fn a_marker_claiming_the_end_of_time_still_reads_as_a_live_client() {
+        let host = FakeHost::new()
+            .with_file(
+                "/tmp/profile/sessions/4242.json",
+                &format!(r#"{{"startedAt":{}}}"#, i64::MAX),
+            )
+            .with_live_process_started_at(
+                4242,
+                DateTime::from_timestamp_millis(NOON).expect("a time"),
+            );
+
+        assert_eq!(
+            clients_in(&host, Path::new("/tmp/profile")).ok(),
+            Some(vec![4242]),
+            "a process that began long before the marker claims is running              against the Profile, whatever the claim adds up to"
+        );
+    }
+
     #[test]
     fn a_credential_never_renders_its_secret() {
         let credential = understood(r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-secret"}}"#);
@@ -1994,7 +2089,8 @@ mod tests {
                 "the keychain",
                 &Installed::unknown("2.1.221"),
             )
-            .expect_err("the case this is about: {held}");
+            .err()
+            .unwrap_or_else(|| panic!("the case this is about: {held}"));
 
             let said = refused.to_string();
             assert!(said.contains("is not JSON Perch understands"), "{said}");
@@ -2003,6 +2099,30 @@ mod tests {
                 "the refusal carries the token: {said}"
             );
         }
+    }
+
+    /// The same rule for the file beside the Credential. `.claude.json` is not a
+    /// secret in the way a Credential is, but it routinely carries an API key in
+    /// an MCP server's `env` block — and serde quotes the value it tripped on.
+    #[test]
+    fn an_identity_file_of_the_wrong_shape_is_refused_without_quoting_what_was_in_it() {
+        const KEY: &str = "sk-ant-api03-must-not-be-said";
+
+        let host = FakeHost::new()
+            .with_env("HOME", "/Users/someone")
+            .with_env("USER", "someone")
+            .with_file(
+                "/Users/someone/.claude.json",
+                &format!(r#"{{"oauthAccount":{{"emailAddress":{{"held":"{KEY}"}}}}}}"#),
+            );
+        let store = default_store(&host).expect("the store is derivable");
+
+        let refused = read_identity(&host, &store, &version_under_test())
+            .expect_err("an address is not an object");
+
+        let said = refused.to_string();
+        assert!(said.contains("is not JSON Perch understands"), "{said}");
+        assert!(!said.contains(KEY), "the refusal carries the key: {said}");
     }
 
     #[test]

@@ -34,6 +34,12 @@ fn machine() -> FakeHost {
     machine_with_claude_code().with_reply(LATEST_URL, 200, &latest(NEWER))
 }
 
+/// The `brew` beside a Cellar, which every Homebrew Installation has and which
+/// `homebrew_command` asks for before it hands the work over.
+fn with_brew(host: FakeHost) -> FakeHost {
+    host.with_file("/opt/homebrew/bin/brew", "")
+}
+
 fn upgrading(host: &FakeHost, args: UpgradeArgs) -> (perch::Result<i32>, String) {
     let mut out = Vec::new();
     let outcome = upgrade::run(host, args, &mut out);
@@ -56,7 +62,7 @@ fn ran(host: &FakeHost) -> Vec<Launched> {
 
 #[test]
 fn a_homebrew_installation_is_handed_to_the_brew_that_owns_it() {
-    let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+    let host = with_brew(machine()).installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
 
     let (outcome, said) = upgrading(&host, UpgradeArgs::default());
 
@@ -102,6 +108,24 @@ fn an_npm_installation_is_handed_to_npm() {
         )]
     );
     assert!(said.contains("npm update -g perch-cli"), "{said}");
+}
+
+/// The refusal named the command to type once `brew` is back, and could only
+/// ever fire for `--channel homebrew`: a detected prefix was taken to have a
+/// `bin/brew` under it, so a Homebrew moved or half removed surfaced as
+/// "could not run /opt/homebrew/bin/brew upgrade perch: No such file".
+#[test]
+fn a_cellar_whose_brew_has_gone_says_the_command_rather_than_failing_to_run_it() {
+    let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+
+    let (outcome, _said) = upgrading(&host, UpgradeArgs::default());
+
+    let refused = outcome.expect_err("there is no brew to hand it back to");
+    assert!(ran(&host).is_empty(), "nothing was run: {:?}", ran(&host));
+    assert!(
+        refused.to_string().contains("brew upgrade perch"),
+        "it says the command to type once `brew` is back: {refused}"
+    );
 }
 
 /// A `0` here is a script's `perch upgrade && restart-my-thing` restarting the
@@ -460,7 +484,7 @@ fn a_channel_that_is_not_one_is_refused_by_name() {
 /// is not that answer.
 #[test]
 fn a_check_refuses_a_channel_word_that_is_not_one_rather_than_reporting_none() {
-    let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+    let host = with_brew(machine()).installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
 
     let (outcome, said) = upgrading(
         &host,
@@ -586,7 +610,7 @@ fn a_named_release_reaches_npm_as_an_install_of_that_version() {
 
 #[test]
 fn a_named_release_is_refused_on_homebrew_rather_than_quietly_ignored() {
-    let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+    let host = with_brew(machine()).installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
 
     let (outcome, _) = upgrading(
         &host,

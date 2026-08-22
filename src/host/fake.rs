@@ -298,6 +298,10 @@ struct Network {
     /// watcher watches it.
     traces: RefCell<Traces>,
     sent: RefCell<Vec<Sent>>,
+    /// How long one request takes to answer. A burst of reads is bounded by
+    /// nothing but the network, so a round can outlast a hold renewed either
+    /// side of it.
+    takes_millis: RefCell<u64>,
 }
 
 /// Time, and what somebody else does while it passes: one mechanism with two
@@ -400,6 +404,7 @@ impl FakeHost {
                 replies: RefCell::new(BTreeMap::new()),
                 traces: RefCell::new(BTreeMap::new()),
                 sent: RefCell::new(Vec::new()),
+                takes_millis: RefCell::new(0),
             },
             stall: Stall {
                 now: RefCell::new(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()),
@@ -726,9 +731,9 @@ impl FakeHost {
     }
 
     /// A keychain that stops to ask the user for permission, and how long they
-    /// take to answer it. The stall a Switch documents as unbounded: one
-    /// keychain write on macOS can put a dialog in front of somebody who then
-    /// walks away, and everything Perch is holding has to survive it.
+    /// take to answer it — before a write and before a delete alike. The stall a
+    /// Switch and a Purge both document as unbounded: everything Perch is
+    /// holding has to survive somebody walking away from the dialog.
     pub fn with_a_keychain_that_asks_first(self, takes_millis: u64) -> Self {
         *self.keys.keychain_set_takes_millis.borrow_mut() = takes_millis;
         self
@@ -907,6 +912,13 @@ impl FakeHost {
                 body: body.to_string(),
             },
         );
+    }
+
+    /// A network that answers slowly, and how slowly. The stall a round has no
+    /// bound on: one read per candidate, each waited thirty seconds for.
+    pub fn with_a_network_that_answers_slowly(self, takes_millis: u64) -> Self {
+        *self.network.takes_millis.borrow_mut() = takes_millis;
+        self
     }
 
     // ---- stall: time, and what somebody else does while it passes ---
@@ -1144,6 +1156,19 @@ impl FakeHost {
         let thought_about_it =
             *self.stall.now.borrow() + chrono::Duration::milliseconds(taken as i64);
         *self.stall.now.borrow_mut() = thought_about_it;
+        self.somebody_else_arrives();
+    }
+
+    /// The dialog a keychain puts in front of somebody before it lets a write
+    /// through, and a wait like any other: what the test said happens while Perch
+    /// waits happens here, which is the point of a stall this long.
+    fn while_the_keychain_asks(&self) {
+        let asked = *self.keys.keychain_set_takes_millis.borrow();
+        if asked == 0 {
+            return;
+        }
+        let answered = *self.stall.now.borrow() + chrono::Duration::milliseconds(asked as i64);
+        *self.stall.now.borrow_mut() = answered;
         self.somebody_else_arrives();
     }
 
@@ -1862,16 +1887,7 @@ impl port::Keys for FakeHost {
             service: service.to_string(),
             account: account.to_string(),
         });
-        let asked = *self.keys.keychain_set_takes_millis.borrow();
-        if asked > 0 {
-            let answered = *self.stall.now.borrow() + chrono::Duration::milliseconds(asked as i64);
-            *self.stall.now.borrow_mut() = answered;
-
-            // A wait like any other, so what the test said happens while Perch
-            // waits happens here too — another `perch` arriving is the whole
-            // point of a stall this long.
-            self.somebody_else_arrives();
-        }
+        self.while_the_keychain_asks();
         if let Some(error) = self.lock_error() {
             return Err(error);
         }
@@ -1893,6 +1909,7 @@ impl port::Keys for FakeHost {
             service: service.to_string(),
             account: account.to_string(),
         });
+        self.while_the_keychain_asks();
         if let Some(error) = self.lock_error() {
             return Err(error);
         }
@@ -2094,6 +2111,13 @@ impl port::Network for FakeHost {
         let asked = sent.url.clone();
         let bearer = sent.bearer().map(str::to_string);
         self.network.sent.borrow_mut().push(sent);
+
+        let takes = *self.network.takes_millis.borrow();
+        if takes > 0 {
+            let answered = *self.stall.now.borrow() + chrono::Duration::milliseconds(takes as i64);
+            *self.stall.now.borrow_mut() = answered;
+            self.somebody_else_arrives();
+        }
 
         // A trace answers before a fixed reply does, and its last entry stays
         // put: a figure that moves is what the test is about, and one that has

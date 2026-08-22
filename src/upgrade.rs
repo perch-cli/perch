@@ -399,7 +399,11 @@ pub fn version_report(host: &dyn Host) -> String {
 pub fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<String>)> {
     let brew = match prefix.as_os_str().is_empty() {
         true => crate::probe::on_path(host, "brew"),
-        false => Some(beneath(&[&prefix.display().to_string(), "bin", "brew"])),
+        // Asked for rather than assumed, so a prefix whose `bin/brew` has gone
+        // reaches the refusal below — which names the command to type — rather
+        // than a "No such file or directory" from running it.
+        false => Some(beneath(&[&prefix.display().to_string(), "bin", "brew"]))
+            .filter(|brew| host.is_file(brew)),
     };
     let brew = brew.ok_or_else(|| {
         PerchError::NotFound(
@@ -634,7 +638,9 @@ mod tests {
             "0.2.0;rm",
             "0.2.0 ",
         ] {
-            let refused = version_typed(typed).expect_err("{typed} is not a Release");
+            let refused = version_typed(typed)
+                .err()
+                .unwrap_or_else(|| panic!("{typed} is not a Release"));
             assert!(
                 matches!(refused, PerchError::Invalid(_)),
                 "{typed}: {refused}"

@@ -128,9 +128,20 @@ pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -
     forget_what_the_registry_does_not_name(host, registry)?;
 
     // The last thing asked before the one deletion running this again cannot
-    // finish: a home that has gone takes whatever another Perch put in it while
-    // this was working, with nothing left afterwards that could name it.
-    crate::commands::still_ours(perch, "given back")?;
+    // finish, and not through `still_ours`: its sentence is that nothing was
+    // done, and by this line every Credential is deleted.
+    perch.renew();
+    if !perch.still_held() {
+        return Err(PerchError::Other(format!(
+            "Another `perch` changed the registry while this Purge was working, \
+             so this one is working from a copy that is out of date. Every \
+             Credential Perch held is already deleted; what is left is {}, and \
+             it has been left where it is rather than taken with whatever the \
+             other `perch` put in it.\n\
+             Run `perch holdings purge` again and it will finish.",
+            home.display(),
+        )));
+    }
 
     host.remove_dir_all(&home).map_err(|err| {
         PerchError::Other(format!(

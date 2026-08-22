@@ -491,7 +491,12 @@ impl NameKind {
 /// months ago — and over the whole of Unicode, because ASCII alone would fold
 /// `work` and `Work` but not `café` and `CAFÉ`.
 pub fn same_name(one: &str, other: &str) -> bool {
-    one.to_lowercase() == other.to_lowercase()
+    // A character at a time rather than through `to_lowercase`, which allocates
+    // two `String`s per comparison — and `validate`'s quadratic collision check
+    // asks this on every read and every write.
+    one.chars()
+        .flat_map(char::to_lowercase)
+        .eq(other.chars().flat_map(char::to_lowercase))
 }
 
 /// A Group name offered as a default, made from something that was never chosen
@@ -987,16 +992,21 @@ impl Registry {
     /// the Settings, the Accounts that claim it, and what the last scheduled
     /// Check left — dropping that would let the watcher Switch again at once.
     pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
-        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
-
-        // Through `declared_group`, which is how every other question about a
-        // Group name is answered here.
+        // Resolved before the new name is judged, or
+        // `perch group rename nosuchgroup work` exits as a name collision. And
+        // through `declared_group`, as every question about a Group name is.
         let Some(declared) = self.declared_group(held).map(str::to_string) else {
             return Err(PerchError::NotFound(format!(
                 "no Group is called `{held}`."
             )));
         };
-        let settings = self.groups.remove(&declared).unwrap_or_default();
+        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
+
+        let Some(settings) = self.groups.remove(&declared) else {
+            return Err(PerchError::NotFound(format!(
+                "no Group is called `{held}`."
+            )));
+        };
         self.groups.insert(to.to_string(), settings);
         for account in &mut self.accounts {
             if account
@@ -1435,7 +1445,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // exactly the thing that writes a value this build has no variant for, and
     // reading the document first fails on that with serde's own words.
     match crate::error::claimed_version(&contents) {
-        Some(version) if version > CURRENT_VERSION => {
+        Some(version) if version > u64::from(CURRENT_VERSION) => {
             return Err(crate::error::written_by_a_newer_perch(
                 &path.display().to_string(),
                 "registry",
@@ -1443,7 +1453,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
                 CURRENT_VERSION,
             ));
         }
-        Some(version) if version < crate::migration::EARLIEST_VERSION => {
+        Some(version) if version < u64::from(crate::migration::EARLIEST_VERSION) => {
             return Err(no_perch_wrote(path, Some(version)));
         }
         None if crate::migration::says_no_version(&contents) => {
@@ -1482,7 +1492,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 ///
 /// Neither names a shape, and a document whose shape is unstated half-parses
 /// rather than refusing.
-fn no_perch_wrote(path: &Path, claimed: Option<u32>) -> PerchError {
+fn no_perch_wrote(path: &Path, claimed: Option<u64>) -> PerchError {
     // Without the path, which `Malformed` has already said.
     let what = match claimed {
         Some(version) => format!(
@@ -1645,6 +1655,17 @@ pub fn validate(registry: &Registry) -> Result<()> {
             "The registry records a Check against `{named}`, which is neither a \
              Group Perch holds nor the Accounts in no Group — so the Cooldown it \
              carries paces nothing."
+        )));
+    }
+
+    // `checked` answers with the first match in `BTreeMap` order and
+    // `record_check` writes under the declared spelling, so two keys that fold
+    // to one pace the next Check off a record nothing is keeping.
+    if let Some((already, name)) = first_collision(registry.checks.keys().map(String::as_str)) {
+        return Err(PerchError::Invalid(format!(
+            "The registry records a Check against `{already}` and one against \
+             `{name}`, which are one Group — so which Cooldown paces the next \
+             one is not decided by anything."
         )));
     }
 
@@ -1890,6 +1911,31 @@ mod tests {
 
         drop(held);
         lock(&host).expect("a lock given back can be taken again");
+    }
+
+    /// The fold is the whole of the identity a name has, so it is stated here
+    /// rather than only through the callers that ask it. Character by character
+    /// rather than over two allocated `String`s, and the two must not differ:
+    /// `İ` lowercases to two characters, which is where a naive pairwise fold
+    /// would part company with `to_lowercase`.
+    #[test]
+    fn two_names_are_one_name_whenever_lowercasing_makes_them_one() {
+        for (one, other) in [
+            ("work", "Work"),
+            ("café", "CAFÉ"),
+            ("İ", "İ"),
+            ("straße", "STRAßE"),
+        ] {
+            assert!(same_name(one, other), "{one} and {other} are one name");
+            assert_eq!(
+                same_name(one, other),
+                one.to_lowercase() == other.to_lowercase(),
+                "and the fold is the one `to_lowercase` makes: {one}, {other}"
+            );
+        }
+        for (one, other) in [("work", "works"), ("café", "cafe"), ("", "a")] {
+            assert!(!same_name(one, other), "{one} and {other} are two names");
+        }
     }
 
     #[test]
@@ -2342,6 +2388,31 @@ mod tests {
             },
         );
         validate(&registry).expect("the Accounts in no Group Cycle too");
+    }
+
+    /// `checked` answers with the first in `BTreeMap` order and `record_check`
+    /// writes under the declared spelling, so the record read is not the record
+    /// kept — and a Cooldown read off a stale one Switches sooner than 15
+    /// minutes.
+    #[test]
+    fn two_checks_against_one_group_are_not_a_registry() {
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut registry = Registry::default();
+        registry
+            .groups
+            .insert("work".to_string(), Settings::default());
+        for spelling in ["Work", "work"] {
+            registry
+                .checks
+                .insert(spelling.to_string(), Checked { switched_at: at });
+        }
+
+        let refused = validate(&registry).expect_err("one of the two paces nothing");
+        let said = refused.to_string();
+        assert!(
+            said.contains("Work") && said.contains("work"),
+            "it names both spellings: {said}"
+        );
     }
 
     #[test]

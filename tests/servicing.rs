@@ -811,6 +811,9 @@ fn upgradable() -> FakeHost {
             200,
             r#"{"tag_name":"v999.0.0","name":"whatever"}"#,
         )
+        // The `brew` beside the Cellar, which every Homebrew Installation has
+        // and which the Upgrade asks for before it hands the work over.
+        .with_file("/opt/homebrew/bin/brew", "")
         .installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch")
 }
 

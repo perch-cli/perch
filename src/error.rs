@@ -168,7 +168,7 @@ pub enum PerchError {
 /// what it was, how far ahead it is, and that upgrading is the way through. A
 /// registry merely *older* migrates forward instead, and which of the two a
 /// format gets turns on what a refusal costs (ADR the-holdings-outlive-a-perch).
-pub fn written_by_a_newer_perch(what: &str, of: &str, version: u32, understood: u32) -> PerchError {
+pub fn written_by_a_newer_perch(what: &str, of: &str, version: u64, understood: u32) -> PerchError {
     PerchError::Other(format!(
         "{what} was written by a newer Perch ({of} version {version}, this build \
          understands {understood}). Upgrade Perch."
@@ -180,13 +180,19 @@ pub fn written_by_a_newer_perch(what: &str, of: &str, version: u32, understood: 
 /// parsing first fails in serde's words about a document that is well-formed.
 /// Nothing rather than an error where it will not parse at all: what to make of
 /// nonsense is the caller's to say, about its own file.
-pub fn claimed_version(contents: &str) -> Option<u32> {
+pub fn claimed_version(contents: &str) -> Option<u64> {
     #[derive(serde::Deserialize)]
     struct Versioned {
-        version: Option<u32>,
+        version: Option<serde_json::Value>,
     }
 
-    serde_json::from_str::<Versioned>(contents).ok()?.version
+    // A `u64`, so a number above this build's ceiling reads as the newer Perch
+    // it is rather than as serde's words about an integer that will not fit.
+    // Anything that is no whole number claims no version at all.
+    serde_json::from_str::<Versioned>(contents)
+        .ok()?
+        .version?
+        .as_u64()
 }
 
 impl PerchError {

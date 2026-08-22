@@ -590,6 +590,40 @@ fn a_destination_nearly_as_full_as_the_account_being_left_is_refused() {
     );
 }
 
+/// Nowhere to go is the one steady state a Threshold crossing can sit in for hours,
+/// and the round that reaches it read every candidate. At the ordinary interval that is
+/// twenty-four reads an hour *per candidate*, against the 28-30 Anthropic allows — so
+/// the loop spends the allowance that `perch status --refresh` needs, on Accounts it
+/// has already refused.
+#[test]
+fn a_dead_end_is_looked_at_again_at_the_cooldown_rather_than_at_the_interval() {
+    // Every round over the Threshold, and the only candidate barely emptier — so
+    // every one of them crosses, reads, and finds nowhere worth going.
+    let host = watching_both(&[82.0, 83.0, 81.0, 84.0, 85.0, 86.0], &[78.0], 6);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    let waits: Vec<u64> = host
+        .effects()
+        .into_iter()
+        .filter_map(|effect| match effect {
+            Effect::Waited { millis } => Some(millis),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        waits
+            .iter()
+            .all(|millis| *millis == perch::watch::NOWHERE_INTERVAL_MILLIS),
+        "every round found nowhere to go, so every wait is the Cooldown: {waits:?}"
+    );
+    assert!(
+        printed.contains("Looking again in 15m"),
+        "and the line says the loop is resting longer than an interval: {printed}"
+    );
+}
+
 /// A machine where the Account being watched fills up, the watcher moves off it, and
 /// the Account it moved to fills up in turn — the trace that would move every round if
 /// nothing paced it. The Account left behind is roomy again by then, so only the
@@ -1421,6 +1455,39 @@ fn a_loop_whose_watch_was_taken_over_stops_rather_than_deciding_beside_it() {
     assert!(
         host.sent_to(USAGE_URL).len() < 3,
         "and it leaves rather than taking the rounds that were left"
+    );
+}
+
+/// The burst is renewed either side of it and bounded by nothing in between, so it can
+/// outlast the watch — and a Switch made after that is the second Watcher deciding
+/// beside the first, which is the whole of what the lock is for.
+#[test]
+fn a_watch_taken_over_while_the_candidates_were_read_switches_nothing() {
+    let lock = "/Users/someone/.config/perch/.watch.lock";
+    // Long enough to carry the round past the staleness window, which is what lets
+    // another Watcher judge this hold abandoned and clear it.
+    let host = watching(&[86.0], 5.0)
+        .with_a_network_that_answers_slowly(
+            perch::watch::LONGEST_WAIT_MILLIS + perch::watch::REFRESH_INTERVAL_MILLIS + 1_000,
+        )
+        .once_while_waiting(move |host| {
+            let _ = host.remove_dir_all(std::path::Path::new(lock));
+        });
+    host.forget_effects();
+
+    let (result, printed) = run_watch_once(&host);
+
+    result.expect("a watch taken over is not this Watcher's failure");
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::KeychainSet { .. })),
+        "nothing was switched, so no Credential moved: {printed}"
+    );
+    assert!(
+        printed.contains("taken over"),
+        "and the round says why it decided nothing: {printed}"
     );
 }
 

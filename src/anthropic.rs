@@ -609,8 +609,9 @@ mod tests {
         ] {
             let document: Value = serde_json::from_str(flattened).unwrap();
 
-            let refused =
-                windows_of(&document).expect_err("half a picture is not a picture: {flattened}");
+            let refused = windows_of(&document)
+                .err()
+                .unwrap_or_else(|| panic!("half a picture is not a picture: {flattened}"));
 
             assert!(
                 refused.contains("five_hour"),
@@ -656,8 +657,9 @@ mod tests {
         ] {
             let document: Value = serde_json::from_str(document).unwrap();
 
-            let refused = windows_of(&document)
-                .expect_err("half a picture is not a picture: {left_out} was left out");
+            let refused = windows_of(&document).err().unwrap_or_else(|| {
+                panic!("half a picture is not a picture: {left_out} was left out")
+            });
 
             assert!(
                 refused.contains(left_out),

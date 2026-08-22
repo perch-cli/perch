@@ -768,6 +768,27 @@ fn listing_the_groups_reads_alongside_another_perch_rather_than_waiting_on_it() 
     drop(held);
 }
 
+/// The two refusals a rename has, in the order a person meets them: a script
+/// branching on the code is told which of the two names is the problem.
+#[test]
+fn renaming_a_group_that_is_not_there_says_so_rather_than_naming_a_collision() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = rename_group(&host, "nosuchgroup", "work");
+
+    let refused = result.expect_err("there is no Group called that");
+    assert_eq!(
+        refused.exit_code(),
+        perch::error::EXIT_NOT_FOUND,
+        "a Group that is not there is not a name collision: {refused}"
+    );
+    assert!(
+        refused.to_string().contains("nosuchgroup"),
+        "and it names the Group that is missing rather than the one that is \
+         there: {refused}"
+    );
+}
+
 /// `global` is the sharpest case: typing back an offered `perch group add
 /// global` gets a refusal, which is a dead end wherever it happens.
 #[test]

@@ -312,21 +312,18 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
     Ok(held)
 }
 
-/// Whether somebody is holding a lock *right now*, without waiting to find out:
-/// the question [`take`] answers, minus the part that makes it a request. Taking
-/// it properly and giving it back would answer too, but only after four
-/// one-second waits, which makes the healthy machine the slow one. `None` where
-/// the lock could not be asked about at all, which is not contention.
+/// Whether somebody is holding a lock *right now*, without waiting to find out.
+/// `None` where the lock could not be asked about, which is not contention.
+///
+/// Read rather than taken: creating the artifact to find out whether it could be
+/// created leaves one behind if this process dies in between.
 pub fn is_held(host: &dyn Host, lock: &LockSpec) -> Option<bool> {
-    match host.create_dir_exclusive(&lock.dir) {
-        // Given straight back. Nothing was asked for beyond the answer, and an
-        // artifact left behind is a lock nothing else can take until it goes
-        // stale — so a removal that failed is not an answer to act on.
-        Ok(()) => host.remove_dir_all(&lock.dir).ok().map(|()| false),
+    match host.modified_at(&lock.dir) {
         // A stale artifact reads as nobody holding it, which is `take`'s rule.
         // Nothing is cleared here: a takeover is something a caller asks for by
         // asking to hold the lock.
-        Err(HostError::AlreadyExists { .. }) => Some(!abandoned(host, lock)),
+        Ok(modified) => Some((host.now() - modified).num_milliseconds() <= lock.stale_millis),
+        Err(HostError::NotFound { .. }) => Some(false),
         Err(_) => None,
     }
 }
@@ -905,6 +902,47 @@ mod tests {
             "work that failed still gives back what it took, innermost first"
         );
         assert!(!host.path_exists(Path::new(&first.dir)));
+    }
+
+    /// The whole of what makes it a question rather than a request. Answered by
+    /// creating the artifact and giving it back, a `perch watcher status` that
+    /// died in between left a lock nothing could take for a whole staleness
+    /// window — 22.5 minutes for the watch.
+    #[test]
+    fn asking_whether_a_lock_is_held_does_not_take_it() {
+        let lock = a_lock("/Users/someone/.config/perch/.watch.lock");
+        let host = FakeHost::new();
+
+        assert_eq!(is_held(&host, &lock), Some(false), "nobody is holding it");
+        assert!(
+            !host.path_exists(&lock.dir),
+            "and asking left nothing behind: {:?}",
+            host.effects()
+        );
+
+        let now = host.now();
+        let host = host.with_dir_held_since(&lock.dir, now);
+        assert_eq!(is_held(&host, &lock), Some(true), "now somebody is");
+
+        let long_ago = now - chrono::Duration::seconds(120);
+        let host = host.with_dir_held_since(&lock.dir, long_ago);
+        assert_eq!(
+            is_held(&host, &lock),
+            Some(false),
+            "and one that has gone quiet is nobody, which is `take`'s rule"
+        );
+        assert!(
+            host.path_exists(&lock.dir),
+            "without clearing it: a takeover is asked for by asking to hold it"
+        );
+
+        let host = FakeHost::new().with_unreadable_file(&lock.dir, "Permission denied");
+        assert_eq!(
+            is_held(&host, &lock),
+            None,
+            "and a lock that cannot be asked about is neither held nor free — \
+             which is not contention, so the caller decides what to make of it"
+        );
     }
 
     /// The behavior every rule below is a qualification of.

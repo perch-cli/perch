@@ -687,25 +687,34 @@ fn everyone_is_exhausted(
             _ => None,
         })
         .min_by_key(|(at, _)| *at);
-    // An elapsed reset says as little about the wait as no reset at all, so it
-    // is counted here rather than dropped: both mean "the wait could be shorter
-    // than that", and for an elapsed one it very likely is.
-    let unsaid = ranked
-        .iter()
-        .filter(|ranked| match ranked.headroom {
-            Headroom::Exhausted { frees_at: None } => true,
+    // Both mean "the wait could be shorter than that", and are told apart
+    // because with no `soonest` at all they are the opposite advice.
+    let mut elapsed = 0;
+    let mut uncached = 0;
+    for ranked in ranked {
+        match ranked.headroom {
+            Headroom::Exhausted { frees_at: None } => uncached += 1,
             Headroom::Exhausted {
                 frees_at: Some(at), ..
-            } => at <= now,
-            _ => false,
-        })
-        .count();
+            } if at <= now => elapsed += 1,
+            _ => {}
+        }
+    }
+    let unsaid = elapsed + uncached;
 
     let mut waiting = match soonest {
         Some((at, account)) => format!(
             "{} frees up soonest, at {}.",
             registry.named_for_the_user(account.email()),
             utilization::reset_phrase(at, now),
+        ),
+        // Every cached reset has come and gone, so the figures are what is old
+        // rather than the Accounts that are full. Saying nothing said would send
+        // somebody off to wait for a reset that has already happened.
+        None if elapsed > 0 => format!(
+            "Every reset any of them cached has already passed, so they may be \
+             free now — {}",
+            how_to_get_figures(scope)
         ),
         // None of them carried a reset. Saying nothing would read as "never".
         None => format!(
@@ -1712,6 +1721,30 @@ pub(crate) mod tests {
         assert!(
             refusal.to_string().contains("frees up soonest"),
             "when the wait is the answer, saying the wait is the answer: {refusal}"
+        );
+    }
+
+    /// The cache said exactly when each of them came back, so telling somebody
+    /// nothing said is the opposite advice: they wait on a reset that has
+    /// already happened.
+    #[test]
+    fn everyone_exhausted_on_resets_that_have_passed_says_they_may_be_free_now() {
+        let registry = holding(vec![
+            account("here@example.com", vec![resetting("5-hour", 100.0, -2)]),
+            account("full@example.com", vec![resetting("5-hour", 100.0, -1)]),
+        ]);
+
+        let refusal = cycle(&registry)
+            .expect_err("everything is exhausted")
+            .to_string();
+
+        assert!(
+            !refusal.contains("No cached figure says when any"),
+            "the cache said when each of them frees up: {refusal}"
+        );
+        assert!(
+            refusal.contains("may be free now"),
+            "and an elapsed reset is good news rather than a wait: {refusal}"
         );
     }
 

@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 
+use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::host::Host;
@@ -96,18 +97,35 @@ impl Placed {
     /// have named it — on macOS, the only name reaching a live Credential.
     pub fn undo(&self, host: &dyn Host) {
         for touched in &self.touched {
-            if touched.was_already_there {
-                host.note(&format!(
-                    "{} was already on this machine, so it was left where it is \
-                     rather than removed with the Profiles this Import made. \
-                     The Export still holds every Credential in it.",
-                    touched.store.config_dir.display(),
-                ));
+            if !touched.was_already_there {
+                profile::discard(host, &touched.store);
                 continue;
             }
-            profile::discard(host, &touched.store);
+            // The directory stays and the Credential does not: a Credential in a
+            // store the rolled-back registry will not name is the state
+            // `profile::discard` exists to prevent.
+            for kept_in in credentials::stores_for(host, &touched.store) {
+                let _ = kept_in.forget(host);
+            }
+            host.note(&format!(
+                "{} was already on this machine, so it was left where it is \
+                 rather than removed with the Profiles this Import made — but \
+                 the Credential this Import wrote into it has been taken back \
+                 out. The Export still holds every Credential in it.",
+                touched.store.config_dir.display(),
+            ));
         }
     }
+}
+
+/// Both maps an Export keys on an address, so a rule stated about one is stated
+/// about the other: an Account holds a Credential and a `.claude.json`, and a
+/// file arriving under an address nothing lists is the same failure either way.
+fn every_map(export: &Export) -> [(&'static str, &BTreeMap<String, String>); 2] {
+    [
+        ("a Credential", &export.credentials),
+        ("a `.claude.json`", &export.identity_files),
+    ]
 }
 
 /// Puts every Credential the Export holds into the Profile of the Account it
@@ -119,32 +137,30 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // Every Credential in the file belongs to an Account the file lists, or this
     // is not the whole restore it claims to be. `gather` cannot write such an
     // Export, so this is about a file written by something else.
-    let unlisted: Vec<&str> = export
-        .credentials
-        .keys()
-        .map(String::as_str)
-        .filter(|email| export.registry.account(email).is_none())
-        .collect();
-    if !unlisted.is_empty() {
-        return Err(PerchError::Malformed {
-            path: "the Export".to_string(),
-            detail: format!(
-                "it holds a Credential for {}, which it does not list as an \
-                 Account. Nothing was imported: a Credential with no Account \
-                 to belong to would be restored into a Profile nothing names, \
-                 or not at all, and neither is the whole file.",
-                unlisted.join(", "),
-            ),
-        });
+    for (what, keys) in every_map(export) {
+        let unlisted: Vec<&str> = keys
+            .keys()
+            .map(String::as_str)
+            .filter(|email| export.registry.account(email).is_none())
+            .collect();
+        if !unlisted.is_empty() {
+            return Err(PerchError::Malformed {
+                path: "the Export".to_string(),
+                detail: format!(
+                    "it holds {what} for {}, which it does not list as an \
+                     Account. Nothing was imported: a file with no Account to \
+                     belong to would be restored into a Profile nothing names, \
+                     or not at all, and neither is the whole file.",
+                    unlisted.join(", "),
+                ),
+            });
+        }
     }
 
     // Two keys in either map that fold to one address, refused for the reason
     // above and by the same fold: `credential_for` answers with the first match,
     // so only one of the two is ever placed, under a report saying it was whole.
-    for (what, keys) in [
-        ("a Credential", &export.credentials),
-        ("a `.claude.json`", &export.identity_files),
-    ] {
+    for (what, keys) in every_map(export) {
         let held: Vec<&str> = keys.keys().map(String::as_str).collect();
         for (at, key) in held.iter().enumerate() {
             if let Some(clash) = held[..at]
@@ -512,19 +528,28 @@ mod tests {
     /// else — and dropping it silently is a success message over a restore that
     /// was not whole.
     #[test]
-    fn a_credential_for_an_account_the_export_does_not_list_is_refused() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let mut export = an_export();
-        export
-            .credentials
-            .insert("nobody@example.com".to_string(), "held".to_string());
+    fn a_file_for_an_account_the_export_does_not_list_is_refused() {
+        for what in ["a Credential", "a `.claude.json`"] {
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let mut export = an_export();
+            let map = match what {
+                "a Credential" => &mut export.credentials,
+                _ => &mut export.identity_files,
+            };
+            map.insert("nobody@example.com".to_string(), "held".to_string());
 
-        let refused = place(&host, &export).expect_err("that Credential belongs to nothing");
+            let refused = place(&host, &export).expect_err("that file belongs to nothing");
 
-        assert!(
-            refused.to_string().contains("nobody@example.com"),
-            "it names the Account that is missing: {refused}"
-        );
+            let said = refused.to_string();
+            assert!(
+                said.contains("nobody@example.com"),
+                "it names the Account that is missing: {said}"
+            );
+            assert!(
+                said.contains(what),
+                "and says which of the two maps holds it: {said}"
+            );
+        }
     }
 
     /// The `unlisted` guard folds case, so both keys name a listed Account and

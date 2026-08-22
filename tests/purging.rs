@@ -799,6 +799,40 @@ fn a_purge_off_macos_explains_the_store_that_machine_actually_has() {
     );
 }
 
+/// A keychain delete can put a dialog in front of somebody who then walks away,
+/// which is the hazard `erase` renews the hold around. Past that point the
+/// Credentials are gone, so the refusal must not be the one that says nothing
+/// was done: somebody would go looking for a Credential that is not there.
+#[test]
+fn a_hold_lost_after_the_credentials_were_deleted_does_not_say_nothing_happened() {
+    let host = a_machine_to_give_back()
+        // Past the staleness window, on the first delete of three.
+        .with_a_keychain_that_asks_first(120_000)
+        .once_while_waiting(|host| {
+            let lock = perch::registry::lock_spec(host).expect("home is known");
+            host.remove_dir_all(&lock.dir).expect("it was abandoned");
+            host.create_dir_exclusive(&lock.dir)
+                .expect("the other `perch` takes it");
+        });
+
+    let (outcome, _printed) = run_purge(&host);
+
+    let refused = outcome.expect_err("this Perch may no longer take the home away");
+    let said = refused.to_string();
+    assert!(
+        !said.contains("Nothing was given back"),
+        "every Credential is already deleted, so that sentence is false: {said}"
+    );
+    assert!(
+        said.contains("already deleted"),
+        "it says what did happen: {said}"
+    );
+    assert!(
+        said.contains("purge` again"),
+        "and that running it again finishes it: {said}"
+    );
+}
+
 /// The questions a Purge asks are the one wait in Perch with no bound on them,
 /// and the registry lock is held across them — so a hold this Perch has lost is
 /// a registry somebody else has been changing since it was read.

@@ -704,6 +704,17 @@ fn act(
     // One call, with the ordering inside it: `switch_to` puts `Checked { switched_at }`
     // in the same save as the Switch it paces.
     watching_alone.renew();
+    // The last thing asked before the one irreversible thing a round does. The burst
+    // above is bounded by nothing but the network, so it can outlast the watch — and a
+    // Switch made after that is the second Watcher deciding beside the first.
+    if !watching_alone.still_held() {
+        return Ok(Outcome::Refused {
+            why: "the watch was taken over while this round was reading the \
+                  candidates, so nothing was switched: whoever holds it now is \
+                  watching this machine."
+                .to_string(),
+        });
+    }
     // One instant for both arrangements, and the beginning rather than the end, because
     // that is the one already written down.
     let acted_at = host.now();

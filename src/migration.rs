@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{Settings, UngroupedConfig};
+use crate::registry::{NameKind, Settings, UngroupedConfig};
 
 /// The oldest version any published Perch stamped, and so the oldest shape this
 /// has. Below it is a number no Perch wrote.
@@ -39,7 +39,8 @@ pub fn says_no_version(text: &str) -> bool {
 /// reading one as the current shape is the half-parse a version exists to stop.
 pub fn below_the_earliest(text: &str) -> bool {
     says_no_version(text)
-        || crate::error::claimed_version(text).is_some_and(|claimed| claimed < EARLIEST_VERSION)
+        || crate::error::claimed_version(text)
+            .is_some_and(|claimed| claimed < u64::from(EARLIEST_VERSION))
 }
 
 /// The registry document this build reads, or `None` where it already is one.
@@ -57,6 +58,11 @@ pub fn forward(document: &str) -> Result<Option<String>> {
 
     let mut moved = held.clone();
     moved.insert("version".to_string(), Value::from(CARRIED_TO));
+
+    // Before any of the Scopes below are read out, so a Group renamed here is
+    // renamed everywhere one is named: what it declares, what an Account claims,
+    // and what a Check is keyed on.
+    let renamed = renames_in(&held);
 
     // Read before Global goes, since both of the Scopes below are made out of it.
     let global = object("global", held.get("global"))?;
@@ -81,6 +87,7 @@ pub fn forward(document: &str) -> Result<Option<String>> {
         let carried = accounts
             .iter()
             .map(cycling_may_choose_it)
+            .map(|account| Ok(claiming(account?, &renamed)))
             .collect::<Result<Vec<Value>>>()?;
         moved.insert("accounts".to_string(), Value::Array(carried));
     }
@@ -88,7 +95,10 @@ pub fn forward(document: &str) -> Result<Option<String>> {
     let mut groups = Map::new();
     for (name, held) in object("groups", held.get("groups"))? {
         let said = object(&format!("groups.{name}"), Some(&held))?;
-        groups.insert(name.clone(), settings(&inherited, &said));
+        groups.insert(
+            now_called(NameKind::Group, &name, &renamed),
+            settings(&inherited, &said),
+        );
     }
     moved.insert("groups".to_string(), Value::Object(groups));
 
@@ -99,13 +109,22 @@ pub fn forward(document: &str) -> Result<Option<String>> {
     );
     moved.remove("global");
 
+    let mut aliases = Map::new();
+    for (name, email) in object("aliases", held.get("aliases"))? {
+        aliases.insert(now_called(NameKind::Alias, &name, &renamed), email);
+    }
+    moved.insert("aliases".to_string(), Value::Object(aliases));
+
     let mut checks = Map::new();
     for (group, check) in object("checks", held.get("checks"))? {
         let mut kept = object(&format!("checks.{group}"), Some(&check))?;
         // The Account a Switch left was read by the no-return alone, and the
         // no-return could never fire (ADR a-watcher-knob-is-arithmetic).
         kept.remove("switched_off");
-        checks.insert(group.clone(), Value::Object(kept));
+        checks.insert(
+            now_called(NameKind::Group, &group, &renamed),
+            Value::Object(kept),
+        );
     }
     moved.insert("checks".to_string(), Value::Object(checks));
 
@@ -113,6 +132,116 @@ pub fn forward(document: &str) -> Result<Option<String>> {
         .map(Some)
         .map_err(|err| PerchError::Other(format!("could not write the registry forward: {err}")))
 }
+
+/// What a name is called after the rename pass, which is itself where nothing
+/// renamed it.
+fn now_called(kind: NameKind, name: &str, renamed: &[Renamed]) -> String {
+    renamed
+        .iter()
+        .find(|entry| entry.kind == kind && entry.was == name)
+        .map_or_else(|| name.to_string(), |entry| entry.is_now.clone())
+}
+
+/// One Account with the Group it claims brought through the rename pass.
+fn claiming(mut account: Value, renamed: &[Renamed]) -> Value {
+    if let Some(held) = account.as_object_mut()
+        && let Some(Value::String(claimed)) = held.get("group")
+    {
+        let now = now_called(NameKind::Group, claimed, renamed);
+        held.insert("group".to_string(), Value::String(now));
+    }
+    account
+}
+
+/// A name a published Perch accepted that this build's rules refuse, said as it
+/// was and as it is now.
+///
+/// The rules gained `global`, `ungrouped` and the leading `-` after version 1
+/// shipped, so every such name is one v0.1.0, v0.1.1 or v0.2.0 created.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Renamed {
+    pub kind: NameKind,
+    pub was: String,
+    pub is_now: String,
+}
+
+/// What [`forward`] has to rename to bring a version 1 registry inside this
+/// build's name rules.
+///
+/// Renamed rather than refused: `validate` is reached from `load`, so that
+/// refusal takes every command with it — `perch group rename` among them.
+pub fn renames(document: &str) -> Vec<Renamed> {
+    serde_json::from_str::<Value>(document)
+        .ok()
+        .and_then(|held| held.as_object().map(renames_in))
+        .unwrap_or_default()
+}
+
+fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
+    let names = |key: &str| -> Vec<String> {
+        held.get(key)
+            .and_then(Value::as_object)
+            .map(|entries| entries.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+    // One namespace, so a Group renamed out of the way of an Alias is a Group
+    // that has not been renamed at all.
+    let mut taken: Vec<String> = names("groups");
+    taken.extend(names("aliases"));
+
+    let mut renamed = Vec::new();
+    for (kind, held) in [
+        (NameKind::Group, names("groups")),
+        (NameKind::Alias, names("aliases")),
+    ] {
+        for was in held {
+            if crate::registry::validate_name(kind, &was).is_ok() {
+                continue;
+            }
+            let Some(is_now) = acceptable(kind, &was, &taken) else {
+                continue;
+            };
+            taken.push(is_now.clone());
+            renamed.push(Renamed { kind, was, is_now });
+        }
+    }
+    renamed
+}
+
+/// The nearest name to this one that this build accepts and nothing else in the
+/// namespace answers to.
+///
+/// `None` leaves the name as it is, for the refusal at `load` to describe: a
+/// name no published Perch accepted either is a hand edit.
+fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
+    // A leading `-` is the one rule a name can be brought inside by editing the
+    // name; `global` and `ungrouped` are whole words, so those take the suffix.
+    let trimmed = name.trim_start_matches('-').trim();
+    let base = match trimmed.is_empty() {
+        true => match kind {
+            NameKind::Group => "group",
+            NameKind::Alias => "alias",
+        },
+        false => trimmed,
+    };
+    (0..ENOUGH_SUFFIXES)
+        .map(|at| match at {
+            0 => base.to_string(),
+            _ => format!("{base}-{at}"),
+        })
+        .find(|candidate| {
+            crate::registry::validate_name(kind, candidate).is_ok()
+                && !taken
+                    .iter()
+                    .any(|held| crate::registry::same_name(held, candidate))
+        })
+}
+
+/// How many spellings of a name are tried before the rename gives up.
+///
+/// Bounded rather than open, so a name no suffix rescues is a refusal at `load`
+/// rather than a command that never returns.
+const ENOUGH_SUFFIXES: u32 = 100;
 
 /// Brings the registry on this machine forward, once, before anything reads it.
 ///
@@ -131,6 +260,10 @@ pub fn bring_forward(host: &dyn Host) -> Result<()> {
     if behind(host, &path).is_none() {
         return Ok(());
     }
+    let renamed = host
+        .read_file(&path)
+        .map(|held| renames(&held))
+        .unwrap_or_default();
     let Some(registry) = crate::registry::load(host)? else {
         return Ok(());
     };
@@ -139,13 +272,46 @@ pub fn bring_forward(host: &dyn Host) -> Result<()> {
     // file in one step, so a migration that fails leaves the old shape intact.
     crate::registry::save(host, &mut perch, &registry)?;
 
+    // The three retired Watcher Settings are named, because they are the one
+    // thing the step does not carry.
     host.note(&format!(
         "This machine's registry was written by an older Perch (version {was}), \
-         and has been brought forward to version {}. Nothing in it was lost, and \
-         no older Perch reads it now.",
+         and has been brought forward to version {}. The Watcher's cooldown, \
+         margin and no-return are fixed in this build, so whatever they were set \
+         to is gone; everything else came with it. No older Perch reads the file \
+         now.{}",
         crate::registry::CURRENT_VERSION,
+        what_was_renamed(&renamed),
     ));
     Ok(())
+}
+
+/// What the step had to rename, for the note, or nothing where it renamed
+/// nothing.
+fn what_was_renamed(renamed: &[Renamed]) -> String {
+    if renamed.is_empty() {
+        return String::new();
+    }
+    let said: Vec<String> = renamed
+        .iter()
+        .map(|entry| {
+            format!(
+                "{} `{}` is now `{}`",
+                entry.kind.article(),
+                entry.was,
+                entry.is_now
+            )
+        })
+        .collect();
+    format!(
+        "\n\nThis build refuses names it once accepted, so {} — nothing else \
+         about {} changed.",
+        said.join(", "),
+        match renamed.len() {
+            1 => "it",
+            _ => "them",
+        },
+    )
 }
 
 /// The version on disk, where [`forward`] has a step that moves it.
@@ -153,7 +319,7 @@ pub fn bring_forward(host: &dyn Host) -> Result<()> {
 /// Asked of the step rather than of a range of its own: `save` stamps the current
 /// version on whatever it is given, so a document nothing moved must not be one
 /// this offers up — that would relabel a shape that never changed.
-fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u32> {
+fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
     let contents = host.read_file(path).ok()?;
     let was = crate::error::claimed_version(&contents)?;
     forward(&contents).ok()?.is_some().then_some(was)
@@ -302,6 +468,133 @@ mod tests {
                 "the case this is about: {not_a_registry:?}"
             );
         }
+    }
+
+    /// The rules gained `global`, `ungrouped` and the leading `-` after version
+    /// 1 shipped, and `validate` is reached from `load` — so leaving such a name
+    /// as it is refuses every command, including the two that would repair it.
+    #[test]
+    fn a_name_a_published_perch_accepted_is_renamed_rather_than_refused() {
+        let held: Value = serde_json::from_str(V0_2_0).expect("a document");
+        let mut held = held.as_object().cloned().expect("an object");
+        held.insert(
+            "groups".to_string(),
+            serde_json::json!({ "global": {}, "-dev": {}, "ungrouped": {} }),
+        );
+        held.insert(
+            "aliases".to_string(),
+            serde_json::json!({ "-w": "work@example.com" }),
+        );
+        held.insert("checks".to_string(), serde_json::json!({ "global": {} }));
+        held.insert(
+            "accounts".to_string(),
+            serde_json::json!([{ "identity": { "email": "work@example.com" }, "group": "global" }]),
+        );
+        let document = Value::Object(held).to_string();
+
+        let moved = forwarded(&document);
+        assert_eq!(
+            moved["groups"].as_object().map(|held| {
+                let mut names: Vec<&String> = held.keys().collect();
+                names.sort();
+                names.into_iter().cloned().collect::<Vec<String>>()
+            }),
+            Some(vec![
+                "dev".to_string(),
+                "global-1".to_string(),
+                "ungrouped-1".to_string()
+            ]),
+            "every declared Group comes forward under a name this build accepts"
+        );
+        assert_eq!(
+            moved["accounts"][0]["group"], "global-1",
+            "and the Account claiming it claims the name it is now called"
+        );
+        assert!(
+            moved["checks"].get("global-1").is_some(),
+            "as does the Check keyed on it, or the Cooldown paces nothing"
+        );
+        assert!(
+            moved["aliases"].get("w").is_some(),
+            "an Alias is the same namespace and the same rules"
+        );
+    }
+
+    /// Renaming into a name something already answers to would be no rename at
+    /// all: Aliases and Group names share one namespace.
+    #[test]
+    fn a_rename_never_lands_on_a_name_already_taken() {
+        let renamed = renames(
+            &serde_json::json!({
+                "version": 1,
+                "groups": { "-dev": {}, "dev": {} },
+                "aliases": { "dev-1": "work@example.com" },
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            renamed,
+            vec![Renamed {
+                kind: NameKind::Group,
+                was: "-dev".to_string(),
+                is_now: "dev-2".to_string(),
+            }]
+        );
+    }
+
+    /// A name that is nothing but the rule it breaks leaves no base to suffix,
+    /// so the kind supplies one. `perch alias someone --` was a name v0.2.0
+    /// accepted.
+    #[test]
+    fn a_name_with_nothing_left_after_the_rule_is_named_for_its_kind() {
+        assert_eq!(
+            renames(
+                &serde_json::json!({
+                    "version": 1,
+                    "groups": { "--": {} },
+                    "aliases": { "-": "work@example.com" },
+                })
+                .to_string()
+            ),
+            vec![
+                Renamed {
+                    kind: NameKind::Group,
+                    was: "--".to_string(),
+                    is_now: "group".to_string(),
+                },
+                Renamed {
+                    kind: NameKind::Alias,
+                    was: "-".to_string(),
+                    is_now: "alias".to_string(),
+                },
+            ]
+        );
+    }
+
+    /// The rename walks `accounts` to move the Group each one claims, and one
+    /// that claims none comes through untouched rather than gaining a `group`.
+    #[test]
+    fn an_account_in_no_group_comes_through_claiming_none() {
+        let moved = forwarded(
+            &serde_json::json!({
+                "version": 1,
+                "groups": { "-dev": {} },
+                "accounts": [{ "identity": { "email": "a@b.com" } }],
+            })
+            .to_string(),
+        );
+        assert_eq!(moved["accounts"].as_array().map(Vec::len), Some(1));
+        assert!(moved["accounts"][0].get("group").is_none());
+    }
+
+    /// A name outside every rule — an `@`, which no published Perch accepted
+    /// either — is a hand edit, and the refusal at `load` is what describes it.
+    #[test]
+    fn a_name_no_perch_ever_accepted_is_left_for_the_refusal() {
+        assert_eq!(
+            renames(&serde_json::json!({ "version": 1, "groups": { "a@b": {} } }).to_string()),
+            vec![]
+        );
     }
 
     #[test]
@@ -517,7 +810,9 @@ mod tests {
                 r#"{"version":1,"accounts":["a"]}"#,
             ),
         ] {
-            let refused = forward(document).expect_err("the case this is about: {document}");
+            let refused = forward(document)
+                .err()
+                .unwrap_or_else(|| panic!("the case this is about: {document}"));
             let said = refused.to_string();
             assert!(said.contains(field), "{field} is the one to name: {said}");
         }
