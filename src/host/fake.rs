@@ -735,8 +735,8 @@ impl FakeHost {
     }
 
     /// A keychain that stops to ask the user for permission, and how long they
-    /// take to answer it — before a write and before a delete alike. The stall a
-    /// Switch and a Purge both document as unbounded: everything Perch is
+    /// take to answer it — before a read, a write and a delete alike. The stall
+    /// a Switch and a Purge both document as unbounded: everything Perch is
     /// holding has to survive somebody walking away from the dialog.
     pub fn with_a_keychain_that_asks_first(self, takes_millis: u64) -> Self {
         *self.keys.keychain_set_takes_millis.borrow_mut() = takes_millis;
@@ -1887,6 +1887,10 @@ impl port::Keys for FakeHost {
             service: service.to_string(),
             account: account.to_string(),
         });
+        // A read stalls as a write does: `security find-generic-password -w`
+        // against an item this binary did not create is the classic prompt, and
+        // `switch::capture` reads inside `Holds::around` for exactly that.
+        self.while_the_keychain_asks();
         if let Some(error) = self.lock_error() {
             return Err(error);
         }
@@ -2218,6 +2222,29 @@ mod tests {
                 "the fake answered what the real adapter refuses"
             );
         }
+    }
+
+    /// On macOS the permission dialog is put up for a *read* as well as a write:
+    /// `security find-generic-password -w` against an item this binary did not
+    /// create is the classic one. A fake that stalled only on writes made the
+    /// read-side `Holds::around` — which `switch::resolve_a_landing` needs —
+    /// unreachable by any fixture.
+    #[test]
+    fn a_keychain_read_stalls_for_the_dialog_as_a_write_does() {
+        use super::port::{Clock as _, Keys as _};
+
+        let host = FakeHost::new().with_a_keychain_that_asks_first(20_000);
+        host.set_keychain_item("service", "account", "secret");
+        let before = host.now();
+
+        host.keychain_get("service", "account")
+            .expect("it is there");
+
+        assert_eq!(
+            host.now() - before,
+            chrono::Duration::milliseconds(20_000),
+            "the clock moves by what the person took to answer"
+        );
     }
 
     /// The fixture is a Profile holding a link into a Default Profile that has
