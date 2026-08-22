@@ -219,11 +219,17 @@ fn resolve_group(
     }
 
     // Only offered when it would be a usable Group name: an organization Perch
-    // would go on to refuse is no help as a default.
+    // would go on to refuse is no help as a default. Both halves of the
+    // refusal, or accepting the offer re-asks the same question for ever.
     let offered = identity
         .organization_name
         .as_deref()
-        .and_then(registry::offerable_name);
+        .and_then(registry::offerable_name)
+        .filter(|name| {
+            registry
+                .refuse_taken_names(args.alias.as_deref(), Some(name))
+                .is_ok()
+        });
 
     let question = match &offered {
         Some(organization) => format!(
