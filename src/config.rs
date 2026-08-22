@@ -52,6 +52,22 @@ impl Setting {
         self != Setting::Interchangeable || *scope == Scope::Ungrouped
     }
 
+    /// What [`carried_by`](Self::carried_by) answering false comes to.
+    ///
+    /// Once, because it is refused twice: `parse` turns the word down and
+    /// `write` turns it down again at the registry boundary, and one sentence
+    /// spelled at two sites is how the two come to name different remedies.
+    fn only_the_ungrouped_scope_carries_it() -> PerchError {
+        PerchError::Invalid(format!(
+            "`{}` is the declaration that the Accounts in no Group are \
+             interchangeable at all, and only they carry it — a Group is \
+             that declaration rather than something that holds \
+             one. `perch config set {UNGROUPED} {} <value>` says it.",
+            Setting::Interchangeable.as_str(),
+            Setting::Interchangeable.as_str(),
+        ))
+    }
+
     /// The Setting a word names, asked of the Scope it was named about.
     ///
     /// Refused two ways, because they are two different mistakes: a word that
@@ -60,14 +76,7 @@ impl Setting {
     pub fn parse(name: &str, scope: &Scope) -> Result<Self> {
         match Self::parse_quietly(name) {
             Some(key) if key.carried_by(scope) => Ok(key),
-            Some(_) => Err(PerchError::Invalid(format!(
-                "`{}` is the declaration that the Accounts in no Group are \
-                 interchangeable at all, and only they carry it — a Group is \
-                 that declaration rather than something that holds \
-                 one. `perch config set {UNGROUPED} {} <value>` says it.",
-                Setting::Interchangeable.as_str(),
-                Setting::Interchangeable.as_str(),
-            ))),
+            Some(_) => Err(Self::only_the_ungrouped_scope_carries_it()),
             None => Err(PerchError::Invalid(format!(
                 "`{name}` is not a Setting {} carries. The ones it carries are {}.",
                 scope.mentioned(),
@@ -106,14 +115,7 @@ impl Setting {
         // a `pub fn` on a `pub` type returning a `Result` refuses rather than
         // writing a Setting onto a Scope nobody named.
         if !self.carried_by(scope) {
-            return Err(PerchError::Invalid(format!(
-                "`{}` is the declaration that the Accounts in no Group are \
-                 interchangeable at all, and only they carry it — a Group is \
-                 that declaration rather than something that holds \
-                 one. `perch config set {UNGROUPED} {} <value>` says it.",
-                Setting::Interchangeable.as_str(),
-                Setting::Interchangeable.as_str(),
-            )));
+            return Err(Self::only_the_ungrouped_scope_carries_it());
         }
 
         let mut settings = registry.settings(scope);

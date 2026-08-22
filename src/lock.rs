@@ -319,13 +319,10 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
 /// the lock could not be asked about at all, which is not contention.
 pub fn is_held(host: &dyn Host, lock: &LockSpec) -> Option<bool> {
     match host.create_dir_exclusive(&lock.dir) {
-        Ok(()) => {
-            // Given straight back. Nothing was asked for beyond the answer, and
-            // an artifact left behind is a lock nothing else can take until it
-            // goes stale.
-            let _ = host.remove_dir_all(&lock.dir);
-            Some(false)
-        }
+        // Given straight back. Nothing was asked for beyond the answer, and an
+        // artifact left behind is a lock nothing else can take until it goes
+        // stale — so a removal that failed is not an answer to act on.
+        Ok(()) => host.remove_dir_all(&lock.dir).ok().map(|()| false),
         // A stale artifact reads as nobody holding it, which is `take`'s rule.
         // Nothing is cleared here: a takeover is something a caller asks for by
         // asking to hold the lock.

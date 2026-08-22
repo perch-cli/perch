@@ -1328,6 +1328,20 @@ pub fn same_profile(one: &str, other: &str) -> bool {
     slug(one) == slug(other)
 }
 
+/// The other Account a Profile belongs to as well, where there is one.
+///
+/// Three commands ask it — a Switch, a Renewal and a Remove — and each spelled
+/// its own scan, two of them comparing addresses by bytes where the third folded
+/// case. Beside [`same_profile`], for the reason that already lives there.
+pub fn sharing_a_profile_with<'a>(
+    registry: &'a Registry,
+    account: &Account,
+) -> Option<&'a Account> {
+    registry.accounts.iter().find(|held| {
+        !same_name(held.email(), account.email()) && same_profile(held.email(), account.email())
+    })
+}
+
 pub fn slug(email: &str) -> String {
     let slugged: String = email
         .to_lowercase()
@@ -1454,9 +1468,13 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
             .with_note(&the_file_to_edit(path))
         })?;
 
+    // Normalized first, so `load` and `save` judge one shape: `validate` asks
+    // `declared_group` about the `checks` key, and would otherwise refuse a
+    // registry this line repairs — leaving no command able to read the file.
+    let registry = with_every_claimed_group_declared(registry);
     validate(&registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
 
-    Ok(Some(with_every_claimed_group_declared(registry)))
+    Ok(Some(registry))
 }
 
 /// The refusal for a registry claiming a version no Perch has stamped, or none
@@ -2976,6 +2994,41 @@ mod tests {
             "carrying what a freshly declared Group carries"
         );
         assert_eq!(registry.accounts_in("work").len(), 1);
+    }
+
+    /// The `checks` rule asks `declared_group`, so it has to be asked after the
+    /// claim is declared and not before. Judged the other way round it refused
+    /// every command on the file, `holdings purge` among them.
+    #[test]
+    fn a_check_against_a_group_only_an_account_claims_is_read_rather_than_refused() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"work"}],"groups":{},"checks":{"work":{"switched_at":"2026-01-01T00:00:00Z"}}}"#,
+        );
+
+        let registry = load(&host).expect("it reads").expect("it is there");
+
+        assert!(
+            registry.checked("work").is_some(),
+            "the Check is still there"
+        );
+    }
+
+    /// The other half: normalizing first must not make the rule toothless.
+    #[test]
+    fn a_check_against_a_group_nobody_claims_is_still_refused() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"}}],"groups":{},"checks":{"ghost":{"switched_at":"2026-01-01T00:00:00Z"}}}"#,
+        );
+
+        let refused = load(&host).expect_err("that Cooldown paces nothing");
+
+        assert!(refused.to_string().contains("ghost"), "{refused}");
     }
 
     #[test]

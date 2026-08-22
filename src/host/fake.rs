@@ -1619,6 +1619,10 @@ impl port::Files for FakeHost {
             Some(mode) => self.fs.modes.borrow_mut().insert(to.to_path_buf(), mode),
             None => self.fs.modes.borrow_mut().remove(to),
         };
+        // The age goes with the file. Left behind, it makes `modified_at` answer
+        // for a path `path_exists` already says is gone — and that answer is the
+        // one `lock::abandoned` reads as "the artifact is still there".
+        self.fs.modified.borrow_mut().remove(from);
         // And it replaces whatever was at the target, a link included, because
         // `rename(2)` does not follow the last component. That is the security
         // property `replace_via_tmp` exists to produce.
@@ -1799,8 +1803,15 @@ impl port::Links for FakeHost {
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        // A hard link is a name for the file, so removing it removes that name
-        // — and only that name.
+        // A hard link is another name for the file and says nothing about
+        // itself, so neither real adapter can recognize one: unix asks
+        // `is_symlink` and Windows asks for a reparse point, and both refuse.
+        if matches!(self.fs.links.borrow().get(path), Some((Link::Hard, _))) {
+            return Err(HostError::Other(format!(
+                "{} is not a link, so it is not Perch's to remove",
+                path.display()
+            )));
+        }
         if self.fs.links.borrow_mut().remove(path).is_some() {
             self.fs.files.borrow_mut().remove(path);
             self.fs.modes.borrow_mut().remove(path);
@@ -2062,6 +2073,11 @@ impl port::Network for FakeHost {
     /// all otherwise — so a command that fetches when it should not fails rather
     /// than quietly succeeding. Every request is recorded either way.
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
+        // Asked before the arrangement is consulted, because the real adapter
+        // asks before it spawns `curl`: a request it would refuse must not be
+        // one a suite can answer.
+        crate::host::sendable(request)?;
+
         let sent = Sent {
             url: request.url.to_string(),
             headers: request
@@ -2115,6 +2131,30 @@ mod tests {
     use super::*;
     // The one concern these tests reach that the file's own body does not.
     use super::port::Links as _;
+
+    /// An access token comes out of a file Perch does not author, so one
+    /// carrying a newline is a request the real adapter refuses before it
+    /// spawns `curl`. A fake that answered it would prove a Refresh, a Back-off
+    /// and a Quarantine decision against a request no machine would make.
+    #[test]
+    fn a_request_the_real_adapter_would_not_send_is_not_one_the_fake_answers() {
+        use super::port::Network as _;
+
+        let host = FakeHost::new().with_reply("https://example.test/usage", 200, "{}");
+
+        for refused in [
+            HttpRequest::get(
+                "https://example.test/usage",
+                &[("Authorization", "Bearer sk-ant\noutput = /tmp/taken")],
+            ),
+            HttpRequest::post("https://example.test/usage", &[], "@/etc/passwd"),
+        ] {
+            assert!(
+                host.http(&refused).is_err(),
+                "the fake answered what the real adapter refuses"
+            );
+        }
+    }
 
     /// The fixture is a Profile holding a link into a Default Profile that has
     /// gone, which `reconcile::sweep` exists to prevent and a machine can still

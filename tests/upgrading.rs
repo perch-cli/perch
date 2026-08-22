@@ -523,7 +523,7 @@ fn a_check_can_answer_as_a_document() {
     assert_eq!(document["newest"], NEWER);
     assert_eq!(document["installed"], upgrade_installed());
     assert_eq!(document["channel"], "installer");
-    assert_eq!(document["upgradeAvailable"], true);
+    assert_eq!(document["upgrade_available"], true);
 }
 
 #[test]

@@ -258,6 +258,52 @@ fn every_url_on_the_site_is_one_the_site_serves() {
     }
 }
 
+/// A link into this repository on GitHub, which the site's own check cannot
+/// reach: it walks the URLs under the published site, and these name a path in
+/// the tree instead. One pointing at a file that has moved is a 404 nobody here
+/// finds — the guide left `docs/guide/` for `pages/src/content/docs/`, and the
+/// line telling a Windows user how to undo a PATH write went on naming it.
+#[test]
+fn every_link_into_this_repository_names_a_file_that_is_there() {
+    const BLOB: &str = "https://github.com/perch-cli/perch/blob/main/";
+
+    for file in sources_quoting_urls() {
+        let text = read(&repo().join(&file));
+
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find(BLOB) {
+            rest = &rest[at + BLOB.len()..];
+            let path: String = rest
+                .chars()
+                .take_while(|c| !c.is_whitespace() && !"\"'`)>|".contains(*c))
+                .collect();
+            let named = path.split('#').next().unwrap_or(&path);
+            assert!(
+                repo().join(named).exists(),
+                "{file} links to {BLOB}{named}, which is not in the tree"
+            );
+        }
+    }
+}
+
+/// Everywhere a URL is quoted at somebody: the two installers, the front page,
+/// the guide page they are pasted from, and the README.
+fn sources_quoting_urls() -> Vec<String> {
+    let mut quoting = vec![
+        "README.md".to_string(),
+        "SECURITY.md".to_string(),
+        "pages/src/content/docs/index.mdx".to_string(),
+        "pages/public/install.sh".to_string(),
+        "pages/public/install.ps1".to_string(),
+    ];
+    quoting.extend(
+        guide_pages()
+            .iter()
+            .map(|page| format!("pages/src/content/docs/{page}")),
+    );
+    quoting
+}
+
 /// The front page's job is to say what Perch does. It has to show that before it
 /// asks for a paste into a terminal.
 #[test]

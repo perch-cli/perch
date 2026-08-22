@@ -102,7 +102,7 @@ perch upgrade --check           # what is installed, what is newest, from where
 perch upgrade --check --json    # the same, for a script
 ```
 
-`--check` exits 0 either way, so branch on `upgradeAvailable` in the JSON rather
+`--check` exits 0 either way, so branch on `upgrade_available` in the JSON rather
 than on the exit code.
 
 `--release` takes a particular one, with or without the leading `v`:

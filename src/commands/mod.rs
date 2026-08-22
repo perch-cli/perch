@@ -71,6 +71,33 @@ pub fn ask_a_word(host: &dyn Host, out: &mut dyn Write, question: &str) -> Resul
     Ok(ask(host, out, question)?.map(|typed| typed.trim().to_lowercase()))
 }
 
+/// What a bare Return means, which is the half of a yes-or-no question the
+/// prompt's own `[y/N]` or `[Y/n]` is already telling the reader.
+#[derive(Clone, Copy)]
+pub enum Presumed {
+    Yes,
+    No,
+}
+
+/// Whether somebody agreed, asked the same way wherever it is asked.
+///
+/// End of input is never agreement, whichever way the default points: a pipe
+/// that closed is nobody, and nobody is not there to type the passphrase or to
+/// want the Credential gone (ADR a-refusal-is-a-promise).
+pub fn said_yes(
+    host: &dyn Host,
+    out: &mut dyn Write,
+    question: &str,
+    presumed: Presumed,
+) -> Result<bool> {
+    Ok(match ask_a_word(host, out, question)?.as_deref() {
+        None => false,
+        Some("y" | "yes") => true,
+        Some("n" | "no") => false,
+        Some(_) => matches!(presumed, Presumed::Yes),
+    })
+}
+
 /// The same, for a question whose answer the terminal must never show — the
 /// passphrase an Export is encrypted with (ADR the-holdings-go-out-sealed). The
 /// newline afterwards is Perch's to write: with echo off, the Return that ended

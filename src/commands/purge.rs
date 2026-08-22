@@ -12,7 +12,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::commands::{ask, ask_a_word, export, say, still_ours};
+use crate::commands::{Presumed, ask, ask_a_word, export, said_yes, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Platform};
 use crate::purge::{self, Purged};
@@ -204,11 +204,10 @@ fn offer_an_export(
         return Ok(());
     }
 
-    let answered = ask_a_word(host, out, "Write an Export first? [Y/n]: ")?;
-    // A no is a no, and so is end of input: nobody who is not there to answer
-    // this is there to type a passphrase at the two prompts that follow.
-    // Everything else — including plain Return — writes one.
-    if matches!(answered.as_deref(), None | Some("n" | "no")) {
+    // Nobody who is not there to answer this is there to type a passphrase at
+    // the two prompts that follow, so end of input declines rather than taking
+    // the `[Y/n]`.
+    if !said_yes(host, out, "Write an Export first? [Y/n]: ", Presumed::Yes)? {
         return Ok(());
     }
 

@@ -310,6 +310,15 @@ fn perform(
         return failed(error);
     }
 
+    // The outgoing Account too, because the Capture writes into *its* store: a
+    // Profile two Accounts share holds one Credential, so filing the live one
+    // there takes the other Account's away with nothing left to tell them apart.
+    if let Some(outgoing) = outgoing
+        && let Err(error) = refuse_a_shared_profile(outgoing, registry)
+    {
+        return failed(error);
+    }
+
     let store = match registry::the_default_profile(host) {
         Ok(ground) => ground,
         Err(error) => return failed(error),
@@ -643,9 +652,7 @@ pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account)
 /// one Account while Claude Code displays the other. `perch remove` does not
 /// ask, because it is the way out.
 pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result<()> {
-    let Some(sharer) = registry.accounts.iter().find(|held| {
-        held.email() != account.email() && registry::same_profile(held.email(), account.email())
-    }) else {
+    let Some(sharer) = registry::sharing_a_profile_with(registry, account) else {
         return Ok(());
     };
     Err(PerchError::Conflict(format!(
@@ -843,18 +850,18 @@ fn held_by(host: &dyn Host, account: &Account) -> Option<Zeroizing<String>> {
 /// The refusal for a live Credential an Identity names somebody else for, where
 /// that somebody else is an Account Perch holds and is not holding this.
 fn the_identity_is_not_corroborated(outgoing: &Account, named: &str) -> String {
+    let outgoing = outgoing.email();
     format!(
         "The Identity beside the live Credential names {named}, but the live \
          Credential is not the one Perch holds for {named} either — and Perch is \
-         on {}, so it cannot tell whose Rotation this is.\n\
-         It may be {}'s, made after a Switch that could not finish writing the \
-         Identity: writing over it would destroy the only good copy, so nothing \
-         was changed.\n\
-         It may be {named}'s, Rotated since. `perch switch {named}` files it \
-         under the Account the Identity names; `perch relogin` replaces it with \
-         a fresh login for whichever Account you meant.",
-        outgoing.email(),
-        outgoing.email(),
+         on {outgoing}, so it cannot tell whose Rotation this is.\n\
+         It may be {outgoing}'s, made after a Switch that could not finish \
+         writing the Identity: writing over it would destroy the only good copy, \
+         so nothing was changed.\n\
+         It may be {named}'s, Rotated since.\n\
+         Either way, `perch relogin {outgoing}` is the way through: a Capture \
+         files the live Credential under the Account Perch is on, so that is the \
+         one whose fresh login replaces what is there."
     )
 }
 

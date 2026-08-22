@@ -110,6 +110,7 @@ pub fn installer_dir(host: &dyn Host) -> Result<PathBuf> {
         Platform::Windows => {
             let local = host
                 .env_var("LOCALAPPDATA")
+                .filter(|local| !local.is_empty())
                 .unwrap_or_else(|| [home.as_str(), "AppData", "Local"].join("/"));
             beneath(&[&local, "Perch", "bin"])
         }
@@ -547,9 +548,17 @@ mod tests {
              reads both"
         );
 
-        // Derived from home only where the machine will not say.
-        let quiet = FakeHost::new().with_platform(Platform::Windows);
-        assert_eq!(spelling(&quiet), "/Users/someone/AppData/Local/Perch/bin");
+        // Derived from home only where the machine will not say. Set-but-empty
+        // is the machine not saying: taken at face value it gives `/Perch/bin`,
+        // which no installer wrote and `channel_at` recognizes as no Channel.
+        for quiet in [
+            FakeHost::new().with_platform(Platform::Windows),
+            FakeHost::new()
+                .with_platform(Platform::Windows)
+                .with_env("LOCALAPPDATA", ""),
+        ] {
+            assert_eq!(spelling(&quiet), "/Users/someone/AppData/Local/Perch/bin");
+        }
 
         for platform in [Platform::MacOs, Platform::Windows, Platform::Other] {
             let chosen = FakeHost::new()

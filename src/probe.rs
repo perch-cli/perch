@@ -379,11 +379,17 @@ pub fn store_for_profile(host: &dyn Host, config_dir: &Path) -> Result<Store> {
     store_for_directory(host, config_dir.to_path_buf(), false)
 }
 
+/// One spelling of a config directory, before anything is derived from it.
+///
+/// Every derivation reads the path as text, so two spellings are two keychain
+/// namespaces and two locks — and a client handed the other one writes where
+/// Perch will not read. `components` leaves `..`.
+pub fn one_spelling(config_dir: &Path) -> PathBuf {
+    config_dir.components().collect()
+}
+
 fn store_for_directory(host: &dyn Host, config_dir: PathBuf, is_default: bool) -> Result<Store> {
-    // One spelling, before anything is derived from it: every derivation below
-    // reads the path as text, so a trailing separator is the same directory with
-    // a different namespace and a different lock. `components` leaves `..`.
-    let config_dir: PathBuf = config_dir.components().collect();
+    let config_dir = one_spelling(&config_dir);
 
     Ok(Store {
         identity_file: identity_file_for(&config_dir, is_default, host)?,
@@ -479,7 +485,10 @@ pub fn understand_credential(
     let parsed: CredentialFile = serde_json::from_str(&raw).map_err(|err| {
         refusal(
             assumption::CREDENTIAL_SHAPE,
-            &format!("{held_in} is not JSON Perch understands: {err}"),
+            &format!(
+                "{held_in} is not JSON Perch understands: {}",
+                where_it_is_wrong(&err)
+            ),
             installed.version(),
         )
     })?;
@@ -528,7 +537,10 @@ pub fn credential_after_rotation(
         serde_json::from_str(current.as_str()).map_err(|err| {
             refusal(
                 assumption::CREDENTIAL_SHAPE,
-                &format!("the Credential being renewed is not JSON Perch understands: {err}"),
+                &format!(
+                    "the Credential being renewed is not JSON Perch understands: {}",
+                    where_it_is_wrong(&err)
+                ),
                 installed.version(),
             )
         })?;
@@ -1129,6 +1141,22 @@ pub fn probe(host: &dyn Host, store: Store) -> Result<Verdict> {
         // remembers who it was: nothing to adopt.
         (None, _) => Ok(Verdict::NoLogin { version, store }),
     }
+}
+
+/// What is wrong with a document, without what was in it.
+///
+/// serde quotes the offending value verbatim — `invalid type: string
+/// "sk-ant-oat01-…", expected i64` — and these bytes came out of a Credential
+/// Store, so the words are the fault's and never the file's.
+fn where_it_is_wrong(err: &serde_json::Error) -> String {
+    use serde_json::error::Category;
+    let what = match err.classify() {
+        Category::Io => "it could not be read",
+        Category::Syntax => "it is not JSON",
+        Category::Data => "a field is not the type Perch expects",
+        Category::Eof => "it ends before it is finished",
+    };
+    format!("{what}, at line {} column {}", err.line(), err.column())
 }
 
 fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
@@ -1948,6 +1976,33 @@ mod tests {
         assert!(said.contains(assumption::CREDENTIAL_SHAPE), "{said}");
         assert!(said.contains("someone@example.com"), "{said}");
         assert!(said.contains("is not JSON Perch understands"), "{said}");
+    }
+
+    /// A type error is the shape serde answers by quoting the value it read,
+    /// and every value in this file is a secret. The refusal reaches a terminal
+    /// and `--json` alike, so what it may not carry it may not carry at all.
+    #[test]
+    fn a_credential_of_the_wrong_shape_is_refused_without_quoting_what_was_in_it() {
+        const TOKEN: &str = "sk-ant-oat01-must-not-be-said";
+
+        for held in [
+            format!(r#"{{"claudeAiOauth":"{{\"accessToken\":\"{TOKEN}\"}}"}}"#),
+            format!(r#"{{"claudeAiOauth":{{"accessToken":"a","expiresAt":"{TOKEN}"}}}}"#),
+        ] {
+            let refused = understand_credential(
+                Zeroizing::new(held.clone()),
+                "the keychain",
+                &Installed::unknown("2.1.221"),
+            )
+            .expect_err("the case this is about: {held}");
+
+            let said = refused.to_string();
+            assert!(said.contains("is not JSON Perch understands"), "{said}");
+            assert!(
+                !said.contains(TOKEN),
+                "the refusal carries the token: {said}"
+            );
+        }
     }
 
     #[test]

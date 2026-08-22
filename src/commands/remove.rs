@@ -12,7 +12,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{ask_a_word, say, still_ours};
+use crate::commands::{Presumed, said_yes, say, still_ours};
 use crate::credentials;
 use crate::cycle;
 use crate::error::{PerchError, Result};
@@ -209,12 +209,7 @@ fn agreed(
 
     let named = registry.named_for_the_user(account.email());
     say(out, &what_it_would_leave(registry, account, consequence))?;
-    let answered = ask_a_word(host, out, &format!("Remove {named}? [y/N]: "))?;
-
-    // Anything that is not a yes is a no, and so is end of input: a pipe that
-    // closed is the one thing that must never read as agreement to delete a
-    // Credential.
-    Ok(matches!(answered.as_deref(), Some("y" | "yes")))
+    said_yes(host, out, &format!("Remove {named}? [y/N]: "), Presumed::No)
 }
 
 /// What the machine looks like afterwards, in the terms the user is deciding in.
@@ -353,10 +348,7 @@ fn delete_the_credential_and_its_profile(
     // Two Accounts whose addresses slug to one directory share a Credential
     // Store, so deleting it would take the Credential of an Account nobody asked
     // to give up. The Account is still forgotten; the outcome says which.
-    if let Some(sharer) = registry.accounts.iter().find(|held| {
-        !registry::same_name(held.email(), account.email())
-            && registry::same_profile(held.email(), account.email())
-    }) {
+    if let Some(sharer) = registry::sharing_a_profile_with(registry, account) {
         return Ok(Deleted::NothingSharedWith(
             registry.named_for_the_user(sharer.email()),
         ));

@@ -94,10 +94,14 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // The environment of this one process, and the whole of what makes the Run
     // a Run.
     let handed: Vec<&str> = launch.args.iter().map(String::as_str).collect();
+    // As the Credential Store was derived from it, rather than as this command
+    // spelled it: two spellings of one Profile are two keychain namespaces, and
+    // the client would be pointed at the one Perch does not read.
+    let told = probe::one_spelling(&profile);
     let ended = host.exec_interactive(
         &launch.program,
         &handed,
-        &[("CLAUDE_CONFIG_DIR", &profile.to_string_lossy())],
+        &[("CLAUDE_CONFIG_DIR", &told.to_string_lossy())],
     );
 
     ended.map_err(|err| PerchError::Other(format!("could not launch {}: {err}", launch.said)))

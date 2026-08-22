@@ -50,18 +50,16 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // Every way out from here takes the directory back out again, which a `?`
     // in the middle would quietly stop doing: one left by a failure is one
     // `reap_abandoned` will not tidy for thirty minutes.
-    let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &installed);
+    let produced = run_the_login(host, out, purpose, &claude, &store, &installed);
     profile::discard(host, &store);
     produced
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_the_login(
     host: &dyn Host,
     out: &mut dyn Write,
     purpose: &str,
     claude: &std::path::Path,
-    dir: &std::path::Path,
     store: &probe::Store,
     installed: &Installed,
 ) -> Result<Produced> {
@@ -78,7 +76,10 @@ fn run_the_login(
         .exec_interactive(
             &claude.to_string_lossy(),
             &[],
-            &[("CLAUDE_CONFIG_DIR", &dir.to_string_lossy())],
+            // The store's own spelling, not the caller's: `store_for_profile`
+            // normalized this path to derive the Credential Store, and a client
+            // told the other spelling writes into a namespace Perch never reads.
+            &[("CLAUDE_CONFIG_DIR", &store.config_dir.to_string_lossy())],
         )
         .map_err(|err| PerchError::Other(format!("could not launch a login: {err}")))?;
 

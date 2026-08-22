@@ -134,26 +134,33 @@ impl std::fmt::Debug for Export {
 /// Nothing is Renewed and nothing is Rotated. A store that will not say what it
 /// holds stops the Export rather than being recorded as an Account with none.
 pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
-    let mut credentials = BTreeMap::new();
-    let mut identity_files = BTreeMap::new();
+    // Filled in place rather than gathered beside it and moved in at the end:
+    // `Export`'s `Drop` is what wipes these two maps, so a store that refuses
+    // partway would otherwise free every Credential read before it untouched.
+    let mut gathered = Export {
+        version: CURRENT_VERSION,
+        registry: registry.clone(),
+        credentials: BTreeMap::new(),
+        identity_files: BTreeMap::new(),
+    };
+
     for account in &registry.accounts {
         if let Some(credential) = read_the_credential(host, registry, account)? {
-            credentials.insert(account.email().to_string(), credential);
+            gathered
+                .credentials
+                .insert(account.email().to_string(), credential);
         }
         // Unlike the Credential, an identity file that will not be read does not
         // stop the Export: an Import composes one from the Identity the registry
         // carries, so the whole file is worth more than one Profile's fidelity.
         if let Some(contents) = read_the_identity_file(host, account) {
-            identity_files.insert(account.email().to_string(), contents);
+            gathered
+                .identity_files
+                .insert(account.email().to_string(), contents);
         }
     }
 
-    Ok(Export {
-        version: CURRENT_VERSION,
-        registry: registry.clone(),
-        credentials,
-        identity_files,
-    })
+    Ok(gathered)
 }
 
 /// The Credential to write for one Account: the live one where that is what the
