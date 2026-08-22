@@ -1115,3 +1115,28 @@ fn a_directory_perch_cannot_list_stops_the_purge_rather_than_reading_as_empty() 
     );
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
 }
+
+/// A registry a hand-edit or a half-written save left unparseable is the one
+/// state with no way off the machine: `perch holdings import` refuses it too,
+/// and on macOS a Credential Store is named after the Profile a `rm -rf` would
+/// take away, so deleting the home by hand orphans every keychain item.
+#[test]
+fn a_registry_that_will_not_parse_does_not_stop_the_purge_that_does_not_read_one() {
+    let host = machine_with_three_accounts().with_answers(&["purge"]);
+    host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[{"bogus":1}]}"#);
+
+    let (outcome, printed) = run_purge(&host);
+    outcome.expect("the word was typed");
+
+    assert!(
+        !host.path_exists(Path::new(PERCH_HOME)),
+        "the Holdings are given back regardless: {printed}"
+    );
+    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
+        assert_eq!(
+            credential_of(&host, email),
+            None,
+            "and no Credential is left in a store nothing can name any more"
+        );
+    }
+}

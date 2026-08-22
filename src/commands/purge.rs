@@ -41,10 +41,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     }
 
     let mut perch = registry::lock(host)?;
-    // Read directly rather than through adoption, for the reason an Import reads
-    // it directly: adoption would make an Account on the way to destroying every
-    // Account. A home holding no registry is what an interrupted Purge leaves.
-    let registry = registry::load(host)?.unwrap_or_default();
+    let registry = whatever_can_be_read_of_the_registry(host, &home);
 
     purge::refuse_while_anything_is_running(host, &registry)?;
 
@@ -143,6 +140,30 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
          Nothing was purged. Pass `--yes` to purge without being asked."
             .to_string(),
     ))
+}
+
+/// What the registry names, where it can be read at all.
+///
+/// The one caller for which `load`'s refusal is the wrong answer: `erase` walks
+/// the directories rather than the registry, and refusing is the only way off a
+/// machine whose registry is corrupt (ADR the-holdings-outlive-a-perch).
+fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> Registry {
+    // Read directly rather than through adoption, for the reason an Import reads
+    // it directly: adoption would make an Account on the way to destroying every
+    // Account. A home holding no registry is what an interrupted Purge leaves.
+    match registry::load(host) {
+        Ok(held) => held.unwrap_or_default(),
+        Err(unreadable) => {
+            host.note(&format!(
+                "{unreadable}\n\nSo the Accounts cannot be named. Every Profile \
+                 under {} is emptied and deleted regardless — that is what a \
+                 Purge does — and the count below is of Profiles rather than of \
+                 Accounts.",
+                home.display(),
+            ));
+            Registry::default()
+        }
+    }
 }
 
 /// What the user is being asked to agree to, in the terms they are deciding in:
