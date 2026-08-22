@@ -39,7 +39,8 @@ pub fn says_no_version(text: &str) -> bool {
 /// reading one as the current shape is the half-parse a version exists to stop.
 pub fn below_the_earliest(text: &str) -> bool {
     says_no_version(text)
-        || crate::error::claimed_version(text).is_some_and(|claimed| claimed < EARLIEST_VERSION)
+        || crate::error::claimed_version(text)
+            .is_some_and(|claimed| claimed < u64::from(EARLIEST_VERSION))
 }
 
 /// The registry document this build reads, or `None` where it already is one.
@@ -319,7 +320,7 @@ fn what_was_renamed(renamed: &[Renamed]) -> String {
 /// Asked of the step rather than of a range of its own: `save` stamps the current
 /// version on whatever it is given, so a document nothing moved must not be one
 /// this offers up — that would relabel a shape that never changed.
-fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u32> {
+fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
     let contents = host.read_file(path).ok()?;
     let was = crate::error::claimed_version(&contents)?;
     forward(&contents).ok()?.is_some().then_some(was)

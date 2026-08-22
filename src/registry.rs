@@ -1440,7 +1440,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // exactly the thing that writes a value this build has no variant for, and
     // reading the document first fails on that with serde's own words.
     match crate::error::claimed_version(&contents) {
-        Some(version) if version > CURRENT_VERSION => {
+        Some(version) if version > u64::from(CURRENT_VERSION) => {
             return Err(crate::error::written_by_a_newer_perch(
                 &path.display().to_string(),
                 "registry",
@@ -1448,7 +1448,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
                 CURRENT_VERSION,
             ));
         }
-        Some(version) if version < crate::migration::EARLIEST_VERSION => {
+        Some(version) if version < u64::from(crate::migration::EARLIEST_VERSION) => {
             return Err(no_perch_wrote(path, Some(version)));
         }
         None if crate::migration::says_no_version(&contents) => {
@@ -1487,7 +1487,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 ///
 /// Neither names a shape, and a document whose shape is unstated half-parses
 /// rather than refusing.
-fn no_perch_wrote(path: &Path, claimed: Option<u32>) -> PerchError {
+fn no_perch_wrote(path: &Path, claimed: Option<u64>) -> PerchError {
     // Without the path, which `Malformed` has already said.
     let what = match claimed {
         Some(version) => format!(

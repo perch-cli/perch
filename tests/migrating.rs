@@ -272,6 +272,26 @@ fn a_registry_from_a_newer_perch_is_still_refused() {
     assert!(refused.to_string().contains("Upgrade Perch"), "{refused}");
 }
 
+/// The version is read as a `u64` so that the guard reaches every number a newer
+/// Perch could stamp. Read as a `u32` it did not: a number past that ceiling
+/// fell through to serde, and the one thing the version exists to catch was
+/// reported as a corrupt file to hand-edit.
+#[test]
+fn a_version_past_this_builds_integer_ceiling_still_says_upgrade_perch() {
+    let host = machine_holding(&format!(
+        "{{\"version\":{},\"accounts\":[]}}",
+        u64::from(u32::MAX) + 1
+    ));
+
+    let refused = registry::load(&host).expect_err("this build does not understand it");
+    let said = refused.to_string();
+    assert!(said.contains("Upgrade Perch"), "{said}");
+    assert!(
+        said.contains("4294967296"),
+        "and it says the version it read rather than one it clamped to: {said}"
+    );
+}
+
 /// A file that is not a document at all keeps the refusal it has: the migration
 /// makes no claim about nonsense.
 #[test]

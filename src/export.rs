@@ -441,7 +441,7 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
         return Err(crate::error::written_by_a_newer_perch(
             "This Export",
             "export",
-            versioned.version.unwrap_or_default(),
+            u64::from(versioned.version.unwrap_or_default()),
             CURRENT_VERSION,
         ));
     }
@@ -454,7 +454,7 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
         return Err(crate::error::written_by_a_newer_perch(
             "The registry inside this Export",
             "registry",
-            inside.unwrap_or_default(),
+            u64::from(inside.unwrap_or_default()),
             crate::registry::CURRENT_VERSION,
         ));
     }
