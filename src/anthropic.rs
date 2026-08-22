@@ -178,14 +178,12 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
     // Read out before the tree is wiped, because dropping a `serde_json::Value`
     // frees its strings untouched and this reply holds the rotated refresh
     // token — the only copy of it there is.
-    let fresh = Fresh {
-        access_token: Zeroizing::new(
-            document
-                .get("access_token")
-                .and_then(Value::as_str)
-                .ok_or_else(|| missing("access_token"))?
-                .to_string(),
-        ),
+    let access_token = document
+        .get("access_token")
+        .and_then(Value::as_str)
+        .map(|token| Zeroizing::new(token.to_string()));
+    let fresh = access_token.map(|access_token| Fresh {
+        access_token,
         refresh_token: document
             .get("refresh_token")
             .and_then(Value::as_str)
@@ -206,9 +204,12 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
             .filter(|seconds| *seconds > 0)
             .and_then(|seconds| seconds.checked_mul(1_000))
             .and_then(|millis| now.timestamp_millis().checked_add(millis)),
-    };
+    });
+    // Before the refusal as well as before the return: a reply carrying a
+    // rotated refresh token and no access token is still a reply carrying the
+    // only copy of that token.
     wipe_the_tokens_in(&mut document);
-    Ok(fresh)
+    fresh.ok_or_else(|| missing("access_token"))
 }
 
 /// Wipes the two token strings out of a token-endpoint reply.
@@ -894,6 +895,27 @@ mod tests {
             "which Account a token belongs to is what this endpoint is for"
         );
         assert_eq!(email_in(&json!({"organization": {"name": "Acme"}})), None);
+    }
+
+    /// A reply with no `access_token` is still a reply, and where Anthropic
+    /// Rotated it carries the only copy of the new refresh token. The refusal is
+    /// raised after the tree is wiped rather than through it, which is the one
+    /// path the `?` used to leave by.
+    #[test]
+    fn a_reply_missing_the_access_token_is_wiped_before_it_is_refused() {
+        let host = crate::host::FakeHost::new();
+        host.reply(
+            TOKEN_URL,
+            None,
+            200,
+            r#"{"refresh_token":"sk-ant-ort01-rotated","expires_in":3600}"#,
+        );
+
+        assert_eq!(
+            renew(&host, "sk-ant-ort01-old"),
+            Err(missing("access_token")),
+            "a reply Perch cannot use is refused, and named"
+        );
     }
 
     /// By the time this runs the old refresh token is retired and the Credential
