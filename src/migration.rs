@@ -341,7 +341,12 @@ fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
 /// The version [`forward`] leaves behind, which is the one this build reads. Its
 /// own name because the two numbers are one step rather than one field: a second
 /// step would read `CURRENT_VERSION` here and be wrong the day a third lands.
-const CARRIED_TO: u32 = crate::registry::CURRENT_VERSION;
+const CARRIED_TO: u32 = 2;
+
+// The step cannot carry a document past the shape this build reads, and reading
+// `CURRENT_VERSION` above would make that true by definition rather than by
+// checking — which is what the constant's own name is for.
+const _: () = assert!(CARRIED_TO <= crate::registry::CURRENT_VERSION);
 
 /// One Account, with the flag that inverted translated rather than dropped.
 ///
