@@ -201,7 +201,7 @@ fn words(typed: &[String]) -> Vec<&str> {
 /// they reached this process with one layer of quoting already taken off, and a
 /// suggestion that cannot be run is worse than no suggestion.
 fn as_typed(target: &str, rest: &[&str]) -> String {
-    let mut line = format!("perch run {target} --");
+    let mut line = format!("perch run {} --", quoted_for_a_shell(target));
     for word in rest {
         line.push(' ');
         line.push_str(&quoted_for_a_shell(word));
@@ -289,6 +289,22 @@ mod tests {
         assert!(said.contains("`--resume`"), "{said}");
         assert!(said.contains("after `--`"), "{said}");
         assert!(said.contains("perch run dev -- --resume"), "{said}");
+    }
+
+    /// The suggestion is a line to paste back, and an Alias arrives here with
+    /// one layer of quoting already taken off — so the target needs what every
+    /// word after it gets. Unquoted, `it's` hangs a shell on an open quote and
+    /// `my alias` re-refuses as two words.
+    #[test]
+    fn the_target_is_quoted_for_a_shell_like_every_other_word_on_the_line() {
+        assert_eq!(as_typed("it's", &["-p"]), r"perch run 'it'\''s' -- -p");
+        assert_eq!(as_typed("my alias", &["-p"]), "perch run 'my alias' -- -p");
+        assert_eq!(as_typed("", &["-p"]), "perch run '' -- -p");
+        assert_eq!(
+            as_typed("dev", &["--resume"]),
+            "perch run dev -- --resume",
+            "and the ordinary target still reads as the person typed it"
+        );
     }
 
     /// The exit code the argument parser itself would have used, so a script
