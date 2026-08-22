@@ -471,6 +471,32 @@ fn an_entry_that_only_holds_the_profile_once_its_link_is_followed_is_not_linked_
     );
 }
 
+/// And where the link is on the *Profile*'s side of the question. A
+/// `PERCH_HOME` reached through one — `~/perch-data`, linked at `~/.claude/perch`
+/// — spells the Profile a second way, and only resolving that spelling says the
+/// entry crossing holds it.
+#[test]
+fn an_entry_that_holds_the_profile_under_its_other_spelling_is_not_linked_either() {
+    let host = machine()
+        .with_file(shared("perch/registry.json"), "{}")
+        .with_link(Link::Symbolic, "/Users/someone/perch-data", shared("perch"));
+
+    let into = "/Users/someone/perch-data/profiles/someone-example-com";
+    reconcile(&host, Path::new(SHARED), Path::new(into)).expect("everything else crosses");
+
+    assert_eq!(
+        host.link_at(format!("{into}/perch")),
+        None,
+        "the Profile is inside the entry under the name Perch was handed, so a \
+         link here points at a directory holding the Profile that made it"
+    );
+    assert_eq!(
+        host.link_at(format!("{into}/CLAUDE.md")),
+        Some((Link::Symbolic, PathBuf::from(shared("CLAUDE.md")))),
+        "and the entries that are nothing to do with it still cross"
+    );
+}
+
 #[test]
 fn the_default_profile_is_never_reconciled_into_itself() {
     let host = machine();
