@@ -53,6 +53,10 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         }
         if let Some(at) = &at {
             let _ = host.remove_file(at);
+            // `enable --now` makes the wants-symlink and *then* starts, so a
+            // failure in the second half leaves a dangling link enabled.
+            let _ = drive(host, service::stopping(host.platform(), host.user_id()));
+            let _ = drive(host, service::forgetting(host.platform()));
         }
         return Err(failed.with_note(&format!(
             "Nothing was installed{}. Perch is unchanged, and `perch watcher \
@@ -111,6 +115,8 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         host.remove_file(at)
             .map_err(|err| PerchError::file_write(at, err))?;
     }
+    // After the removal, which is the whole reason it is not part of `stopping`.
+    let _ = drive(host, service::forgetting(host.platform()));
 
     match installed {
         true => {
@@ -286,6 +292,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
         host.remove_file(at)
             .map_err(|err| PerchError::file_write(at, err))?;
     }
+    let _ = drive(host, service::forgetting(host.platform()));
 
     say(out, "The Service is stopped and its unit is gone.")?;
     Ok(true)

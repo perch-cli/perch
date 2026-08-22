@@ -628,3 +628,28 @@ fn an_export_settles_a_landing_before_it_decides_whose_the_live_credential_is() 
         "and the Account arriving travels as itself, once rather than nowhere"
     );
 }
+
+/// The two halves of the previous two tests at once. An Identity naming a
+/// stranger is evidence against wherever it is readable, and whether `claude`
+/// can say its version has nothing to do with whether it can be read.
+#[test]
+fn a_live_credential_belonging_to_somebody_else_is_left_out_with_claude_code_gone_too() {
+    let host = machine_with_three_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    host.write_private_file(
+        std::path::Path::new(IDENTITY_PATH),
+        &SECOND_IDENTITY_FILE.replace(SECOND_EMAIL, "stranger@example.com"),
+    )
+    .expect("the identity file is written");
+    host.remove_file(std::path::Path::new(CLAUDE_BIN))
+        .expect("Claude Code is uninstalled");
+    let host = typing_the_passphrase(host);
+
+    run_export(&host, AT).0.expect("the export is written");
+
+    assert_eq!(
+        opened(&host, AT).credentials.get(EMAIL).map(String::as_str),
+        Some(CREDENTIAL),
+        "the copy in its own Profile is the honest answer for it"
+    );
+}

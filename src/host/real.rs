@@ -117,7 +117,7 @@ const MAX_REPLY_BYTES: u64 = 8 * 1024 * 1024;
 /// The URL, the headers and the body all arrive this way so that none of them
 /// is ever an argument: an `Authorization` header holds an access token, and
 /// argv is readable by every process on the machine.
-fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
+fn curl_config(request: &HttpRequest<'_>) -> Result<Zeroizing<String>, HostError> {
     let quoted = super::double_quoted;
 
     // A configuration file is read a line at a time and has no escape a newline
@@ -134,9 +134,13 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
         }
         None => (CONNECT_TIMEOUT_SECONDS, MAX_TIME_SECONDS),
     };
-    let mut config = format!(
+    // Wiped on drop, and reserved at full width so no growth abandons a copy:
+    // an `Authorization` header is an access token, and a renewal's
+    // `data-binary` line is the refresh token outright.
+    let mut config = Zeroizing::new(String::with_capacity(width_of(request)));
+    config.push_str(&format!(
         "connect-timeout = {connect}\nmax-time = {whole}\nmax-filesize = {MAX_REPLY_BYTES}\n"
-    );
+    ));
     config.push_str(&format!("url = {}\n", quoted(request.url)));
     for (name, value) in request.headers {
         config.push_str(&format!(
@@ -149,6 +153,19 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
         config.push_str(&format!("data-binary = {}\n", quoted(body)));
     }
     Ok(config)
+}
+
+/// Room for every line [`curl_config`] writes, over-counted rather than exact:
+/// what it must not do is come up short, which is a reallocation leaving a
+/// half-built request holding a token in freed heap.
+fn width_of(request: &HttpRequest<'_>) -> usize {
+    const PER_LINE: usize = 32;
+    let headers: usize = request
+        .headers
+        .iter()
+        .map(|(name, value)| name.len() + value.len() + PER_LINE)
+        .sum();
+    request.url.len() + headers + request.body.map_or(0, str::len) + 4 * PER_LINE
 }
 
 /// Runs a program, optionally with something on its stdin, and reads the whole
@@ -687,6 +704,10 @@ impl Waiting for RealHost {
         std::thread::sleep(std::time::Duration::from_millis(millis));
     }
 
+    fn asked_to_stop(&self) -> bool {
+        interrupted()
+    }
+
     fn listen_for_interrupts(&self) {
         listen_for_interrupts();
     }
@@ -744,7 +765,7 @@ impl Terminal for RealHost {
 
 impl Network for RealHost {
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
-        let execution = curl(&curl_config(request)?)?;
+        let mut execution = curl(&curl_config(request)?)?;
         if !execution.succeeded() {
             return Err(HostError::Other(format!(
                 "curl exited {}: {}",
@@ -753,7 +774,13 @@ impl Network for RealHost {
             )));
         }
 
-        split_reply(&execution.stdout)
+        // Taken out of the `Execution` and wiped there, exactly as `keychain_get`
+        // does: the token endpoint answers a renewal with the rotated refresh
+        // token in this body, and an `Execution` drops it to the allocator whole.
+        let mut stdout = std::mem::take(&mut execution.stdout);
+        let reply = split_reply(&stdout);
+        stdout.zeroize();
+        reply
     }
 }
 
@@ -1831,6 +1858,7 @@ mod tests {
         let headers = [("Authorization", "Bearer sk-ant-oat01-secret")];
         let config =
             curl_config(&HttpRequest::get("https://example.test/usage", &headers)).unwrap();
+        let config = &*config;
         let expected = "header = \"Authorization: Bearer sk-ant-oat01-secret\"";
 
         assert!(config.contains(expected), "{config}");
@@ -2007,6 +2035,7 @@ mod tests {
         let body = r#"{"refresh_token":"sk-ant-ort01-\"odd\""}"#;
         let config =
             curl_config(&HttpRequest::post("https://example.test/token", &[], body)).unwrap();
+        let config = &*config;
         let expected = r#"data-binary = "{\"refresh_token\":\"sk-ant-ort01-\\\"odd\\\"\"}""#;
 
         assert!(config.contains("url = \"https://example.test/token\""));
@@ -2024,6 +2053,7 @@ mod tests {
     #[test]
     fn a_request_may_carry_its_own_bound_and_otherwise_gets_the_ordinary_one() {
         let ordinary = curl_config(&HttpRequest::get("https://example.test/usage", &[])).unwrap();
+        let ordinary = &*ordinary;
         assert!(ordinary.contains("connect-timeout = 10"), "{ordinary}");
         assert!(ordinary.contains("max-time = 30"), "{ordinary}");
         // The bound the two timeouts do not give: a reply that keeps arriving
@@ -2036,6 +2066,8 @@ mod tests {
         let brief =
             curl_config(&HttpRequest::get("https://example.test/latest", &[]).within(2_000))
                 .unwrap();
+
+        let brief = &*brief;
         assert!(brief.contains("connect-timeout = 2"), "{brief}");
         assert!(brief.contains("max-time = 2"), "{brief}");
         assert!(
@@ -2048,6 +2080,7 @@ mod tests {
         // for a short one means.
         let sub_second =
             curl_config(&HttpRequest::get("https://example.test/latest", &[]).within(200)).unwrap();
+        let sub_second = &*sub_second;
         assert!(sub_second.contains("max-time = 1"), "{sub_second}");
     }
 

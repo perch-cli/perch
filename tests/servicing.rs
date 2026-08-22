@@ -461,6 +461,22 @@ fn uninstalling_stops_the_service_and_takes_the_unit_back() {
         "{:?}",
         ran(&host)
     );
+    // A reload driven before the removal re-reads the unit that is still there,
+    // so systemd goes on listing a unit `perch watcher status` calls gone.
+    let effects = host.effects();
+    let removed = effects
+        .iter()
+        .position(
+            |effect| matches!(effect, Effect::RemovedFile(at) if at == std::path::Path::new(UNIT)),
+        )
+        .expect("the unit file is removed");
+    let reloaded = effects
+        .iter()
+        .rposition(|effect| {
+            matches!(effect, Effect::Exec { args, .. } if args.contains(&"daemon-reload".to_string()))
+        })
+        .expect("and the manager is told to forget it");
+    assert!(reloaded > removed, "{effects:#?}");
     // The whole of what it says, and nothing about what stops starting at login or
     // about a terminal that was never affected.
     assert!(

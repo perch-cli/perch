@@ -49,12 +49,15 @@ pub fn below_the_earliest(text: &str) -> bool {
 /// the caller, which knows what file it is holding. Idempotent, because it is
 /// reached twice — in memory on a read, and again on the run that writes it back.
 pub fn forward(document: &str) -> Result<Option<String>> {
+    // The version off a shape that is only the version, before the whole tree is
+    // built: every command reaches this against a registry already current, and
+    // a `Value` of every cached Utilization is a costly way to say "nothing".
+    if crate::error::claimed_version(document) != Some(u64::from(EARLIEST_VERSION)) {
+        return Ok(None);
+    }
     let Ok(Value::Object(held)) = serde_json::from_str::<Value>(document) else {
         return Ok(None);
     };
-    if held.get("version").and_then(Value::as_u64) != Some(u64::from(EARLIEST_VERSION)) {
-        return Ok(None);
-    }
 
     let mut moved = held.clone();
     moved.insert("version".to_string(), Value::from(CARRIED_TO));
@@ -121,10 +124,14 @@ pub fn forward(document: &str) -> Result<Option<String>> {
         // The Account a Switch left was read by the no-return alone, and the
         // no-return could never fire (ADR a-watcher-knob-is-arithmetic).
         kept.remove("switched_off");
-        checks.insert(
-            now_called(NameKind::Group, &group, &renamed),
-            Value::Object(kept),
-        );
+        // `ungrouped` is a legitimate key here and is not a Group, so a v1
+        // registry that declared a Group by that name must not have the
+        // Ungrouped Scope's Cooldown re-keyed onto the renamed Group.
+        let under = match crate::registry::means_ungrouped(&group) {
+            true => group.clone(),
+            false => now_called(NameKind::Group, &group, &renamed),
+        };
+        checks.insert(under, Value::Object(kept));
     }
     moved.insert("checks".to_string(), Value::Object(checks));
 
@@ -134,11 +141,14 @@ pub fn forward(document: &str) -> Result<Option<String>> {
 }
 
 /// What a name is called after the rename pass, which is itself where nothing
-/// renamed it.
+/// renamed it. Folded, as `renames_in` decides collisions and every other
+/// question about a name: matched byte-exactly, an Account claiming `-DEV` of a
+/// Group declared `-dev` keeps a claim naming nothing, and `validate` refuses
+/// the very name this pass exists to rename.
 fn now_called(kind: NameKind, name: &str, renamed: &[Renamed]) -> String {
     renamed
         .iter()
-        .find(|entry| entry.kind == kind && entry.was == name)
+        .find(|entry| entry.kind == kind && crate::registry::same_name(&entry.was, name))
         .map_or_else(|| name.to_string(), |entry| entry.is_now.clone())
 }
 
@@ -337,12 +347,15 @@ const CARRIED_TO: u32 = crate::registry::CURRENT_VERSION;
 /// dropping the key instead would put a disabled Account back into Cycling.
 fn cycling_may_choose_it(account: &Value) -> Result<Value> {
     let mut carried = object("an entry in `accounts`", Some(account))?;
-    let kept_out = carried
-        .remove("enabled")
-        .and_then(|enabled| enabled.as_bool())
-        .is_some_and(|enabled| !enabled);
-    if kept_out {
-        carried.insert("disabled".to_string(), Value::Bool(true));
+    // Refused rather than read as `true`, which is `no_object_here`'s rule about
+    // a map applied to the one field whose loss puts an Account somebody took
+    // out of Cycling back into it.
+    match carried.remove("enabled") {
+        None | Some(Value::Bool(true)) => {}
+        Some(Value::Bool(false)) => {
+            carried.insert("disabled".to_string(), Value::Bool(true));
+        }
+        Some(_) => return Err(shape_belies_the_version("accounts[].enabled")),
     }
     Ok(Value::Object(carried))
 }

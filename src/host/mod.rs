@@ -543,6 +543,11 @@ pub trait Waiting {
     /// request answered in the same place.
     fn listen_for_interrupts(&self);
 
+    /// Whether that request has arrived, asked where there is no wait to end.
+    /// A round is bounded by the network rather than by the clock, so a stop
+    /// has to be answerable between the steps of one.
+    fn asked_to_stop(&self) -> bool;
+
     /// Waits up to `millis`, and stops the moment that has been asked for. Its
     /// own effect rather than a [`Waiting::sleep`] with a check around it,
     /// because what makes a foreground watcher killable is that the wait ends

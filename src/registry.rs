@@ -494,9 +494,17 @@ pub fn same_name(one: &str, other: &str) -> bool {
     // A character at a time rather than through `to_lowercase`, which allocates
     // two `String`s per comparison — and `validate`'s quadratic collision check
     // asks this on every read and every write.
-    one.chars()
+    fold(one).eq(fold(other))
+}
+
+/// The fold `same_name` compares on: lowercase, with both spellings of a Greek
+/// sigma brought to one. `Σ` lowercases to `ς` ending a word and to `σ` inside
+/// one, which is an orthographic rule about rendering Greek text — and a Group
+/// is a name somebody typed rather than a word.
+fn fold(name: &str) -> impl Iterator<Item = char> + '_ {
+    name.chars()
         .flat_map(char::to_lowercase)
-        .eq(other.chars().flat_map(char::to_lowercase))
+        .map(|character| if character == 'ς' { 'σ' } else { character })
 }
 
 /// A Group name offered as a default, made from something that was never chosen
@@ -1242,7 +1250,13 @@ impl Registry {
 /// The same path on every platform rather than `%APPDATA%`, because one rule is
 /// easier to keep in a Host port exposing only a home directory. A preference.
 pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
-    if let Some(overridden) = host.env_var("PERCH_HOME") {
+    // Set-but-empty is the machine not saying: taken at face value it makes the
+    // registry a relative path, so Perch would read and write the Holdings
+    // wherever it happened to be invoked from.
+    if let Some(overridden) = host
+        .env_var("PERCH_HOME")
+        .filter(|overridden| !overridden.is_empty())
+    {
         return Ok(PathBuf::from(overridden));
     }
     Ok(home_dir(host)?.join(".config").join("perch"))
@@ -1810,6 +1824,25 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
             }
         }
     }
+    with_every_check_under_the_declared_spelling(registry)
+}
+
+/// The same for what `checks` is keyed on. `checked` and `validate` fold the
+/// key and the two mutators remove it exactly, so a key differing only in case
+/// outlives its Group and leaves `validate` refusing what `save` just built.
+fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Registry {
+    let keyed: Vec<String> = registry.checks.keys().cloned().collect();
+    for name in keyed {
+        let Some(declared) = registry.declared_group(&name).map(str::to_string) else {
+            continue;
+        };
+        if declared == name {
+            continue;
+        }
+        if let Some(checked) = registry.checks.remove(&name) {
+            registry.checks.insert(declared, checked);
+        }
+    }
     registry
 }
 
@@ -1914,28 +1947,36 @@ mod tests {
     }
 
     /// The fold is the whole of the identity a name has, so it is stated here
-    /// rather than only through the callers that ask it. Character by character
-    /// rather than over two allocated `String`s, and the two must not differ:
-    /// `İ` lowercases to two characters, which is where a naive pairwise fold
-    /// would part company with `to_lowercase`.
+    /// rather than only through the callers that ask it. `İ` lowercases to two
+    /// characters, which is where a naive pairwise fold parts company with
+    /// `to_lowercase`; `ΟΔΟΣ` is where `to_lowercase` parts company with a name.
     #[test]
-    fn two_names_are_one_name_whenever_lowercasing_makes_them_one() {
+    fn two_names_are_one_name_whenever_the_only_difference_is_case() {
         for (one, other) in [
             ("work", "Work"),
             ("café", "CAFÉ"),
             ("İ", "İ"),
             ("straße", "STRAßE"),
+            ("ΟΔΟΣ", "οδος"),
+            ("ΟΔΟΣ", "οδοσ"),
         ] {
             assert!(same_name(one, other), "{one} and {other} are one name");
-            assert_eq!(
-                same_name(one, other),
-                one.to_lowercase() == other.to_lowercase(),
-                "and the fold is the one `to_lowercase` makes: {one}, {other}"
-            );
         }
         for (one, other) in [("work", "works"), ("café", "cafe"), ("", "a")] {
             assert!(!same_name(one, other), "{one} and {other} are two names");
         }
+    }
+
+    /// The one place the fold is deliberately not `to_lowercase`'s, stated as a
+    /// case rather than left to the reader to derive from the sigma rule.
+    #[test]
+    fn a_greek_name_is_one_name_where_to_lowercase_makes_it_two() {
+        assert_ne!(
+            "ΟΔΟΣ".to_lowercase(),
+            "οδοσ".to_lowercase(),
+            "`to_lowercase` writes a final sigma as `ς`"
+        );
+        assert!(same_name("ΟΔΟΣ", "οδοσ"), "and a name is not a Greek word");
     }
 
     #[test]
@@ -2413,6 +2454,34 @@ mod tests {
             said.contains("Work") && said.contains("work"),
             "it names both spellings: {said}"
         );
+    }
+
+    /// `checked` and `validate` fold the key and the two mutators remove it
+    /// exactly, so a `checks` key that outlives its Group leaves `validate`
+    /// refusing what `save` has just built — under a sentence saying the fault
+    /// is Perch's, on a registry no command can then read.
+    #[test]
+    fn a_check_keyed_in_another_case_than_its_group_is_brought_to_one_on_the_way_in() {
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut registry = Registry::default();
+        registry
+            .groups
+            .insert("work".to_string(), Settings::default());
+        registry
+            .checks
+            .insert("Work".to_string(), Checked { switched_at: at });
+
+        let mut registry = with_every_claimed_group_declared(registry);
+        validate(&registry).expect("one Group, one Check");
+        assert_eq!(
+            registry.checks.keys().collect::<Vec<_>>(),
+            vec!["work"],
+            "the Check is filed under the spelling the Group was declared under"
+        );
+
+        registry.forget_group("work");
+        validate(&registry).expect("and it goes when the Group it paces goes");
+        assert!(registry.checks.is_empty(), "{:?}", registry.checks);
     }
 
     #[test]
@@ -2939,6 +3008,21 @@ mod tests {
     #[test]
     fn without_the_override_perch_keeps_its_registry_under_the_config_directory() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+
+        assert_eq!(
+            perch_home(&host).unwrap(),
+            std::path::PathBuf::from("/Users/someone/.config/perch")
+        );
+    }
+
+    /// `export PERCH_HOME=$SOMETHING_UNSET` is the ordinary way to arrive here,
+    /// and a relative registry path is the Holdings following the working
+    /// directory around.
+    #[test]
+    fn a_perch_home_set_to_nothing_is_the_machine_not_saying_rather_than_the_working_directory() {
+        let host = crate::host::FakeHost::new()
+            .with_env("HOME", "/Users/someone")
+            .with_env("PERCH_HOME", "");
 
         assert_eq!(
             perch_home(&host).unwrap(),

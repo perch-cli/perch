@@ -811,3 +811,44 @@ fn a_name_no_group_could_have_is_refused_rather_than_offered_as_one_to_declare()
         );
     }
 }
+
+/// Aliases and Group names share one namespace, so `perch group add <alias>` is
+/// refused — and pointing at it is sending somebody to a second refusal for a
+/// reason the first one never mentioned.
+#[test]
+fn a_scope_that_names_an_alias_is_not_offered_a_group_add_that_would_be_refused() {
+    let host = three_accounts_in_one_group();
+    set_alias(&host, "overflow", SECOND_EMAIL)
+        .0
+        .expect("the Alias is set");
+
+    let (result, _) = run_list_in(&host, "overflow", false);
+
+    let refused = result.expect_err("an Alias is not a Scope");
+    let said = refused.to_string();
+    assert!(
+        !said.contains("Declare it with"),
+        "the offer would be refused the moment it was taken: {said}"
+    );
+    assert!(
+        said.contains("is an Alias for") && said.contains(SECOND_EMAIL),
+        "and what the name already means is what is said instead: {said}"
+    );
+}
+
+/// `config` draws "is already" against "is now" for the same reason: a report of
+/// a change is a claim that something changed.
+#[test]
+fn renaming_a_group_to_the_name_it_has_says_so_rather_than_reporting_a_rename() {
+    let host = three_accounts_in_one_group();
+
+    let (result, printed) = rename_group(&host, "work", "work");
+
+    result.expect("asking for what is already so is not a failure");
+    assert!(printed.contains("already called `work`"), "{printed}");
+    assert!(
+        !printed.contains("Renamed"),
+        "nothing was renamed: {printed}"
+    );
+    assert_eq!(registry_of(&host).accounts_in("work").len(), 3);
+}

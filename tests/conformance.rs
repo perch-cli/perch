@@ -152,6 +152,46 @@ const CASES: &[Case] = &[
             );
         },
     },
+    Case {
+        named: "a read follows a symbolic link whose target is relative",
+        asserts: |host, root, adapter, _now| {
+            let real = root.join("beside-the-link");
+            let link = root.join("relative-link");
+            host.create_file_with_mode(&real, "what it holds", PRIVATE_FILE_MODE)
+                .expect("the file is written");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            // What `ln -s`, stow and chezmoi all record unless handed an
+            // absolute path, so a managed `~/.claude.json` is one of these.
+            host.link(Link::Symbolic, Path::new("beside-the-link"), &link)
+                .expect("the link is made");
+
+            assert_eq!(
+                host.read_file(&link).ok().as_deref(),
+                Some("what it holds"),
+                "{adapter}: a relative target is resolved against where the link sits"
+            );
+            assert!(
+                host.path_exists(&link),
+                "{adapter}: and the link is there to be found"
+            );
+        },
+    },
+    Case {
+        named: "a file that is there has a modification time",
+        asserts: |host, root, adapter, _now| {
+            let written = root.join("has-an-age");
+            host.create_file_with_mode(&written, "anything", PRIVATE_FILE_MODE)
+                .expect("the file is written");
+
+            assert!(
+                host.modified_at(&written).is_ok(),
+                "{adapter}: `carry` ranks Profiles on this, and every staleness \
+                 question in `lock` is `now() - modified_at`",
+            );
+        },
+    },
     // Both are about a lock artifact that is a dangling link: the state
     // `reconcile`'s denylist keeps Perch out of and `lock::clear_the_abandoned`
     // has to be able to meet anyway.

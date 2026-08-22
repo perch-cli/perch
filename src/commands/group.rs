@@ -129,6 +129,12 @@ fn rename(registry: &mut Registry, from: &str, to: &str) -> Result<String> {
         None => return Err(no_such_group(registry, from)),
     };
 
+    // Said as what happened rather than as what was asked for, which is the
+    // distinction `config`'s "is already" / "is now" draws.
+    if held == to {
+        return Ok(format!("The Group is already called `{held}`."));
+    }
+
     registry.rename_group(&held, to)?;
 
     Ok(match registry.accounts_in(to).len() {
@@ -177,6 +183,17 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
     // here rather than at each caller, in `validate_name`'s own words.
     if let Err(why) = registry::validate_name(registry::NameKind::Group, name) {
         return PerchError::NotFound(format!("No Group called `{name}`. {why}"));
+    }
+    // The other name a `perch group add` would be refused for. Aliases and Group
+    // names share one namespace, so a name already answering for an Account is
+    // one nothing may declare a Group under.
+    if let Some((alias, email)) = registry.declared_alias(name) {
+        return PerchError::NotFound(format!(
+            "No Group called `{name}`. `{alias}` is an Alias for {email}, and a \
+             name cannot be both — so there is no `perch group add {name}` to \
+             make one. Name the Group something else, or free the Alias with \
+             `perch alias {email} --unset`."
+        ));
     }
 
     let declared: Vec<String> = registry.groups.keys().cloned().collect();

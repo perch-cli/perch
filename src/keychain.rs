@@ -76,8 +76,7 @@ pub fn add_command_line(
     account: &str,
     secret: &str,
 ) -> Result<Zeroizing<String>, KeychainError> {
-    inert("the keychain service name", service)?;
-    inert("the keychain account name", account)?;
+    storable(service, account)?;
     // `Zeroizing`, because this line holds the Credential. Hex is an encoding
     // and not a protection, and every other buffer on this path is wiped.
     Ok(Zeroizing::new(format!(
@@ -86,6 +85,16 @@ pub fn add_command_line(
         double_quoted(account),
         hex_encode(secret.as_bytes()).as_str(),
     )))
+}
+
+/// What no adapter may store, whichever one is answering.
+///
+/// `security -i` reads one sub-command per line, so a name carrying a control
+/// character would end the `add-generic-password` line and begin whatever the
+/// rest of it spelled. Beside [`add_command_line`] so the fake asks it too.
+pub fn storable(service: &str, account: &str) -> Result<(), KeychainError> {
+    inert("the keychain service name", service)?;
+    inert("the keychain account name", account)
 }
 
 /// Refuses a value that would be punctuation rather than a value.
@@ -134,10 +143,14 @@ pub fn hex_decode(text: &str) -> Option<Vec<u8>> {
     {
         return None;
     }
-    (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok())
-        .collect()
+    // Reserved at full width for `hex_encode`'s reason: collecting an
+    // `Option<Vec<_>>` starts at capacity zero, so every doubling frees a
+    // fragment of the decoded Credential — and this is the macOS read path.
+    let mut out = Vec::with_capacity(text.len() / 2);
+    for at in (0..text.len()).step_by(2) {
+        out.push(u8::from_str_radix(&text[at..at + 2], 16).ok()?);
+    }
+    Some(out)
 }
 
 /// `security -w` prints hex for data that is not printable, so a reply that is

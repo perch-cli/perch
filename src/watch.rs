@@ -422,10 +422,13 @@ impl Recently {
     }
 
     /// What a scheduled check inherits from the one before it: when its Group last
-    /// Switched, or nothing where it never has.
-    pub fn recorded(checked: Option<&Checked>) -> Recently {
+    /// Switched, or nothing where it never has. Brought back to `now` where it is
+    /// later, because the hold runs a Cooldown from the stamp: a clock reading 2035
+    /// for the round that Switched would cool that Group until 2035, and only
+    /// `perch group remove` — which destroys its Settings — clears a record.
+    pub fn recorded(checked: Option<&Checked>, now: DateTime<Utc>) -> Recently {
         Recently {
-            switched: checked.map(|checked| checked.switched_at),
+            switched: checked.map(|checked| checked.switched_at.min(now)),
         }
     }
 
@@ -575,6 +578,10 @@ pub enum Outcome {
     /// (ADR a-profile-is-live-by-evidence). Only where waiting is an answer: a failure
     /// that does not clear itself is reported as itself instead.
     Refused { why: String },
+    /// The watch was taken over, or given up, between the reading and the Switch. Its
+    /// own outcome rather than a [`Outcome::Refused`], because a scheduler branching on
+    /// "nothing to do" would record a round that was in fact displaced.
+    HandedOver { why: String },
 }
 
 impl Outcome {
@@ -593,7 +600,9 @@ impl Outcome {
                 EXIT_NOTHING_TO_DO
             }
             Outcome::Nowhere { .. } => EXIT_NO_CANDIDATE,
-            Outcome::Held { .. } => EXIT_HELD,
+            // Both are the code for a contended lock: nothing was changed, and
+            // asking again is what resolves it.
+            Outcome::Held { .. } | Outcome::HandedOver { .. } => EXIT_HELD,
         }
     }
 
@@ -607,6 +616,7 @@ impl Outcome {
             Outcome::Nowhere { .. } => "nowhere",
             Outcome::Held { .. } => "held",
             Outcome::Refused { .. } => "refused",
+            Outcome::HandedOver { .. } => "handed over",
         }
     }
 }
@@ -670,7 +680,10 @@ impl Round {
             | Outcome::Waiting
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
-            | Outcome::Refused { .. } => REFRESH_INTERVAL_MILLIS,
+            | Outcome::Refused { .. }
+            // The loop leaves at the top of the next round rather than waiting this
+            // out, so the number is only what the line would have promised.
+            | Outcome::HandedOver { .. } => REFRESH_INTERVAL_MILLIS,
         }
     }
 
@@ -686,7 +699,8 @@ impl Round {
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
             | Outcome::Nowhere { .. }
-            | Outcome::Refused { .. } => None,
+            | Outcome::Refused { .. }
+            | Outcome::HandedOver { .. } => None,
         }
     }
 
@@ -748,6 +762,7 @@ impl Round {
                 "nothing current to decide on, so nothing was decided: {why}"
             )),
             Outcome::Refused { why } => explaining(&format!("the Switch was turned away: {why}")),
+            Outcome::HandedOver { why } => explaining(why),
         }
     }
 }
@@ -1196,7 +1211,7 @@ mod tests {
 
     #[test]
     fn a_check_is_paced_by_what_the_one_before_it_recorded() {
-        let recorded = Recently::recorded(Some(&Checked { switched_at: now() }));
+        let recorded = Recently::recorded(Some(&Checked { switched_at: now() }), now());
 
         assert!(recorded.resting(now() + Duration::minutes(4)).is_some());
         assert_eq!(
@@ -1206,9 +1221,31 @@ mod tests {
              than from the process that read it"
         );
         assert_eq!(
-            Recently::recorded(None),
+            Recently::recorded(None, now()),
             Recently::nothing(),
             "a Group nothing has Switched within owes nobody a wait"
+        );
+    }
+
+    /// The record is written from whatever clock the machine had at the time, and
+    /// nothing but `perch group remove` — which destroys the Group's Settings —
+    /// clears one.
+    #[test]
+    fn a_check_recorded_under_a_clock_years_fast_cools_its_group_for_a_cooldown() {
+        let skewed = Checked {
+            switched_at: now() + Duration::days(3650),
+        };
+
+        let recorded = Recently::recorded(Some(&skewed), now());
+
+        assert!(
+            recorded.resting(now() + Duration::minutes(4)).is_some(),
+            "it still paces the next Check"
+        );
+        assert_eq!(
+            recorded.resting(now() + Duration::minutes(15)),
+            None,
+            "but a Cooldown from now rather than from 2035"
         );
     }
 

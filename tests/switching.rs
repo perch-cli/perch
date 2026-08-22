@@ -1071,6 +1071,10 @@ fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_d
 #[test]
 fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_claude_code() {
     let host = machine_with_two_accounts().with_file(REFRESH_LOCK, "not a lock directory");
+    // Past the staleness window, which is what makes it a wedge rather than a
+    // lock somebody is holding: a fresh one is waited on like any other, and it
+    // is only once nothing may still be behind it that the shape is the news.
+    host.set_now(host.now() + chrono::Duration::milliseconds(120_000));
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 

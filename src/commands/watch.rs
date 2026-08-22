@@ -353,10 +353,18 @@ impl Watcher {
     /// A check takes the Group's record, read under the lock so the cooldown a round is
     /// held by is the one that was on record when it decided. The loop's is already in
     /// the caller's hands.
-    fn pacing(self, carried: &mut Recently, registry: &Registry, scope: &Scope) {
+    fn pacing(
+        self,
+        carried: &mut Recently,
+        registry: &Registry,
+        scope: &Scope,
+        now: DateTime<Utc>,
+    ) {
         match self {
             Watcher::Loop => {}
-            Watcher::Check => *carried = Recently::recorded(registry.checked(scope.word())),
+            Watcher::Check => {
+                *carried = Recently::recorded(registry.checked(scope.word()), now);
+            }
         }
     }
 
@@ -486,7 +494,7 @@ fn one_round(
     };
     let email = watching.account.email().to_string();
 
-    watcher.pacing(recently, &registry, &watching.scope);
+    watcher.pacing(recently, &registry, &watching.scope, host.now());
 
     // Once per round, and handed to everything in it that wants one: probed where it is
     // wanted, an acting round walks `PATH` and spawns `claude --version` three times.
@@ -708,10 +716,19 @@ fn act(
     // above is bounded by nothing but the network, so it can outlast the watch — and a
     // Switch made after that is the second Watcher deciding beside the first.
     if !watching_alone.still_held() {
-        return Ok(Outcome::Refused {
+        return Ok(Outcome::HandedOver {
             why: "the watch was taken over while this round was reading the \
                   candidates, so nothing was switched: whoever holds it now is \
                   watching this machine."
+                .to_string(),
+        });
+    }
+    // The same guard for the other way a round stops being the one to act: the
+    // wait at the bottom of the loop is too late, thirty seconds after a stop.
+    if host.asked_to_stop() {
+        return Ok(Outcome::HandedOver {
+            why: "this Watcher was asked to stop while the round was reading \
+                  the candidates, so nothing was switched."
                 .to_string(),
         });
     }

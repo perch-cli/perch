@@ -8,7 +8,7 @@
 mod common;
 
 use common::*;
-use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
+use perch::error::{EXIT_CONFLICT, EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
 use perch::host::prelude::*;
 use perch::host::{FakeHost, Platform};
 use perch::registry::{Active, Quarantine, Registry};
@@ -156,6 +156,11 @@ fn an_import_whose_registry_went_stale_while_the_passphrase_was_typed_writes_not
     let (outcome, _) = run_import(&host, AT);
 
     let refused = outcome.expect_err("this Perch may no longer speak for the registry");
+    assert_eq!(
+        refused.exit_code(),
+        EXIT_HELD,
+        "a registry another `perch` has moved on is a run to repeat, not a fault: {refused}"
+    );
     assert!(
         refused.to_string().contains("Nothing was imported"),
         "{refused}"
@@ -516,6 +521,11 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
         "and the Credential this Import wrote into it came back out with the \
          rest: a live Credential in a Profile the registry does not name is \
          what discarding a Profile exists to prevent"
+    );
+    assert!(
+        !host.path_exists(&orphan.identity_file),
+        "and so did the `.claude.json`, which came out of the same Export and \
+         routinely carries an API key in an MCP server's `env` block"
     );
     assert!(
         host.notes()

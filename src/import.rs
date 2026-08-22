@@ -101,17 +101,18 @@ impl Placed {
                 profile::discard(host, &touched.store);
                 continue;
             }
-            // The directory stays and the Credential does not: a Credential in a
-            // store the rolled-back registry will not name is the state
-            // `profile::discard` exists to prevent.
+            // The directory stays and neither thing written into it does: a
+            // `.claude.json` holds an API key in an MCP server's `env` block, so
+            // it is what `profile::discard` prevents as much as a Credential is.
             for kept_in in credentials::stores_for(host, &touched.store) {
                 let _ = kept_in.forget(host);
             }
+            let _ = host.remove_file(&touched.store.identity_file);
             host.note(&format!(
                 "{} was already on this machine, so it was left where it is \
                  rather than removed with the Profiles this Import made — but \
-                 the Credential this Import wrote into it has been taken back \
-                 out. The Export still holds every Credential in it.",
+                 the Credential and the `.claude.json` this Import wrote into it \
+                 have been taken back out. The Export still holds both.",
                 touched.store.config_dir.display(),
             ));
         }
@@ -131,8 +132,8 @@ fn every_map(export: &Export) -> [(&'static str, &BTreeMap<String, String>); 2] 
 /// Puts every Credential the Export holds into the Profile of the Account it
 /// belongs to, wherever this machine keeps one, through
 /// [`profile::store_credential`] so an Import gets the read-back guard. An
-/// Account it holds no Credential for gets no Profile, is restored anyway, and
-/// is not Quarantined here for it.
+/// Account the Export carries neither a Credential nor a `.claude.json` for gets
+/// no Profile, is restored anyway, and is not Quarantined here for it.
 pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // Every Credential in the file belongs to an Account the file lists, or this
     // is not the whole restore it claims to be. `gather` cannot write such an
@@ -210,29 +211,30 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         // Keyed the way the guard above asked the question: `credential_for`
         // folds case and a `BTreeMap` lookup does not, so a key spelled
         // `ONE@example.com` is listed by the one and missed by the other.
-        if let Some(credential) = export.credential_for(account.email()) {
-            // Verbatim where the Export carries one, because Claude Code's
-            // `oauthAccount` block holds fields the registry does not record and
-            // a Switch prefers it (ADR everything-but-the-account).
-
-            // `Zeroizing` because `Export::drop` wipes `identity_files` and this
-            // clones out from under it: a `.claude.json` routinely carries an API
-            // key in an MCP server's `env` block. Both arms, so one type does.
-            let identity_file = Zeroizing::new(
-                export
-                    .identity_file_for(account.email())
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        probe::fresh_identity_file(&account.identity.oauth_account_block())
-                    }),
-            );
-            placements.push((
-                account.email().to_string(),
-                store,
-                credential,
-                identity_file,
-            ));
+        let credential = export.credential_for(account.email());
+        let carried = export.identity_file_for(account.email());
+        // Either one is a Profile to make. A Quarantined Account travels with no
+        // Credential and with the `.claude.json` naming it, and dropping that
+        // makes the next Export smaller than the one that fed this Import.
+        if credential.is_none() && carried.is_none() {
+            continue;
         }
+        // Verbatim where the Export carries one, because Claude Code's
+        // `oauthAccount` block holds fields the registry does not record and a
+        // Switch prefers it (ADR everything-but-the-account).
+
+        // `Zeroizing` because `Export::drop` wipes `identity_files` and this
+        // clones out from under it: a `.claude.json` routinely carries an API
+        // key in an MCP server's `env` block. Both arms, so one type does.
+        let identity_file = Zeroizing::new(carried.cloned().unwrap_or_else(|| {
+            probe::fresh_identity_file(&account.identity.oauth_account_block())
+        }));
+        placements.push((
+            account.email().to_string(),
+            store,
+            credential,
+            identity_file,
+        ));
     }
 
     // A Profile something is running against is one nothing writes into, which
@@ -261,8 +263,14 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
             was_already_there: host.path_exists(&store.config_dir),
             store: store.clone(),
         });
+        // A Quarantined Account travels with no Credential and with the
+        // `.claude.json` that names it, so the Profile is made for the file
+        // alone: dropped, it is a re-Export smaller than the one that made it.
         if let Err(error) = profile::make_dir(host, &store.config_dir)
-            .and_then(|()| profile::store_credential(host, &store, credential))
+            .and_then(|()| match credential {
+                Some(credential) => profile::store_credential(host, &store, credential),
+                None => Ok(()),
+            })
             .and_then(|()| login::carry_identity_file(host, &identity_file, &store))
         {
             placed.undo(host);
@@ -325,6 +333,38 @@ mod tests {
             credentials: BTreeMap::from([("one@example.com".to_string(), "held".to_string())]),
             identity_files: BTreeMap::new(),
         }
+    }
+
+    /// `gather` records a `.claude.json` for every Account whether or not a
+    /// Credential could be read, and `refuse_a_file_for_an_account_it_does_not
+    /// _list` validates its key — so one dropped here is a file that traveled,
+    /// was checked, and then went nowhere.
+    #[test]
+    fn a_claude_json_for_an_account_carrying_no_credential_is_placed_all_the_same() {
+        let host = crate::host::FakeHost::new();
+        let mut export = an_export();
+        export.identity_files.insert(
+            "two@example.com".to_string(),
+            r#"{"oauthAccount":{"emailAddress":"two@example.com"},"projects":{}}"#.to_string(),
+        );
+        let store = export
+            .registry
+            .account("two@example.com")
+            .unwrap()
+            .store(&host)
+            .unwrap();
+
+        place(&host, &export).expect("the Profiles can be made");
+
+        assert_eq!(
+            host.read_file(&store.identity_file).ok().as_deref(),
+            Some(r#"{"oauthAccount":{"emailAddress":"two@example.com"},"projects":{}}"#),
+            "the Quarantined Account's file came back as it went out"
+        );
+        assert!(
+            crate::credentials::read(&host, &store).unwrap().is_none(),
+            "and no Credential was invented to carry it"
+        );
     }
 
     /// A machine that has never run Perch and one a Purge emptied are the same
