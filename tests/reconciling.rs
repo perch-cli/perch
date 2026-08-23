@@ -596,6 +596,11 @@ fn a_profile_linked_at_the_default_profile_is_already_holding_all_of_it() {
         (Platform::Windows, Link::Junction),
     ] {
         let host = machine().with_platform(platform);
+        // A link is made inside a directory, and there is no `profiles/` until
+        // something makes one — `ln -s` into a directory that is not there
+        // fails on every machine.
+        host.create_dir_all(Path::new(PROFILE).parent().expect("a Profile has one"))
+            .expect("the directory Profiles sit in");
         host.link(kind, Path::new(SHARED), Path::new(PROFILE))
             .expect("the Profile is linked at the Default Profile");
 

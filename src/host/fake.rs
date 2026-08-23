@@ -1836,6 +1836,20 @@ impl port::Links for FakeHost {
                 path: at.to_path_buf(),
             });
         }
+        // A link is made inside a directory, and `symlink(2)` answers `ENOENT`
+        // where there is none. Refused rather than invented, or a caller that
+        // forgot to make the Profile first passes here and fails on a machine.
+        if let Some(parent) = at.parent().filter(|at| !at.as_os_str().is_empty())
+            && !self
+                .resolved(parent)
+                .is_some_and(|at| self.fs.dirs.borrow().contains(&at))
+        {
+            // `Io` with a `NotFound` kind, which is what `RealHost` hands back:
+            // `symlink` reports through `std::io::Error` and nothing narrows it.
+            return Err(HostError::Io(std::io::Error::from(
+                std::io::ErrorKind::NotFound,
+            )));
+        }
 
         let windows = self.platform() == Platform::Windows;
         match kind {
