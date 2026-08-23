@@ -1226,6 +1226,7 @@ fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
         assumption: assumption.to_string(),
         detail: detail.to_string(),
         version: version.to_string(),
+        note: None,
     }
 }
 
@@ -2012,6 +2013,7 @@ mod tests {
                 assumption,
                 detail,
                 version,
+                ..
             } => {
                 assert_eq!(assumption, assumption::INSTALLED);
                 assert!(

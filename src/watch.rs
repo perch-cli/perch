@@ -1737,6 +1737,7 @@ mod tests {
             assumption: "session marker".to_string(),
             detail: "sessions could not be read".to_string(),
             version: "1.2.3".to_string(),
+            note: None,
         }))
         .expect_err("a directory nobody can read does not clear itself");
         assert_eq!(unreadable.exit_code(), crate::error::EXIT_PROBE_REFUSED);
