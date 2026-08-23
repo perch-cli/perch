@@ -98,7 +98,10 @@ fn citations(text: &str) -> Vec<(usize, String)> {
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
         if cited(&word) {
-            found.push((text[..at].lines().count().max(1), word));
+            // Newlines rather than `lines()`, which drops the empty last line:
+            // a citation opening a line would be counted onto the one above it,
+            // and a failure names the line an editor is sent to.
+            found.push((text[..at].matches('\n').count() + 1, word));
         }
     }
     found
@@ -286,4 +289,24 @@ fn every_band_is_contiguous_from_its_base() {
         "band N runs N01 upward, four digits, no gap and no number twice:\n{}",
         wrong.join("\n")
     );
+}
+
+/// The line a failure names, on the two shapes a citation opens: after a
+/// marker, and at column zero, which is where `lines()` counted it onto the
+/// line above. The word is composed rather than written, so this file parses
+/// what it does not also cite.
+#[test]
+fn a_citation_is_named_at_the_line_it_sits_on() {
+    let word = format!("{}R", "AD");
+    let at = |text: &str| {
+        citations(text)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(at(&format!("// {word} one-two")), [1]);
+    assert_eq!(at(&format!("a\n// {word} one-two")), [2]);
+    assert_eq!(at(&format!("a\n{word} one-two")), [2]);
+    assert_eq!(at(&format!("a\nb\n\n{word} one-two")), [4]);
 }
