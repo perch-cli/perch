@@ -1066,6 +1066,26 @@ mod tests {
         }
     }
 
+    /// A `..` with nothing ordinary in front of it to cancel, which is where the
+    /// answer stops being "drop the component before". `/..` is the root, a
+    /// leading one on a relative path is part of where it points, and a path
+    /// that cancels itself out entirely is this directory rather than no path.
+    #[test]
+    fn a_path_doubling_back_past_its_own_start_keeps_what_it_cannot_cancel() {
+        for (given, want) in [
+            ("/a/b/../c", "/a/c"),
+            ("/..", "/"),
+            ("/../..", "/"),
+            ("../a", "../a"),
+            ("a/../..", ".."),
+            ("a/b/..", "a"),
+            ("a/..", "."),
+            ("./a", "a"),
+        ] {
+            assert_eq!(flattened(Path::new(given)), PathBuf::from(want), "{given}");
+        }
+    }
+
     /// A `..` is not a name, so `Path::file_name` answers `None` on one and the
     /// walk stopped there — leaving links above it unfollowed and the rest to be
     /// compared as spelling. Both directions are wrong, and the Purge reaches

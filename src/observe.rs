@@ -1015,6 +1015,19 @@ mod tests {
         );
     }
 
+    /// `refresh` breaks on a stop rather than recording it, so no `Attempt` ever
+    /// carries one — the arms exist because the type allows it, and this is what
+    /// they would say. A stop is not a line about an Account and not a reason a
+    /// figure is missing: the round reports it through `Report::stopped`.
+    #[test]
+    fn a_stop_is_reported_by_the_round_rather_than_against_an_account() {
+        let stopped = attempt("someone@example.com", Outcome::Stopped(Lost::Stopped));
+
+        assert_eq!(stopped.note(), None, "nothing to say about the Account");
+        assert_eq!(stopped.document()["outcome"], "stopped");
+        assert_eq!(stopped.document()["reason"], serde_json::Value::Null);
+    }
+
     /// The other half of the same beat: the caller answers whether the burst may
     /// go on, and a watch taken over mid-burst ends it there. Read to the end,
     /// the reads spend an hourly allowance that does not refill early, on a

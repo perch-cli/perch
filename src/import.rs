@@ -47,12 +47,20 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
             crate::commands::groups(declared)
         ),
     };
+    // Said only where a Group is part of what is held: an Import refused over
+    // Accounts alone is refused for the sentence above it.
+    let declarations = match groups {
+        0 => "",
+        _ => {
+            " A Group and what it carries are declarations this machine holds \
+              alone."
+        }
+    };
     Err(PerchError::Conflict(format!(
         "Perch already holds {holding}, and an Import does not merge: the \
          same Account on both sides one Rotation apart has no answer to which \
          Credential is live, and an Alias can mean different Accounts on two \
-         machines. A Group and what it carries are declarations this machine \
-         holds alone.\n\
+         machines.{declarations}\n\
          Nothing was imported and the file was not opened. `perch holdings \
          purge` gives the machine back and is what makes room — it offers to \
          write an Export first."
@@ -343,6 +351,41 @@ mod tests {
     use crate::registry::Active;
     use crate::registry::{Account, Quarantine, Settings};
     use std::collections::BTreeMap;
+
+    /// What the refusal counts, on each of the three ways a machine can be
+    /// occupied. A Group with no Account in it is the one the guard used to
+    /// miss, and "0 Accounts" is the wrong thing to say to somebody whose
+    /// Groups are what is about to be replaced.
+    #[test]
+    fn the_refusal_names_whichever_of_the_two_a_machine_is_holding() {
+        let empty = Registry::default();
+        refuse_a_machine_that_is_not_empty(None).expect("a machine Perch never ran on");
+        refuse_a_machine_that_is_not_empty(Some(&empty)).expect("what a Purge leaves");
+
+        let mut accounts_only = Registry::default();
+        accounts_only.upsert(crate::cycle::tests::account("one@example.com", vec![]));
+        let said = refuse_a_machine_that_is_not_empty(Some(&accounts_only))
+            .expect_err("it holds an Account")
+            .to_string();
+        assert!(said.contains("1 Account"), "{said}");
+        assert!(!said.contains("Group"), "and nothing about Groups: {said}");
+
+        let mut groups_only = Registry::default();
+        groups_only
+            .declare_group("work")
+            .expect("the Group is declared");
+        let said = refuse_a_machine_that_is_not_empty(Some(&groups_only))
+            .expect_err("a Group is a declaration held nowhere else")
+            .to_string();
+        assert!(said.contains("no Account but 1 Group"), "{said}");
+
+        let mut both = groups_only.clone();
+        both.upsert(crate::cycle::tests::account("one@example.com", vec![]));
+        let said = refuse_a_machine_that_is_not_empty(Some(&both))
+            .expect_err("it holds both")
+            .to_string();
+        assert!(said.contains("1 Account and 1 Group"), "{said}");
+    }
 
     /// Where the restored registry would be written. It is the file a refusal
     /// tells somebody to edit, so it is named rather than derived here.
