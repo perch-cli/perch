@@ -1764,11 +1764,11 @@ fn a_check_held_settling_a_landing_says_so_on_standard_output() {
     );
 }
 
-/// The same again, inside the burst rather than after it. A `SIGKILL` here runs
-/// no `Drop`, so both locks are left on disk: every other `perch` waits out the
-/// registry's window, and the next login's Service waits out the watch's.
+/// The same again, inside the round rather than between two. A `SIGKILL` here
+/// runs no `Drop`, so both locks are left on disk: every other `perch` waits out
+/// the registry's window, and the next login's Service waits out the watch's.
 #[test]
-fn a_watcher_asked_to_stop_reads_no_further_candidates() {
+fn a_watcher_asked_to_stop_reads_nothing_and_pays_nothing() {
     // A third Account, so there is a second candidate for the burst to reach —
     // and its Credential is one that has not run out, or the round stops at a
     // Renewal rather than at the reads this is about.
@@ -1797,14 +1797,15 @@ fn a_watcher_asked_to_stop_reads_no_further_candidates() {
     result.expect("being asked to stop is not this Watcher's failure");
     let asked = asked_by(&host);
     assert!(
-        asked.contains(&SPARE_TOKEN.to_string()),
-        "the first candidate is read, or an empty report paces a Back-off that \
-         spent nothing: {asked:?}\n{printed}"
+        asked.is_empty(),
+        "the reads stop where the stop arrived, including before the first: a \
+         round given one address asks the question once, and an ask made only \
+         after the first read is one that reading never makes: {asked:?}\n{printed}"
     );
     assert!(
-        !asked.contains(&THIRD_TOKEN.to_string()),
-        "and the burst stops there rather than spending thirty seconds a \
-         candidate on a decision already not going to be made: {asked:?}\n{printed}"
+        printed.contains("asked to stop"),
+        "and the round says so rather than reporting a reading that failed, \
+         which is what would pace a Back-off off a request nobody sent: {printed}"
     );
     assert!(
         !host

@@ -70,6 +70,12 @@ pub struct Report {
     /// Accounts would otherwise answer `"refresh": null`, which is this document's word
     /// for *nobody asked*.
     pub asked: bool,
+    /// Why the reads stopped where they did, for the caller holding the watch.
+    ///
+    /// Handed back rather than swallowed: a round that stopped read fewer Accounts
+    /// than it was given, and read as a reading that failed it would pace a Back-off
+    /// off a question nobody was asked.
+    pub stopped: Option<Lost>,
 }
 
 /// One step of an observation: what it produced, or the outcome that stopped it there.
@@ -215,18 +221,16 @@ pub fn refresh(
     let mut report = Report::asked_for();
     let mut anything_to_keep = false;
 
-    for (at, email) in emails.iter().enumerate() {
+    for email in emails {
         // A round trip to Anthropic each, so the hold is renewed between them and again
         // inside the turn: one Account's turn is up to six requests bounded at thirty
         // seconds, twice the ninety the registry hold goes stale in.
         perch.renew();
-        // And whatever else the caller holds, and where it says whether the reads may
-        // go on: five candidates is three hundred seconds against a thirty-second
-        // grace and a watch stale in twenty-two minutes, which a burst can outlast.
-        let go_on = still_ours();
-        // Never before the first: nothing has been spent yet, and a round held
-        // before it read anything would pace a Back-off.
-        if at > 0 && go_on.is_err() {
+        // And whatever else the caller holds. Before the first as well as between
+        // them: the round's own Refresh is one address, so an ask made only after
+        // one is an ask this reading never makes.
+        if let Err(lost) = still_ours() {
+            report.stopped = Some(lost);
             break;
         }
 
@@ -951,6 +955,7 @@ mod tests {
             attempts: vec![attempt("someone@example.com", Outcome::Observed)],
             not_kept: None,
             asked: true,
+            stopped: None,
         };
         assert!(report.notes().is_empty(), "the age of the figure says it");
         assert_eq!(report.document()["kept"], true);
@@ -971,6 +976,7 @@ mod tests {
             ],
             not_kept: None,
             asked: true,
+            stopped: None,
         };
 
         let notes = report.notes();
@@ -1008,6 +1014,7 @@ mod tests {
             attempts: vec![attempt("someone@example.com", Outcome::Observed)],
             not_kept: Some("the registry is read-only".to_string()),
             asked: true,
+            stopped: None,
         };
 
         let document = report.document();

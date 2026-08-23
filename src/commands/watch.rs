@@ -202,19 +202,22 @@ fn left(out: &mut dyn Write, lost: Lost) -> Result<()> {
     }
 }
 
-/// The outcome for a round that stopped being the one to act while it was reading
-/// the candidates, which is the longest thing a round does.
+/// The outcome for a round that stopped being the one to act while it was reading,
+/// which is the longest thing a round does.
+///
+/// One sentence for both readings, the Account's own and the candidates': what a
+/// reader needs is that nothing was switched, which is true of either.
 fn nothing_was_switched(lost: Lost) -> Outcome {
     match lost {
         Lost::HandedOver => Outcome::HandedOver {
-            why: "the watch was taken over while this round was reading the \
-                  candidates, so nothing was switched: whoever holds it now is \
-                  watching this machine."
+            why: "the watch was taken over while this round was reading, so \
+                  nothing was switched: whoever holds it now is watching this \
+                  machine."
                 .to_string(),
         },
         Lost::Stopped => Outcome::Stopped {
-            why: "this Watcher was asked to stop while the round was reading \
-                  the candidates, so nothing was switched."
+            why: "this Watcher was asked to stop while the round was reading, \
+                  so nothing was switched."
                 .to_string(),
         },
     }
@@ -572,6 +575,16 @@ fn one_round(
         host.note(not_kept);
     }
 
+    // Before the reading is judged, because a round that stopped read nothing and a
+    // hold charged for it would pace the Back-off off a question nobody was asked.
+    if let Some(lost) = report.stopped {
+        return Ok(Turn::Decided(Round {
+            fullest: None,
+            threshold: watching.policy.threshold,
+            outcome: nothing_was_switched(lost),
+        }));
+    }
+
     // A hold said against the wait it earned. `waiting_for` is passed in rather than
     // charged here, because not every hold is a question nobody answered.
     let held = |why: String, waiting_for: u64| {
@@ -764,6 +777,13 @@ fn act(
         probed,
         &mut || watching_alone.goes_on(),
     );
+    // Before the choice rather than after it: a burst that stopped part way leaves
+    // every candidate past that point on whatever figure was cached, and choosing on
+    // those is the Switch this round is no longer the one to make.
+    if let Some(lost) = read.stopped {
+        return Ok(nothing_was_switched(lost));
+    }
+
     // What could not be read, carried into the sentence that says where the watcher
     // went: an Account ranked on a figure from an hour ago is the one thing that can
     // make this Switch land somewhere worse than it left.
