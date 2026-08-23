@@ -826,19 +826,18 @@ fn explaining(said: &str) -> String {
 /// Said in the same shape as every other line, with the figure it does not have said as
 /// unread. `retrying_in` is [`Outcome::Held`]'s.
 pub fn held_line(why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> String {
-    let asking_again = match retrying_in {
-        Some(millis) => format!(" Asking again in {}.", how_long(millis)),
-        None => String::new(),
-    };
-    format!(
-        "{}  {:<8}  unread{}",
-        now.to_rfc3339_opts(SecondsFormat::Secs, true),
-        "held",
-        explaining(&format!(
-            "nothing current to decide on, so nothing was decided: \
-             {why}{asking_again}",
-        )),
-    )
+    // The Round it would have been, so the sentence has one spelling: a figure
+    // that was not read renders as `unread` whatever the threshold says, which
+    // is why a threshold this round never saw can be any number.
+    Round {
+        fullest: None,
+        threshold: 0,
+        outcome: Outcome::Held {
+            why: why.to_string(),
+            retrying_in,
+        },
+    }
+    .line(now)
 }
 
 /// A message from anywhere else, as one line.

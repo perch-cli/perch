@@ -126,14 +126,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             // The machine is not arranged for watching, which the loop holds on.
             // Nothing is charged to the back-off: this round asked the registry rather
             // than Anthropic.
-            Ok(Turn::NotArranged(why)) => {
-                let why = why.to_string();
-                let line = watch::held_line(&why, Some(watch::REFRESH_INTERVAL_MILLIS), host.now());
-                (
-                    watch::REFRESH_INTERVAL_MILLIS,
-                    Spoken::held(&why, Some(watch::REFRESH_INTERVAL_MILLIS), line),
-                )
-            }
+            Ok(Turn::NotArranged(why)) => held_before_a_round(&why.to_string(), host.now()),
             // Held like any other round that could not read. Ending the watcher over a
             // contended registry would let a `perch status --refresh` stop it silently.
             Err(PerchError::Busy(why)) => held_before_a_round(&why, host.now()),
@@ -210,10 +203,9 @@ fn take_the_watch<'a>(
 }
 
 /// A hold that happened before there was a [`Round`] to hold, and so one with no
-/// Account to name; [`one_round`]'s `held` is the other shape.
-///
-/// At the ordinary interval, because nothing here spent a request: a contended
-/// registry and a lock inside its staleness window are each an answer.
+/// Account to name; [`one_round`]'s `held` is the other shape. At the ordinary
+/// interval, because nothing here spent a request: a contended registry, a lock
+/// inside its window and a machine nothing arranged are each an answer.
 fn held_before_a_round(why: &str, now: DateTime<Utc>) -> (u64, Spoken) {
     let waiting_for = watch::REFRESH_INTERVAL_MILLIS;
     let line = watch::held_line(why, Some(waiting_for), now);
