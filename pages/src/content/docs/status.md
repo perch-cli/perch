@@ -244,9 +244,19 @@ either `ranked` or `held`, and its `accounts` in that order.
       "accounts": [ … ]
     }
   ],
+  "landing": null,
   "refresh": null
 }
 ```
+
+**Both documents carry `landing`.** It is `null` on every machine that is not
+part way through a Switch, and an object naming `leaving` and `arriving` on one
+that is. That is the window in which what is live and what Perch records as
+active can disagree, and it is the reason `perch status --json` can answer
+`"active": null` on a machine that plainly has an Account: the two questions —
+which Account, and whether Perch can say — are different, so they are different
+keys. A script that branches on `active` being null should read `landing` before
+it concludes there is no Account.
 
 So `.sections[0].accounts[0]` is the Account a bare `perch switch` would land on,
 and a section whose `order` is `held` is saying that its Accounts are in no
