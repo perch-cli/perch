@@ -230,6 +230,9 @@ const CASES: &[Case] = &[
         named: "asking when a dangling link was written is not an answer",
         asserts: |host, root, adapter, _now| {
             let link = root.join("points-nowhere");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
             host.link(Link::Symbolic, &root.join("was-never-there"), &link)
                 .expect("a link to nothing is still a link");
 
@@ -251,6 +254,9 @@ const CASES: &[Case] = &[
                 .expect("with something in it");
 
             let link = root.join("points-at-it");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
             host.link(Link::Symbolic, &real, &link).expect("linked");
 
             host.remove_dir_all(&link)
