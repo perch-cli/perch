@@ -1107,7 +1107,9 @@ impl FakeHost {
     fn resolved(&self, path: &Path) -> Option<PathBuf> {
         const FOLLOWED: usize = 8;
 
-        let mut at = path.to_path_buf();
+        // A real filesystem walks `..` rather than storing it, so a path
+        // carrying one names the place it lands on here too.
+        let mut at = crate::host::flattened(path);
         for _ in 0..FOLLOWED {
             if self.fs.files.borrow().contains_key(&at) || self.fs.dirs.borrow().contains(&at) {
                 return Some(at);
@@ -1119,7 +1121,7 @@ impl FakeHost {
                 .get(&at)
                 .map(|(_, target)| target.clone())
             {
-                at = crate::host::against(&at, target);
+                at = crate::host::flattened(&crate::host::against(&at, target));
                 continue;
             }
             // Nothing of that name, which does not mean nothing is there: a

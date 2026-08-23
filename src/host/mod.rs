@@ -9,7 +9,7 @@
 //! the machine touches several of its surfaces at once — the port is 43 methods
 //! wide because the machine is (ADR the-port-fits-the-machine).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 
@@ -800,14 +800,42 @@ pub(crate) struct Settled(Option<PathBuf>);
 pub(crate) fn settled(host: &dyn Host, path: &Path) -> Settled {
     const FOLLOWED: usize = 8;
 
-    let mut at = path.to_path_buf();
+    let mut at = flattened(path);
     for _ in 0..FOLLOWED {
         match deepest_link_on(host, &at) {
-            Some(followed) => at = followed,
+            Some(followed) => at = flattened(&followed),
             None => return Settled(Some(at)),
         }
     }
     Settled(None)
+}
+
+/// `.` and `..` taken out, so what is left is a path of names: the walk below
+/// ends at a `..`, leaving links above it unfollowed and the components either
+/// side compared as spelling. Lexical, so `link/..` is where the link sits,
+/// which is what a shell answers and what somebody typing a path means.
+pub(crate) fn flattened(path: &Path) -> PathBuf {
+    let mut kept: Vec<Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match kept.last() {
+                Some(Component::Normal(_)) => drop(kept.pop()),
+                // `/..` is `/`, and a relative path's leading `..` is part of
+                // where it points rather than something to cancel.
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => kept.push(component),
+            },
+            named => kept.push(named),
+        }
+    }
+    let flat: PathBuf = kept.iter().collect();
+    // A path that cancels itself out is this directory, which is a name; the
+    // empty path is not one, and `deepest_link_on` would read it as the root.
+    if flat.as_os_str().is_empty() && !path.as_os_str().is_empty() {
+        return PathBuf::from(".");
+    }
+    flat
 }
 
 impl Settled {
@@ -1003,6 +1031,45 @@ mod tests {
         assert!(
             looping.is_inside(&settled(&host, Path::new("/somewhere/else"))),
             "and what it could not resolve is not ruled out of anywhere"
+        );
+    }
+
+    /// A `..` is not a name, so `Path::file_name` answers `None` on one and the
+    /// walk stopped there — leaving links above it unfollowed and the rest to be
+    /// compared as spelling. Both directions are wrong, and the Purge reaches
+    /// both: it writes the Export at a path a person types at a prompt.
+    #[test]
+    fn a_path_that_doubles_back_is_resolved_before_it_is_placed() {
+        let host = FakeHost::new().with_link(
+            Link::Symbolic,
+            "/Users/someone/backups",
+            "/Users/someone/.config/perch",
+        );
+        let home = Path::new("/Users/someone/.config/perch");
+
+        assert!(
+            is_inside(
+                &host,
+                Path::new("/Users/someone/Documents/../.config/perch/backup.age"),
+                home,
+            ),
+            "doubling back into the directory lands in it"
+        );
+        assert!(
+            !is_inside(
+                &host,
+                Path::new("/Users/someone/.config/perch/profiles/../../../x.age"),
+                home,
+            ),
+            "and doubling back out of it does not"
+        );
+        assert!(
+            is_inside(
+                &host,
+                Path::new("/Users/someone/Documents/../backups/perch.age"),
+                home,
+            ),
+            "a link past the `..` is followed rather than abandoned at it"
         );
     }
 
