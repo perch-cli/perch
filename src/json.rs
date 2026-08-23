@@ -243,7 +243,10 @@ fn balanced_end(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize
                 at += 1;
             }
             byte if byte == close => {
-                depth -= 1;
+                // Saturating, as its sibling in `span_of` is. Only the two
+                // callers above reach this and both enter on `open`, so a close
+                // first is unreachable — and a `-=` is how it stops being so.
+                depth = depth.saturating_sub(1);
                 at += 1;
                 if depth == 0 {
                     return Some(at);
