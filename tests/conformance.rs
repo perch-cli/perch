@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use perch::host::{
     Clock, FakeHost, Files, Filesystem, Host, HostError, Link, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
-    Platform, RealHost,
+    Platform, RealHost, Waited,
 };
 
 /// This machine, as the port names it, so the fake is asked to be the platform
@@ -1295,6 +1295,116 @@ const WHOLE_HOST_CASES: &[WholeHostCase] = &[
             );
         },
     },
+    WholeHostCase {
+        named: "where this process is, and where it came from, are rooted",
+        asserts: |host, adapter| {
+            // Through `probe::rooted` rather than `Path::is_absolute`, which reads
+            // the separator of the platform this build runs on: a fake claiming
+            // Windows answers the paths a test wrote, and `/a/b` is a root there.
+            let on_windows = host.platform() == Platform::Windows;
+            for (what, path) in [
+                ("home_dir", host.home_dir().expect("a home")),
+                (
+                    "current_dir",
+                    host.current_dir().expect("a working directory"),
+                ),
+                ("current_exe", host.current_exe().expect("a binary")),
+            ] {
+                assert!(
+                    perch::probe::rooted(&path.to_string_lossy(), on_windows),
+                    "{adapter}: {what} answered {path:?}, and every path Perch \
+                     joins onto is joined onto from somewhere other than where \
+                     the command happened to be run"
+                );
+            }
+        },
+    },
+    WholeHostCase {
+        named: "the platform is the machine the suite is running on",
+        asserts: |host, adapter| {
+            assert_eq!(
+                host.platform(),
+                this_platform(),
+                "{adapter}: the Credential Store, the Service and the program \
+                 search are all chosen off this"
+            );
+        },
+    },
+    WholeHostCase {
+        named: "a variable nothing set is not there",
+        asserts: |host, adapter| {
+            // Named as no machine names one: the fake is asked the same
+            // question as the real host, which reads this process's own
+            // environment.
+            assert_eq!(
+                host.env_var("PERCH_A_VARIABLE_NOTHING_SETS"),
+                None,
+                "{adapter}: an unset variable is nothing, not an empty value — \
+                 `CLAUDE_CONFIG_DIR` read as `Some(\"\")` derives a Credential \
+                 Store from the root"
+            );
+        },
+    },
+    WholeHostCase {
+        named: "a user id is answered exactly where the filesystem judges by one",
+        asserts: |host, adapter| {
+            assert_eq!(
+                host.user_id().is_some(),
+                modes_mean_something(),
+                "{adapter}: the Service files a session under this and every \
+                 private write is judged by it, so a platform that has no uid \
+                 must not answer with one"
+            );
+        },
+    },
+    WholeHostCase {
+        named: "a program that is nowhere is an error and not a status",
+        asserts: |host, adapter| {
+            let refused = host.exec("perch-no-such-program-anywhere", &[]);
+
+            assert!(
+                refused.is_err(),
+                "{adapter}: a program that could not be run is told apart from \
+                 one that ran and failed — `probe::installed` reads a status of \
+                 its own from the second: {refused:?}"
+            );
+        },
+    },
+    WholeHostCase {
+        named: "nothing is asked to stop before anything asks it to",
+        asserts: |host, adapter| {
+            assert!(
+                !host.asked_to_stop(),
+                "{adapter}: a Watcher that read this as true at the top of its \
+                 first round would stop before it had watched anything"
+            );
+
+            // Twice, because `perch watcher check` and `perch watcher run` both
+            // reach the same process-wide disposition and one may follow the
+            // other in a single run.
+            host.listen_for_interrupts();
+            host.listen_for_interrupts();
+
+            assert!(
+                !host.asked_to_stop(),
+                "{adapter}: listening for a signal is not being sent one"
+            );
+        },
+    },
+    WholeHostCase {
+        named: "a wait nobody interrupts is a wait that finished",
+        asserts: |host, adapter| {
+            assert_eq!(
+                host.wait(1),
+                Waited::Fully,
+                "{adapter}: the Watcher's whole pace rests on telling a wait \
+                 that ended from one somebody ended"
+            );
+            // Only that it returns: a sleep asserts nothing about a clock,
+            // because the fake's moves and the real one's is the machine's.
+            host.sleep(1);
+        },
+    },
 ];
 
 /// A run in which every link case skipped checked nothing about the half of
@@ -1353,6 +1463,163 @@ fn both_adapters_conform_to_the_port_beyond_the_filesystem() {
         (case.asserts)(
             &FakeHost::new().with_platform(this_platform()),
             &format!("FakeHost ({})", case.named),
+        );
+    }
+}
+
+// ————— the table against the port it is a table of —————
+
+mod tree;
+
+/// Every method on the port, trait by trait, read off `Host`'s own supertraits.
+///
+/// Read rather than listed, because a list is the thing that goes out of step:
+/// three reviews in a row found a sentence with two implementations and no
+/// reader, on a method nobody had noticed the table never asked.
+fn the_port() -> Vec<(String, String)> {
+    let source = std::fs::read_to_string(tree::repo().join("src/host/mod.rs"))
+        .expect("the port declares itself in one file");
+
+    let mut found = Vec::new();
+    let mut pending = supertraits_of("Host", &source);
+    while let Some(name) = pending.pop() {
+        pending.extend(supertraits_of(&name, &source));
+        for method in methods_on(&name, &source) {
+            found.push((name.clone(), method));
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The traits one trait is the sum of, so `Filesystem` carries `Files` and
+/// `Links` in without either being named at `Host`.
+fn supertraits_of(name: &str, source: &str) -> Vec<String> {
+    let Some(at) = source.find(&format!("\npub trait {name}")) else {
+        return Vec::new();
+    };
+    let declaration = &source[at + 1..];
+    let Some(open) = declaration.find('{') else {
+        return Vec::new();
+    };
+    match declaration[..open].split_once(':') {
+        None => Vec::new(),
+        Some((_, sum)) => sum
+            .split('+')
+            .map(|held| held.trim().to_string())
+            .filter(|held| !held.is_empty())
+            .collect(),
+    }
+}
+
+/// The methods a trait declares itself, which are the lines at one indent under
+/// its own `{`.
+fn methods_on(name: &str, source: &str) -> Vec<String> {
+    let Some(at) = source.find(&format!("\npub trait {name}")) else {
+        return Vec::new();
+    };
+    source[at..]
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.starts_with('}'))
+        .filter_map(|line| line.strip_prefix("    fn "))
+        .filter_map(|rest| rest.split(['(', '<']).next())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The methods no case can ask, each with what stops one.
+///
+/// The list is short and every entry names a machine effect a test may not
+/// have, rather than a case somebody has not got round to: a method left off
+/// for the second reason is one the fake may answer however it likes.
+const UNASKED: &[(&str, &str)] = &[
+    (
+        "exec_interactive",
+        "hands this process's terminal to a child and waits for a person",
+    ),
+    (
+        "http",
+        "reaches Anthropic; `your_machine.rs` is where that is asked",
+    ),
+    (
+        "keychain_get",
+        "the real one raises the macOS dialog, which is `your_machine.rs`'s to answer",
+    ),
+    (
+        "keychain_set",
+        "the real one raises the macOS dialog, which is `your_machine.rs`'s to answer",
+    ),
+    (
+        "keychain_delete",
+        "the real one raises the macOS dialog, which is `your_machine.rs`'s to answer",
+    ),
+    (
+        "note",
+        "the real one writes to this process's stderr and the fake keeps a list, \
+              so the two have no observable in common",
+    ),
+    (
+        "read_line",
+        "reads this process's stdin, which a suite may not consume",
+    ),
+    (
+        "read_secret",
+        "reads this process's stdin, which a suite may not consume",
+    ),
+    (
+        "is_interactive",
+        "answers about this process's stdin, which the harness decides and neither adapter can",
+    ),
+];
+
+/// Every `host.<method>(` the table writes, which is what it asks the two
+/// adapters. Read out of the source rather than declared beside each case: a
+/// case that names the method it asks in a field is one that can name the wrong
+/// one, and this cannot.
+fn whatever_the_table_calls() -> std::collections::BTreeSet<String> {
+    let table = std::fs::read_to_string(tree::repo().join("tests/conformance.rs"))
+        .expect("the table is a file");
+    table
+        .match_indices("host.")
+        .filter_map(|(at, _)| table[at + "host.".len()..].split('(').next())
+        .filter(|called| {
+            !called.is_empty() && called.chars().all(|c| c.is_alphanumeric() || c == '_')
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every method on the port is asked of both adapters, or says why not.
+///
+/// A sentence with two implementations and no reader is one they drift apart on,
+/// and a method the table never names is that (ADR a-class-not-its-instances).
+#[test]
+fn every_method_on_the_port_is_asked_of_both_adapters() {
+    let asked = whatever_the_table_calls();
+
+    let unasked: Vec<String> = the_port()
+        .into_iter()
+        .filter(|(_, method)| !asked.contains(method))
+        .filter(|(_, method)| !UNASKED.iter().any(|(held, _)| held == method))
+        .map(|(trait_name, method)| format!("{trait_name}::{method}"))
+        .collect();
+
+    assert!(
+        unasked.is_empty(),
+        "the two adapters answer these and nothing compares the answers — add a \
+         case, or an `UNASKED` entry naming the machine effect that stops one:\n{}",
+        unasked.join("\n")
+    );
+
+    // The exemptions are a list, so they are a list that can outlive its
+    // reason: one naming a method the port no longer has says nothing.
+    let port: std::collections::BTreeSet<String> =
+        the_port().into_iter().map(|(_, method)| method).collect();
+    for (method, _) in UNASKED {
+        assert!(
+            port.contains(*method),
+            "`{method}` is excused from the table and is not on the port"
         );
     }
 }

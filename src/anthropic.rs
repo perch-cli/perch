@@ -15,6 +15,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::host::{Host, HttpRequest, HttpResponse};
 use crate::registry::WindowUtilization;
+use crate::secret::Secret;
 
 /// Where an Account's Quota Windows are read from. Roughly 28-30 requests per
 /// rolling hour per Account, and it does not refill early
@@ -241,11 +242,9 @@ fn missing(field: &str) -> Refused {
 /// A read as this Account: a Bearer token, and the beta the OAuth endpoints are
 /// behind.
 fn read(host: &dyn Host, url: &str, access_token: &str) -> Result<Value, Refused> {
-    // Wiped on drop for the reason `renew`'s body is, and reserved for it too:
-    // `format!` reserves off the literal alone, so the token's own bytes are
-    // what every doubling abandons.
-    let mut authorization =
-        Zeroizing::new(String::with_capacity(BEARER.len() + access_token.len()));
+    // A `Secret` for the reason `renew`'s body is one: `format!` would build
+    // the header in a plain `String` and free it holding the token.
+    let mut authorization = Secret::with_room_for(BEARER.len() + access_token.len());
     authorization.push_str(BEARER);
     authorization.push_str(access_token);
     let headers = [

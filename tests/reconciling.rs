@@ -5,6 +5,14 @@
 //! symbolic link privilege a machine without Developer Mode does not have —
 //! is asserted from whatever machine the tests run on.
 
+// Every path compared here comes out of the fake's effect log, spelled as the
+// code under test wrote it: filtering that log by prefix asks which effects
+// landed under a directory, and never whether a path on a machine is inside one.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the fake's effect log, filtered by the prefix it was written under"
+)]
+
 use std::path::{Path, PathBuf};
 
 use perch::host::fake::Effect;

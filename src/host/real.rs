@@ -24,6 +24,7 @@ use super::{
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
 };
+use crate::secret::Secret;
 
 /// The `curl` binary. Perch shells out for the same reason it shells out to
 /// `security` (ADR a-crate-must-not-cost-a-seam), and always by absolute path,
@@ -117,7 +118,7 @@ const MAX_REPLY_BYTES: u64 = 8 * 1024 * 1024;
 /// The URL, the headers and the body all arrive this way so that none of them
 /// is ever an argument: an `Authorization` header holds an access token, and
 /// argv is readable by every process on the machine.
-fn curl_config(request: &HttpRequest<'_>) -> Result<Zeroizing<String>, HostError> {
+fn curl_config(request: &HttpRequest<'_>) -> Result<Secret, HostError> {
     let quoted = super::write_double_quoted;
 
     // A configuration file is read a line at a time and has no escape a newline
@@ -134,11 +135,10 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<Zeroizing<String>, HostError
         }
         None => (CONNECT_TIMEOUT_SECONDS, MAX_TIME_SECONDS),
     };
-    // Wiped on drop, reserved at full width so no growth abandons a copy, and
-    // every secret escaped straight in: a `String` of its own is a copy this
+    // Every secret escaped straight in: a `String` of its own is a copy this
     // buffer's wipe does not reach.
-    let mut config = Zeroizing::new(String::with_capacity(width_of(request)));
-    let out = &mut *config;
+    let mut config = Secret::with_room_for(width_of(request));
+    let out = &mut config;
     // The only line holding no secret, so the one that may go through `format!`.
     out.push_str(&format!(
         "connect-timeout = {connect}\nmax-time = {whole}\nmax-filesize = {MAX_REPLY_BYTES}\n"
@@ -164,9 +164,9 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<Zeroizing<String>, HostError
     Ok(config)
 }
 
-/// Room for every line [`curl_config`] writes, over-counted rather than exact:
-/// what it must not do is come up short, which is a reallocation leaving a
-/// half-built request holding a token in freed heap.
+/// Room for every line [`curl_config`] writes, over-counted rather than exact.
+/// A count that came up short costs one copy — `Secret` wipes what it grew out
+/// of — so this saves the copy rather than deciding whether a token leaks.
 fn width_of(request: &HttpRequest<'_>) -> usize {
     const PER_LINE: usize = 32;
     /// Escaping doubles `\` and `"`, so a value made of nothing else is twice

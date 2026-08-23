@@ -18,6 +18,7 @@ use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError, Platform};
 use crate::json;
+use crate::secret::Secret;
 
 /// Named assumptions. A refusal quotes one of these, so the failure a user
 /// experiences says which belief stopped holding.
@@ -281,11 +282,12 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Whether a `PATH` element names a directory from the root rather than from
-/// wherever Perch was run. Asked of the platform the host reports rather than
-/// through `Path::is_absolute`, which reads the separator of the platform this
-/// build runs on — the reason the search above joins with `/` by hand.
-pub(crate) fn rooted(dir: &str, on_windows: bool) -> bool {
+/// Whether a path names a place from the root rather than from wherever Perch
+/// was run. Asked of the platform the host reports rather than through
+/// `Path::is_absolute`, which reads the separator of the platform this build
+/// runs on — the reason the search above joins with `/` by hand. Public because
+/// the conformance table asks it of a fake claiming a platform it is not on.
+pub fn rooted(dir: &str, on_windows: bool) -> bool {
     if dir.starts_with('/') {
         return true;
     }
@@ -555,7 +557,7 @@ pub fn credential_after_rotation(
     refresh_token: Option<&str>,
     expires_at: Option<i64>,
     installed: &Installed,
-) -> Result<Zeroizing<String>> {
+) -> Result<Secret> {
     let mut document: serde_json::Value =
         serde_json::from_str(current.as_str()).map_err(|err| {
             refusal(

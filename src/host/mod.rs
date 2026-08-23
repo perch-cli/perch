@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use crate::keychain::KeychainError;
+use crate::secret::Secret;
 use zeroize::Zeroizing;
 
 /// Behind a feature so it stays out of the binary somebody downloads. It is
@@ -267,7 +268,7 @@ pub const PRIVATE_DIR_MODE: u32 = 0o700;
 /// `security -i`'s command lines. One copy, because two is how one of them gets
 /// fixed and the other does not. It makes a value a *token* and not inert —
 /// neither protocol escapes a newline, so one is refused where it enters.
-pub fn write_double_quoted(out: &mut String, value: &str) {
+pub fn write_double_quoted(out: &mut Secret, value: &str) {
     out.push('"');
     write_escaped(out, value);
     out.push('"');
@@ -276,7 +277,7 @@ pub fn write_double_quoted(out: &mut String, value: &str) {
 /// The escaping alone, for a token assembled out of more than one piece: a
 /// `curl` `header` line is one quoted value holding a name, `: ` and a value,
 /// and quoting the three separately would put quotes inside the token.
-pub fn write_escaped(out: &mut String, value: &str) {
+pub fn write_escaped(out: &mut Secret, value: &str) {
     for c in value.chars() {
         if c == '\\' || c == '"' {
             out.push('\\');
@@ -738,22 +739,57 @@ pub(crate) fn against(link_at: &Path, target: PathBuf) -> PathBuf {
     }
 }
 
-/// The same, following every link on the path — which is what *is this path
-/// inside that directory* needs: `~/claude` linked at
-/// `~/.config/perch/profiles` makes `~/claude/work` and
-/// `~/.config/perch/profiles/work` one directory with two spellings. Bounded,
-/// so a path that will not settle is a comparison that fails closed.
-pub(crate) fn through_every_link(host: &dyn Host, path: &Path) -> PathBuf {
+/// A path with every link on it followed, which is the only shape *is this
+/// inside that directory* is asked in. A type rather than a `PathBuf`:
+/// `starts_with` matches components, so `~/claude` linked at
+/// `~/.config/perch/profiles` is one directory whose two spellings share none
+/// (ADR an-invariant-gets-a-door).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Settled(Option<PathBuf>);
+
+/// [`Settled`] for a path, following every link on the way. Bounded, so a loop
+/// of links is an answer rather than a walk that never returns.
+pub(crate) fn settled(host: &dyn Host, path: &Path) -> Settled {
     const FOLLOWED: usize = 8;
 
     let mut at = path.to_path_buf();
     for _ in 0..FOLLOWED {
         match deepest_link_on(host, &at) {
             Some(followed) => at = followed,
-            None => return at,
+            None => return Settled(Some(at)),
         }
     }
-    at
+    Settled(None)
+}
+
+impl Settled {
+    /// Whether this path is `outer` or sits under it.
+    ///
+    /// A path that would not settle is inside whatever it is asked about: every
+    /// caller refuses or skips on `true`, so the answer a loop of links leaves
+    /// undecided is the one that acts.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the one containment comparison, on the one shape resolved for it"
+    )]
+    pub(crate) fn is_inside(&self, outer: &Settled) -> bool {
+        match (&self.0, &outer.0) {
+            (Some(inner), Some(outer)) => inner.starts_with(outer),
+            _ => true,
+        }
+    }
+
+    /// Where the walk landed, for the cases that are about the walk itself.
+    #[cfg(test)]
+    fn at(&self) -> Option<&Path> {
+        self.0.as_deref()
+    }
+}
+
+/// Both halves of the question for a caller that asks it once. A caller asking
+/// it of many paths settles the fixed side itself.
+pub(crate) fn is_inside(host: &dyn Host, inner: &Path, outer: &Path) -> bool {
+    settled(host, inner).is_inside(&settled(host, outer))
 }
 
 /// The deepest component of `path` that is a link, replaced by what it points
@@ -814,20 +850,20 @@ mod tests {
         );
 
         assert_eq!(
-            through_every_link(&host, Path::new("/Users/someone/claude/work")),
-            Path::new("/Users/someone/.config/perch/profiles/work"),
+            settled(&host, Path::new("/Users/someone/claude/work")).at(),
+            Some(Path::new("/Users/someone/.config/perch/profiles/work")),
             "the link is two components up, and the rest of the path goes back on"
         );
         assert_eq!(
-            through_every_link(&host, Path::new("/Users/someone/elsewhere")),
-            Path::new("/Users/someone/elsewhere"),
+            settled(&host, Path::new("/Users/someone/elsewhere")).at(),
+            Some(Path::new("/Users/someone/elsewhere")),
             "a path with no link on it is itself"
         );
         // A relative path runs out of parents at the empty one rather than at
         // the root, which is the other way this walk has to know it is done.
         assert_eq!(
-            through_every_link(&host, Path::new("neither/is/this")),
-            Path::new("neither/is/this"),
+            settled(&host, Path::new("neither/is/this")).at(),
+            Some(Path::new("neither/is/this")),
         );
     }
 
@@ -863,26 +899,53 @@ mod tests {
         let host = FakeHost::new().with_link(Link::Symbolic, "elsewhere", "/Users/someone/here");
 
         assert_eq!(
-            through_every_link(&host, Path::new("/Users/someone/here/inside")),
-            Path::new("/Users/someone/elsewhere/inside"),
+            settled(&host, Path::new("/Users/someone/here/inside")).at(),
+            Some(Path::new("/Users/someone/elsewhere/inside")),
         );
     }
 
     /// Two links pointing at each other are a loop, and the walk is bounded
-    /// rather than trusting the filesystem not to contain one. The caller is
-    /// comparing rather than opening, so an answer that got part way is a
-    /// comparison that fails closed.
+    /// rather than trusting the filesystem not to contain one.
     #[test]
-    fn a_loop_of_links_gives_up_rather_than_hanging() {
+    fn a_loop_of_links_is_inside_whatever_it_is_asked_about() {
         let host = FakeHost::new()
             .with_link(Link::Symbolic, "/b", "/a")
             .with_link(Link::Symbolic, "/a", "/b");
 
-        let settled = through_every_link(&host, Path::new("/a"));
+        let looping = settled(&host, Path::new("/a"));
+
+        assert_eq!(looping.at(), None, "the walk gives up rather than spinning");
+        assert!(
+            looping.is_inside(&settled(&host, Path::new("/somewhere/else"))),
+            "and what it could not resolve is not ruled out of anywhere"
+        );
+    }
+
+    /// Both sides, because either can be the linked one: a guard that resolved
+    /// only the path it was handed is one a link on the *directory* walks past.
+    #[test]
+    fn a_directory_reached_through_a_link_still_holds_what_is_inside_it() {
+        let host = FakeHost::new().with_link(
+            Link::Symbolic,
+            "/Users/someone/.config/perch",
+            "/Users/someone/perch",
+        );
 
         assert!(
-            settled == Path::new("/a") || settled == Path::new("/b"),
-            "it stops somewhere on the loop rather than spinning: {settled:?}"
+            is_inside(
+                &host,
+                Path::new("/Users/someone/.config/perch/profiles/work"),
+                Path::new("/Users/someone/perch"),
+            ),
+            "one spelling of the directory holds the other spelling of the path"
+        );
+        assert!(
+            !is_inside(
+                &host,
+                Path::new("/Users/someone/backups/perch.age"),
+                Path::new("/Users/someone/perch"),
+            ),
+            "and a path that is genuinely elsewhere is still elsewhere"
         );
     }
 

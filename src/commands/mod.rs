@@ -198,7 +198,9 @@ pub fn refreshed(
             registry,
             about,
             &crate::probe::Installed::probed(host),
-            &mut || {},
+            // Nothing to lose part way: these two hold the registry lock and
+            // nothing else, and neither is a Watcher a signal can displace.
+            &mut || Ok(()),
         ),
         None => crate::observe::Report::default(),
     }

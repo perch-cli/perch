@@ -6,6 +6,14 @@
 //! Profile before the live store is written, the Identity is patched last, and
 //! all of it happens inside Claude Code's own locks, in Claude Code's own order.
 
+// Every path compared here comes out of the fake's effect log, spelled as the
+// code under test wrote it: filtering that log by prefix asks which effects
+// landed under a directory, and never whether a path on a machine is inside one.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the fake's effect log, filtered by the prefix it was written under"
+)]
+
 mod common;
 
 use std::path::{Path, PathBuf};

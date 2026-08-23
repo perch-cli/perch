@@ -394,15 +394,17 @@ fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
     forward(&contents).ok()?.is_some().then_some(was)
 }
 
-/// The version [`forward`] leaves behind, which is the one this build reads. Its
-/// own name because the two numbers are one step rather than one field: a second
-/// step would read `CURRENT_VERSION` here and be wrong the day a third lands.
+/// The version [`forward`] leaves behind, which is the one this build reads.
+///
+/// Written down rather than read off `CURRENT_VERSION`: a step that named the
+/// current version would land on it whatever it became, so a shape moving with
+/// no step to carry it would compile.
 const CARRIED_TO: u32 = 2;
 
-// The step cannot carry a document past the shape this build reads, and reading
-// `CURRENT_VERSION` above would make that true by definition rather than by
-// checking — which is what the constant's own name is for.
-const _: () = assert!(CARRIED_TO <= crate::registry::CURRENT_VERSION);
+// Short of the shape this build reads, `load` deserializes what the step left
+// behind as a shape it is not. Reading `CURRENT_VERSION` above would make this
+// true by definition rather than by checking.
+const _: () = assert!(CARRIED_TO == crate::registry::CURRENT_VERSION);
 
 /// One Account, with the flag that inverted translated rather than dropped.
 ///
@@ -955,6 +957,34 @@ mod tests {
                 .unwrap_or_else(|| panic!("the case this is about: {document}"));
             let said = refused.to_string();
             assert!(said.contains(field), "{field} is the one to name: {said}");
+        }
+    }
+
+    /// Every version below the one this build reads has a step that moves it.
+    ///
+    /// `forward` answers `None` for a version it does not recognize and `load`
+    /// then reads that document as the current shape, which is a shape moving
+    /// under a version that did not.
+    #[test]
+    fn every_version_short_of_the_current_one_is_carried_forward() {
+        for version in EARLIEST_VERSION..crate::registry::CURRENT_VERSION {
+            let document = format!(r#"{{"version":{version},"accounts":[]}}"#);
+
+            let moved = forward(&document)
+                .unwrap_or_else(|refused| panic!("version {version} is refused: {refused}"))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "version {version} is below the {} this build reads and \
+                         no step moves it, so `load` reads it as the current shape",
+                        crate::registry::CURRENT_VERSION
+                    )
+                });
+
+            assert_eq!(
+                crate::error::claimed_version(&moved),
+                Some(u64::from(crate::registry::CURRENT_VERSION)),
+                "and the step leaves it stamped with the shape it now holds"
+            );
         }
     }
 

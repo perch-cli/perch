@@ -6,6 +6,11 @@
 //! would be a list to keep in step with the tree, and a file on nobody's list
 //! is the gap eleven green pull requests hide.
 
+// One module, three suites, and each reaches a different part of it: a suite
+// that walked the tree it did not need would be paying for the walk to keep the
+// compiler quiet.
+#![allow(dead_code, reason = "each suite reaches the part of the walk it needs")]
+
 use std::path::{Path, PathBuf};
 
 pub fn repo() -> PathBuf {

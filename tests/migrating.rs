@@ -611,3 +611,163 @@ fn two_v1_cooldowns_landing_on_one_key_keep_the_later_switch() {
         "the August record paces the Scope, not the January one: {written}"
     );
 }
+
+// ————— every version 1 registry, and not only the two on disk —————
+
+/// The name rules the published version 1 builds shipped, at their loosest:
+/// v0.1.0's four checks, its own `to_lowercase` fold and all.
+///
+/// History rather than a rule: v0.1.0, v0.1.1 and v0.2.0 are the only builds
+/// that stamped version 1, so what they accepted cannot move again.
+fn a_published_perch_accepted(name: &str) -> bool {
+    !name.trim().is_empty()
+        && !name.chars().any(char::is_whitespace)
+        && name.to_lowercase() != "none"
+        && !name.contains('@')
+}
+
+/// Whole spellings no generated name reaches: the reserved words, both folds of
+/// a Greek sigma, and the two shapes a terminal reads as an instruction.
+const SPELLINGS: &[&str] = &[
+    "work",
+    "Work",
+    "global",
+    "Global",
+    "GLOBAL",
+    "ungrouped",
+    "Ungrouped",
+    "UNGROUPED",
+    "-dev",
+    "--dev",
+    "-",
+    "---",
+    "group",
+    "group-1",
+    "alias",
+    "\u{1b}[31mred",
+    "red\u{202e}",
+    "café",
+    "CAFÉ",
+    "ΟΔΟΣ",
+    "οδος",
+    "straße",
+    "İ",
+    "\u{ad}",
+    "\u{feff}soft",
+];
+
+/// The characters every name rule so far has turned on. Three deep, which is a
+/// leading character, a body and a trailing one — enough for every rule that
+/// reads the ends of a name apart from its middle.
+const ALPHABET: &[char] = &['a', '-', '\u{1b}', '\u{202e}', 'Σ', 'ς', '.', '0'];
+
+/// Every spelling a published Perch would have let somebody create, out of the
+/// words above and the alphabet under them.
+fn every_name_a_published_perch_accepted() -> Vec<String> {
+    let mut names: Vec<String> = SPELLINGS.iter().map(|held| (*held).to_string()).collect();
+    let mut wider = vec![String::new()];
+    for _ in 0..3 {
+        wider = wider
+            .iter()
+            .flat_map(|held| {
+                ALPHABET.iter().map(move |c| {
+                    let mut name = held.clone();
+                    name.push(*c);
+                    name
+                })
+            })
+            .collect();
+        names.extend(wider.iter().cloned());
+    }
+    names.retain(|name| a_published_perch_accepted(name));
+    names
+}
+
+/// One version 1 registry, with `group` in all three places a Group name is
+/// written down — declared, claimed and keyed on by a Check — and `alias` in the
+/// one place an Alias is.
+fn a_v1_registry_naming(group: &str, alias: &str) -> String {
+    serde_json::json!({
+        "version": 1,
+        "active": "one@example.com",
+        "accounts": [
+            {
+                "identity": {
+                    "email": "one@example.com",
+                    "account_uuid": "uuid-one",
+                    "organization_name": "Acme",
+                    "organization_uuid": "org-1"
+                },
+                "plan": "max",
+                "enabled": true,
+                "group": group
+            },
+            {
+                "identity": {
+                    "email": "two@example.com",
+                    "account_uuid": "uuid-two",
+                    "organization_name": "Acme",
+                    "organization_uuid": "org-1"
+                },
+                "enabled": true
+            }
+        ],
+        "aliases": { alias: "two@example.com" },
+        "groups": { group: { "watcher_threshold_percent": 80 } },
+        "ungrouped": { "strategy": "soonest-reset" },
+        "global": { "cycle_ungrouped": true, "settings": { "strategy": "most-headroom" } },
+        "checks": { group: { "switched_at": "2026-08-14T10:00:00Z" } }
+    })
+    .to_string()
+}
+
+/// The corpus has to break the rules it is for. A generator that stopped
+/// producing a name this build refuses would go on passing, having asserted
+/// that the names Perch accepts are names Perch accepts.
+#[test]
+fn the_corpus_holds_names_this_build_refuses() {
+    let refused = every_name_a_published_perch_accepted()
+        .into_iter()
+        .filter(|name| registry::validate_name(registry::NameKind::Group, name).is_err())
+        .count();
+
+    assert!(
+        refused >= 10,
+        "a corpus of names this build already accepts asserts nothing: {refused} of them are \
+         refused"
+    );
+}
+
+/// Every version 1 registry a published Perch could have written comes forward
+/// into one this build reads (ADR a-class-not-its-instances).
+///
+/// Over the name space rather than the instances: a rule joining `validate_name`
+/// that no step forward satisfies takes every command with it.
+#[test]
+fn every_name_a_published_perch_accepted_comes_forward_into_one_that_loads() {
+    for name in every_name_a_published_perch_accepted() {
+        // The counterparts are spelled outside the corpus, so no case pairs a
+        // name with itself: a Group and an Alias of one name is the collision
+        // every published `validate` refused, and so is no v1 registry.
+        for (group, alias) in [(name.as_str(), "the-alias"), ("the-group", name.as_str())] {
+            let host = machine_holding(&a_v1_registry_naming(group, alias));
+
+            perch::migration::bring_forward(&host).unwrap_or_else(|refused| {
+                panic!(
+                    "a Group `{group}` and an Alias `{alias}` are \
+                     names a published Perch accepted, and the step forward refused them: \
+                     {refused}"
+                )
+            });
+
+            registry::load(&host)
+                .unwrap_or_else(|refused| {
+                    panic!(
+                        "a Group `{group}` and an Alias `{alias}` came \
+                     forward into a registry no command can read: {refused}"
+                    )
+                })
+                .expect("the registry is there");
+        }
+    }
+}
