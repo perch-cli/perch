@@ -12,7 +12,8 @@ harm plainly: `U+202E` reverses the rest of the line it lands in, and a
 zero-width character hides the whole difference between two names. Three values
 were held to it, each by its own copy of the same four lines — a Group or Alias
 name in `validate_name`, an Account's address in `registry::validate`, an
-organization in `probe::read_identity`.
+organization in `probe::read_identity`. The second of those is a refusal in the
+wrong place, and *What is refused and where* below is what it costs.
 
 Three more reached `perch list` and `perch status` with nothing asked at all:
 
@@ -32,6 +33,25 @@ in is a guard on neither.
 A `window` of `5-hour\u{1b}[2K\u{1b}[31mALL QUOTA GONE` is accepted by `save` and
 by `load`, and both surfaces write it exactly as they hold it.
 
+## What is refused and where
+
+A value nobody chose is refused where it enters and never where it is read back.
+An address comes out of `oauthAccount` beside the organization, so both are
+refused in `probe::read_identity`; neither is refused in `registry::validate`.
+
+The rule the address broke is the one stated two sections down about the other
+three: a refusal in `validate` is met at `load`, and `load` is every command.
+A registry v0.2.0 wrote holding `wo\u{1b}rk@example.com` — an address that build
+accepted, its whole rule being one alphanumeric and an `@` — answers every
+command with a refusal naming the file to edit, and `perch remove`, which is the
+only way such an Account could ever go, is one of them. `migration::forward`
+cannot carry it: an address is what the Profile directory, the keychain
+namespace and every Alias are keyed on, so there is no rename to make.
+
+What it buys is narrower than the other three: an address a terminal would obey
+is still one nobody can type as a Target. It has an Alias, `perch list` draws it
+stripped, and a machine with one has a working `perch`.
+
 ## Why a type and not a fourth copy of the rule
 
 ADR an-invariant-gets-a-door: an invariant with more than one call site is
@@ -47,8 +67,8 @@ the compiler names every site that has not.
 
 ## It strips; it does not refuse
 
-The three values already guarded are refused, and that is right: a person chose
-them, and a refusal is a thing they can go and act on.
+A Group name and an Alias are refused, and that is right: a person chose them,
+and a refusal is a thing they can go and act on.
 
 These three are not chosen by anybody. A Quota Window's name is Anthropic's, a
 plan is Claude Code's, and an organization is the login's. Refusing one in
@@ -103,9 +123,9 @@ corrupt a document a script is parsing.
   bytes written for it cannot disagree.
 - `--json` is untouched: `serde_json` escapes a control character as six literal
   characters, which is what a parser wants and what a terminal draws.
-- The three refusals in `validate_name`, `registry::validate` and
-  `probe::read_identity` stay. They are about names somebody chose, and they
-  refuse rather than strip.
+- `validate_name` refuses, because a Group name and an Alias are chosen at a
+  prompt. `probe::read_identity` refuses the address and the organization, at
+  the boundary the block enters through. `registry::validate` refuses neither.
 
 ## The glossary
 

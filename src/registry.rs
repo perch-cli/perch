@@ -1657,15 +1657,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
                 account.email(),
             )));
         }
-        // `validate_name`'s other rule, on the member of the namespace that
-        // does not go through it: an address arrives from an Import or a hand
-        // edit, and is rendered into a table cell exactly as it is held.
-        if let Some(said) = crate::host::control_character_in(account.email()) {
-            return Err(PerchError::Invalid(format!(
-                "The registry holds an Account whose address carries {said}, \
-                 which no line of Perch's output could show as part of one."
-            )));
-        }
+        // Nothing here about a character a terminal would act on. An address is
+        // Claude Code's rather than anybody's choice, so it is refused where it
+        // enters and drawn through `Shown` (ADR nothing-drawn-is-obeyed).
     }
 
     // One entry per Account. `upsert` replaces the matching entry, so two for
@@ -3591,11 +3585,12 @@ mod tests {
         );
     }
 
-    /// The other half of `validate_name`'s rule, on the member of the namespace
-    /// nothing validates on the way in: an address arrives from an Import or a
-    /// hand edit and is written into a table cell exactly as it is held.
+    /// An address is Claude Code's rather than anybody's choice, so it is
+    /// refused where it enters and drawn stripped. Refused here it would be
+    /// refused at `load`, which takes every command with it — including
+    /// `perch remove`, which is the only way such an Account could ever go.
     #[test]
-    fn an_account_address_a_terminal_would_read_as_an_instruction_is_refused() {
+    fn an_account_address_a_terminal_would_obey_reads_rather_than_bricking() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
         let path = registry_path(&host).unwrap();
         host.set_file(
@@ -3603,13 +3598,10 @@ mod tests {
             r#"{"version":2,"accounts":[{"identity":{"email":"bad\u001brow@example.com"}}]}"#,
         );
 
-        let refused = load(&host).expect_err("that is not an address a table can hold");
-        let said = refused.to_string();
-        assert!(said.contains("a control character (U+001B)"), "{said}");
-        assert!(
-            said.contains("registry.json"),
-            "and the file to edit: {said}"
-        );
+        let registry = load(&host)
+            .expect("a registry a published Perch wrote is readable")
+            .expect("it is there");
+        assert_eq!(registry.accounts.len(), 1);
     }
 
     #[test]
