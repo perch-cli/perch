@@ -1125,6 +1125,27 @@ fn global_is_answered_with_the_listing_it_means_rather_than_offered_as_a_group()
     );
 }
 
+/// An address is not a Scope either, and it breaks the naming rule about `@` —
+/// so the refusal was a lecture on how Group names are spelled, about an
+/// Account Perch holds and could have named the Group of.
+#[test]
+fn an_account_perch_holds_is_said_to_be_one_rather_than_a_bad_group_name() {
+    let host = machine_holding_three_accounts();
+
+    let (result, _) = run_list_in(&host, EMAIL, false);
+
+    let refused = result.expect_err("an address is not a Scope");
+    let said = refused.to_string();
+    assert!(
+        said.contains("an Account Perch holds"),
+        "it says what the name is: {said}"
+    );
+    assert!(
+        said.contains("in Group `work`"),
+        "and which Scope that Account sits in, which is what was meant: {said}"
+    );
+}
+
 /// An Alias names one Account and a Scope is a set, so sharing a namespace does
 /// not make them interchangeable here.
 #[test]
