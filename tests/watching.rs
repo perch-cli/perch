@@ -617,6 +617,46 @@ fn a_destination_nearly_as_full_as_the_account_being_left_is_refused() {
     );
 }
 
+/// The other round that has read every candidate: one that wanted a Switch,
+/// attempted it, and was turned away. At the ordinary interval that repeats the
+/// burst twenty-four times an hour per candidate, against the 28-30 Anthropic
+/// allows — the same cost nowhere-to-go rests to avoid, for the same reason.
+#[test]
+fn a_switch_the_machine_turned_away_is_looked_at_again_at_the_cooldown() {
+    let now = watched().now();
+    let outgoing = store_of(&watched(), EMAIL).config_dir;
+    let host = watching(&[86.0, 40.0], 5.0)
+        .with_dir_held_since("/Users/someone/.claude/.oauth_refresh.lock", now)
+        .once_while_waiting(move |host| {
+            host.remove_dir_all(std::path::Path::new(
+                "/Users/someone/.claude/.oauth_refresh.lock",
+            ))
+            .expect("the holder is done");
+            host.set_file(
+                format!("{}/sessions/7788.json", outgoing.display()),
+                &a_client_marker(7788, now),
+            );
+            host.set_live_process(7788);
+        });
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a Switch the machine turned away does not end the watch");
+    let waits: Vec<u64> = host
+        .effects()
+        .into_iter()
+        .filter_map(|effect| match effect {
+            Effect::Waited { millis } => Some(millis),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        waits.first().copied(),
+        Some(perch::watch::NOWHERE_INTERVAL_MILLIS),
+        "the round after the refusal rests for the Cooldown: {waits:?}\n{printed}"
+    );
+}
+
 /// Nowhere to go is the one steady state a Threshold crossing can sit in for hours,
 /// and the round that reaches it read every candidate. At the ordinary interval that is
 /// twenty-four reads an hour *per candidate*, against the 28-30 Anthropic allows — so

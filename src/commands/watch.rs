@@ -811,6 +811,8 @@ fn act(
             ..
         }) => Ok(Outcome::Refused {
             why: error.to_string(),
+            // Every candidate was read to get here.
+            after_reading: true,
         }),
         Err(NotSwitched { error, .. }) => Err(error),
     }
