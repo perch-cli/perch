@@ -28,6 +28,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     refuse_without_a_terminal(host, "perch holdings export")?;
     refuse_a_directory_that_is_not_there(host, path)?;
     refuse_an_occupied_path(host, path)?;
+    refuse_a_path_perchs_home_would_take(host, path)?;
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
@@ -62,6 +63,7 @@ pub fn write_the_export(
 ) -> Result<()> {
     refuse_a_directory_that_is_not_there(host, path)?;
     refuse_an_occupied_path(host, path)?;
+    refuse_a_path_perchs_home_would_take(host, path)?;
 
     // Before a Credential Store is read: during a Landing the live one may be
     // either Account's, so each Credential would be gathered out of its own
@@ -97,6 +99,26 @@ pub fn write_the_export(
     *landed = Some(path.to_path_buf());
 
     report(out, path, &export)
+}
+
+/// Refuses to write the Export inside Perch's own home.
+///
+/// Here rather than at either command, because both doors owe it: a Purge that
+/// wrote its offer there deletes it moments later, and `perch holdings export`
+/// writes the same file at the same path with no Purge in sight yet.
+fn refuse_a_path_perchs_home_would_take(host: &dyn Host, path: &Path) -> Result<()> {
+    let home = crate::registry::perch_home(host)?;
+    if !crate::host::is_inside(host, path, &home) {
+        return Ok(());
+    }
+    Err(PerchError::Invalid(format!(
+        "{} is inside {}, which is Perch's own — and `perch holdings purge` \
+         deletes that directory whole, so an Export written there goes with the \
+         Holdings it is the only copy of.\n\
+         Name a path somewhere Perch does not own.",
+        path.display(),
+        home.display(),
+    )))
 }
 
 /// Refuses to write over whatever is already at the path.
