@@ -83,6 +83,16 @@ impl Quarantine {
         }
     }
 
+    /// Whether getting here cost a request to Anthropic, which is what the
+    /// Watcher's Back-off paces. A property of what happened rather than of why
+    /// the Renewal was wanted: both reasons reach both halves of this.
+    pub fn reached_anthropic(&self) -> bool {
+        match self {
+            Quarantine::RenewalRejected | Quarantine::RotationLost => true,
+            Quarantine::NoRefreshToken | Quarantine::NoCredential => false,
+        }
+    }
+
     /// The reason as a script reads it, which is the spelling the registry
     /// records.
     pub fn as_str(&self) -> &'static str {

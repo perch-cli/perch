@@ -403,7 +403,7 @@ fn only_off_a_credential_that_is_theirs(
                 why.because(),
                 account.email(),
             ),
-            spent: because.spent(),
+            spent: because.spent() || why.reached_anthropic(),
         };
     }
 
@@ -422,7 +422,7 @@ fn only_off_a_credential_that_is_theirs(
             account.email(),
             account.email(),
         ),
-        spent: because.spent(),
+        spent: because.spent() || why.reached_anthropic(),
     }
 }
 
