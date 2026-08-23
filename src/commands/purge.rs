@@ -41,7 +41,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     }
 
     let mut perch = registry::lock(host)?;
-    let mut registry = whatever_can_be_read_of_the_registry(host, &home);
+    let (mut registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
 
     purge::refuse_while_anything_is_running(host, &registry)?;
 
@@ -52,6 +52,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
             &home,
             purge::profiles_held(host).unwrap_or(0),
             crate::commands::service::is_there(host),
+            readable,
         ),
     )?;
     // Filled by the Export the instant its bytes land rather than by the call
@@ -151,12 +152,12 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
 /// The one caller for which `load`'s refusal is the wrong answer: `erase` walks
 /// the directories rather than the registry, and refusing is the only way off a
 /// machine whose registry is corrupt (ADR the-holdings-outlive-a-perch).
-fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> Registry {
+fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> (Registry, bool) {
     // Read directly rather than through adoption, for the reason an Import reads
     // it directly: adoption would make an Account on the way to destroying every
     // Account. A home holding no registry is what an interrupted Purge leaves.
     match registry::load(host) {
-        Ok(held) => held.unwrap_or_default(),
+        Ok(held) => (held.unwrap_or_default(), true),
         Err(unreadable) => {
             host.note(&format!(
                 "{unreadable}\n\nSo the Accounts cannot be named. Every Profile \
@@ -165,7 +166,7 @@ fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> Registr
                  Accounts.",
                 home.display(),
             ));
-            Registry::default()
+            (Registry::default(), false)
         }
     }
 }
@@ -175,7 +176,13 @@ fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> Registr
 ///
 /// By address rather than by Alias, although every other command names an Account
 /// the way the user named it: what is being agreed to is the loss of the login.
-fn what_will_go(registry: &Registry, home: &Path, profiles: usize, service: bool) -> String {
+fn what_will_go(
+    registry: &Registry,
+    home: &Path,
+    profiles: usize,
+    service: bool,
+    readable: bool,
+) -> String {
     // Said in the same breath as the Profiles rather than left for the report,
     // because it is the one thing a Purge takes that lives *outside* Perch's home
     // (ADR the-machine-runs-the-watcher).
@@ -200,13 +207,19 @@ fn what_will_go(registry: &Registry, home: &Path, profiles: usize, service: bool
                 home.display(),
             ),
             profiles => format!(
-                "Perch holds {} under {} that it cannot name — its registry says \
-                 nothing this Perch can read. A Purge empties every one of their \
-                 Credential Stores and deletes {} itself. Nothing undoes it: only \
-                 a fresh login brings an Account back, and it comes back as a new \
-                 one.{and_the_service}",
+                "Perch holds {} under {} that it cannot name{}. A Purge empties \
+                 every one of their Credential Stores and deletes {} itself. \
+                 Nothing undoes it: only a fresh login brings an Account back, \
+                 and it comes back as a new one.{and_the_service}",
                 crate::commands::profiles(profiles),
                 home.display(),
+                // Only where the registry is the reason: one that parsed and
+                // names nobody is the ordinary leftover of a login that died at
+                // the browser step, and is not a corrupt file to be agreed to.
+                match readable {
+                    true => "",
+                    false => " — its registry says nothing this Perch can read",
+                },
                 home.display(),
             ),
         };

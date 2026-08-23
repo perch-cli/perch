@@ -96,7 +96,10 @@ fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
     .flatten()
     {
         match host.list_dir(&parent) {
-            Ok(entries) => found.extend(entries),
+            // Directories, as the name says: a `.DS_Store` beside them is not a
+            // Profile, and counting one tells somebody agreeing to a Purge that
+            // Perch holds a Profile it cannot name.
+            Ok(entries) => found.extend(entries.into_iter().filter(|at| !host.is_file(at))),
             Err(crate::host::HostError::NotFound { .. }) => {}
             Err(err) => {
                 return Err(

@@ -1031,6 +1031,54 @@ fn a_home_holding_a_registry_and_nothing_else_is_taken_and_said_as_that() {
     assert!(!printed.contains("Profile"), "{printed}");
 }
 
+/// The prompt read "its registry says nothing this Perch can read" off the
+/// Accounts being empty, which a registry that parsed perfectly can also be. A
+/// login that died at the browser step is exactly that machine, and telling the
+/// person their registry is corrupt is a false thing to be agreeing to in the
+/// one command nothing undoes.
+#[test]
+fn a_readable_registry_naming_nobody_is_not_said_to_be_unreadable() {
+    let host = machine_with_claude_code().with_answers(&["purge"]);
+    host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
+    let landing = perch::registry::pending_logins_dir(&host)
+        .expect("home is known")
+        .join("login-1");
+    host.create_dir_all(&landing)
+        .expect("the directory is made");
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(
+        printed.contains("that it cannot name"),
+        "the Profile is counted: {printed}"
+    );
+    assert!(
+        !printed.contains("says nothing this Perch can read"),
+        "and the registry it read is not called unreadable: {printed}"
+    );
+}
+
+/// A `.DS_Store` beside the Profiles is not a Profile, and counting one tells
+/// somebody agreeing to a Purge that Perch holds one it cannot name.
+#[test]
+fn a_stray_file_under_the_profiles_is_not_counted_as_one() {
+    let host = machine_with_claude_code().with_answers(&["purge"]);
+    host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
+    let stray = perch::registry::profiles_dir(&host)
+        .expect("home is known")
+        .join(".DS_Store");
+    host.set_file(&stray, "");
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(
+        !printed.contains("Profile"),
+        "nothing under the Profiles is a Profile: {printed}"
+    );
+}
+
 /// The same from the other side: a `perch add` whose registry write failed
 /// leaves a Profile holding a live Credential no Account names.
 #[test]
