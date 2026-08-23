@@ -302,7 +302,7 @@ fn observe(
     // Anthropic would not take the token, and the Credential holding it did not think
     // it had run out — the state one carrying no `expiresAt` is permanently in. Once,
     // and only off a rejection.
-    refuse_if_live(host, &asked, installed).map_err(theirs)?;
+    refuse_if_live(host, &asked, installed, Because::AnthropicRefusedIt).map_err(theirs)?;
     let renewed = renew_under_the_lock(host, perch, &asked, installed, Because::AnthropicRefusedIt)
         .map_err(theirs)?;
     read_off(host, perch, &renewed.token, account).map_err(Turned::settled)
@@ -497,8 +497,9 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
     }
 }
 
-/// Why a Renewal is being attempted, which decides whether the Credential's own account
-/// of itself gets a say.
+/// How a reading came to want a Renewal: whether the Credential's own account of itself
+/// gets a say, what a refusal on the way says happened, and whether the round has spent
+/// a request by the time it gets there (ADR an-invariant-gets-a-door).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Because {
     /// The stored Credential says it has run out. One that turns out to be good after
@@ -510,6 +511,26 @@ enum Because {
     /// has been overtaken by evidence: this is the path that reaches one carrying no
     /// `expiresAt`, which claims to be usable for ever.
     AnthropicRefusedIt,
+}
+
+impl Because {
+    /// The clause a refusal on the way to a Renewal opens with.
+    ///
+    /// Read off the reason rather than written at each refusal: three of them are
+    /// reached from both, and one sentence about an expired token is true at one.
+    fn clause(self) -> &'static str {
+        match self {
+            Because::ItSaysItRanOut => "its access token has expired",
+            Because::AnthropicRefusedIt => "Anthropic would not accept its access token",
+        }
+    }
+
+    /// Whether the round had asked Anthropic something by the time it got here, which
+    /// is what the Back-off paces. `AnthropicRefusedIt` *is* a request that went out
+    /// and came back, so a refusal after one is a round that spent.
+    fn spent(self) -> bool {
+        self == Because::AnthropicRefusedIt
+    }
 }
 
 /// An access token to ask with, and where this reading got it.
@@ -532,7 +553,7 @@ fn usable_token(
     asked: &Asked,
     installed: &Installed,
 ) -> Step<Asking> {
-    let credential = credential_in(host, asked, installed)?;
+    let credential = credential_in(host, asked, installed, Because::ItSaysItRanOut)?;
     if credential.usable_at(host.now()) {
         return Ok(Asking {
             token: credential.access_token,
@@ -543,7 +564,7 @@ fn usable_token(
     // Asked before the locks are taken, so an Account that was never going to be
     // renewed says so without queuing, and again under them, where the answer is the
     // one that counts.
-    refuse_if_live(host, asked, installed)?;
+    refuse_if_live(host, asked, installed, Because::ItSaysItRanOut)?;
     renew_under_the_lock(host, perch, asked, installed, Because::ItSaysItRanOut)
 }
 
@@ -551,8 +572,13 @@ fn usable_token(
 ///
 /// Anthropic retires the old refresh token when it Rotates one, so renewing a
 /// Credential a running Claude Code holds logs that session out mid-task. Asked of
-/// every directory it could be in use from, because a Rotation kills them all.
-fn refuse_if_live(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<()> {
+/// every directory it could be in use from, and told why, since both reasons reach it.
+fn refuse_if_live(
+    host: &dyn Host,
+    asked: &Asked,
+    installed: &Installed,
+    because: Because,
+) -> Step<()> {
     // Which directory each client is in, and not only that there is one: `in_use_from`
     // holds two for the active Account, and a refusal naming neither leaves the reader
     // to guess which to quit.
@@ -568,12 +594,12 @@ fn refuse_if_live(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step
 
     Err(Outcome::Failed {
         why: format!(
-            "its access token has expired and a client is running against it \
-             ({}), so renewing it would log that session out. The cached figure \
-             is what you see.",
+            "{} and a client is running against it ({}), so renewing it would \
+             log that session out. The cached figure is what you see.",
+            because.clause(),
             running.join(", ")
         ),
-        spent: false,
+        spent: because.spent(),
     })
 }
 
@@ -582,7 +608,12 @@ fn refuse_if_live(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step
 /// An Account's own Profile holding nothing is terminal, because that Profile is the
 /// only place its Credential lives. The Default Profile holding nothing is a Claude
 /// Code that has been logged out, and the Account's copy is still there.
-fn credential_in(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<Credential> {
+fn credential_in(
+    host: &dyn Host,
+    asked: &Asked,
+    installed: &Installed,
+    because: Because,
+) -> Step<Credential> {
     probe::read_credential(host, &asked.store, installed)?.ok_or_else(|| {
         if asked.its_own_profile {
             Outcome::Quarantined {
@@ -594,7 +625,7 @@ fn credential_in(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<
                 why: "the Default Profile holds no Credential, so Claude Code is \
                       logged out and there is nothing to ask Anthropic with."
                     .to_string(),
-                spent: false,
+                spent: because.spent(),
             }
         }
     })
@@ -618,14 +649,14 @@ fn renew_under_the_lock(
     if let Some(sharer) = &asked.shares_its_profile_with {
         return Err(Outcome::Failed {
             why: format!(
-                "its access token has expired and it shares one Profile — and so \
-                 one Credential Store — with {sharer}, because their addresses \
-                 differ only in characters a Profile directory does not keep \
-                 apart. Renewing may Rotate, which would retire a refresh token \
-                 that is not this Account's to spend. The cached figure is what \
-                 you see."
+                "{} and it shares one Profile — and so one Credential Store — \
+                 with {sharer}, because their addresses differ only in characters \
+                 a Profile directory does not keep apart. Renewing may Rotate, \
+                 which would retire a refresh token that is not this Account's to \
+                 spend. The cached figure is what you see.",
+                because.clause(),
             ),
-            spent: false,
+            spent: because.spent(),
         });
     }
 
@@ -634,11 +665,11 @@ fn renew_under_the_lock(
         let mut holds = lock::Holds::of(held, perch);
         // Both of the questions asked before the locks were taken, asked again now that
         // nothing can change the answer underneath Perch.
-        refuse_if_live(host, asked, installed)?;
+        refuse_if_live(host, asked, installed, because)?;
         // Renewed around the read for the write below's reason: a keychain read is a
         // `security` subprocess, and one that stops to ask for permission takes as long
         // as the answer does.
-        let credential = holds.around(|| credential_in(host, asked, installed))?;
+        let credential = holds.around(|| credential_in(host, asked, installed, because))?;
         if because == Because::ItSaysItRanOut && credential.usable_at(host.now()) {
             // Somebody else renewed it while Perch queued for the lock, so this reading
             // did not: claiming otherwise would report `Turned::Away` about a token

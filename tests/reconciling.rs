@@ -584,3 +584,32 @@ fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mo
         "what actually refused is named: {said}"
     );
 }
+
+/// Both platforms, because they fail differently and only one of them says so:
+/// everywhere else the Run is refused naming the person's own file as the
+/// obstruction, and a Windows share is routinely a hard link, so `in_the_way`
+/// deletes what is there and reports a Run that worked.
+#[test]
+fn a_profile_linked_at_the_default_profile_is_already_holding_all_of_it() {
+    for (platform, kind) in [
+        (Platform::MacOs, Link::Symbolic),
+        (Platform::Windows, Link::Junction),
+    ] {
+        let host = machine().with_platform(platform);
+        host.link(kind, Path::new(SHARED), Path::new(PROFILE))
+            .expect("the Profile is linked at the Default Profile");
+
+        run_reconcile(&host).unwrap_or_else(|refused| {
+            panic!("[{platform:?}] the Profile already holds all of it: {refused}")
+        });
+
+        assert_eq!(
+            host.read_file(Path::new(&shared("settings.json")))
+                .ok()
+                .as_deref(),
+            Some(r#"{"theme":"dark"}"#),
+            "[{platform:?}] and nothing of the person's was replaced by a link \
+             to itself"
+        );
+    }
+}

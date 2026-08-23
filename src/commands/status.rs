@@ -16,7 +16,7 @@ use serde_json::json;
 
 use crate::commands::say_json;
 use crate::error::Result;
-use crate::host::Host;
+use crate::host::{Host, Shown};
 use crate::listing;
 use crate::observe::Report;
 use crate::registry::{self, Account, Registry};
@@ -96,12 +96,12 @@ fn render_human(
         crate::commands::say(out, &said)?;
     }
 
-    utilization::write_labeled(out, "Account", account.email())?;
+    utilization::write_labeled(out, "Account", &Shown::of(account.email()))?;
     if let Some(organization) = &account.identity.organization_name {
-        utilization::write_labeled(out, "Organization", organization)?;
+        utilization::write_labeled(out, "Organization", &Shown::of(organization))?;
     }
     if let Some(plan) = &account.plan {
-        utilization::write_labeled(out, "Plan", plan)?;
+        utilization::write_labeled(out, "Plan", &Shown::of(plan))?;
     }
     // Above the figures, because a Quarantined Account's figures describe quota
     // it cannot spend: the state is the news and the numbers are the detail.
@@ -110,11 +110,11 @@ fn render_human(
         utilization::write_labeled(
             out,
             "Quarantine",
-            &format!(
+            &Shown::of(&format!(
                 "{}. {}",
                 why.because(),
                 registry::how_to_repair(account.email())
-            ),
+            )),
         )?;
     }
 

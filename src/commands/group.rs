@@ -13,7 +13,7 @@ use std::io::Write;
 use crate::adopt;
 use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, only_the_registry, say};
 use crate::error::{PerchError, Result};
-use crate::host::Host;
+use crate::host::{Host, Shown};
 use crate::registry::{self, NO_GROUP, Registry, Scope};
 use crate::target::{self, AccountTarget};
 
@@ -324,6 +324,6 @@ fn labeled(label: &str, value: &str) -> String {
     // out of line the first time something wide goes through it.
     format!(
         "  {}{value}",
-        crate::utilization::padded(label, LABEL_WIDTH)
+        crate::utilization::padded(&Shown::of(label), LABEL_WIDTH)
     )
 }

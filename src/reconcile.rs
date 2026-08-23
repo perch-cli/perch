@@ -33,10 +33,10 @@ pub const HELD_BACK: [&str; 4] = [
 /// A no-op on the second pass over an unchanged machine, apart from the hard
 /// links, which cannot be told from the files they name (see [`in_the_way`]).
 pub fn reconcile(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
-    // A Profile that *is* the Default Profile already holds all of it. Nothing
-    // below would survive being pointed at itself, and this is cheaper than
-    // finding out one entry at a time.
-    if shared == into {
+    // A Profile that *is* the Default Profile already holds all of it, and the
+    // loop below has no guard for it: that one asks whether an entry *holds* the
+    // Profile, and a Profile linked at the Default Profile holds none of them.
+    if host::is_the_same_place(host, shared, into) {
         return Ok(());
     }
 
