@@ -202,16 +202,29 @@ fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
             .map(|entries| entries.keys().cloned().collect())
             .unwrap_or_default()
     };
+    let aliases = names("aliases");
+    // A Group an Account claims is a Group name whether or not `groups`
+    // declares it: `load` declares every claim it finds, so a claim left
+    // unrenamed is the name `validate` refuses and there is no command left to
+    // repair it with. Folded against what is already there, so a claim spelling
+    // a declared Group in another case is not a second name.
+    let mut groups = names("groups");
+    for claimed in claimed_groups(held) {
+        if !groups
+            .iter()
+            .any(|held| crate::registry::same_name(held, &claimed))
+        {
+            groups.push(claimed);
+        }
+    }
+
     // One namespace, so a Group renamed out of the way of an Alias is a Group
     // that has not been renamed at all.
-    let mut taken: Vec<String> = names("groups");
-    taken.extend(names("aliases"));
+    let mut taken: Vec<String> = groups.clone();
+    taken.extend(aliases.clone());
 
     let mut renamed = Vec::new();
-    for (kind, held) in [
-        (NameKind::Group, names("groups")),
-        (NameKind::Alias, names("aliases")),
-    ] {
+    for (kind, held) in [(NameKind::Group, groups), (NameKind::Alias, aliases)] {
         for was in held {
             if crate::registry::validate_name(kind, &was).is_ok() {
                 continue;
@@ -224,6 +237,23 @@ fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
         }
     }
     renamed
+}
+
+/// Every Group name an Account claims, in the order the Accounts are listed.
+///
+/// Duplicates and all: the caller folds them against the declared names, which
+/// is the same question it asks of the declared ones themselves.
+fn claimed_groups(held: &Map<String, Value>) -> Vec<String> {
+    held.get("accounts")
+        .and_then(Value::as_array)
+        .map(|accounts| {
+            accounts
+                .iter()
+                .filter_map(|account| account.get("group").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The nearest name to this one that this build accepts and nothing else in the
