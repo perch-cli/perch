@@ -453,7 +453,16 @@ pub fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, V
                 .to_string(),
         )
     })?;
-    let args = match version {
+    Ok((npm, npm_arguments(version)))
+}
+
+/// What `npm` is told, whichever way the command is reached.
+///
+/// Its own function because Windows prints this command rather than running it,
+/// and does so before any `npm` has been found: two spellings of `perch-cli`
+/// are two that come to disagree.
+pub fn npm_arguments(version: Option<&str>) -> Vec<String> {
+    match version {
         Some(version) => vec![
             "install".to_string(),
             "-g".to_string(),
@@ -464,8 +473,7 @@ pub fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, V
             "-g".to_string(),
             "perch-cli".to_string(),
         ],
-    };
-    Ok((npm, args))
+    }
 }
 
 /// The installer this platform is upgraded by, embedded rather than fetched.

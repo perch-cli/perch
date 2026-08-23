@@ -194,6 +194,47 @@ fn npm_on_windows_is_printed_rather_than_run_because_it_cannot_work_from_here() 
     );
 }
 
+/// The rule its Homebrew twin states out loud: a refusal that holds whatever
+/// the Release turns out to be is made before anything is resolved and before
+/// anybody agrees to anything.
+#[test]
+fn npm_on_windows_refuses_before_it_asks_anything_or_looks_for_npm() {
+    // No `npm` anywhere, and no answer to give: neither is what decides this.
+    let host = machine()
+        .with_platform(Platform::Windows)
+        .with_env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .installed_at("/c/Users/someone/AppData/Roaming/npm/node_modules/perch-cli/node_modules/@perch-cli/win32-x64/bin/perch.exe");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            // Older than what is installed, so the downgrade prompt is on the
+            // path this refusal must come before.
+            release: Some("0.0.1".to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let refused = outcome.expect_err("npm cannot replace a running perch.exe");
+    assert_eq!(refused.exit_code(), EXIT_NOTHING_TO_DO, "{refused}");
+    assert!(
+        refused.to_string().contains("running"),
+        "it says why Windows cannot do this rather than that npm is missing: {refused}"
+    );
+    assert!(
+        !refused.to_string().contains("no `npm` was found"),
+        "and never diagnoses a PATH that is beside the point: {refused}"
+    );
+    assert!(
+        !said.contains("[y/N]") && !said.contains("older"),
+        "nobody is asked to agree to something refused either way: {said:?}"
+    );
+    assert!(
+        host.sent_to(LATEST_URL).is_empty(),
+        "and no Release is resolved for a command that cannot run"
+    );
+}
+
 // ---- the one Channel Perch replaces itself for ---------------------------
 
 #[test]
