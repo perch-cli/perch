@@ -5,19 +5,21 @@ Sorted by what actually went wrong they are not a hundred and thirty problems.
 Seven shapes account for nearly all of them, and six of the seven appeared in
 five or six consecutive reviews:
 
-| shape | reviews |
+| shape | found in |
 |---|---|
-| `validate` gains a name rule, `migration::forward` does not, every command refuses | 284, 285, 286, 288, 289, 291 |
-| the Watcher's loop asks the interrupt flag or the lease only at the loop's edges | 285, 286, 288, 290, 291 |
-| a secret built with `format!` inside a `Zeroizing` buffer, prefixes abandoned on growth | 285, 286, 288, 290, 291 |
-| `FakeHost` answers something no real machine answers | 284, 286, 288, 290, 291 |
-| a second entry into one write sequence, with the guard on only the first | 284, 288, 289, 290, 291 |
-| a path guard comparing spelling where it means place | 288, 289, 290 |
-| the Back-off charged for a round that asked Anthropic nothing | 288, 290 |
+| `validate` gains a name rule, `migration::forward` does not, every command refuses | all six |
+| the Watcher's loop asks the interrupt flag or the lease only at the loop's edges | five |
+| a secret built with `format!` inside a `Zeroizing` buffer, prefixes abandoned on growth | five |
+| `FakeHost` answers something no real machine answers | five |
+| a second entry into one write sequence, with the guard on only the first | five |
+| a path guard comparing spelling where it means place | three |
+| the Back-off charged for a round that asked Anthropic nothing | two |
 
-Two findings were made *by* the previous review's fix. 289's bricked Group name
-exists because 288 added a rule to `validate_name` with no matching step
-forward; 289's Purge hole is the relative half of the symlinked hole 288 closed.
+Two findings were made *by* the previous review's fix. A Group name that bricked
+every command got there because the review before had added a rule to
+`validate_name` with no matching step forward, and a Purge that deleted the
+Export it had just offered was the relative half of a symlinked hole the review
+before had closed.
 
 Each rule was stated once, in prose, in one file's header — and honored by hand
 at ten call sites. That is the whole of the pattern. The design is not the
@@ -74,8 +76,8 @@ what makes it unnecessary. Both, or the wrapper is a suggestion.
 **Panicking when a `Secret` under-reserves.** The width a caller counts would
 then be load-bearing again, which is what five reviews found it cannot be:
 `width_of` in `host::real` was "correct by about thirty bytes of coincidence"
-when 288 read it. Growth that wipes makes the arithmetic an optimization, so a
-miscount costs a copy rather than a token.
+the last time a review read it. Growth that wipes makes the arithmetic an
+optimization, so a miscount costs a copy rather than a token.
 
 **Making `Watch::goes_on` the only way to renew.** `act` renews once after the
 Switch has landed, where the answer changes nothing — there is no step left to

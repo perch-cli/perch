@@ -45,9 +45,9 @@ a terminal handed to a child, a request to Anthropic, the macOS keychain dialog,
 this process's stdin. Nine of forty-three, and the list is asserted against the
 port too, so an entry excusing a method that no longer exists fails.
 
-The table was asking nineteen of forty-three when 290 counted, twenty-three when
-this was written, and thirty-four after it. The gap was not a decision anybody
-made; it was a table with no reader.
+The table was asking nineteen of forty-three when a review last counted it,
+twenty-three when this was written, and thirty-four after it. The gap was not a
+decision anybody made; it was a table with no reader.
 
 ## Why only two
 
