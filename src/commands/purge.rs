@@ -109,7 +109,15 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     crate::commands::service::take_back_before_a_purge(host, out).map_err(and_the_export)?;
 
     let purged = purge::erase(host, &mut perch, &registry).map_err(and_the_export)?;
-    report(host, out, &home, &purged, exported.as_deref())
+    // The Export's whereabouts is the report's *last* line, so a report that
+    // failed before it leaves the Holdings gone and the file holding them named
+    // nowhere. What the note adds is that there is nothing to run again.
+    report(host, out, &home, &purged, exported.as_deref()).map_err(|error| {
+        and_the_export(error.with_note(
+            "The Purge itself finished: the Holdings are gone, and only the \
+             report could not be printed.",
+        ))
+    })
 }
 
 /// Adds the whereabouts of an Export this run wrote to a failure after it.

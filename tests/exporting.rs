@@ -653,3 +653,42 @@ fn a_live_credential_belonging_to_somebody_else_is_left_out_with_claude_code_gon
         "the copy in its own Profile is the honest answer for it"
     );
 }
+
+/// The bytes land before the command says so, and the path an Export is never
+/// written over is refused on a re-run — which reads as somebody else's file.
+/// So a report that could not be printed has to say the Export is there.
+#[test]
+fn a_terminal_that_goes_away_reporting_still_says_the_export_was_written() {
+    /// Writes until the report, and then is not there.
+    struct GoesAwayReporting;
+
+    impl std::io::Write for GoesAwayReporting {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Exported") {
+                true => Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the pipe closed",
+                )),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = typing_the_passphrase(a_machine_worth_backing_up());
+
+    let outcome =
+        perch::commands::export::run(&host, std::path::Path::new(AT), &mut GoesAwayReporting);
+
+    let refused = outcome.expect_err("the report could not be written");
+    let said = refused.to_string();
+    assert!(said.contains(AT), "the file that is there is named: {said}");
+    assert!(
+        said.contains("nothing to run again"),
+        "and running it again is refused for the path being taken: {said}"
+    );
+    assert!(host.path_exists(std::path::Path::new(AT)), "which it is");
+}

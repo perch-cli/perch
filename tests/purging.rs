@@ -720,6 +720,53 @@ fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
     );
 }
 
+/// The Export's whereabouts is the last line of a finished Purge's report, so a
+/// terminal that goes away partway through that report loses the one path
+/// naming the Holdings — after the Holdings are gone.
+#[test]
+fn a_terminal_that_goes_away_during_the_report_does_not_lose_the_export() {
+    /// Writes until the report of what was purged, and then is not there.
+    struct GoesAwayReporting;
+
+    impl std::io::Write for GoesAwayReporting {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Purged") {
+                true => Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the pipe closed",
+                )),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", AT, "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let outcome = perch::commands::purge::run(&host, false, &mut GoesAwayReporting);
+
+    let refused = outcome.expect_err("the report could not be written");
+    let said = refused.to_string();
+    assert!(
+        said.contains(AT),
+        "the Export is named, and it is the only thing left that names the \
+         Holdings: {said}"
+    );
+    assert!(
+        said.contains("Purge itself finished"),
+        "and what happened is said, because there is nothing to run again: {said}"
+    );
+    assert!(
+        !host.path_exists(Path::new(PERCH_HOME)),
+        "which is true: the Holdings went"
+    );
+}
+
 /// `write_the_export` does one more fallible thing after the bytes have landed:
 /// it reports what it wrote. An `Err` from that is not an Export that was never
 /// written, and the armored file at the path is what has to be said.
