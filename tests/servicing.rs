@@ -80,6 +80,11 @@ fn linux() -> FakeHost {
         )
         .with_exec(
             "systemctl",
+            &["--user", "restart", "perch-watch.service"],
+            worked(),
+        )
+        .with_exec(
+            "systemctl",
             &["--user", "disable", "--now", "perch-watch.service"],
             worked(),
         )
@@ -116,6 +121,32 @@ fn run_service(host: &FakeHost, command: WatcherCommand) -> (perch::Result<i32>,
     let mut written = Vec::new();
     let result = perch::commands::watcher::run(host, command, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// On a replace, `enable --now` succeeds against an already-running unit without
+/// doing anything, so `restart` is the only step that moves the process onto the
+/// binary just written. Left as `may_fail` it was swallowed, and the line said
+/// the Service now runs a binary nothing was running.
+#[test]
+fn a_replace_whose_restart_fails_does_not_claim_the_new_binary_is_running() {
+    let host = linux();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("the Service is installed first");
+    // systemd stops answering the one step that matters between the two.
+    host.set_exec(
+        "systemctl",
+        &["--user", "restart", "perch-watch.service"],
+        failed("Job for perch-watch.service failed"),
+    );
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert!(
+        !printed.contains("Replaced the Service, and it now runs"),
+        "nothing is running, so that sentence is not true: {printed}{}",
+        result.map_or_else(|why| format!("\n{why}"), |code| format!("\nexit {code}"))
+    );
 }
 
 #[test]

@@ -378,13 +378,13 @@ pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Drive
                 Driven::must("launchctl", &["bootstrap", &domain, &path]),
             ]
         }
-        // `daemon-reload` first, because systemd has not read a unit that did not exist
-        // when it last looked; `--now` makes an install something that has happened;
-        // `restart`, because `enable --now` leaves a running unit alone.
+        // `daemon-reload` because systemd has not read a unit that was not there;
+        // `--now` makes an install something that happened; `restart` because
+        // `enable --now` leaves a running unit on the binary it already had.
         Platform::Other => vec![
             Driven::must("systemctl", &["--user", "daemon-reload"]),
             Driven::must("systemctl", &["--user", "enable", "--now", UNIT_NAME]),
-            Driven::may_fail("systemctl", &["--user", "restart", UNIT_NAME]),
+            Driven::must("systemctl", &["--user", "restart", UNIT_NAME]),
         ],
         // `/NP` keeps a console window off the desktop by registering the task without
         // a stored password, `/RU` names the user whose home the Profiles are under,
