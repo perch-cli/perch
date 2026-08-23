@@ -2002,6 +2002,15 @@ impl port::Keys for FakeHost {
     }
 }
 
+/// Whether a program is named as a path rather than as a word `PATH` answers.
+///
+/// Off the platform the Host reports rather than through `Path::parent`, for
+/// [`crate::probe::rooted`]'s reason: a backslash separates on Windows alone, so
+/// a fake claiming it must not answer by the runner it is on.
+fn names_a_place(program: &str, on_windows: bool) -> bool {
+    program.contains('/') || (on_windows && program.contains('\\'))
+}
+
 impl port::Processes for FakeHost {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
         self.record(Effect::Exec {
@@ -2055,10 +2064,9 @@ impl port::Processes for FakeHost {
         // A program the machine does not hold is one no machine launches: the
         // real adapter fails at `spawn`, and a `0` here is a Run reporting a
         // success it never had. A bare word is `PATH`'s answer, not this one's.
-        let names_a_place = Path::new(program)
-            .parent()
-            .is_some_and(|at| !at.as_os_str().is_empty());
-        if names_a_place && !self.path_exists(Path::new(program)) {
+        if names_a_place(program, self.platform() == Platform::Windows)
+            && !self.path_exists(Path::new(program))
+        {
             return Err(HostError::NotFound {
                 path: PathBuf::from(program),
             });
