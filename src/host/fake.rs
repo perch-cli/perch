@@ -1862,6 +1862,10 @@ impl port::Links for FakeHost {
     }
 
     fn link_target(&self, path: &Path) -> Result<Option<PathBuf>, HostError> {
+        // Through the directories above and never the last component, as
+        // `symlink_metadata` reads a path: a Profile `reconcile` has been over
+        // has a linked directory in front of every name it then asks about.
+        let path = &self.lands_at(path);
         match self.fs.links.borrow().get(path) {
             // A hard link tells nothing about itself, so it answers as the
             // ordinary file it is indistinguishable from.

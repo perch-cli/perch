@@ -517,6 +517,38 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "asking what a name under a linked directory links to reads through the link",
+        asserts: |host, root, adapter, _now| {
+            let real = root.join("the-real-directory");
+            let held = real.join("an-ordinary-file");
+            host.create_dir_all(&real).expect("it is made");
+            host.create_file_with_mode(&held, "what it holds", PRIVATE_FILE_MODE)
+                .expect("with something in it");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            let linked = root.join("the-linked-directory");
+            host.link(Link::Symbolic, &real, &linked)
+                .expect("the directory is linked");
+
+            // `symlink_metadata` follows every component but the last, and the
+            // three answers here are what `reconcile::establish` branches on:
+            // `NotFound` is "make it" and `Ok(None)` is "something is in the way".
+            assert_eq!(
+                host.link_target(&linked.join("an-ordinary-file")).ok(),
+                Some(None),
+                "{adapter}: a file under a linked directory is a file, not absent"
+            );
+            assert!(
+                matches!(
+                    host.link_target(&linked.join("never-there")),
+                    Err(HostError::NotFound { .. })
+                ),
+                "{adapter}: and a name nothing holds under one is still absent"
+            );
+        },
+    },
+    Case {
         named: "a rename onto a directory fails and moves nothing",
         asserts: |host, root, adapter, _now| {
             let from = root.join("would-move");
