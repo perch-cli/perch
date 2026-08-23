@@ -285,7 +285,7 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
 /// wherever Perch was run. Asked of the platform the host reports rather than
 /// through `Path::is_absolute`, which reads the separator of the platform this
 /// build runs on — the reason the search above joins with `/` by hand.
-fn rooted(dir: &str, on_windows: bool) -> bool {
+pub(crate) fn rooted(dir: &str, on_windows: bool) -> bool {
     if dir.starts_with('/') {
         return true;
     }

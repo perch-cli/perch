@@ -308,27 +308,25 @@ fn offer_an_export(
 /// The one path in Perch no shell has been over. Only a leading `~/`, and every
 /// other one is refused rather than read as a file beside the current directory.
 fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
+    let on_windows = host.platform() == Platform::Windows;
     let Some(rest) = typed.strip_prefix('~') else {
-        let typed = PathBuf::from(typed);
-        // Resolved here rather than left for whoever writes it, because the
-        // guard below matches components: a bare `backup.age` typed from inside
-        // the directory this Purge is about to delete shares none with it.
-        if typed.is_absolute() || typed.as_os_str().is_empty() {
-            return Ok(typed);
+        // Rooted asked of the platform the *Host* reports, and joined with `/`
+        // by hand, for `probe::rooted`'s reason: `is_absolute` and `join` read
+        // the separator of the platform this build runs on.
+        if typed.is_empty() || crate::probe::rooted(typed, on_windows) {
+            return Ok(PathBuf::from(typed));
         }
-        // A machine that cannot say where it is says so through the guard
-        // refusing nothing, which is where it stood before this line.
+        // Resolved rather than left for whoever writes it, because the guard
+        // below matches components: a bare `backup.age` typed inside the
+        // directory this Purge deletes shares none with it.
         return Ok(match host.current_dir() {
-            Ok(here) => here.join(typed),
-            Err(_) => typed,
+            Ok(here) => PathBuf::from(format!("{}/{typed}", here.display())),
+            Err(_) => PathBuf::from(typed),
         });
     };
     // Either separator, because Windows reads both and somebody typing here is
-    // typing at Perch rather than at a shell — as `upgrade::beneath` and
-    // `segments` already establish for every path Perch reads there.
-    let separator = |character: char| {
-        character == '/' || (host.platform() == Platform::Windows && character == '\\')
-    };
+    // typing at Perch rather than at a shell.
+    let separator = |character: char| character == '/' || (on_windows && character == '\\');
     let Some(rest) = rest.strip_prefix(separator) else {
         return Err(PerchError::Invalid(format!(
             "`{typed}` begins with a `~` that does not name this machine's home, \

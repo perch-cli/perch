@@ -360,6 +360,26 @@ fn a_windows_tilde_means_home_too_because_windows_writes_the_other_separator() {
     );
 }
 
+/// The other half of a Windows path: rootedness was asked through
+/// `Path::is_absolute`, which reads the separator of the platform the *build*
+/// runs on — so `C:\...` was judged relative and joined onto the current
+/// directory, and the Windows branch could not be honestly tested at all.
+#[test]
+fn a_windows_path_from_the_root_is_written_where_it_says() {
+    let host = a_machine_to_give_back()
+        .with_platform(Platform::Windows)
+        .with_answers(&["y", "C:\\backups\\perch.age", "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(
+        host.file("C:\\backups\\perch.age").is_some(),
+        "the Export is at the path that was typed: {printed}"
+    );
+}
+
 /// The only thing that makes a Purge survivable must not be written where the
 /// Purge is about to delete it — and `starts_with` matches components, so a
 /// linked spelling of the same directory is a different string.
