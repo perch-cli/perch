@@ -1115,13 +1115,7 @@ impl FakeHost {
                 .get(&at)
                 .map(|(_, target)| target.clone())
             {
-                // Resolved against where the link sits where it is relative, as
-                // `host::through_every_link` does: `ln -s`, stow and chezmoi all
-                // record a relative target unless given an absolute path.
-                at = match target.is_absolute() {
-                    true => target,
-                    false => at.parent().unwrap_or(Path::new("")).join(target),
-                };
+                at = crate::host::against(&at, target);
                 continue;
             }
             // Nothing of that name, which does not mean nothing is there: a
