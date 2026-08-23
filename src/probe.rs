@@ -1133,7 +1133,7 @@ pub fn patch_oauth_account(
     block: &str,
     path: &Path,
     installed: &Installed,
-) -> Result<String> {
+) -> Result<Secret> {
     // Written rather than replaced, so a file with no `oauthAccount` yet gets
     // one: Claude Code writes the identity block only at a login. The one
     // refusal left is a file that is not a JSON object at all.
@@ -1239,6 +1239,18 @@ fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The patch as text a case can compare: it answers a `Secret`, which
+    /// neither prints nor compares.
+    fn patched_block(
+        contents: &str,
+        block: &str,
+        path: &Path,
+        installed: &Installed,
+    ) -> Result<String> {
+        patch_oauth_account(contents, block, path, installed)
+            .map(|written| written.as_str().to_string())
+    }
 
     /// A version to quote, for the tests that are not about the quoting.
     fn version_under_test() -> Installed {
@@ -1578,7 +1590,7 @@ mod tests {
 
     #[test]
     fn patching_the_identity_leaves_every_other_byte_alone() {
-        let patched = patch_oauth_account(
+        let patched = patched_block(
             IDENTITY_FILE,
             "{\n  \"emailAddress\": \"overflow@example.com\"\n}",
             Path::new("/Users/someone/.claude.json"),
@@ -1608,7 +1620,7 @@ mod tests {
         // hands over: already indented, for a file that is not this one.
         let from_elsewhere = "{\n    \"emailAddress\": \"overflow@example.com\"\n  }";
 
-        let patched = patch_oauth_account(
+        let patched = patched_block(
             IDENTITY_FILE,
             from_elsewhere,
             Path::new("/Users/someone/.claude.json"),
@@ -1630,7 +1642,7 @@ mod tests {
     /// with an API key — rather than drift.
     #[test]
     fn a_file_that_has_no_block_yet_gets_one_rather_than_refusing_for_ever() {
-        let patched = patch_oauth_account(
+        let patched = patched_block(
             r#"{"numStartups": 41}"#,
             r#"{"emailAddress": "someone@example.com"}"#,
             Path::new("/Users/someone/.claude.json"),
@@ -1653,7 +1665,7 @@ mod tests {
     /// written into a `.claude.json` that is not a JSON object.
     #[test]
     fn a_file_that_is_not_an_object_is_a_refusal_naming_the_assumption() {
-        let error = patch_oauth_account(
+        let error = patched_block(
             r#"["not what this file is"]"#,
             "{}",
             Path::new("/Users/someone/.claude.json"),

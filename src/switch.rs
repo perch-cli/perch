@@ -897,7 +897,7 @@ fn the_live_credential_is_unaccounted_for(account: &Account) -> String {
 /// (ADR everything-but-the-account).
 fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
     let file = &prepared.store.identity_file;
-    let patched = match host.read_file(file) {
+    let patched = match host.read_file(file).map(Zeroizing::new) {
         Ok(contents) => probe::patch_oauth_account(
             &contents,
             &prepared.identity_block,
@@ -908,7 +908,7 @@ fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
         // holding the Account and nothing else is exactly what it would write
         // for itself, and leaves it displaying the Account it is acting as.
         Err(host::HostError::NotFound { .. }) => {
-            probe::fresh_identity_file(&prepared.identity_block)
+            crate::secret::Secret::taken_over(probe::fresh_identity_file(&prepared.identity_block))
         }
         Err(err) => return Err(PerchError::file_read(file.clone(), err)),
     };
@@ -926,6 +926,7 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
     let kept = incoming.store(host)?.identity_file;
     let held = host
         .read_file(&kept)
+        .map(Zeroizing::new)
         .ok()
         .and_then(|contents| probe::oauth_account_block(&contents).map(str::to_string));
 
