@@ -355,9 +355,14 @@ fn main() {
     // exiting, and the line underneath it has to come from somewhere with a
     // Host to ask (ADR an-upgrade-asks-its-channel).
     if version_asked_for(&typed) {
-        let _ = write!(out, "{}", perch::upgrade::version_report(&host));
-        let _ = out.flush();
-        std::process::exit(EXIT_OK);
+        // Through `ended_as` like every other arm: a `perch --version > file`
+        // on a full disk that exits 0 having written nothing is a script's
+        // reading of the installed version, silently empty.
+        let written = write!(out, "{}", perch::upgrade::version_report(&host))
+            .and_then(|()| out.flush())
+            .map(|()| EXIT_OK)
+            .map_err(perch::commands::write_failed);
+        std::process::exit(ended_as(written, &mut out));
     }
 
     let cli = Cli::parse();

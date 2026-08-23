@@ -33,7 +33,7 @@ use crate::host::Host;
 /// of the thing the command was asked to do, but the command cannot finish
 /// saying what it did.
 pub fn write_failed(err: std::io::Error) -> PerchError {
-    PerchError::Other(err.to_string())
+    PerchError::Other(format!("Perch could not write its output: {err}"))
 }
 
 /// One line to the person running the command.
