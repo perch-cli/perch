@@ -9,17 +9,17 @@
 //!
 //! The form is `CLAUDE.md`'s; the reasoning is `docs/agents/comments.md`'s.
 
+mod tree;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+use tree::{read, relative, repo};
 
 /// At most this many characters, hard rather than a target: unlike a comment
 /// cap there is no "write the ADR" escape hatch, so a slug that drifts past it
 /// is a title to shorten.
 const CAP: usize = 30;
-
-fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
 
 /// Where a number is a record rather than a citation: `CHANGELOG.md` and the ADR
 /// inventory both say what was true on a date, so a number in either may name a
@@ -29,31 +29,8 @@ fn exempt(path: &Path) -> bool {
     relative == Path::new("CHANGELOG.md") || relative == Path::new("docs/research/adr-inventory.md")
 }
 
-/// Directories holding no citation of this repository's: build output, and a
-/// dependency tree nobody here wrote.
-fn skipped(name: &str) -> bool {
-    matches!(name, ".git" | "target" | "node_modules" | "dist" | ".astro")
-}
-
 fn sources() -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let mut pending = vec![repo()];
-    while let Some(directory) = pending.pop() {
-        for entry in std::fs::read_dir(&directory).expect("a readable directory") {
-            let path = entry.expect("a readable entry").path();
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if skipped(name) {
-                continue;
-            }
-            if path.is_dir() {
-                pending.push(path);
-            } else if !exempt(&path) {
-                found.push(path);
-            }
-        }
-    }
-    found.sort();
-    found
+    tree::sources(|path| !exempt(path))
 }
 
 /// Every document there is, by the tail of its filename. The prefix is a sort
@@ -131,18 +108,11 @@ fn every_citation() -> BTreeMap<PathBuf, Vec<(usize, String)>> {
     sources()
         .into_iter()
         .filter_map(|path| {
-            let text = String::from_utf8(std::fs::read(&path).ok()?).ok()?;
+            let text = read(&path)?;
             let found = citations(&text);
             (!found.is_empty()).then_some((path, found))
         })
         .collect()
-}
-
-fn relative(path: &Path) -> String {
-    path.strip_prefix(repo())
-        .unwrap_or(path)
-        .display()
-        .to_string()
 }
 
 /// Every citation there is, gathered once and reported as a list of sites so a
