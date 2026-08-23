@@ -517,6 +517,46 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a rename onto a directory fails and moves nothing",
+        asserts: |host, root, adapter, _now| {
+            let from = root.join("would-move");
+            let onto = root.join("a-directory-in-the-way");
+            host.create_file_with_mode(&from, "incoming", PRIVATE_FILE_MODE)
+                .expect("the source");
+            host.create_dir_all(&onto).expect("the destination");
+
+            host.rename(&from, &onto)
+                .expect_err("a directory is not a name a rename may take over");
+
+            assert_eq!(
+                host.read_file(&from).ok().as_deref(),
+                Some("incoming"),
+                "{adapter}: and the source is where it was"
+            );
+        },
+    },
+    Case {
+        named: "removing a file at a directory fails rather than doing nothing",
+        asserts: |host, root, adapter, _now| {
+            let at = root.join("a-directory-not-a-file");
+            let held = at.join("held");
+            host.create_dir_all(&at).expect("it is made");
+            host.create_file_with_mode(&held, "still here", PRIVATE_FILE_MODE)
+                .expect("with something in it");
+
+            // `Ok` here reads as a store this emptied — `credentials::forget`
+            // says so on the strength of it — so answering it for a directory
+            // reports a Credential as deleted that is still on the machine.
+            host.remove_file(&at)
+                .expect_err("a directory is not a file to unlink");
+
+            assert!(
+                host.read_file(&held).is_ok(),
+                "{adapter}: and what was under it is untouched"
+            );
+        },
+    },
+    Case {
         named: "a rename of what is not there fails, and not as NotFound",
         asserts: |host, root, adapter, _now| {
             let failed = host

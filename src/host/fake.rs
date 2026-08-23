@@ -1663,6 +1663,14 @@ impl port::Files for FakeHost {
         // component — which the arm below is about.
         let from = &self.lands_at(from);
         let to = &self.lands_at(to);
+        // A directory at the destination refuses on every real adapter, and the
+        // fake would otherwise describe a path that is a file and a directory
+        // at once. `replace_via_tmp` ends here, so this is every private write.
+        if self.fs.dirs.borrow().contains(to) {
+            return Err(HostError::Io(std::io::Error::from(
+                std::io::ErrorKind::IsADirectory,
+            )));
+        }
         // `Io`, which is what the real host answers: `NotFound` is load-bearing
         // elsewhere — `CredentialStore::read` reads it as "this store holds
         // nothing" and `clients_in` as "nothing is running".
@@ -1707,6 +1715,14 @@ impl port::Files for FakeHost {
             return Err(HostError::Other(detail.clone()));
         }
         let at = self.lands_at(path);
+        // A directory is a refusal rather than a no-op: `credentials::forget`
+        // reads `Ok` here as a store it emptied, and answering that for a
+        // directory it did not touch reports a Credential as deleted.
+        if self.fs.dirs.borrow().contains(&at) {
+            return Err(HostError::Io(std::io::Error::from(
+                std::io::ErrorKind::IsADirectory,
+            )));
+        }
         self.fs.files.borrow_mut().remove(&at);
         self.fs.links.borrow_mut().remove(&at);
         self.fs.modified.borrow_mut().remove(&at);
