@@ -1596,10 +1596,11 @@ fn a_loop_whose_watch_was_taken_over_stops_rather_than_deciding_beside_it() {
 #[test]
 fn a_watch_taken_over_while_the_candidates_were_read_switches_nothing() {
     let lock = "/Users/someone/.config/perch/.watch.lock";
-    // Long enough to carry the round past the staleness window, which is what lets
-    // another Watcher judge this hold abandoned and clear it.
+    // A keychain that stops to ask, and nobody at the machine to answer: the one
+    // unbounded wait inside a round, and long enough here to carry it past the
+    // staleness window that lets another Watcher judge this hold abandoned.
     let host = watching(&[86.0], 5.0)
-        .with_a_network_that_answers_slowly(
+        .with_a_keychain_that_asks_first(
             perch::watch::LONGEST_WAIT_MILLIS + perch::watch::REFRESH_INTERVAL_MILLIS + 1_000,
         )
         .once_while_waiting(move |host| {

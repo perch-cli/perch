@@ -968,3 +968,31 @@ fn a_check_somebody_asked_for_is_not_cut_short() {
 fn upgrade_installed() -> &'static str {
     perch::upgrade::installed()
 }
+
+/// The check on `perch --version` is the one request that carries a bound of
+/// its own, and nothing could show it bounded anything: the fake answered a
+/// stall of any length. A network slower than two seconds is a version line
+/// that does not appear rather than a pause somebody would notice.
+#[test]
+fn the_version_check_gives_up_on_a_network_slower_than_its_own_bound() {
+    let host =
+        machine().with_a_network_that_answers_slowly(perch::upgrade::CHECK_WITHIN_MILLIS + 1);
+
+    assert_eq!(
+        perch::upgrade::notice(&host),
+        None,
+        "a check that timed out says nothing rather than guessing"
+    );
+}
+
+/// The other half of it: inside the bound, the check answers as it always did.
+#[test]
+fn the_version_check_answers_a_network_inside_its_own_bound() {
+    let host =
+        machine().with_a_network_that_answers_slowly(perch::upgrade::CHECK_WITHIN_MILLIS - 1);
+
+    assert!(
+        perch::upgrade::notice(&host).is_some(),
+        "a slow network that still answers inside the bound is answered"
+    );
+}

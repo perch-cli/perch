@@ -918,8 +918,9 @@ impl FakeHost {
         );
     }
 
-    /// A network that answers slowly, and how slowly. The stall a round has no
-    /// bound on: one read per candidate, each waited thirty seconds for.
+    /// A network that answers slowly, and how slowly — per request, as `curl`'s
+    /// `max-time` is per request. Longer than the request's bound is a request
+    /// that times out rather than one that answers late.
     pub fn with_a_network_that_answers_slowly(self, takes_millis: u64) -> Self {
         *self.network.takes_millis.borrow_mut() = takes_millis;
         self
@@ -2187,11 +2188,21 @@ impl port::Network for FakeHost {
         let bearer = sent.bearer().map(str::to_string);
         self.network.sent.borrow_mut().push(sent);
 
+        // Bounded as `curl` is bounded, by the request's own `max-time` or by
+        // the ceiling every request without one gets: a reply arriving after
+        // that does not arrive, so a fixture arranging one arranges no machine.
         let takes = *self.network.takes_millis.borrow();
+        let bound = request.bound_millis();
         if takes > 0 {
-            let answered = *self.stall.now.borrow() + chrono::Duration::milliseconds(takes as i64);
+            let waited = takes.min(bound);
+            let answered = *self.stall.now.borrow() + chrono::Duration::milliseconds(waited as i64);
             *self.stall.now.borrow_mut() = answered;
             self.somebody_else_arrives();
+        }
+        if takes > bound {
+            return Err(HostError::Other(format!(
+                "curl exited 28: Operation timed out after {bound} milliseconds"
+            )));
         }
 
         // A trace answers before a fixed reply does, and its last entry stays

@@ -119,7 +119,18 @@ impl std::fmt::Debug for HttpRequest<'_> {
     }
 }
 
+/// The bound on a request that carries none of its own.
+///
+/// At the port rather than in the real adapter, because a fake that answered a
+/// request after longer than this would be answering one no machine answers.
+pub const ORDINARY_BOUND_MILLIS: u64 = 30_000;
+
 impl<'a> HttpRequest<'a> {
+    /// How long this request may take, whether or not it says.
+    pub fn bound_millis(&self) -> u64 {
+        self.within_millis.unwrap_or(ORDINARY_BOUND_MILLIS)
+    }
+
     pub fn get(url: &'a str, headers: &'a [(&'a str, &'a str)]) -> Self {
         HttpRequest {
             url,
