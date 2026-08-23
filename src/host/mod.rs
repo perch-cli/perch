@@ -330,8 +330,9 @@ pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
 
 /// Whether a terminal acts on a character rather than drawing it. `is_control`
 /// is `Cc` alone, which leaves the formatting characters out: `U+202E` reverses
-/// the rest of the line it lands in, and a zero-width one hides the whole
-/// difference between two names.
+/// the rest of the line it lands in, a zero-width one hides the whole
+/// difference between two names, and the tags block spells hidden text in
+/// characters that mirror ASCII and draw as nothing.
 pub fn is_unshowable(c: char) -> bool {
     c.is_control()
         || matches!(c,
@@ -339,7 +340,9 @@ pub fn is_unshowable(c: char) -> bool {
             | '\u{200B}'..='\u{200F}'
             | '\u{202A}'..='\u{202E}'
             | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206F}')
+            | '\u{2066}'..='\u{206F}'
+            | '\u{180E}'
+            | '\u{E0000}'..='\u{E007F}')
 }
 
 /// Text on its way to a terminal, with everything a terminal would act on
@@ -1032,6 +1035,35 @@ mod tests {
             looping.is_inside(&settled(&host, Path::new("/somewhere/else"))),
             "and what it could not resolve is not ruled out of anywhere"
         );
+    }
+
+    /// The tags block is the standard carrier for invisible text: `U+E0020`
+    /// upward mirror ASCII, draw as nothing, and are `Cf` rather than `Cc`, so
+    /// `is_control` passes over every one. An address is read out of a file
+    /// Perch does not own, and this is the rule that refuses one.
+    #[test]
+    fn a_character_that_draws_as_nothing_is_unshowable_however_it_is_spelled() {
+        for hidden in [
+            '\u{E0001}',
+            '\u{E0020}',
+            '\u{E0041}',
+            '\u{E007F}',
+            '\u{180E}',
+        ] {
+            assert!(
+                is_unshowable(hidden),
+                "U+{:04X} draws as nothing and hides the difference between two names",
+                hidden as u32
+            );
+        }
+        assert_eq!(
+            Shown::of("some\u{E0041}one@example.com").to_string(),
+            "someone@example.com",
+            "so a listing draws the address without it"
+        );
+        for ordinary in ['a', '@', '.', 'é', '中'] {
+            assert!(!is_unshowable(ordinary), "{ordinary} is drawn");
+        }
     }
 
     /// A `..` is not a name, so `Path::file_name` answers `None` on one and the
