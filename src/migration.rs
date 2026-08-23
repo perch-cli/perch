@@ -134,7 +134,18 @@ pub fn forward(document: &str) -> Result<Option<String>> {
             true => crate::registry::UNGROUPED.to_string(),
             false => now_called(NameKind::Group, &group, &renamed),
         };
-        checks.insert(under, Value::Object(kept));
+        // Two v1 keys can land on one — a Group called `Ungrouped` beside the
+        // Ungrouped Scope's own record — and the later of the two wins, as
+        // `with_every_check_under_the_declared_spelling` decides the same
+        // collision: byte order would otherwise pick, and the older record
+        // winning is a Check free to Switch inside a Cooldown still running.
+        let kept = Value::Object(kept);
+        match checks.get(&under).and_then(switched_at) {
+            Some(held) if switched_at(&kept).is_none_or(|arriving| arriving < held) => {}
+            _ => {
+                checks.insert(under, kept);
+            }
+        }
     }
     moved.insert("checks".to_string(), Value::Object(checks));
 
@@ -237,6 +248,18 @@ fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
         }
     }
     renamed
+}
+
+/// When a `checks` record says its Switch happened.
+///
+/// Parsed rather than compared as text: chrono writes a fractional second only
+/// where there is one, and `.` sorts below `Z`, so text order puts a record
+/// carrying one before a record of the same instant without.
+fn switched_at(check: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+    check
+        .get("switched_at")
+        .and_then(Value::as_str)
+        .and_then(|at| at.parse().ok())
 }
 
 /// Every Group name an Account claims, in the order the Accounts are listed.
