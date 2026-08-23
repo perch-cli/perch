@@ -744,9 +744,16 @@ fn everyone_is_exhausted(
     // leaving it out silently turns "the soonest Perch can vouch for" into
     // advice to wait longer than you have to.
     if unsaid > 0 && soonest.is_some() {
+        // Not "cache no reset time": an elapsed one caches a reset and it is
+        // simply behind us, which says as little about the next window as no
+        // reset at all — which is why the two are counted together.
+        let say = match unsaid {
+            1 => "says",
+            _ => "say",
+        };
         waiting.push_str(&format!(
-            " {unsaid} of them cache no reset time, so the wait could be \
-             shorter than that — {}",
+            " {unsaid} of them {say} nothing about when they come back, so the \
+             wait could be shorter than that — {}",
             how_to_get_figures(scope)
         ));
     }
@@ -1274,7 +1281,9 @@ pub(crate) mod tests {
 
         assert!(error.to_string().contains("here@example.com"), "{error}");
         assert!(
-            error.to_string().contains("1 of them cache no reset time"),
+            error
+                .to_string()
+                .contains("1 of them says nothing about when they come back"),
             "advising a three-hour wait while one Account may be back sooner is \
              worse than saying so: {error}"
         );

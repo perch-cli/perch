@@ -291,7 +291,7 @@ fn a_reset_that_has_already_gone_by_is_not_what_frees_up_soonest() {
          window that came back hours ago: {said}"
     );
     assert!(
-        said.contains("2 of them cache no reset time"),
+        said.contains("2 of them say nothing about when they come back"),
         "the two elapsed ones say as little about the wait as no reset at all, \
          so the wait may be shorter than the one figure that can still speak: \
          {said}"
