@@ -382,6 +382,13 @@ fn takeover_claim(lock: &LockSpec) -> PathBuf {
 /// The suffix that names one.
 const TAKEOVER_SUFFIX: &str = ".perch-takeover";
 
+/// How long a takeover claim may say nothing before it belongs to nobody.
+///
+/// Its own window rather than the lock's, which the watcher lock puts at 25
+/// minutes: a claim is held across one staleness check and one `mkdir`, so a
+/// process killed between them would wedge every later takeover for that long.
+const CLAIM_STALE_MILLIS: i64 = 30_000;
+
 /// Clears an abandoned lock for the one process that gets to, answering whether
 /// this call may now create it — `false` being somebody else clearing, or a lock
 /// that was not abandoned after all. `mkdir` cannot be raced, so the claim
@@ -390,10 +397,10 @@ const TAKEOVER_SUFFIX: &str = ".perch-takeover";
 fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
     let claim = takeover_claim(lock);
     // A claim outliving the process that made it would stop this lock ever
-    // being taken over again, so one as stale as the lock it guards is cleared.
+    // being taken over again, so one that has gone quiet is cleared.
     if let Err(refused) = host.create_dir_exclusive(&claim) {
         if matches!(refused, HostError::AlreadyExists { .. })
-            && gone_quiet_for(host, &claim, lock.stale_millis)
+            && gone_quiet_for(host, &claim, CLAIM_STALE_MILLIS)
         {
             let _ = host.remove_dir_all(&claim);
         }
@@ -1036,6 +1043,40 @@ mod tests {
         );
         assert!(host.path_exists(&lock.dir), "and it is held on the way out");
         assert!(!host.path_exists(&claim), "with the claim given back");
+    }
+
+    /// The claim is held across one staleness check and one `mkdir`, and it
+    /// took the *lock's* window to go stale — 25 minutes for the watcher lock.
+    /// A process killed between the two wedged every later takeover for that
+    /// long, with no Watcher running the whole time.
+    #[test]
+    fn a_claim_goes_quiet_on_its_own_window_rather_than_on_the_locks() {
+        let lock = LockSpec {
+            stale_millis: 1_500_000,
+            ..a_lock("/Users/someone/.config/perch/.watch.lock")
+        };
+        let host = FakeHost::new();
+        let now = host.now();
+        let host = host
+            // Abandoned by the lock's own window, so there is a takeover to make.
+            .with_dir_held_since(&lock.dir, now - chrono::Duration::seconds(1_800))
+            // And a claim from a minute ago: long past anything a claim is held
+            // for, and nowhere near the lock's window.
+            .with_dir_held_since(takeover_claim(&lock), now - chrono::Duration::seconds(60));
+
+        assert!(
+            !take_over(&host, &lock).expect("nothing failed"),
+            "this attempt makes no claim of its own"
+        );
+        assert!(
+            !host.path_exists(&takeover_claim(&lock)),
+            "but it clears the one nobody is behind"
+        );
+
+        assert!(
+            take_over(&host, &lock).expect("nothing failed"),
+            "so the next attempt takes the abandoned lock over"
+        );
     }
 
     #[test]
