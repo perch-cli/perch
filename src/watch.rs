@@ -542,6 +542,18 @@ pub fn set_aside(
     }
 }
 
+/// Why a round may not go on, which is the whole of what stops one part way.
+///
+/// Both are sticky — a watch taken over is never regained and a stop is never
+/// withdrawn — so a caller that has been told one may ask again for nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lost {
+    /// Another Watcher took the watch over.
+    HandedOver,
+    /// This Watcher was asked to stop.
+    Stopped,
+}
+
 /// What a round decided.
 ///
 /// Six outcomes, five of which change nothing — and they are five different reasons for

@@ -23,6 +23,7 @@ use crate::lock::{self, Held};
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
+use crate::watch::Lost;
 
 /// How one Account's turn ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,26 +210,25 @@ pub fn refresh(
     registry: &mut Registry,
     emails: &[String],
     installed: &Result<Installed>,
-    alongside: &mut dyn FnMut(),
+    still_ours: &mut dyn FnMut() -> std::result::Result<(), Lost>,
 ) -> Report {
     let mut report = Report::asked_for();
     let mut anything_to_keep = false;
 
     for (at, email) in emails.iter().enumerate() {
-        // Answerable between Accounts: five candidates is three hundred seconds
-        // against a thirty-second grace, and a `SIGKILL`ed Watcher leaves both
-        // locks behind. Never before the first, which would pace a Back-off.
-        if at > 0 && host.asked_to_stop() {
-            break;
-        }
         // A round trip to Anthropic each, so the hold is renewed between them and again
         // inside the turn: one Account's turn is up to six requests bounded at thirty
         // seconds, twice the ninety the registry hold goes stale in.
         perch.renew();
-        // And whatever else the caller is holding across the whole of this. The
-        // Watcher's burst is one read per candidate, each bounded only at thirty
-        // seconds, and the watch goes stale in twenty-two and a half minutes.
-        alongside();
+        // And whatever else the caller holds, and where it says whether the reads may
+        // go on: five candidates is three hundred seconds against a thirty-second
+        // grace and a watch stale in twenty-two minutes, which a burst can outlast.
+        let go_on = still_ours();
+        // Never before the first: nothing has been spent yet, and a round held
+        // before it read anything would pace a Back-off.
+        if at > 0 && go_on.is_err() {
+            break;
+        }
 
         let Some(account) = registry.account(email).cloned() else {
             continue;
@@ -861,11 +861,57 @@ mod tests {
             &mut registry,
             &emails,
             &installed,
-            &mut || renewals += 1,
+            &mut || {
+                renewals += 1;
+                Ok(())
+            },
         );
 
         assert_eq!(report.attempts.len(), 3, "one turn each");
         assert_eq!(renewals, 3, "and one renewal each");
+    }
+
+    /// The other half of the same beat: the caller answers whether the burst may
+    /// go on, and a watch taken over mid-burst ends it there. Read to the end,
+    /// the reads spend an hourly allowance that does not refill early, on a
+    /// decision the second Watcher is making instead.
+    #[test]
+    fn a_burst_the_caller_has_stopped_reads_no_further_accounts() {
+        for stopped_by in [Lost::HandedOver, Lost::Stopped] {
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let mut registry = Registry::default();
+            let emails: Vec<String> = ["a@example.com", "b@example.com", "c@example.com"]
+                .iter()
+                .map(|email| {
+                    registry.upsert(crate::cycle::tests::account(email, vec![]));
+                    (*email).to_string()
+                })
+                .collect();
+            let mut perch = registry::lock(&host).expect("nobody holds it");
+            let installed = Err(PerchError::Other("no Claude Code here".to_string()));
+
+            let mut asked = 0;
+            let report = refresh(
+                &host,
+                &mut perch,
+                &mut registry,
+                &emails,
+                &installed,
+                &mut || {
+                    asked += 1;
+                    match asked {
+                        1 => Ok(()),
+                        _ => Err(stopped_by),
+                    }
+                },
+            );
+
+            assert_eq!(
+                report.attempts.len(),
+                1,
+                "the first Account is read and the burst ends there ({stopped_by:?})"
+            );
+        }
     }
 
     #[test]

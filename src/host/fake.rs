@@ -995,6 +995,10 @@ impl FakeHost {
 
     /// Every file at or below a path, for a test that has to say what a whole
     /// directory tree holds.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the keys of the fake's own map are the tree, spelled as they were written"
+    )]
     pub fn paths_under(&self, root: impl AsRef<Path>) -> Vec<PathBuf> {
         self.fs
             .files
@@ -1314,8 +1318,15 @@ impl port::Environment for FakeHost {
         Ok(self.environment.current_exe.borrow().clone())
     }
 
+    /// Nothing on Windows, whatever a test set: there is no uid there, and
+    /// `service::stopping` reads `unwrap_or_default()` off this to build a
+    /// launchd domain — so a fake answering one lets a case pass on an
+    /// arrangement the platform does not have.
     fn user_id(&self) -> Option<u32> {
-        *self.environment.user_id.borrow()
+        match self.platform() {
+            Platform::Windows => None,
+            _ => *self.environment.user_id.borrow(),
+        }
     }
 }
 
@@ -1549,26 +1560,35 @@ impl port::Files for FakeHost {
                 path.display()
             )));
         }
-        self.fs
-            .dirs
-            .borrow_mut()
-            .retain(|dir| !dir.starts_with(path));
-        self.fs
-            .links
-            .borrow_mut()
-            .retain(|at, _| !at.starts_with(path));
-        self.fs
-            .files
-            .borrow_mut()
-            .retain(|file, _| !file.starts_with(path));
-        self.fs
-            .modified
-            .borrow_mut()
-            .retain(|written, _| !written.starts_with(path));
-        self.fs
-            .modes
-            .borrow_mut()
-            .retain(|at, _| !at.starts_with(path));
+        // Prefix over the fake's own keys, and not a containment guard: this is
+        // the tree walk `remove_dir_all` does, which descends into directories
+        // and takes a link at a name without following it.
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "the keys of the fake's own map are the tree, spelled as they were written"
+        )]
+        {
+            self.fs
+                .dirs
+                .borrow_mut()
+                .retain(|dir| !dir.starts_with(path));
+            self.fs
+                .links
+                .borrow_mut()
+                .retain(|at, _| !at.starts_with(path));
+            self.fs
+                .files
+                .borrow_mut()
+                .retain(|file, _| !file.starts_with(path));
+            self.fs
+                .modified
+                .borrow_mut()
+                .retain(|written, _| !written.starts_with(path));
+            self.fs
+                .modes
+                .borrow_mut()
+                .retain(|at, _| !at.starts_with(path));
+        }
         Ok(())
     }
 

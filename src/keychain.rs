@@ -8,7 +8,7 @@
 //! are spelled.
 
 use crate::host::{Execution, write_double_quoted};
-use zeroize::Zeroizing;
+use crate::secret::Secret;
 
 /// The `security` binary. Never a build of Perch, never a crate — see
 /// ADR a-crate-must-not-cost-a-seam.
@@ -75,14 +75,14 @@ pub fn add_command_line(
     service: &str,
     account: &str,
     secret: &str,
-) -> Result<Zeroizing<String>, KeychainError> {
+) -> Result<Secret, KeychainError> {
     storable(service, account)?;
-    // `Zeroizing` because this line holds the Credential, and pushed into rather
-    // than `format!`ed for `hex_encode`'s reason: `format!` reserves off the
-    // literals alone, so every doubling abandons a prefix of the hex un-wiped.
-    let mut line = Zeroizing::new(String::with_capacity(
+    // A `Secret` because this line holds the Credential, and pushed into rather
+    // than `format!`ed because a `format!` of one is a second buffer nothing
+    // wipes — the width is what keeps this one from having to move.
+    let mut line = Secret::with_room_for(
         FIXED_WIDTH + service.len() * 2 + account.len() * 2 + secret.len() * 2,
-    ));
+    );
     line.push_str("add-generic-password -U -s ");
     write_double_quoted(&mut line, service);
     line.push_str(" -a ");
@@ -132,13 +132,12 @@ pub fn write_path_for(command_line: &str) -> WritePath {
     }
 }
 
-pub fn hex_encode(bytes: &[u8]) -> Zeroizing<String> {
+pub fn hex_encode(bytes: &[u8]) -> Secret {
     use std::fmt::Write;
 
-    // One buffer, reserved at the full width so it never grows. A `String` per
-    // byte is a fragment of the Credential in freed heap several thousand times
-    // over, and a `Vec` that reallocates frees the old block untouched.
-    let mut out = Zeroizing::new(String::with_capacity(bytes.len() * 2));
+    // One buffer, at the full width: a `String` per byte is a fragment of the
+    // Credential in freed heap several thousand times over.
+    let mut out = Secret::with_room_for(bytes.len() * 2);
     for byte in bytes {
         let _ = write!(out, "{byte:02X}");
     }

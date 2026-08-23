@@ -1,0 +1,12 @@
+# Rules the compiler cannot state, kept here rather than as a comment somebody
+# has to have read. Each entry names what goes wrong and where the sanctioned
+# form is; a site that genuinely wants the method carries an `#[allow]` with a
+# `reason` saying why, which is the record that the question was asked.
+
+# `starts_with` on a path matches components, so a directory reached through a
+# link is a spelling sharing none of them and walks past a containment guard —
+# three consecutive reviews found one of those. `host::is_inside` resolves both
+# sides, and decides what a path that will not resolve counts as.
+disallowed-methods = [
+    { path = "std::path::Path::starts_with", reason = "use `host::is_inside`, which follows every link on both sides" },
+]

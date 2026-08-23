@@ -9,13 +9,14 @@
 //!
 //! Narrow, and not a JSON library: one top-level key, and deeper is this twice.
 
-use zeroize::{Zeroize, Zeroizing};
+use crate::secret::Secret;
+use zeroize::Zeroize;
 
 /// `document` as JSON text, in a buffer wiped on drop and reserved at the width
 /// the finished text takes. `to_string` starts at zero and doubles, so every
 /// growth abandons a prefix of what it wrote un-wiped — and each document that
 /// comes through here holds the only copy there is of a refresh token.
-pub fn sealed(document: &serde_json::Value) -> Zeroizing<String> {
+pub fn sealed(document: &serde_json::Value) -> Secret {
     let mut width = Width(0);
     // A failure here costs the reserve and nothing else, so it is not a reason
     // to refuse: the pass below writes the same bytes either way.
@@ -26,11 +27,11 @@ pub fn sealed(document: &serde_json::Value) -> Zeroizing<String> {
         // Unreachable — a `Value` and a `Vec<u8>` have nothing between them
         // that can fail — and truncated bytes would be worse than a lost wipe.
         bytes.zeroize();
-        return Zeroizing::new(document.to_string());
+        return Secret::copied(&document.to_string());
     }
     // Borrowed over what `to_writer` wrote, and `into_owned` of a borrowed one
     // reserves exactly: one copy, no growth.
-    let text = Zeroizing::new(String::from_utf8_lossy(&bytes).into_owned());
+    let text = Secret::taken_over(String::from_utf8_lossy(&bytes).into_owned());
     bytes.zeroize();
     text
 }

@@ -24,7 +24,8 @@ use crate::probe;
 use crate::registry::{self, Account, Registry, Scope, UNGROUPED};
 use crate::switch::{self, Idle, NotSwitched, Settled};
 use crate::watch::{
-    self, Backoff, Considered, Cooled, Fullest, Holding, Outcome, Policy, Recently, Round, Speak,
+    self, Backoff, Considered, Cooled, Fullest, Holding, Lost, Outcome, Policy, Recently, Round,
+    Speak,
 };
 
 /// One round, for whatever scheduled it.
@@ -38,7 +39,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // The same lock a loop takes: a Check firing while a Service runs is the double-
     // Switch it exists for. Held rather than refused, and `20` tells a scheduler to
     // come back.
-    let mut watching_alone = match lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
+    let watching_alone = match lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
         Ok(held) => held,
         Err(PerchError::Busy(why)) => {
             say(out, &watch::held_line(&why, None, host.now()))?;
@@ -46,6 +47,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         }
         Err(other) => return Err(other),
     };
+    let mut watching_alone = Watch::taken(host, watching_alone);
 
     // Nothing carried in: the cooldown comes off the registry inside the round, and a
     // back-off would pace a loop this process does not have.
@@ -92,18 +94,18 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
 
     // Exactly one Watcher per person per machine. Kept by name rather than dropped into
     // a `_`, because a hold nothing renews is one the next Check clears.
-    let Some(mut watching_alone) = take_the_watch(host, out, &mut holding)? else {
+    let Some(watching_alone) = take_the_watch(host, out, &mut holding)? else {
         return stopped(out);
     };
+    let mut watching_alone = Watch::taken(host, watching_alone);
 
     say(out, &opening(host)?)?;
 
     loop {
         // Twice a round, and this is the half that bounds the gap: the window is the
         // longest wait plus a round, and a round is bounded by nothing but the network.
-        watching_alone.renew();
-        if !watching_alone.still_held() {
-            return handed_over(out);
+        if let Err(lost) = watching_alone.goes_on() {
+            return left(out, lost);
         }
 
         let (waiting_for, spoken) = match one_round(
@@ -137,11 +139,8 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
 
         // The other half, here because the round's own work is over: everything above
         // may have waited on Claude Code's locks or on a keychain that stopped to ask.
-        watching_alone.renew();
-        if !watching_alone.still_held() {
-            // Whoever took the lock over is watching this machine now, and a second
-            // Watcher deciding beside them is what the lock is for.
-            return handed_over(out);
+        if let Err(lost) = watching_alone.goes_on() {
+            return left(out, lost);
         }
 
         // The one place the loop holds nothing it took this round, and therefore How
@@ -153,6 +152,72 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     }
 
     stopped(out)
+}
+
+/// The watch this process holds, as one question rather than three.
+///
+/// `renew`, `still_held` and `asked_to_stop` were asked apart at nine points and five
+/// reviews found a long step running between two of them. One call asks all three, and
+/// the long steps take this rather than a bare renewal (ADR an-invariant-gets-a-door).
+struct Watch<'a> {
+    host: &'a dyn Host,
+    held: lock::Held<'a>,
+}
+
+impl<'a> Watch<'a> {
+    fn taken(host: &'a dyn Host, held: lock::Held<'a>) -> Watch<'a> {
+        Watch { host, held }
+    }
+
+    /// Renews the hold and says whether this Watcher is still the one to act.
+    ///
+    /// Called for its answer wherever a round is about to spend something or change
+    /// something, and called for the renewal everywhere else — the same call, so the
+    /// two cannot come apart.
+    fn goes_on(&mut self) -> std::result::Result<(), Lost> {
+        self.held.renew();
+        if !self.held.still_held() {
+            return Err(Lost::HandedOver);
+        }
+        if self.host.asked_to_stop() {
+            return Err(Lost::Stopped);
+        }
+        Ok(())
+    }
+
+    /// The renewal without the question, for the one place the answer changes
+    /// nothing: the Credential has already moved, and there is no step left to
+    /// stop before.
+    fn kept_up(&mut self) {
+        self.held.renew();
+    }
+}
+
+/// What the loop says on the way out when something other than the person at the
+/// terminal ended it.
+fn left(out: &mut dyn Write, lost: Lost) -> Result<()> {
+    match lost {
+        Lost::HandedOver => handed_over(out),
+        Lost::Stopped => stopped(out),
+    }
+}
+
+/// The outcome for a round that stopped being the one to act while it was reading
+/// the candidates, which is the longest thing a round does.
+fn nothing_was_switched(lost: Lost) -> Outcome {
+    match lost {
+        Lost::HandedOver => Outcome::HandedOver {
+            why: "the watch was taken over while this round was reading the \
+                  candidates, so nothing was switched: whoever holds it now is \
+                  watching this machine."
+                .to_string(),
+        },
+        Lost::Stopped => Outcome::Stopped {
+            why: "this Watcher was asked to stop while the round was reading \
+                  the candidates, so nothing was switched."
+                .to_string(),
+        },
+    }
 }
 
 /// What the loop says on the way out, which is that it is out.
@@ -453,7 +518,7 @@ fn one_round(
     watcher: Watcher,
     recently: &mut Recently,
     backoff: &mut Backoff,
-    watching_alone: &mut crate::lock::Held<'_>,
+    watching_alone: &mut Watch<'_>,
 ) -> Result<Turn> {
     // A machine with no Claude Code login has nothing to adopt. `Busy` is passed
     // through untouched, because both callers answer it differently from "not
@@ -493,16 +558,14 @@ fn one_round(
     // The one Account Refreshed, and nearly all of the network this loop spends.
     // Renewed either side of it, as the loop renews either side of the wait: up to six
     // requests at thirty seconds each go out under this call alone.
-    watching_alone.renew();
     let report = observe::refresh(
         host,
         &mut perch,
         &mut registry,
         std::slice::from_ref(&email),
         &installed,
-        &mut || watching_alone.renew(),
+        &mut || watching_alone.goes_on(),
     );
-    watching_alone.renew();
     // Worth saying and not worth holding a decision over: the figure this round decides
     // on is the one that was just read, and the next round reads its own.
     if let Some(not_kept) = &report.not_kept {
@@ -673,7 +736,7 @@ fn act(
     recently: &mut Recently,
     cooled: &Cooled<'_>,
     probed: &Result<probe::Installed>,
-    watching_alone: &mut crate::lock::Held<'_>,
+    watching_alone: &mut Watch<'_>,
 ) -> Result<Outcome> {
     let scope = watching.scope.clone();
     let outgoing = watching.account.clone();
@@ -691,18 +754,16 @@ fn act(
     };
 
     // The burst, and the longest thing a round does: one read per candidate, each
-    // bounded only at thirty seconds, over as many as the Scope holds. The watch is
-    // renewed either side of it.
-    watching_alone.renew();
+    // bounded only at thirty seconds, over as many as the Scope holds. It takes the
+    // watch rather than a renewal, so it ends where the watch does.
     let read = observe::refresh(
         host,
         perch,
         registry,
         &addresses_of(&considered(registry, watching, cooled, &idle)),
         probed,
-        &mut || watching_alone.renew(),
+        &mut || watching_alone.goes_on(),
     );
-    watching_alone.renew();
     // What could not be read, carried into the sentence that says where the watcher
     // went: an Account ranked on a figure from an hour ago is the one thing that can
     // make this Switch land somewhere worse than it left.
@@ -734,28 +795,11 @@ fn act(
         Err(error) => return Err(error),
     };
 
-    // One call, with the ordering inside it: `switch_to` puts `Checked { switched_at }`
-    // in the same save as the Switch it paces.
-    watching_alone.renew();
     // The last thing asked before the one irreversible thing a round does. The burst
     // above is bounded by nothing but the network, so it can outlast the watch — and a
     // Switch made after that is the second Watcher deciding beside the first.
-    if !watching_alone.still_held() {
-        return Ok(Outcome::HandedOver {
-            why: "the watch was taken over while this round was reading the \
-                  candidates, so nothing was switched: whoever holds it now is \
-                  watching this machine."
-                .to_string(),
-        });
-    }
-    // The same guard for the other way a round stops being the one to act: the
-    // wait at the bottom of the loop is too late, thirty seconds after a stop.
-    if host.asked_to_stop() {
-        return Ok(Outcome::Stopped {
-            why: "this Watcher was asked to stop while the round was reading \
-                  the candidates, so nothing was switched."
-                .to_string(),
-        });
+    if let Err(lost) = watching_alone.goes_on() {
+        return Ok(nothing_was_switched(lost));
     }
     // One instant for both arrangements, and the beginning rather than the end, because
     // that is the one already written down.
@@ -769,7 +813,7 @@ fn act(
         Some(&outgoing),
         watcher.reason(&scope, acted_at),
     );
-    watching_alone.renew();
+    watching_alone.kept_up();
 
     // Only a Switch that happened starts a cooldown, and a Switch that moved and then
     // *failed* is one — which is why the question is asked of both ways out rather than

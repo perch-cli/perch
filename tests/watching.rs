@@ -9,6 +9,14 @@
 //! that was just read, and no Switch lands on an Account nearly as full as the one
 //! being left (ADR a-watcher-knob-is-arithmetic).
 
+// Every path compared here comes out of the fake's effect log, spelled as the
+// code under test wrote it: filtering that log by prefix asks which effects
+// landed under a directory, and never whether a path on a machine is inside one.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the fake's effect log, filtered by the prefix it was written under"
+)]
+
 mod common;
 
 use chrono::{DateTime, Duration, Utc};

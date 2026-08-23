@@ -348,13 +348,9 @@ fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
 
 /// Refuses to write the Export inside the directory this Purge is about to delete.
 ///
-/// Only the absolute case, which is the one somebody types here. Both sides
-/// through every link, because `starts_with` matches components and a linked
-/// spelling of one directory shares none of them.
+/// Only the absolute case, which is the one somebody types here.
 fn refuse_a_path_the_purge_would_take(host: &dyn Host, path: &Path, home: &Path) -> Result<()> {
-    if !crate::host::through_every_link(host, path)
-        .starts_with(crate::host::through_every_link(host, home))
-    {
+    if !crate::host::is_inside(host, path, home) {
         return Ok(());
     }
     Err(PerchError::Invalid(format!(

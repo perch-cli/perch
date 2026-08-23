@@ -1292,11 +1292,7 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
     let told = crate::probe::default_store(host)?;
     let home = perch_home(host)?;
-    // Both sides resolved through *every* link on the path, not one at the end:
-    // `starts_with` matches components, so a `CLAUDE_CONFIG_DIR` reaching a
-    // Profile by another name is a different string and slips past.
-    let told_at = crate::host::through_every_link(host, &told.config_dir);
-    if told_at.starts_with(crate::host::through_every_link(host, &home)) {
+    if crate::host::is_inside(host, &told.config_dir, &home) {
         return crate::probe::default_profile_store(host);
     }
     Ok(told)
@@ -2479,7 +2475,11 @@ mod tests {
         let store = the_default_profile(&host).expect("a Default Profile is known");
 
         assert!(
-            !store.config_dir.starts_with("/Users/someone/claude"),
+            !crate::host::is_inside(
+                &host,
+                &store.config_dir,
+                std::path::Path::new("/Users/someone/claude")
+            ),
             "a Profile is never the Default Profile, whichever name reaches it: {:?}",
             store.config_dir
         );

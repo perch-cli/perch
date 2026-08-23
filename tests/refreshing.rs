@@ -7,6 +7,14 @@
 //! of a Credential something else is holding (ADR a-profile-is-live-by-evidence), and
 //! no figure recorded against an Account whose Credential it was not.
 
+// Every path compared here comes out of the fake's effect log, spelled as the
+// code under test wrote it: filtering that log by prefix asks which effects
+// landed under a directory, and never whether a path on a machine is inside one.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the fake's effect log, filtered by the prefix it was written under"
+)]
+
 mod common;
 
 use std::path::PathBuf;

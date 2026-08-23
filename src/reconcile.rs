@@ -48,9 +48,9 @@ pub fn reconcile(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
     // Both sides resolved, which is what *is this inside that* takes: a link
     // above the Profile makes one directory with two spellings, and a share
     // through the other one links the Profile into a directory holding it.
-    let here = host::through_every_link(host, into);
+    let here = host::settled(host, into);
     for entry in crossing(host, shared)? {
-        let holds_the_profile = here.starts_with(host::through_every_link(host, &entry));
+        let holds_the_profile = here.is_inside(&host::settled(host, &entry));
         let Some(name) = entry.file_name().filter(|_| !holds_the_profile) else {
             continue;
         };
@@ -197,7 +197,15 @@ fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         let Ok(Some(points_at)) = host.link_target(&at) else {
             continue;
         };
-        if !plain(&points_at).starts_with(plain(shared)) {
+        // The target as it was recorded, unresolved: this asks what the link
+        // says rather than where it lands, and a target that is gone — which is
+        // the case this sweep is for — resolves to nothing at all.
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "what a link records, which is text and not a place"
+        )]
+        let into_the_shared_state = plain(&points_at).starts_with(plain(shared));
+        if !into_the_shared_state {
             continue;
         }
         // A link at a held-back name goes whether or not its target is there:
