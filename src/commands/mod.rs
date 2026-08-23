@@ -63,7 +63,7 @@ pub fn say_json(out: &mut dyn Write, document: &serde_json::Value) -> Result<()>
 /// is typed where the question ends: a question the terminal has not been shown
 /// yet is a command that looks hung.
 pub fn ask(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Option<String>> {
-    write!(out, "{question}").map_err(write_failed)?;
+    write!(out, "{}", crate::host::Shown::of(question)).map_err(write_failed)?;
     out.flush().map_err(write_failed)?;
     host.read_line()
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))
@@ -115,7 +115,7 @@ pub fn ask_secret(
     out: &mut dyn Write,
     question: &str,
 ) -> Result<Option<Zeroizing<String>>> {
-    write!(out, "{question}").map_err(write_failed)?;
+    write!(out, "{}", crate::host::Shown::of(question)).map_err(write_failed)?;
     out.flush().map_err(write_failed)?;
     let answered = host
         .read_secret()
@@ -260,6 +260,16 @@ pub fn credentials(count: usize) -> String {
     counted(count, "Credential")
 }
 
+pub fn groups(count: usize) -> String {
+    counted(count, "Group")
+}
+
+/// Not a noun of Perch's: what `perch config` says about a command line it was
+/// given too many of.
+pub fn words(count: usize) -> String {
+    counted(count, "word")
+}
+
 fn counted(count: usize, noun: &str) -> String {
     match count {
         1 => format!("1 {noun}"),
@@ -351,6 +361,34 @@ pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
 mod tests {
     use super::*;
     use crate::registry::Registry;
+
+    /// A prompt draws a value nobody chose: `perch remove` puts the address in
+    /// the question, and an address is Claude Code's rather than anybody's
+    /// choice. `registry::validate` lets a terminal-obeyed character through on
+    /// the stated grounds that it is drawn through `Shown`.
+    #[test]
+    fn a_question_draws_what_it_names_as_stripped_as_a_listing_does() {
+        let host = crate::host::FakeHost::new().with_answers(&["n"]);
+        let mut out = Vec::new();
+
+        let answered = ask(
+            &host,
+            &mut out,
+            "Remove safe@x.com\u{1b}[2K\rReally other@x.com? [y/N]: ",
+        )
+        .expect("the question is put");
+
+        assert_eq!(answered.as_deref(), Some("n"));
+        let drawn = String::from_utf8(out).expect("what a terminal is shown");
+        assert!(
+            !drawn.contains('\u{1b}') && !drawn.contains('\r'),
+            "nothing the terminal acts on survives the question: {drawn:?}"
+        );
+        assert!(
+            drawn.contains("safe@x.com") && drawn.contains("other@x.com"),
+            "and every character it may draw is still there: {drawn:?}"
+        );
+    }
 
     /// The way out turns on what is held, and both commands that meet this state
     /// read the same sentence: a login is the answer only where there is nothing

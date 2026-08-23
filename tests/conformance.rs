@@ -184,6 +184,31 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a link under a directory that is not there is refused",
+        asserts: |host, root, adapter, _now| {
+            let real = root.join("a-target");
+            host.create_file_with_mode(&real, "what it holds", PRIVATE_FILE_MODE)
+                .expect("the file is written");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            let nowhere = root.join("not-a-directory").join("the-link");
+
+            let refused = host
+                .link(Link::Symbolic, &real, &nowhere)
+                .expect_err("a link is made inside a directory");
+
+            assert!(
+                matches!(&refused, HostError::Io(err) if err.kind() == std::io::ErrorKind::NotFound),
+                "{adapter}: `symlink(2)` answers ENOENT, and so does this: {refused:?}"
+            );
+            assert!(
+                !host.path_exists(nowhere.parent().expect("the link has a parent")),
+                "{adapter}: and the directory was not invented on the way"
+            );
+        },
+    },
+    Case {
         named: "a read follows a symbolic link whose target is relative",
         asserts: |host, root, adapter, _now| {
             let real = root.join("beside-the-link");

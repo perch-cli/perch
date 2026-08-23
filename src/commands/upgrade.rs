@@ -54,6 +54,9 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     if matches!(channel, Channel::Homebrew { .. }) {
         refuse_a_release_homebrew_cannot_take(&args.release)?;
     }
+    if matches!(channel, Channel::Npm) {
+        refuse_npm_replacing_a_running_perch(host, &args.release)?;
+    }
 
     let wanted = match &args.release {
         Some(typed) => Some(upgrade::version_typed(typed)?),
@@ -88,20 +91,6 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
             // had the leading `v`, so `v0.2.0` is a package nobody published.
             let named = args.release.as_ref().and(wanted.as_deref());
             let (npm, npm_args) = upgrade::npm_command(host, named)?;
-            // npm would be replacing `perch.exe` while it is the running
-            // process, and Windows holds that file open — so the command is
-            // printed, which works from a shell where Perch is not running.
-            if host.platform() == Platform::Windows {
-                // Nothing done rather than done: `NothingToDo` is already the
-                // code for a request understood and a machine left as it was.
-                return Err(PerchError::NothingToDo(format!(
-                    "This Installation came from npm, and npm cannot replace \
-                     `perch.exe` while it is running. Nothing was upgraded.\n\
-                     Run this from a terminal where Perch is not running:\n\
-                     \n    {}\n",
-                    crate::host::as_typed(&npm, &npm_args)
-                )));
-            }
             hand_it_over(host, &npm, &npm_args, out)
         }
         // The one Channel with nothing to hand the work to, so its Release is
@@ -285,6 +274,26 @@ fn agree_to_going_back(
             "Nothing was installed.".to_string(),
         )),
     }
+}
+
+/// npm would be replacing `perch.exe` while it is the running process, and
+/// Windows holds that file open — so the command is printed, to be run from a
+/// shell where Perch is not. Spelled from the literals rather than from a
+/// resolved `npm`: whether one is on PATH does not bear on this.
+fn refuse_npm_replacing_a_running_perch(host: &dyn Host, release: &Option<String>) -> Result<()> {
+    if host.platform() != Platform::Windows {
+        return Ok(());
+    }
+    let named = release.as_deref().map(upgrade::version_typed).transpose()?;
+    // Nothing done rather than done: `NothingToDo` is already the code for a
+    // request understood and a machine left as it was.
+    Err(PerchError::NothingToDo(format!(
+        "This Installation came from npm, and npm cannot replace `perch.exe` \
+         while it is running. Nothing was upgraded.\n\
+         Run this from a terminal where Perch is not running:\n\
+         \n    npm {}\n",
+        upgrade::npm_arguments(named.as_deref()).join(" ")
+    )))
 }
 
 /// Homebrew installs what the formula says, so `--release` there is a request

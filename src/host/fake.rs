@@ -1107,7 +1107,9 @@ impl FakeHost {
     fn resolved(&self, path: &Path) -> Option<PathBuf> {
         const FOLLOWED: usize = 8;
 
-        let mut at = path.to_path_buf();
+        // A real filesystem walks `..` rather than storing it, so a path
+        // carrying one names the place it lands on here too.
+        let mut at = crate::host::flattened(path);
         for _ in 0..FOLLOWED {
             if self.fs.files.borrow().contains_key(&at) || self.fs.dirs.borrow().contains(&at) {
                 return Some(at);
@@ -1119,7 +1121,7 @@ impl FakeHost {
                 .get(&at)
                 .map(|(_, target)| target.clone())
             {
-                at = crate::host::against(&at, target);
+                at = crate::host::flattened(&crate::host::against(&at, target));
                 continue;
             }
             // Nothing of that name, which does not mean nothing is there: a
@@ -1833,6 +1835,20 @@ impl port::Links for FakeHost {
             return Err(HostError::AlreadyExists {
                 path: at.to_path_buf(),
             });
+        }
+        // A link is made inside a directory, and `symlink(2)` answers `ENOENT`
+        // where there is none. Refused rather than invented, or a caller that
+        // forgot to make the Profile first passes here and fails on a machine.
+        if let Some(parent) = at.parent().filter(|at| !at.as_os_str().is_empty())
+            && !self
+                .resolved(parent)
+                .is_some_and(|at| self.fs.dirs.borrow().contains(&at))
+        {
+            // `Io` with a `NotFound` kind, which is what `RealHost` hands back:
+            // `symlink` reports through `std::io::Error` and nothing narrows it.
+            return Err(HostError::Io(std::io::Error::from(
+                std::io::ErrorKind::NotFound,
+            )));
         }
 
         let windows = self.platform() == Platform::Windows;

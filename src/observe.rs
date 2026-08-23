@@ -44,6 +44,10 @@ pub enum Outcome {
         why: Quarantine,
         detail: Option<String>,
     },
+    /// The watch went while this reading was in the middle of one. Not a failure
+    /// and not a refusal: nothing was read because nothing more was allowed to
+    /// be, and the round says it stopped rather than pacing a Back-off.
+    Stopped(Lost),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +109,9 @@ impl Attempt {
                 Refused::Throttled
             )),
             Outcome::Failed { why, .. } => Some(format!("{}: {why}", self.named)),
+            // `refresh` breaks on this rather than recording it, so no `Attempt`
+            // carries one; the arm is here because the type allows it.
+            Outcome::Stopped(_) => None,
             // The Account as the user names it, and the raw address as the Target to
             // type: `perch relogin someone@example.com (as `work`)` is not a command.
             Outcome::Quarantined { why, detail } => {
@@ -140,6 +147,7 @@ impl Attempt {
             Outcome::Quarantined { why, detail } => {
                 ("quarantined", Some(why.as_str()), detail.clone())
             }
+            Outcome::Stopped(_) => ("stopped", None, None),
         };
         json!({
             "email": self.email,
@@ -237,7 +245,21 @@ pub fn refresh(
         let Some(account) = registry.account(email).cloned() else {
             continue;
         };
-        let outcome = match observe(host, perch, registry, &account, installed.as_ref()) {
+        let outcome = match observe(
+            host,
+            perch,
+            registry,
+            &account,
+            installed.as_ref(),
+            still_ours,
+        ) {
+            // The same answer as the ask at the top of the turn, reached from
+            // inside one: nothing is recorded against the Account, because the
+            // round stopped rather than learning anything about it.
+            Err(Outcome::Stopped(lost)) => {
+                report.stopped = Some(lost);
+                break;
+            }
             Ok(windows) => {
                 keep(registry, email, windows, host.now());
                 anything_to_keep = true;
@@ -273,6 +295,7 @@ fn observe(
     registry: &Registry,
     account: &Account,
     installed: std::result::Result<&Installed, &PerchError>,
+    still_ours: &mut dyn FnMut() -> std::result::Result<(), Lost>,
 ) -> Step<QuotaWindows> {
     // An Account already known to be beyond repair is not asked again: nothing would be
     // recorded against it, so the read would spend an allowance that does not refill
@@ -294,8 +317,8 @@ fn observe(
         }
     };
 
-    let asking =
-        usable_token(host, perch, asked, installed).map_err(theirs(Because::ItSaysItRanOut))?;
+    let asking = usable_token(host, perch, asked, installed, still_ours)
+        .map_err(theirs(Because::ItSaysItRanOut))?;
     match read_off(host, perch, &asking.token, account) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
@@ -314,8 +337,15 @@ fn observe(
     // and only off a rejection.
     refuse_if_live(host, asked, installed, Because::AnthropicRefusedIt)
         .map_err(theirs(Because::AnthropicRefusedIt))?;
-    let renewed = renew_under_the_lock(host, perch, asked, installed, Because::AnthropicRefusedIt)
-        .map_err(theirs(Because::AnthropicRefusedIt))?;
+    let renewed = renew_under_the_lock(
+        host,
+        perch,
+        asked,
+        installed,
+        Because::AnthropicRefusedIt,
+        still_ours,
+    )
+    .map_err(theirs(Because::AnthropicRefusedIt))?;
     read_off(host, perch, &renewed.token, account).map_err(Turned::settled)
 }
 
@@ -403,7 +433,7 @@ fn only_off_a_credential_that_is_theirs(
                 why.because(),
                 account.email(),
             ),
-            spent: because.spent(),
+            spent: because.spent() || why.reached_anthropic(),
         };
     }
 
@@ -422,7 +452,7 @@ fn only_off_a_credential_that_is_theirs(
             account.email(),
             account.email(),
         ),
-        spent: because.spent(),
+        spent: because.spent() || why.reached_anthropic(),
     }
 }
 
@@ -564,6 +594,7 @@ fn usable_token(
     perch: &mut Held<'_>,
     asked: &Asked,
     installed: &Installed,
+    still_ours: &mut dyn FnMut() -> std::result::Result<(), Lost>,
 ) -> Step<Asking> {
     let credential = credential_in(host, asked, installed, Because::ItSaysItRanOut)?;
     if credential.usable_at(host.now()) {
@@ -577,7 +608,14 @@ fn usable_token(
     // renewed says so without queuing, and again under them, where the answer is the
     // one that counts.
     refuse_if_live(host, asked, installed, Because::ItSaysItRanOut)?;
-    renew_under_the_lock(host, perch, asked, installed, Because::ItSaysItRanOut)
+    renew_under_the_lock(
+        host,
+        perch,
+        asked,
+        installed,
+        Because::ItSaysItRanOut,
+        still_ours,
+    )
 }
 
 /// Refuses to renew a Credential something else is holding.
@@ -654,6 +692,7 @@ fn renew_under_the_lock(
     asked: &Asked,
     installed: &Installed,
     because: Because,
+    still_ours: &mut dyn FnMut() -> std::result::Result<(), Lost>,
 ) -> Step<Asking> {
     // A shared Profile is refused here rather than at the two callers, because this is
     // the one door every Renewal goes through. For this Account alone: the others are
@@ -702,6 +741,10 @@ fn renew_under_the_lock(
                 detail: None,
             })?;
 
+        // The last question before the step nothing can undo: Anthropic retires the
+        // old refresh token as it Rotates, so a kill between the reply and
+        // `store_it` leaves the new one in freed heap and the Account bricked.
+        still_ours().map_err(Outcome::Stopped)?;
         // Renewed before the round trip: the config-file lock goes stale in ten seconds
         // and one request can take longer. Both holds, because losing Perch's throws
         // away every figure found.
@@ -912,6 +955,77 @@ mod tests {
 
         assert_eq!(report.attempts.len(), 3, "one turn each");
         assert_eq!(renewals, 3, "and one renewal each");
+    }
+
+    /// The ask at the top of a turn is not the last chance to answer it. A turn
+    /// is up to six requests at thirty seconds, and `store_it` follows a Rotation
+    /// that has already retired the refresh token Perch holds — so a stop
+    /// answered only at the edges is one answered after the point of no return.
+    #[test]
+    fn a_watcher_asked_to_stop_mid_turn_never_reaches_the_renewal() {
+        const EXPIRED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spent","refreshToken":"sk-ant-ort01-spent","expiresAt":1}}"#;
+
+        let host = crate::host::FakeHost::new()
+            .with_env("HOME", "/Users/someone")
+            .with_env("USER", "someone");
+        let mut registry = Registry::default();
+        let email = "a@example.com";
+        registry.upsert(crate::cycle::tests::account(email, vec![]));
+        let store = registry
+            .account(email)
+            .expect("it was just added")
+            .store(&host)
+            .expect("home is known");
+        let [primary, _] = crate::credentials::stores_for(&host, &store);
+        primary.write(&host, EXPIRED).expect("the store takes it");
+
+        let mut perch = registry::lock(&host).expect("nobody holds it");
+        let installed = Ok(crate::probe::Installed::unknown("2.1.221"));
+
+        let mut asked = 0;
+        let report = refresh(
+            &host,
+            &mut perch,
+            &mut registry,
+            &[email.to_string()],
+            &installed,
+            // The turn is entered, and the stop lands inside it.
+            &mut || {
+                asked += 1;
+                match asked {
+                    1 => Ok(()),
+                    _ => Err(Lost::Stopped),
+                }
+            },
+        );
+
+        assert!(
+            host.sent_to(crate::anthropic::TOKEN_URL).is_empty(),
+            "no refresh token was spent by a round that had been told to stop"
+        );
+        assert_eq!(
+            report.stopped,
+            Some(Lost::Stopped),
+            "and the round says it stopped rather than reporting a failed reading"
+        );
+        assert!(
+            report.attempts.is_empty(),
+            "with nothing recorded against the Account: {:?}",
+            report.attempts
+        );
+    }
+
+    /// `refresh` breaks on a stop rather than recording it, so no `Attempt` ever
+    /// carries one — the arms exist because the type allows it, and this is what
+    /// they would say. A stop is not a line about an Account and not a reason a
+    /// figure is missing: the round reports it through `Report::stopped`.
+    #[test]
+    fn a_stop_is_reported_by_the_round_rather_than_against_an_account() {
+        let stopped = attempt("someone@example.com", Outcome::Stopped(Lost::Stopped));
+
+        assert_eq!(stopped.note(), None, "nothing to say about the Account");
+        assert_eq!(stopped.document()["outcome"], "stopped");
+        assert_eq!(stopped.document()["reason"], serde_json::Value::Null);
     }
 
     /// The other half of the same beat: the caller answers whether the burst may

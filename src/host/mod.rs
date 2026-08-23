@@ -9,7 +9,7 @@
 //! the machine touches several of its surfaces at once — the port is 43 methods
 //! wide because the machine is (ADR the-port-fits-the-machine).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 
@@ -330,8 +330,9 @@ pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
 
 /// Whether a terminal acts on a character rather than drawing it. `is_control`
 /// is `Cc` alone, which leaves the formatting characters out: `U+202E` reverses
-/// the rest of the line it lands in, and a zero-width one hides the whole
-/// difference between two names.
+/// the rest of the line it lands in, a zero-width one hides the whole
+/// difference between two names, and the tags block spells hidden text in
+/// characters that mirror ASCII and draw as nothing.
 pub fn is_unshowable(c: char) -> bool {
     c.is_control()
         || matches!(c,
@@ -339,7 +340,9 @@ pub fn is_unshowable(c: char) -> bool {
             | '\u{200B}'..='\u{200F}'
             | '\u{202A}'..='\u{202E}'
             | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206F}')
+            | '\u{2066}'..='\u{206F}'
+            | '\u{180E}'
+            | '\u{E0000}'..='\u{E007F}')
 }
 
 /// Text on its way to a terminal, with everything a terminal would act on
@@ -800,14 +803,42 @@ pub(crate) struct Settled(Option<PathBuf>);
 pub(crate) fn settled(host: &dyn Host, path: &Path) -> Settled {
     const FOLLOWED: usize = 8;
 
-    let mut at = path.to_path_buf();
+    let mut at = flattened(path);
     for _ in 0..FOLLOWED {
         match deepest_link_on(host, &at) {
-            Some(followed) => at = followed,
+            Some(followed) => at = flattened(&followed),
             None => return Settled(Some(at)),
         }
     }
     Settled(None)
+}
+
+/// `.` and `..` taken out, so what is left is a path of names: the walk below
+/// ends at a `..`, leaving links above it unfollowed and the components either
+/// side compared as spelling. Lexical, so `link/..` is where the link sits,
+/// which is what a shell answers and what somebody typing a path means.
+pub(crate) fn flattened(path: &Path) -> PathBuf {
+    let mut kept: Vec<Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match kept.last() {
+                Some(Component::Normal(_)) => drop(kept.pop()),
+                // `/..` is `/`, and a relative path's leading `..` is part of
+                // where it points rather than something to cancel.
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => kept.push(component),
+            },
+            named => kept.push(named),
+        }
+    }
+    let flat: PathBuf = kept.iter().collect();
+    // A path that cancels itself out is this directory, which is a name; the
+    // empty path is not one, and `deepest_link_on` would read it as the root.
+    if flat.as_os_str().is_empty() && !path.as_os_str().is_empty() {
+        return PathBuf::from(".");
+    }
+    flat
 }
 
 impl Settled {
@@ -1003,6 +1034,94 @@ mod tests {
         assert!(
             looping.is_inside(&settled(&host, Path::new("/somewhere/else"))),
             "and what it could not resolve is not ruled out of anywhere"
+        );
+    }
+
+    /// The tags block is the standard carrier for invisible text: `U+E0020`
+    /// upward mirror ASCII, draw as nothing, and are `Cf` rather than `Cc`, so
+    /// `is_control` passes over every one. An address is read out of a file
+    /// Perch does not own, and this is the rule that refuses one.
+    #[test]
+    fn a_character_that_draws_as_nothing_is_unshowable_however_it_is_spelled() {
+        for hidden in [
+            '\u{E0001}',
+            '\u{E0020}',
+            '\u{E0041}',
+            '\u{E007F}',
+            '\u{180E}',
+        ] {
+            assert!(
+                is_unshowable(hidden),
+                "U+{:04X} draws as nothing and hides the difference between two names",
+                hidden as u32
+            );
+        }
+        assert_eq!(
+            Shown::of("some\u{E0041}one@example.com").to_string(),
+            "someone@example.com",
+            "so a listing draws the address without it"
+        );
+        for ordinary in ['a', '@', '.', 'é', '中'] {
+            assert!(!is_unshowable(ordinary), "{ordinary} is drawn");
+        }
+    }
+
+    /// A `..` with nothing ordinary in front of it to cancel, which is where the
+    /// answer stops being "drop the component before". `/..` is the root, a
+    /// leading one on a relative path is part of where it points, and a path
+    /// that cancels itself out entirely is this directory rather than no path.
+    #[test]
+    fn a_path_doubling_back_past_its_own_start_keeps_what_it_cannot_cancel() {
+        for (given, want) in [
+            ("/a/b/../c", "/a/c"),
+            ("/..", "/"),
+            ("/../..", "/"),
+            ("../a", "../a"),
+            ("a/../..", ".."),
+            ("a/b/..", "a"),
+            ("a/..", "."),
+            ("./a", "a"),
+        ] {
+            assert_eq!(flattened(Path::new(given)), PathBuf::from(want), "{given}");
+        }
+    }
+
+    /// A `..` is not a name, so `Path::file_name` answers `None` on one and the
+    /// walk stopped there — leaving links above it unfollowed and the rest to be
+    /// compared as spelling. Both directions are wrong, and the Purge reaches
+    /// both: it writes the Export at a path a person types at a prompt.
+    #[test]
+    fn a_path_that_doubles_back_is_resolved_before_it_is_placed() {
+        let host = FakeHost::new().with_link(
+            Link::Symbolic,
+            "/Users/someone/backups",
+            "/Users/someone/.config/perch",
+        );
+        let home = Path::new("/Users/someone/.config/perch");
+
+        assert!(
+            is_inside(
+                &host,
+                Path::new("/Users/someone/Documents/../.config/perch/backup.age"),
+                home,
+            ),
+            "doubling back into the directory lands in it"
+        );
+        assert!(
+            !is_inside(
+                &host,
+                Path::new("/Users/someone/.config/perch/profiles/../../../x.age"),
+                home,
+            ),
+            "and doubling back out of it does not"
+        );
+        assert!(
+            is_inside(
+                &host,
+                Path::new("/Users/someone/Documents/../backups/perch.age"),
+                home,
+            ),
+            "a link past the `..` is followed rather than abandoned at it"
         );
     }
 

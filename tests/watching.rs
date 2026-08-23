@@ -597,6 +597,45 @@ fn a_credential_with_nothing_left_to_ask_with_does_not_pace_the_loop_down() {
     );
 }
 
+/// The way out `Because` cannot answer for. The stored token says it has run
+/// out, so a Renewal goes to the token endpoint — and Anthropic refuses the
+/// refresh token. Why the Renewal was *wanted* is what `Because` records; what
+/// paces the Back-off is whether a request went out, and here one did.
+#[test]
+fn a_renewal_anthropic_refused_paces_the_loop_down() {
+    // The body OAuth gives a retired refresh token.
+    const RETIRED: &str = r#"{"error":"invalid_grant"}"#;
+
+    let host = answering(watched(), SPARE_TOKEN, SECOND_EMAIL, &[5.0])
+        .with_reply(TOKEN_URL, 401, RETIRED)
+        .with_interrupt_after(4);
+    // Expired, and with a refresh token to spend on a Renewal.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    // Naming somebody else, so the Quarantine is not recorded against the
+    // Account and every round reaches the token endpoint again.
+    host.write_private_file(
+        std::path::Path::new("/Users/someone/.claude.json"),
+        SECOND_IDENTITY_FILE,
+    )
+    .expect("the identity file is written");
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+    host.forget_effects();
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    assert!(
+        !host.sent_to(TOKEN_URL).is_empty(),
+        "the round did ask Anthropic to renew: {printed}"
+    );
+    assert_ne!(
+        waits(&host),
+        vec![150_000; 4],
+        "so the rounds that spent one apiece are paced rather than \
+         hitting the token endpoint on the ordinary beat for ever: {printed}"
+    );
+}
+
 /// The mirror, and the half a shared constant got wrong: the same refusal is
 /// reached again *after* a reading has gone out and Anthropic has turned a live
 /// token away. That round spent, so the Back-off paces it and the sentence says

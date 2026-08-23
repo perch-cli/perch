@@ -419,6 +419,46 @@ fn an_export_path_that_reaches_perchs_home_through_a_link_is_refused_too() {
     }
 }
 
+/// A `..` was the third spelling of the same place, and the walk that follows
+/// links stopped at it: a path typed at this prompt could double back into the
+/// home the Purge is about to delete, and be judged outside it.
+#[test]
+fn an_export_that_doubles_back_into_perchs_home_is_refused_too() {
+    for typed in [
+        // Out of a sibling directory and back in.
+        "/Users/someone/Documents/../.config/perch/backup.age",
+        // The same, reaching the home by the name it is linked to.
+        "/Users/someone/Documents/../backups/backup.age",
+    ] {
+        let host = a_machine_to_give_back()
+            .with_link(
+                perch::host::Link::Symbolic,
+                "/Users/someone/backups",
+                PERCH_HOME,
+            )
+            .with_file("/Users/someone/backups/.keep", "")
+            .with_answers(&["y", typed, "purge"])
+            .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+        let (outcome, printed) = run_purge(&host);
+
+        let refused = outcome.expect_err("the Export would go with the home");
+        // The guard's own refusal rather than any failure to write: every
+        // export error carries "Nothing was purged", so the code and the named
+        // directory are what tell the two apart.
+        assert_eq!(refused.exit_code(), EXIT_INVALID, "{typed}: {refused}");
+        assert!(
+            refused.to_string().contains(&perch_home_as_written(&host)),
+            "{typed}: it names Perch's own home: {refused}"
+        );
+        assert_eq!(
+            registry_on(&host).map(|registry| registry.accounts.len()),
+            Some(3),
+            "{typed}: and every Account is still here: {printed}"
+        );
+    }
+}
+
 /// The relative half of the same rule. A bare filename is read as a file beside
 /// the current directory, and where that directory is inside Perch's home the
 /// Export lands in what the Purge deletes moments later — with the report saying

@@ -190,7 +190,13 @@ fn read_the_credential(
     {
         return Ok(Some(credential));
     }
-    read_from(host, &account.store(host)?, account)
+    // An address no Profile could be named after has no store to read, and it
+    // reaches the registry only by hand. `perch holdings purge` takes such an
+    // Account out and offers an Export on the way, so this must not stop either.
+    let Ok(store) = account.store(host) else {
+        return Ok(None);
+    };
+    read_from(host, &store, account)
 }
 
 /// The Default Profile, where what is live in it is this Account's Credential.
@@ -634,6 +640,25 @@ mod tests {
             "nothing in the file is readable without the passphrase"
         );
         assert_eq!(unseal(&sealed, PASSPHRASE).expect("it opens"), export);
+    }
+
+    /// An address no Profile could be named after has no store, and a Purge is
+    /// what takes one back out — after offering an Export first.
+    #[test]
+    fn an_address_no_profile_could_be_named_after_does_not_stop_a_gather() {
+        let host = crate::host::FakeHost::new();
+        let mut registry = crate::registry::Registry::default();
+        registry.upsert(crate::cycle::tests::account("one@example.com", vec![]));
+        registry.upsert(crate::cycle::tests::account("@", vec![]));
+
+        let gathered = gather(&host, &registry).expect("`@` names no store to read");
+
+        assert_eq!(gathered.accounts(), 2, "both travel in the registry");
+        assert!(
+            gathered.without_a_credential().contains(&"@"),
+            "and the one with no store to read is reported as holding none: {:?}",
+            gathered.without_a_credential()
+        );
     }
 
     /// Asserted through the ceiling, because that is the one place `age` will

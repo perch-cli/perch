@@ -16,7 +16,8 @@ sidebar:
 | `perch switch [<group>]` | Cycle to the best Account in a Group |
 | `perch watcher run` | Cycle automatically when the Account you are on runs low |
 | `perch watcher check` | take one round for cron or a systemd timer, saying what it decided in the exit code |
-| `perch watcher install\|uninstall\|status [--json]` | have the machine run the watcher for you, starting at login |
+| `perch watcher install\|uninstall` | have the machine run the watcher for you, starting at login, or take that unit back |
+| `perch watcher status [--json]` | whether a Service is installed, whether it is running, and whether a Watcher holds the lock right now |
 | `perch run <target> [-- <command>]` | launch Claude Code as an Account, in this terminal alone |
 | `perch group add\|move\|rename\|remove\|list` | declare Groups and move Accounts between them |
 | `perch config set\|get` | the rules Perch chooses Accounts by, one Scope at a time |

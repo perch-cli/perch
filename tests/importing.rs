@@ -324,6 +324,42 @@ fn an_import_onto_a_logged_in_machine_adopts_nothing() {
     assert_eq!(*registry.active(), Active::Nobody);
 }
 
+/// A Group outlives the Accounts in it: `registry::forget` takes the Account and
+/// the Alias and leaves the Group declared, because a Group is a declaration
+/// rather than a summary of who is in it. So a machine can hold no Account and
+/// still hold Groups and the Settings on them, which exist nowhere else.
+#[test]
+fn a_machine_holding_no_account_but_a_declared_group_is_refused_too() {
+    let sealed = an_export_of_a_whole_machine();
+    let host = machine_with_two_accounts()
+        .with_file(AT, &sealed)
+        .with_secrets(&[PASSPHRASE]);
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL] {
+        run_remove_with(
+            &host,
+            perch::commands::remove::RemoveArgs {
+                target: email.to_string(),
+                yes: true,
+            },
+        )
+        .0
+        .expect("the Account is given up");
+    }
+    let before = registry_of(&host);
+    assert!(before.accounts.is_empty(), "no Account is left");
+    assert!(before.groups.contains_key("work"), "and the Group still is");
+
+    let (outcome, printed) = run_import(&host, AT);
+
+    outcome.expect_err("the Group and its Settings would be replaced wholesale");
+    assert_eq!(
+        registry_of(&host),
+        before,
+        "and the machine is exactly as it was: {printed}"
+    );
+}
+
 #[test]
 fn a_machine_that_already_holds_an_account_is_refused_and_told_about_purge() {
     let sealed = an_export_of_a_whole_machine();

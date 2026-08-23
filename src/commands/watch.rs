@@ -709,6 +709,9 @@ fn refused_the_reading(attempts: &[Attempt]) -> Option<Refusal> {
             why.because(),
             crate::registry::how_to_repair(&attempt.email),
         ))),
+        // The round stopped rather than being refused, and `refresh` reports that
+        // through `Report::stopped` rather than as an attempt against an Account.
+        observe::Outcome::Stopped(_) => None,
     }
 }
 
