@@ -240,6 +240,28 @@ pub fn a_store_that_held_nothing(host: &dyn Host) -> &'static str {
     }
 }
 
+/// Why there is no active Account, in the terms the way out depends on: holding
+/// nothing, a login is the way in; holding Accounts, Perch has merely been left
+/// on nobody and naming one is what `perch switch` is for. `because` is what the
+/// command wanted an active Account for. One function, because two commands meet
+/// this state and only one of them told the difference.
+pub fn no_active_account(registry: &crate::registry::Registry, because: &str) -> PerchError {
+    if registry.accounts.is_empty() {
+        return PerchError::NotFound(format!(
+            "Perch holds no Accounts{because}. Run `claude` and log in, then run \
+             Perch again."
+        ));
+    }
+    PerchError::NotFound(format!(
+        "Perch holds no active Account{because}. `perch switch <target>` makes \
+         {} active.",
+        match registry.accounts.len() {
+            1 => "the one it holds".to_string(),
+            held => format!("one of the {held} it holds"),
+        }
+    ))
+}
+
 /// Refuses to act on an Account whose Credential no longer works, in the words of
 /// whichever command was asked; `consequence` is what did not happen and why it
 /// would have been worse than nothing. One function rather than one per command:
@@ -273,4 +295,31 @@ pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
         crate::config::Setting::Interchangeable.as_str(),
         registry.ungrouped.interchangeable
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::Registry;
+
+    /// The way out turns on what is held, and both commands that meet this state
+    /// read the same sentence: a login is the answer only where there is nothing
+    /// to switch to.
+    #[test]
+    fn what_to_do_about_no_active_account_depends_on_what_perch_holds() {
+        let empty = Registry::default();
+        let said = no_active_account(&empty, "").to_string();
+        assert!(said.contains("no Accounts"), "{said}");
+        assert!(said.contains("`claude`"), "{said}");
+
+        let mut held = Registry::default();
+        held.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
+        let said = no_active_account(&held, ", so there is no Group to Cycle within").to_string();
+        assert!(said.contains("no Group to Cycle within"), "{said}");
+        assert!(said.contains("the one it holds"), "{said}");
+        assert!(
+            !said.contains("`claude`"),
+            "a login repairs nothing here: {said}"
+        );
+    }
 }

@@ -146,11 +146,7 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Accou
 /// Group decides where it may look.
 fn leaving(registry: &Registry) -> Result<&Account> {
     registry.active_account().ok_or_else(|| {
-        PerchError::NotFound(
-            "No active Account, so there is no Group to Cycle within. Run \
-             `claude` and log in, then run Perch again."
-                .to_string(),
-        )
+        crate::commands::no_active_account(registry, ", so there is no Group to Cycle within")
     })
 }
 

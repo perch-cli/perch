@@ -14,6 +14,7 @@ mod common;
 use chrono::{DateTime, Duration, Utc};
 use common::*;
 use perch::anthropic::{PROFILE_URL, TOKEN_URL, USAGE_URL};
+use perch::commands::add::AddArgs;
 use perch::error::{EXIT_INVALID, EXIT_NOT_INTERCHANGEABLE};
 use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
@@ -522,6 +523,32 @@ fn a_live_profiles_token_is_never_renewed_to_get_a_figure() {
         "nothing was renewed under a running session"
     );
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
+}
+
+/// A Back-off paces questions nobody is answering. A Renewal refused because a
+/// client is holding the Profile asks nobody anything, so the loop that finds
+/// the session gone must be able to read at once rather than in twenty minutes.
+#[test]
+fn a_hold_that_asked_anthropic_nothing_does_not_pace_the_loop_down() {
+    let host = answering(watched(), SPARE_TOKEN, SECOND_EMAIL, &[5.0])
+        .with_reply_to(PROFILE_URL, ACTIVE_TOKEN, 200, &profile_of(EMAIL))
+        .with_interrupt_after(4);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let host = client_running_against(host, DEFAULT_CONFIG_DIR, 4242);
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "nothing was renewed under a running session: {printed}"
+    );
+    assert_eq!(
+        waits(&host),
+        vec![150_000; 4],
+        "so every round comes back on the ordinary beat: {printed}"
+    );
 }
 
 #[test]
@@ -1643,6 +1670,57 @@ fn a_check_held_settling_a_landing_says_so_on_standard_output() {
     );
 }
 
+/// The same again, inside the burst rather than after it. A `SIGKILL` here runs
+/// no `Drop`, so both locks are left on disk: every other `perch` waits out the
+/// registry's window, and the next login's Service waits out the watch's.
+#[test]
+fn a_watcher_asked_to_stop_reads_no_further_candidates() {
+    // A third Account, so there is a second candidate for the burst to reach —
+    // and its Credential is one that has not run out, or the round stops at a
+    // Renewal rather than at the reads this is about.
+    const THIRD: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-third","refreshToken":"sk-ant-ort01-third","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;
+    let host = watched().with_login(login_producing(THIRD, THIRD_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the third Account is added");
+    move_to_group(&host, THIRD_EMAIL, "work")
+        .0
+        .expect("it joins the Group");
+
+    let host = answering(host, ACTIVE_TOKEN, EMAIL, &[86.0]);
+    let host = answering(host, SPARE_TOKEN, SECOND_EMAIL, &[5.0]);
+    let host = answering(host, THIRD_TOKEN, THIRD_EMAIL, &[5.0]).with_interrupt_after(0);
+    host.forget_effects();
+
+    let (result, printed) = run_watch_once(&host);
+
+    result.expect("being asked to stop is not this Watcher's failure");
+    let asked = asked_by(&host);
+    assert!(
+        asked.contains(&SPARE_TOKEN.to_string()),
+        "the first candidate is read, or an empty report paces a Back-off that \
+         spent nothing: {asked:?}\n{printed}"
+    );
+    assert!(
+        !asked.contains(&THIRD_TOKEN.to_string()),
+        "and the burst stops there rather than spending thirty seconds a \
+         candidate on a decision already not going to be made: {asked:?}\n{printed}"
+    );
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::KeychainSet { .. })),
+        "nothing was switched: {printed}"
+    );
+}
+
 /// A round is bounded by the network rather than by the clock, so the wait at the
 /// bottom of the loop is far too late to answer a stop: a service manager allows
 /// thirty seconds and then sends a signal nothing can handle.
@@ -1664,5 +1742,10 @@ fn a_watcher_asked_to_stop_while_the_candidates_were_read_switches_nothing() {
     assert!(
         printed.contains("asked to stop"),
         "and the round says why it decided nothing: {printed}"
+    );
+    assert!(
+        printed.contains("stopped") && !printed.contains("replaced"),
+        "under the word for what happened: nothing replaced this Watcher, and a \
+         day of these is skimmed by that column: {printed}"
     );
 }

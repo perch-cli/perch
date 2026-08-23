@@ -63,6 +63,7 @@ pub const SECOND_IDENTITY_FILE: &str = r#"{
 /// A third Account, for the cases that need more than two.
 pub const THIRD_EMAIL: &str = "spare@example.com";
 pub const THIRD_CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-third","refreshToken":"sk-ant-ort01-third","expiresAt":1785000000000,"scopes":["user:inference","user:profile"],"subscriptionType":"pro"}}"#;
+pub const THIRD_TOKEN: &str = "sk-ant-oat01-third";
 
 pub const THIRD_IDENTITY_FILE: &str = r#"{
   "numStartups": 1,

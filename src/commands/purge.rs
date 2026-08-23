@@ -41,7 +41,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     }
 
     let mut perch = registry::lock(host)?;
-    let registry = whatever_can_be_read_of_the_registry(host, &home);
+    let mut registry = whatever_can_be_read_of_the_registry(host, &home);
 
     purge::refuse_while_anything_is_running(host, &registry)?;
 
@@ -62,7 +62,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         // The offer's *own* failure carries the note as well, because the bytes
         // land before the report. Taken as a value first, so the borrow of
         // `exported` the call holds is over before the note reads it.
-        let offered = offer_an_export(host, &mut perch, &registry, &home, &mut exported, out);
+        let offered = offer_an_export(host, &mut perch, &mut registry, &home, &mut exported, out);
         offered.map_err(|error| still_standing(error, exported.as_deref()))?;
         // The note again, because the question *between* the offer and the
         // decision is a failure path of its own: `agreed` writes a prompt and
@@ -88,9 +88,8 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         }
     }
 
-    // Every failure from here on carries the same note the declined Purge does,
-    // and only those: a Purge that finished says where the file is in its own
-    // report.
+    // Every failure from here on carries the same note the declined Purge does.
+    // A Purge that finished says it in its own report instead.
     let and_the_export = |error: PerchError| still_standing(error, exported.as_deref());
 
     // The same guard `perch remove` takes, at the same point: the questions above
@@ -109,7 +108,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     crate::commands::service::take_back_before_a_purge(host, out).map_err(and_the_export)?;
 
     let purged = purge::erase(host, &mut perch, &registry).map_err(and_the_export)?;
-    report(host, out, &home, &purged)
+    report(host, out, &home, &purged, exported.as_deref())
 }
 
 /// Adds the whereabouts of an Export this run wrote to a failure after it.
@@ -234,7 +233,7 @@ fn what_will_go(registry: &Registry, home: &Path, profiles: usize, service: bool
 fn offer_an_export(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
-    registry: &Registry,
+    registry: &mut Registry,
     home: &Path,
     landed: &mut Option<PathBuf>,
     out: &mut dyn Write,
@@ -363,7 +362,13 @@ fn agreed(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
 }
 
 /// What was given back.
-fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
+fn report(
+    host: &dyn Host,
+    out: &mut dyn Write,
+    home: &Path,
+    purged: &Purged,
+    exported: Option<&Path>,
+) -> Result<()> {
     // Said as what happened rather than as a count, because "Purged 0 Accounts"
     // is not a sentence — and holding none is a real state here: it is what a
     // Purge that stopped in its last step leaves for the next one to finish.
@@ -414,6 +419,20 @@ fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) ->
                 "{} of them had nothing in either Credential Store to delete — {}.",
                 crate::commands::accounts(purged.accounts - purged.credentials),
                 crate::commands::a_store_that_held_nothing(host),
+            ),
+        )?;
+    }
+
+    // The sentence every *other* way out of this command says about a file this
+    // one wrote: the path is the only thing left that names the Holdings, and
+    // the run that destroyed them is where it matters most.
+    if let Some(path) = exported {
+        say(
+            out,
+            &format!(
+                "The Export is at {} — it holds a working Credential for every \
+                 Account, so keep it somewhere you would keep those.",
+                path.display(),
             ),
         )?;
     }

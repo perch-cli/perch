@@ -45,12 +45,12 @@ pub fn reconcile(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         profile::make_dir(host, into)?;
     }
 
+    // Both sides resolved, which is what *is this inside that* takes: a link
+    // above the Profile makes one directory with two spellings, and a share
+    // through the other one links the Profile into a directory holding it.
+    let here = host::through_every_link(host, into);
     for entry in crossing(host, shared)? {
-        // Anything containing the Profile, spelled that way or reached through
-        // one hop of link resolution — which is what a dotfile manager makes,
-        // and what equality alone lets be linked into its own subtree.
-        let holds_the_profile =
-            into.starts_with(&entry) || into.starts_with(host::through_any_link(host, &entry));
+        let holds_the_profile = here.starts_with(host::through_every_link(host, &entry));
         let Some(name) = entry.file_name().filter(|_| !holds_the_profile) else {
             continue;
         };

@@ -6,7 +6,7 @@
 //!
 //! [`Host`] declares nothing itself: it is the sum of nine traits, one per kind
 //! of effect. No consumer narrows to one of them, because anything that touches
-//! the machine touches several of its surfaces at once — the port is 42 methods
+//! the machine touches several of its surfaces at once — the port is 43 methods
 //! wide because the machine is (ADR the-port-fits-the-machine).
 
 use std::path::{Path, PathBuf};
@@ -149,7 +149,10 @@ impl<'a> HttpRequest<'a> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct HttpResponse {
     pub status: u16,
-    pub body: String,
+    /// Wiped when it is freed, for the reason [`HttpResponse`]'s `Debug` is
+    /// redacted: the token endpoint answers a Renewal with the rotated refresh
+    /// token in here, and every other buffer on that path is already covered.
+    pub body: Zeroizing<String>,
 }
 
 impl std::fmt::Debug for HttpResponse {
@@ -209,6 +212,22 @@ impl Link {
             Link::Hard => "a hard link",
         }
     }
+}
+
+/// What `remove_link` says about a path that is not one. Both adapters spelled
+/// it, twice each, and `tests/conformance.rs` asserts a substring of it — so
+/// four copies had to stay in step by hand or a case quietly stopped proving
+/// anything about the one somebody edited.
+pub fn not_a_link(path: &Path) -> HostError {
+    HostError::Other(format!(
+        "{} is not a link, so it is not Perch's to remove",
+        path.display()
+    ))
+}
+
+/// The same for the link kind only one platform makes.
+pub fn junctions_are_windows_only() -> HostError {
+    HostError::Other("a directory junction is a Windows link, and this is not Windows".to_string())
 }
 
 /// How a wait ended: on its own, or because the loop was asked to stop. Its own
@@ -297,15 +316,32 @@ pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
     Ok(())
 }
 
-/// The first control character in a value, named the way a refusal names one.
+/// Whether a terminal acts on a character rather than drawing it. `is_control`
+/// is `Cc` alone, which leaves the formatting characters out: `U+202E` reverses
+/// the rest of the line it lands in, and a zero-width one hides the whole
+/// difference between two names.
+pub fn is_unshowable(c: char) -> bool {
+    c.is_control()
+        || matches!(c,
+            '\u{00AD}' | '\u{061C}' | '\u{FEFF}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}')
+}
+
+/// The first such character in a value, named the way a refusal names one.
 /// Shared with [`crate::keychain`]'s refusal, for the reason [`write_double_quoted`]
 /// is one copy. What each caller *says* about it stays theirs: the two protocols
 /// break differently, and that sentence is worth having twice.
 pub fn control_character_in(value: &str) -> Option<String> {
-    value
-        .chars()
-        .find(|c| c.is_control())
-        .map(|control| format!("a control character (U+{:04X})", control as u32))
+    value.chars().find(|c| is_unshowable(*c)).map(|found| {
+        let kind = match found.is_control() {
+            true => "a control character",
+            false => "a formatting character",
+        };
+        format!("{kind} (U+{:04X})", found as u32)
+    })
 }
 
 /// A command as somebody would have typed it, for the line printed before it is
@@ -529,7 +565,8 @@ pub trait Processes {
     fn process_id(&self) -> u32;
 
     /// Whether a process is still running. A Live Profile's Credential is
-    /// untouchable because something else is holding it.
+    /// untouchable because something else is holding it. Narrowed by
+    /// [`is_a_pid`] first, as [`Processes::process_started_at`] is.
     fn process_alive(&self, pid: u32) -> bool;
 
     /// When a process began, or `None` where there is no saying. What
@@ -538,6 +575,15 @@ pub trait Processes {
     /// marker says the session did, because a recycled PID necessarily belongs
     /// to a process that began after the marker was written.
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>>;
+}
+
+/// Whether a number names a process at all. `probe::clients_in` parses one out
+/// of any filename, so a stray `0.json` reaches the port — and `0` is a process
+/// group to `kill` and the kernel to macOS's `proc_pidinfo`, which answers it a
+/// start time at boot that is older than every session. Both questions ask it:
+/// a start time is believed without `process_alive` ever being consulted.
+pub fn is_a_pid(pid: u32) -> bool {
+    pid != 0 && pid != u32::MAX
 }
 
 /// Time passing, and being asked to stop waiting. One trait rather than two,
@@ -852,7 +898,7 @@ mod tests {
         );
         let rotated = HttpResponse {
             status: 200,
-            body: format!("{{\"refresh_token\":\"{SECRET}\"}}"),
+            body: Zeroizing::new(format!("{{\"refresh_token\":\"{SECRET}\"}}")),
         };
 
         for printed in [

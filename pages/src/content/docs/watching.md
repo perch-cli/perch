@@ -82,7 +82,7 @@ the one reading that could never be over any threshold.
 ```
 2026-08-04T12:00:00Z  held      unread — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 2m30s.
 2026-08-04T12:02:30Z  held      unread — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 5m00s.
-2026-08-04T12:07:30Z  nowhere   100% used, fullest 5-hour — nowhere to go: Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 3h).
+2026-08-04T12:07:30Z  nowhere   100% used, fullest 5-hour — nowhere to go: Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 2h23m).
 ```
 
 Neither of those ends the watch. Nowhere to go is resolved by waiting, which is

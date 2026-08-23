@@ -1021,11 +1021,9 @@ impl Registry {
         };
         self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
 
-        let Some(settings) = self.groups.remove(&declared) else {
-            return Err(PerchError::NotFound(format!(
-                "no Group is called `{held}`."
-            )));
-        };
+        // `declared` is one of this map's own keys, `declared_group` having
+        // just read it out — so the refusal above is the only one there is.
+        let settings = self.groups.remove(&declared).unwrap_or_default();
         self.groups.insert(to.to_string(), settings);
         for account in &mut self.accounts {
             if account
@@ -1372,9 +1370,14 @@ pub fn sharing_a_profile_with<'a>(
     registry: &'a Registry,
     account: &Account,
 ) -> Option<&'a Account> {
-    registry.accounts.iter().find(|held| {
-        !same_name(held.email(), account.email()) && same_profile(held.email(), account.email())
-    })
+    // Slugged once rather than once per comparison. `is_a_candidate` asks this
+    // of every Account, and every Account asks `is_a_candidate`, so a `perch
+    // list` over n Accounts pays for it n² times.
+    let mine = slug(account.email());
+    registry
+        .accounts
+        .iter()
+        .find(|held| !same_name(held.email(), account.email()) && slug(held.email()) == mine)
 }
 
 pub fn slug(email: &str) -> String {
@@ -1488,8 +1491,10 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     }
 
     // In memory here and written back by `migration::bring_forward`, because
-    // every path that writes holds the lock before it reads.
-    let forwarded = crate::migration::forward(&contents)?;
+    // every path that writes holds the lock before it reads. Decorated as every
+    // other refusal here is: a step that names a field names no file otherwise.
+    let forwarded = crate::migration::forward(&contents)
+        .map_err(|refused| refused.with_note(&the_file_to_edit(path)))?;
 
     // Strictly, so a key nobody recognizes is a refusal naming it rather than a
     // value that quietly did nothing. Every type here is Perch's own — Claude
@@ -1867,7 +1872,14 @@ fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Regis
             continue;
         }
         if let Some(checked) = registry.checks.remove(&name) {
-            registry.checks.insert(declared, checked);
+            // The later of the two, where both spellings carry a record: byte
+            // order would otherwise decide, and the older one winning is a
+            // Check free to Switch inside a Cooldown still running.
+            let later = match registry.checks.get(&declared) {
+                Some(held) if held.switched_at > checked.switched_at => held.clone(),
+                _ => checked,
+            };
+            registry.checks.insert(declared, later);
         }
     }
     registry
@@ -2278,6 +2290,35 @@ mod tests {
                 None,
                 Some("a control character (U+0007)"),
             ),
+            // `char::is_control` is `Cc` alone, so neither of these was caught
+            // by the clause above: the first reverses the rest of the line it is
+            // drawn on, and the second is a name drawn identically to `work`.
+            (
+                NameKind::Group,
+                "\u{202e}gpj.exe",
+                None,
+                Some("a formatting character (U+202E)"),
+            ),
+            (
+                NameKind::Alias,
+                "wo\u{200b}rk",
+                None,
+                Some("a formatting character (U+200B)"),
+            ),
+            // The word joiner and the bidi isolates, which are the same harm
+            // under two more blocks of the table.
+            (
+                NameKind::Group,
+                "wo\u{2060}rk",
+                None,
+                Some("a formatting character (U+2060)"),
+            ),
+            (
+                NameKind::Group,
+                "\u{2066}gpj.exe",
+                None,
+                Some("a formatting character (U+2066)"),
+            ),
         ];
 
         for (kind, name, instead_of, refusal) in cases {
@@ -2529,6 +2570,36 @@ mod tests {
         registry.forget_group("work");
         validate(&registry).expect("and it goes when the Group it paces goes");
         assert!(registry.checks.is_empty(), "{:?}", registry.checks);
+    }
+
+    /// The fold happens before `validate`, so the collision it refuses is one
+    /// `load` never reaches — it merges instead, and merging by insertion order
+    /// lets `"Work"` (0x57) write over `"work"` whichever is fresher.
+    #[test]
+    fn two_checks_folding_to_one_group_keep_the_later_switch() {
+        let noon = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let january = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut registry = Registry::default();
+        registry
+            .groups
+            .insert("work".to_string(), Settings::default());
+        registry
+            .checks
+            .insert("Work".to_string(), Checked { switched_at: noon });
+        registry.checks.insert(
+            "work".to_string(),
+            Checked {
+                switched_at: january,
+            },
+        );
+
+        let registry = with_every_claimed_group_declared(registry);
+
+        assert_eq!(
+            registry.checked("work").map(|it| it.switched_at),
+            Some(noon),
+            "the older record winning is a Check free to Switch at once"
+        );
     }
 
     #[test]

@@ -738,11 +738,13 @@ impl Processes for RealHost {
     }
 
     fn process_alive(&self, pid: u32) -> bool {
-        process_alive(pid)
+        super::is_a_pid(pid) && process_alive(pid)
     }
 
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
-        process_started_at(pid)
+        super::is_a_pid(pid)
+            .then(|| process_started_at(pid))
+            .flatten()
     }
 }
 
@@ -849,7 +851,7 @@ fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
     })?;
     Ok(HttpResponse {
         status,
-        body: body.to_string(),
+        body: Zeroizing::new(body.to_string()),
     })
 }
 
@@ -1217,9 +1219,7 @@ fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
     match kind {
         Link::Symbolic => or_already_exists(std::os::unix::fs::symlink(target, at), at),
         Link::Hard => or_already_exists(std::fs::hard_link(target, at), at),
-        Link::Junction => Err(HostError::Other(
-            "a directory junction is a Windows link, and this is not Windows".to_string(),
-        )),
+        Link::Junction => Err(super::junctions_are_windows_only()),
     }
 }
 
@@ -1253,10 +1253,7 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
         return Ok(());
     };
     if !metadata.file_type().is_symlink() {
-        return Err(HostError::Other(format!(
-            "{} is not a link, so it is not Perch's to remove",
-            path.display()
-        )));
+        return Err(super::not_a_link(path));
     }
     if_it_is_there(std::fs::remove_file(path)).map(|_| ())
 }
@@ -1279,10 +1276,7 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
     };
 
     if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
-        return Err(HostError::Other(format!(
-            "{} is not a link, so it is not Perch's to remove",
-            path.display()
-        )));
+        return Err(super::not_a_link(path));
     }
 
     let removed = if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
@@ -1392,17 +1386,17 @@ fn mode_of(_metadata: &std::fs::Metadata) -> Option<u32> {
     None
 }
 
-/// The one `chmod` Perch performs. `O_NOFOLLOW` is what makes it a handle rather
-/// than a name: a symlink at the last component fails with `ELOOP`, so the answer
-/// becomes the remark `tighten_if_loose` already makes about a file it could not
-/// narrow. Read-only, because opening for writing would truncate the Credential
-/// this is protecting.
+/// The one `chmod` Perch performs, on a handle rather than a name. `O_NOFOLLOW`
+/// fails a symlink at the last component with `ELOOP`, and `O_NONBLOCK` a FIFO
+/// that would otherwise wait for a writer for ever — both become the remark
+/// `tighten_if_loose` already makes about a file it could not narrow. Read-only,
+/// or opening it would truncate the Credential.
 #[cfg(unix)]
 fn set_private_mode(path: &Path) -> Result<(), HostError> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let file = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
     file.set_permissions(std::fs::Permissions::from_mode(PRIVATE_FILE_MODE))?;
     Ok(())
@@ -1562,10 +1556,10 @@ fn home_from(variable: &str, value: Option<std::ffi::OsString>) -> Result<PathBu
 }
 
 /// Whether a process exists. Signal 0 performs the checks without delivering
-/// anything, and the identifier is narrowed rather than cast: `0` and `-1` are a
-/// process *group* to `kill`, and both are reachable since `probe::clients_in`
-/// parses a pid out of any filename. `EPERM` is alive and only `ESRCH` is dead,
-/// because a Profile that looks Live is one Perch leaves alone.
+/// anything, and the identifier is narrowed rather than cast: what `super::is_a_pid`
+/// lets through is still a `u32`, and every value above `i32::MAX` is a process
+/// *group* to `kill`. `EPERM` is alive and only `ESRCH` is dead, because a
+/// Profile that looks Live is one Perch leaves alone.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
@@ -1620,6 +1614,9 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
     use std::os::unix::ffi::OsStrExt;
     let raw = std::ffi::CString::new(path.as_os_str().as_bytes())
         .map_err(|err| HostError::Other(format!("{} is not a path: {err}", path.display())))?;
+    // SAFETY: `raw` outlives the call and holds a nul-terminated path, which is
+    // what `CString::new` promises; a null `times` is `utimes`'s documented
+    // "now" and reads no second buffer.
     let outcome = unsafe { libc::utimes(raw.as_ptr(), std::ptr::null()) };
     if outcome == 0 {
         Ok(())
@@ -1646,6 +1643,9 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
     use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
 
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: `wide` outlives the block and is nul-terminated by the `chain`
+    // above; the handle it opens is closed on every path out, and the error is
+    // read before `CloseHandle` can replace it.
     unsafe {
         let handle = CreateFileW(
             wide.as_ptr(),
@@ -1873,13 +1873,13 @@ mod tests {
     fn a_reply_is_split_into_a_body_and_a_status_and_says_so_when_it_cannot_be() {
         let reply = split_reply("{\"five_hour\":{}}\n200").expect("that is a reply");
         assert_eq!(reply.status, 200);
-        assert_eq!(reply.body, "{\"five_hour\":{}}");
+        assert_eq!(*reply.body, "{\"five_hour\":{}}");
 
         // A body with newlines in it: the split is the *last* one, because the
         // status is what curl appends.
         let reply = split_reply("first\nsecond\n429").expect("that is a reply too");
         assert_eq!(reply.status, 429);
-        assert_eq!(reply.body, "first\nsecond");
+        assert_eq!(*reply.body, "first\nsecond");
 
         // An empty body still carries a status, which is what a 204 looks like.
         assert_eq!(split_reply("\n204").expect("a bodyless reply").status, 204);

@@ -899,7 +899,7 @@ impl FakeHost {
                 .iter()
                 .map(|(status, body)| HttpResponse {
                     status: *status,
-                    body: (*body).to_string(),
+                    body: Zeroizing::new((*body).to_string()),
                 })
                 .collect(),
         );
@@ -913,7 +913,7 @@ impl FakeHost {
             (url.to_string(), bearer.map(str::to_string)),
             HttpResponse {
                 status,
-                body: body.to_string(),
+                body: Zeroizing::new(body.to_string()),
             },
         );
     }
@@ -1383,9 +1383,18 @@ impl port::Files for FakeHost {
         if let Some(parent) = lands_at.parent() {
             self.make_dirs(parent, ORDINARY_DIR_MODE)?;
         }
-        // Whatever was at the path is taken away first, a link included, because
-        // the real one leads with `remove_file` and then `create_new`. Left
-        // behind, one path would be both a regular file and a symbolic link.
+        // A directory is not something `remove_file` takes away, so `create_new`
+        // meets it and answers `EEXIST`. Refused rather than written over, or
+        // one path would be a regular file and a directory at once.
+        if self.fs.dirs.borrow().contains(&lands_at) {
+            return Err(HostError::Other(format!(
+                "{}: Is a directory (os error 21)",
+                lands_at.display()
+            )));
+        }
+        // Whatever else was at the path is taken away first, a link included,
+        // because the real one leads with `remove_file` and then `create_new`.
+        // Left behind, one path would be both a regular file and a symbolic link.
         self.fs.links.borrow_mut().remove(path);
         // A disk that fills partway leaves what fitted behind and then fails,
         // which is the order the real host does it in: open, `write_all`,
@@ -1524,6 +1533,9 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unlistable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        // The directories on the way resolve and the last component does not,
+        // as [`Self::remove_file`]'s do.
+        let path = &self.lands_at(path);
         // A link at the path is taken away and what it points at is left alone:
         // `remove_dir_all` does not follow the last component, so it unlinks the
         // link itself and answers `Ok`. Measured rather than assumed.
@@ -1684,15 +1696,21 @@ impl port::Files for FakeHost {
         Ok(())
     }
 
+    /// Through the link a write went through, and never through the last
+    /// component: `unlink` resolves the directories on the way and then takes
+    /// away the name it was given, link or file. Without the first half a file
+    /// created under a linked parent could not be removed — which is
+    /// `replace_via_tmp`'s cleanup on any Profile Reconcile has been over.
     fn remove_file(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::RemovedFile(path.to_path_buf()));
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        self.fs.files.borrow_mut().remove(path);
-        self.fs.links.borrow_mut().remove(path);
-        self.fs.modified.borrow_mut().remove(path);
-        self.fs.modes.borrow_mut().remove(path);
+        let at = self.lands_at(path);
+        self.fs.files.borrow_mut().remove(&at);
+        self.fs.links.borrow_mut().remove(&at);
+        self.fs.modified.borrow_mut().remove(&at);
+        self.fs.modes.borrow_mut().remove(&at);
         Ok(())
     }
 
@@ -1794,9 +1812,7 @@ impl port::Links for FakeHost {
                 ));
             }
             Link::Junction if !windows => {
-                return Err(HostError::Other(
-                    "a directory junction is a Windows link, and this is not Windows".to_string(),
-                ));
+                return Err(port::junctions_are_windows_only());
             }
             // A hard link is a second name for a *file*: there is no such thing
             // as one for a directory, and nothing to name where nothing is.
@@ -1856,10 +1872,7 @@ impl port::Links for FakeHost {
         // itself, so neither real adapter can recognize one: unix asks
         // `is_symlink` and Windows asks for a reparse point, and both refuse.
         if matches!(self.fs.links.borrow().get(path), Some((Link::Hard, _))) {
-            return Err(HostError::Other(format!(
-                "{} is not a link, so it is not Perch's to remove",
-                path.display()
-            )));
+            return Err(port::not_a_link(path));
         }
         if self.fs.links.borrow_mut().remove(path).is_some() {
             self.fs.files.borrow_mut().remove(path);
@@ -1871,10 +1884,7 @@ impl port::Links for FakeHost {
         // the real call refuses it: answered `Ok`, this could not tell a caller
         // that dropped its `link_target` guard from one that kept it.
         if self.fs.files.borrow().contains_key(path) || self.fs.dirs.borrow().contains(path) {
-            return Err(HostError::Other(format!(
-                "{} is not a link, so it is not Perch's to remove",
-                path.display()
-            )));
+            return Err(port::not_a_link(path));
         }
         self.fs.modified.borrow_mut().remove(path);
         Ok(())
@@ -2019,21 +2029,22 @@ impl port::Processes for FakeHost {
     }
 
     fn process_alive(&self, pid: u32) -> bool {
-        // The identifiers the real host refuses before it asks, refused here too:
-        // `kill` reads `0` and `-1` as a process *group*, and `clients_in` parses
-        // a pid out of any filename in a sessions directory.
-        if pid == 0 || pid == u32::MAX {
-            return false;
-        }
-        self.processes.live_processes.borrow().contains_key(&pid)
+        port::is_a_pid(pid) && self.processes.live_processes.borrow().contains_key(&pid)
     }
 
+    /// Guarded as [`Self::process_alive`] is, and for the same reason: a fake
+    /// that answers a start time for a number that names no process describes a
+    /// machine neither adapter runs on.
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
-        self.processes
-            .live_processes
-            .borrow()
-            .get(&pid)
-            .copied()
+        port::is_a_pid(pid)
+            .then(|| {
+                self.processes
+                    .live_processes
+                    .borrow()
+                    .get(&pid)
+                    .copied()
+                    .flatten()
+            })
             .flatten()
     }
 }

@@ -1800,7 +1800,30 @@ mod tests {
         assert_eq!(
             clients_in(&host, Path::new("/tmp/profile")).ok(),
             Some(vec![4242]),
-            "a process that began long before the marker claims is running              against the Profile, whatever the claim adds up to"
+            "a process that began long before the marker claims is running against \
+             the Profile, whatever the claim adds up to"
+        );
+    }
+
+    /// The pid is read back out of a filename, so any file in the directory
+    /// names one — and `0` is a process group to `kill` and the kernel to
+    /// macOS's `proc_pidinfo`, which answers a start time at boot that is
+    /// older than every session a marker could record.
+    #[test]
+    fn a_marker_named_after_a_number_that_is_no_process_makes_nothing_live() {
+        let host = FakeHost::new()
+            .with_file(
+                "/tmp/profile/sessions/0.json",
+                &format!(r#"{{"startedAt":{NOON}}}"#),
+            )
+            .with_live_process_started_at(0, DateTime::<Utc>::MIN_UTC);
+
+        assert_eq!(
+            clients_in(&host, Path::new("/tmp/profile")).ok(),
+            Some(vec![]),
+            "a start time believed here would refuse every Switch, Capture and \
+             Renewal against the Profile for ever, and no client could be quit \
+             to clear it"
         );
     }
 

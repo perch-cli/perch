@@ -350,7 +350,7 @@ pub fn choose(
         .collect();
     if ranked.is_empty() {
         return Err(PerchError::NoCandidate(nobody_is_a_candidate(
-            scope, &accounts,
+            registry, scope, &accounts,
         )));
     }
 
@@ -546,15 +546,22 @@ pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
 }
 
 /// The Accounts a Cycle may not choose, counted once each, or empty where every
-/// Account is a candidate.
-///
-/// Shared, because the refusal that nobody can be Cycled to and the Reserve that
-/// says what is out of the running count the same Accounts.
-pub fn out_of_the_running(accounts: &[&Account]) -> String {
+/// Account is a candidate. Shared with the Reserve, which counts the same set —
+/// and every way out of [`is_a_candidate`] is counted here, or a Scope held back
+/// by only the missing one renders an empty parenthetical.
+pub fn out_of_the_running(registry: &Registry, accounts: &[&Account]) -> String {
     let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
     let disabled = accounts
         .iter()
         .filter(|a| a.disabled && !a.quarantined())
+        .count();
+    let sharing = accounts
+        .iter()
+        .filter(|a| {
+            !a.disabled
+                && !a.quarantined()
+                && registry::sharing_a_profile_with(registry, a).is_some()
+        })
         .count();
     let mut out = Vec::new();
     if disabled > 0 {
@@ -562,6 +569,9 @@ pub fn out_of_the_running(accounts: &[&Account]) -> String {
     }
     if quarantined > 0 {
         out.push(format!("{quarantined} Quarantined"));
+    }
+    if sharing > 0 {
+        out.push(format!("{sharing} sharing a Profile with another Account"));
     }
     out.join(", ")
 }
@@ -664,12 +674,12 @@ fn chosen_basis(best: &Ranked, strategy: Strategy, now: DateTime<Utc>) -> Basis 
 
 /// The Scope holds Accounts and none of them is a candidate. Which way each one
 /// left the running is [`out_of_the_running`]'s to count.
-fn nobody_is_a_candidate(scope: &Scope, accounts: &[&Account]) -> String {
+fn nobody_is_a_candidate(registry: &Registry, scope: &Scope, accounts: &[&Account]) -> String {
     format!(
         "No Account in {} is a Cycle candidate ({}), so there is nowhere to \
          Switch to. Nothing was changed.",
         scope.place(),
-        out_of_the_running(accounts),
+        out_of_the_running(registry, accounts),
     )
 }
 
@@ -744,7 +754,7 @@ fn everyone_is_exhausted(
     // What the filter took out before any of this was measured. Without it the
     // refusal sends somebody off to wait for a quota reset about a Group whose
     // two Accounts with full Headroom are merely disabled.
-    let set_aside = out_of_the_running(accounts);
+    let set_aside = out_of_the_running(registry, accounts);
     let (every, also) = match set_aside.is_empty() {
         true => (String::new(), String::new()),
         false => (
@@ -808,10 +818,34 @@ pub(crate) mod tests {
         let mut spare = account("spare@example.com", vec![]);
         spare.disabled = true;
 
-        let said = nobody_is_a_candidate(&Scope::Ungrouped, &[&broken, &spare]);
+        let said = nobody_is_a_candidate(
+            &holding(vec![broken.clone(), spare.clone()]),
+            &Scope::Ungrouped,
+            &[&broken, &spare],
+        );
 
         assert!(said.contains("1 disabled"), "{said}");
         assert!(said.contains("1 Quarantined"), "{said}");
+    }
+
+    /// A sharer is the third way out of `is_a_candidate`, and the only one
+    /// whose absence here rendered `(   )` — an empty parenthetical where the
+    /// sentence promised the reason nothing can be Cycled to.
+    #[test]
+    fn an_account_sharing_a_profile_is_counted_out_of_the_running() {
+        let one = account("some-one@example.com", vec![]);
+        let other = account("some.one@example.com", vec![]);
+
+        let said = nobody_is_a_candidate(
+            &holding(vec![one.clone(), other.clone()]),
+            &Scope::Ungrouped,
+            &[&one, &other],
+        );
+
+        assert!(
+            said.contains("2 sharing a Profile with another Account"),
+            "{said}"
+        );
     }
 
     pub(crate) fn account(email: &str, windows: Vec<WindowUtilization>) -> Account {

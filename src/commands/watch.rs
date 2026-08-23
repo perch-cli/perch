@@ -626,7 +626,13 @@ fn refused_the_reading(attempts: &[Attempt]) -> Option<Refusal> {
              nothing current could be read."
                 .to_string(),
         )),
-        observe::Outcome::Failed(why) => Some(Refusal::paced(why.clone())),
+        // Paced only where the round asked Anthropic something: a Renewal refused
+        // because a client is holding the Profile, or an Account sharing one, sent
+        // nothing, and a Back-off paces questions nobody is answering.
+        observe::Outcome::Failed { why, spent } => Some(match spent {
+            true => Refusal::paced(why.clone()),
+            false => Refusal::unpaced(why.clone()),
+        }),
         // An Account already Quarantined is not asked at all (`observe` returns
         // before the first request), so this round spent nothing and a Back-off
         // paces questions nobody is answering.
@@ -753,7 +759,7 @@ fn act(
     // The same guard for the other way a round stops being the one to act: the
     // wait at the bottom of the loop is too late, thirty seconds after a stop.
     if host.asked_to_stop() {
-        return Ok(Outcome::HandedOver {
+        return Ok(Outcome::Stopped {
             why: "this Watcher was asked to stop while the round was reading \
                   the candidates, so nothing was switched."
                 .to_string(),

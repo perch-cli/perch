@@ -465,16 +465,14 @@ fn write_row(
 /// empty table.
 fn nothing_here(registry: &Registry, scope: &Scope) -> String {
     // Diagnosed the same way whichever Scope was named: narrowing a listing
-    // changes what it shows rather than what Perch says is the matter.
-    if registry.accounts.is_empty() {
+    // changes what it shows rather than what Perch says is the matter — and
+    // `Everything` has no narrowing to answer for, its rows being every Account.
+    if registry.accounts.is_empty() || matches!(scope, Scope::Everything) {
         return "No Accounts yet. `perch add` logs into one in a Profile of its own.".to_string();
     }
     match scope {
-        Scope::Everything => {
-            "No Accounts yet. `perch add` logs into one in a Profile of its own.".to_string()
-        }
         Scope::Group(name) => format!("The Group `{name}` holds no Accounts yet."),
-        Scope::Ungrouped => "Every Account is in a Group.".to_string(),
+        Scope::Ungrouped | Scope::Everything => "Every Account is in a Group.".to_string(),
     }
 }
 

@@ -253,6 +253,44 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
         None,
         "and the Purge happened: {printed}"
     );
+    assert!(
+        printed.contains(AT),
+        "and the report names the file, which is now the only thing that names \
+         the Holdings — every other way out of this command says so: {printed}"
+    );
+}
+
+/// A Purge holds the registry lock across its offer, so its Export cannot go
+/// through `perch holdings export` — and the settlement that command makes
+/// before it reads a Credential Store is the one step that has to come with it.
+/// Without it, every Credential is gathered out of its own Profile, where the
+/// Account being left holds the copy a Rotation retired.
+#[test]
+fn the_export_it_offers_settles_a_landing_first() {
+    let host = a_machine_to_give_back()
+        .with_answers(&["", AT, "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+    // A Switch that died after the Credential moved and before the Identity was
+    // patched: the arriving Account's Credential is what is live.
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_CREDENTIAL);
+
+    let (outcome, printed) = run_purge(&host);
+    outcome.expect("the word was typed");
+
+    let sealed = host.file(AT).expect("the Export was written");
+    let exported = export::unseal(&sealed, PASSPHRASE).expect("it opens");
+    assert_eq!(
+        exported.credentials.get(SECOND_EMAIL).map(String::as_str),
+        Some(SECOND_CREDENTIAL),
+        "the Account the Switch was arriving at travels as the live Credential \
+         Perch settled on: {printed}"
+    );
+    assert_eq!(
+        exported.registry.active().whose(),
+        Some(SECOND_EMAIL),
+        "and the Landing is settled in the file rather than traveling in it"
+    );
 }
 
 /// The path typed at this prompt is the one path in Perch no shell has been

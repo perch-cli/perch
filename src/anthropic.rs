@@ -168,12 +168,16 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
     );
     let headers = [("Content-Type", "application/json")];
 
+    // Before the request: `expires_in` is measured from when the server issued
+    // the token, so a clock read on receipt makes the lifetime longer than it is
+    // by the whole round trip — up to `MAX_TIME_SECONDS`.
+    let now = host.now();
+
     let response = send(host, &HttpRequest::post(TOKEN_URL, &headers, &body))?;
     // A refresh token Anthropic has retired comes back as a bad request rather
     // than an unauthorized one, and it means the same thing here only where the
     // body agrees — see [`REVOKED`] and [`REFUSALS`].
     let mut document = understand(response, REFUSALS)?;
-    let now = host.now();
 
     // Read out before the tree is wiped, because dropping a `serde_json::Value`
     // frees its strings untouched and this reply holds the rotated refresh
@@ -800,11 +804,11 @@ mod tests {
     fn the_statuses_that_matter_are_told_apart() {
         let reply = |status: u16| HttpResponse {
             status,
-            body: "{}".to_string(),
+            body: Zeroizing::new("{}".to_string()),
         };
         let said = |body: &str| HttpResponse {
             status: 400,
-            body: body.to_string(),
+            body: Zeroizing::new(body.to_string()),
         };
 
         assert_eq!(understand(reply(429), &[]), Err(Refused::Throttled));
@@ -827,7 +831,7 @@ mod tests {
             understand(
                 HttpResponse {
                     status: 400,
-                    body: body.to_string(),
+                    body: Zeroizing::new(body.to_string()),
                 },
                 &[400],
             )
@@ -854,7 +858,7 @@ mod tests {
             understand(
                 HttpResponse {
                     status,
-                    body: body.to_string(),
+                    body: Zeroizing::new(body.to_string()),
                 },
                 REFUSALS,
             )
@@ -879,7 +883,7 @@ mod tests {
     fn a_read_endpoint_still_rejects_on_the_status_alone() {
         let reply = |status: u16| HttpResponse {
             status,
-            body: String::new(),
+            body: Zeroizing::new(String::new()),
         };
 
         assert_eq!(understand(reply(401), &[]), Err(Refused::Rejected));

@@ -1078,9 +1078,9 @@ fn live_but_unnamed(prepared: &Prepared, outgoing: Option<&Account>, incoming: &
         None => "another Account".to_string(),
     };
     format!(
-        "{incoming} is active — its Credential is the live one and was recorded \
-         as such — but {file} still names {named}, so Claude Code will act as \
-         {incoming} while displaying {named}.\n\
+        "{incoming} is active — its Credential is the live one — but {file} \
+         still names {named}, so Claude Code will act as {incoming} while \
+         displaying {named}.\n\
          Run `perch switch {incoming}` again to finish the job.",
         incoming = incoming.email(),
         file = prepared.store.identity_file.display(),

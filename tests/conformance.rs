@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use perch::host::{
-    Clock, FakeHost, Files, Filesystem, HostError, Link, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
+    Clock, FakeHost, Files, Filesystem, Host, HostError, Link, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
     Platform, RealHost,
 };
 
@@ -1116,6 +1116,107 @@ const CASES: &[Case] = &[
             );
         },
     },
+    Case {
+        named: "a write over a directory is refused rather than performed",
+        asserts: |host, root, adapter, _now| {
+            // The mirror of "writing under a file is ENOTDIR": `create_new`
+            // meets what `remove_file` would not take away, and a fake that
+            // wrote anyway leaves one path a file and a directory at once.
+            let at = root.join("a-directory");
+            host.create_private_dir_all(&at)
+                .expect("the directory is made");
+
+            let written = host.create_file_with_mode(&at, "{}", PRIVATE_FILE_MODE);
+
+            assert!(
+                written.is_err(),
+                "{adapter}: a directory is not a file to write over"
+            );
+            assert!(
+                host.read_file(&at).is_err(),
+                "{adapter}: and it is still a directory afterwards"
+            );
+        },
+    },
+    Case {
+        named: "a file made under a linked directory can be removed again",
+        asserts: |host, root, adapter, _now| {
+            // What Reconcile makes, and what `replace_via_tmp` then writes its
+            // copy beside and clears on a failure: a write that resolved a link
+            // and a remove that did not would leave the temp file behind.
+            let real = root.join("real");
+            let linked = root.join("linked");
+            host.create_private_dir_all(&real).expect("the directory");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &real, &linked)
+                .expect("the link is made");
+
+            let beside = linked.join("settings.json.new");
+            host.create_file_with_mode(&beside, "half", PRIVATE_FILE_MODE)
+                .expect("written through the link");
+            host.remove_file(&beside).expect("and removed through it");
+
+            assert!(
+                !host.path_exists(&real.join("settings.json.new")),
+                "{adapter}: the write and the remove resolve the same path, or a \
+                 failed replacement leaves its copy where nothing names it"
+            );
+        },
+    },
+];
+
+/// One sentence on the port that no `&dyn Filesystem` can be asked: [`Case`]
+/// narrows to the filesystem, which is 19 of the port's 43 methods. A table of
+/// its own rather than a wider [`Case`], because nothing here wants a scratch
+/// directory or a machine's link support to decide.
+struct WholeHostCase {
+    /// What sentence this asserts, for [`Case::named`]'s reason — and here it
+    /// travels into the message, there being no scratch directory to name.
+    named: &'static str,
+    asserts: fn(&dyn Host, &str),
+}
+
+const WHOLE_HOST_CASES: &[WholeHostCase] = &[
+    WholeHostCase {
+        named: "a number that names no process is neither alive nor started",
+        asserts: |host, adapter| {
+            // `probe::clients_in` parses a pid out of any filename in a
+            // `sessions` directory, so both are reachable from a stray file.
+            for pid in [0, u32::MAX] {
+                assert!(
+                    !host.process_alive(pid),
+                    "{adapter}: {pid} names no process, so nothing is alive at it"
+                );
+                assert_eq!(
+                    host.process_started_at(pid),
+                    None,
+                    "{adapter}: {pid} names no process, so nothing began at it — \
+                     a start time here corroborates a marker for ever, because \
+                     boot is older than every session"
+                );
+            }
+        },
+    },
+    WholeHostCase {
+        named: "this process is alive and began no later than now",
+        asserts: |host, adapter| {
+            let me = host.process_id();
+            assert!(
+                host.process_alive(me),
+                "{adapter}: the process asking is running"
+            );
+            let began = host
+                .process_started_at(me)
+                .unwrap_or_else(|| panic!("{adapter}: this process has a start time"));
+            assert!(
+                began <= host.now(),
+                "{adapter}: a process began before the clock reads now, or every \
+                 marker it writes is evidence of nothing"
+            );
+        },
+    },
 ];
 
 /// A run in which every link case skipped checked nothing about the half of
@@ -1161,5 +1262,19 @@ fn the_fake_host_conforms_to_the_port() {
         let root = PathBuf::from("/conformance").join(case.named.replace(' ', "-"));
         host.create_dir_all(&root).expect("a root to work under");
         (case.asserts)(&host, &root, "FakeHost", host.now());
+    }
+}
+
+/// The half of the port a [`Case`] cannot reach, asked of both adapters in one
+/// test: neither needs a world built for it, so there is nothing to set up
+/// differently between them.
+#[test]
+fn both_adapters_conform_to_the_port_beyond_the_filesystem() {
+    for case in WHOLE_HOST_CASES {
+        (case.asserts)(&RealHost::new(), &format!("RealHost ({})", case.named));
+        (case.asserts)(
+            &FakeHost::new().with_platform(this_platform()),
+            &format!("FakeHost ({})", case.named),
+        );
     }
 }

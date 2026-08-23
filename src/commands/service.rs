@@ -469,7 +469,13 @@ fn recorded_log(
     at: Option<&std::path::Path>,
     installed: bool,
 ) -> Result<Option<PathBuf>> {
-    if !installed || host.platform() == Platform::Windows {
+    // `None` where there is nothing installed to write one, as `binary` is
+    // `null` beside a `binary_exists` of `null`: a path here is a file a script
+    // would tail and nothing would ever append to.
+    if !installed {
+        return Ok(None);
+    }
+    if host.platform() == Platform::Windows {
         return service::log_path(host);
     }
     Ok(at

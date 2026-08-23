@@ -202,6 +202,34 @@ fn with_no_group_the_organization_is_offered_and_accepted_by_confirming() {
     );
 }
 
+/// The offer is built once, above the loop that asks. An offer the same command
+/// would refuse is therefore not a bad default but an unanswerable question:
+/// Enter re-asks it, with the same offer, for as long as somebody keeps pressing.
+#[test]
+fn a_group_the_command_would_refuse_is_never_offered() {
+    // `--alias Overflow-Ltd` takes the name the organization would be offered
+    // under, and one name cannot be both.
+    let host = ready_to_add().with_answers(&[""]);
+    let args = AddArgs {
+        alias: Some("Overflow-Ltd".to_string()),
+        ..AddArgs::default()
+    };
+
+    let (result, printed) = run_add(&host, args);
+    assert!(result.is_ok(), "{:?}", result.err());
+
+    assert!(
+        !printed.contains("[Overflow-Ltd]"),
+        "an offer this command would refuse is no help as a default:\n{printed}"
+    );
+    let registry = registry_of(&host);
+    let added = registry
+        .account(SECOND_EMAIL)
+        .expect("the Account was added");
+    assert_eq!(added.group, None, "and Enter left it in no Group");
+    assert_eq!(registry.alias_of(SECOND_EMAIL), Some("Overflow-Ltd"));
+}
+
 #[test]
 fn the_offered_group_is_only_a_default_and_can_be_answered_over() {
     let host = ready_to_add().with_answers(&["personal"]);

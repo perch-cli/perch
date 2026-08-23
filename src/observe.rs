@@ -31,8 +31,10 @@ pub enum Outcome {
     Observed,
     /// The hourly budget for this Account is spent, so the cache still answers.
     Throttled,
-    /// Nothing was read, and this is why.
-    Failed(String),
+    /// Nothing was read, and this is why. `spent` is whether the attempt asked
+    /// Anthropic anything before it stopped: a Back-off paces questions nobody
+    /// is answering, and a refusal made before the first request asked none.
+    Failed { why: String, spent: bool },
     /// The Account's Credential cannot be used and cannot be recovered from anything
     /// Perch holds, so it is Quarantined. Distinct from a failure because trying again
     /// is not the answer and never will be. `detail` carries whatever the failure
@@ -77,7 +79,10 @@ type Step<T> = std::result::Result<T, Outcome>;
 /// already used.
 impl From<PerchError> for Outcome {
     fn from(error: PerchError) -> Outcome {
-        Outcome::Failed(error.to_string())
+        Outcome::Failed {
+            why: error.to_string(),
+            spent: false,
+        }
     }
 }
 
@@ -92,7 +97,7 @@ impl Attempt {
                 self.named,
                 Refused::Throttled
             )),
-            Outcome::Failed(why) => Some(format!("{}: {why}", self.named)),
+            Outcome::Failed { why, .. } => Some(format!("{}: {why}", self.named)),
             // The Account as the user names it, and the raw address as the Target to
             // type: `perch relogin someone@example.com (as `work`)` is not a command.
             Outcome::Quarantined { why, detail } => {
@@ -124,7 +129,7 @@ impl Attempt {
         let (outcome, reason, detail) = match &self.outcome {
             Outcome::Observed => ("observed", None, None),
             Outcome::Throttled => ("throttled", None, Some(Refused::Throttled.to_string())),
-            Outcome::Failed(why) => ("failed", None, Some(why.clone())),
+            Outcome::Failed { why, .. } => ("failed", None, Some(why.clone())),
             Outcome::Quarantined { why, detail } => {
                 ("quarantined", Some(why.as_str()), detail.clone())
             }
@@ -209,7 +214,13 @@ pub fn refresh(
     let mut report = Report::asked_for();
     let mut anything_to_keep = false;
 
-    for email in emails {
+    for (at, email) in emails.iter().enumerate() {
+        // Answerable between Accounts: five candidates is three hundred seconds
+        // against a thirty-second grace, and a `SIGKILL`ed Watcher leaves both
+        // locks behind. Never before the first, which would pace a Back-off.
+        if at > 0 && host.asked_to_stop() {
+            break;
+        }
         // A round trip to Anthropic each, so the hold is renewed between them and again
         // inside the turn: one Account's turn is up to six requests bounded at thirty
         // seconds, twice the ninety the registry hold goes stale in.
@@ -266,7 +277,10 @@ fn observe(
         return Err(Outcome::Quarantined { why, detail: None });
     }
 
-    let installed = installed.map_err(|err| Outcome::Failed(err.to_string()))?;
+    let installed = installed.map_err(|err| Outcome::Failed {
+        why: err.to_string(),
+        spent: false,
+    })?;
     let asked = holding(host, registry, account)?;
     let theirs =
         |outcome| only_off_a_credential_that_is_theirs(host, outcome, &asked, account, installed);
@@ -310,12 +324,13 @@ impl Turned {
             // Not a Quarantine: the refresh token bought a renewal, so it is live, and
             // an Account is not unrecoverable because Anthropic contradicted itself
             // inside one command.
-            Turned::Away => Outcome::Failed(
-                "Anthropic renewed this Account's Credential and then would not \
-                 accept the token it had just issued, so nothing about it could \
-                 be read. The cached figure is what you see."
+            Turned::Away => Outcome::Failed {
+                why: "Anthropic renewed this Account's Credential and then would \
+                      not accept the token it had just issued, so nothing about \
+                      it could be read. The cached figure is what you see."
                     .to_string(),
-            ),
+                spent: true,
+            },
             Turned::Settled(outcome) => outcome,
         }
     }
@@ -366,31 +381,37 @@ fn only_off_a_credential_that_is_theirs(
     // the copy this reading asked with, so the refusal is evidence about a superseded
     // Credential rather than a broken Account.
     if asked.arriving_in_a_landing {
-        return Outcome::Failed(format!(
-            "the Credential in this Account's own Profile could not be used — \
-             {}{how} — but a Switch onto it is in flight and was never \
-             recorded, so the working copy may be the live one. Nothing was \
-             recorded against this Account. `perch switch {}` settles that and \
-             says which it was.",
-            why.because(),
-            account.email(),
-        ));
+        return Outcome::Failed {
+            why: format!(
+                "the Credential in this Account's own Profile could not be used \
+                 — {}{how} — but a Switch onto it is in flight and was never \
+                 recorded, so the working copy may be the live one. Nothing was \
+                 recorded against this Account. `perch switch {}` settles that \
+                 and says which it was.",
+                why.because(),
+                account.email(),
+            ),
+            spent: true,
+        };
     }
 
     if asked.its_own_profile || names(host, &asked.store, account, installed) {
         return outcome;
     }
 
-    Outcome::Failed(format!(
-        "the live Credential could not be used — {}{how} — but {} does not \
-         name {}, so it may belong to a login made outside Perch and nothing \
-         was recorded against this Account. `perch switch {}` puts its own \
-         Credential back in place.",
-        why.because(),
-        asked.store.identity_file.display(),
-        account.email(),
-        account.email(),
-    ))
+    Outcome::Failed {
+        why: format!(
+            "the live Credential could not be used — {}{how} — but {} does not \
+             name {}, so it may belong to a login made outside Perch and nothing \
+             was recorded against this Account. `perch switch {}` puts its own \
+             Credential back in place.",
+            why.because(),
+            asked.store.identity_file.display(),
+            account.email(),
+            account.email(),
+        ),
+        spent: true,
+    }
 }
 
 /// Whether a store's Identity names this Account.
@@ -545,12 +566,15 @@ fn refuse_if_live(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step
         return Ok(());
     }
 
-    Err(Outcome::Failed(format!(
-        "its access token has expired and a client is running against it ({}), \
-         so renewing it would log that session out. The cached figure is what \
-         you see.",
-        running.join(", ")
-    )))
+    Err(Outcome::Failed {
+        why: format!(
+            "its access token has expired and a client is running against it \
+             ({}), so renewing it would log that session out. The cached figure \
+             is what you see.",
+            running.join(", ")
+        ),
+        spent: false,
+    })
 }
 
 /// The Credential to ask with, or what its absence means.
@@ -566,11 +590,12 @@ fn credential_in(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<
                 detail: None,
             }
         } else {
-            Outcome::Failed(
-                "the Default Profile holds no Credential, so Claude Code is \
-                 logged out and there is nothing to ask Anthropic with."
+            Outcome::Failed {
+                why: "the Default Profile holds no Credential, so Claude Code is \
+                      logged out and there is nothing to ask Anthropic with."
                     .to_string(),
-            )
+                spent: false,
+            }
         }
     })
 }
@@ -591,13 +616,17 @@ fn renew_under_the_lock(
     // the one door every Renewal goes through. For this Account alone: the others are
     // readable, and their figures are not this one's to lose.
     if let Some(sharer) = &asked.shares_its_profile_with {
-        return Err(Outcome::Failed(format!(
-            "its access token has expired and it shares one Profile — and so one \
-             Credential Store — with {sharer}, because their addresses differ \
-             only in characters a Profile directory does not keep apart. \
-             Renewing may Rotate, which would retire a refresh token that is not \
-             this Account's to spend. The cached figure is what you see."
-        )));
+        return Err(Outcome::Failed {
+            why: format!(
+                "its access token has expired and it shares one Profile — and so \
+                 one Credential Store — with {sharer}, because their addresses \
+                 differ only in characters a Profile directory does not keep \
+                 apart. Renewing may Rotate, which would retire a refresh token \
+                 that is not this Account's to spend. The cached figure is what \
+                 you see."
+            ),
+            spent: false,
+        });
     }
 
     let store = &asked.store;
@@ -686,8 +715,10 @@ fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -
                 detail: Some(error.to_string()),
             }
         } else {
-            Outcome::Failed(format!(
-                "Anthropic renewed this Account without Rotating its refresh \
+            Outcome::Failed {
+                spent: true,
+                why: format!(
+                    "Anthropic renewed this Account without Rotating its refresh \
                  token, so no refresh token was retired and this is not a \
                  Quarantine: {error}\n\
                  A store that refused the write is still holding what it held \
@@ -695,7 +726,8 @@ fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -
                  took the write and read it back as something else is said \
                  above — that copy was removed rather than left for Claude Code \
                  to find, and there a `perch relogin` is the way back."
-            ))
+                ),
+            }
         }
     })
 }
@@ -712,11 +744,14 @@ const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
 fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Result<(), Turned> {
     match anthropic::whose(host, token) {
         Ok(email) if !registry::same_name(&email, account.email()) => {
-            Err(Turned::Settled(Outcome::Failed(format!(
-                "the Credential Perch would ask with belongs to {email} rather \
-                 than to {}, so no figure was recorded against it.",
-                account.email()
-            ))))
+            Err(Turned::Settled(Outcome::Failed {
+                why: format!(
+                    "the Credential Perch would ask with belongs to {email} \
+                     rather than to {}, so no figure was recorded against it.",
+                    account.email()
+                ),
+                spent: true,
+            }))
         }
         Ok(_) => Ok(()),
         // The one refusal worth telling apart, because a Renewal may answer it: a token
@@ -752,7 +787,10 @@ fn keep(registry: &mut Registry, email: &str, windows: QuotaWindows, at: DateTim
 fn reading_refused(why: Refused) -> Outcome {
     match why {
         Refused::Throttled => Outcome::Throttled,
-        other => Outcome::Failed(other.to_string()),
+        other => Outcome::Failed {
+            why: other.to_string(),
+            spent: true,
+        },
     }
 }
 
@@ -765,7 +803,10 @@ fn getting_ready_refused(why: Refused) -> Outcome {
         Refused::Throttled => RATE_LIMITED.to_string(),
         other => other.to_string(),
     };
-    Outcome::Failed(said)
+    Outcome::Failed {
+        why: said,
+        spent: true,
+    }
 }
 
 /// The same, for the renewal, where being turned away is terminal: a refresh token
@@ -843,7 +884,13 @@ mod tests {
         let report = Report {
             attempts: vec![
                 attempt("someone@example.com", Outcome::Throttled),
-                attempt("overflow@example.com", Outcome::Failed("no token".into())),
+                attempt(
+                    "overflow@example.com",
+                    Outcome::Failed {
+                        why: "no token".into(),
+                        spent: true,
+                    },
+                ),
             ],
             not_kept: None,
             asked: true,

@@ -582,10 +582,15 @@ pub enum Outcome {
     /// (ADR a-profile-is-live-by-evidence). Only where waiting is an answer: a failure
     /// that does not clear itself is reported as itself instead.
     Refused { why: String },
-    /// The watch was taken over, or given up, between the reading and the Switch. Its
-    /// own outcome rather than a [`Outcome::Refused`], because a scheduler branching on
-    /// "nothing to do" would record a round that was in fact displaced.
+    /// The watch was taken over between the reading and the Switch. Its own outcome
+    /// rather than a [`Outcome::Refused`], because a scheduler branching on "nothing
+    /// to do" would record a round that was in fact displaced.
     HandedOver { why: String },
+    /// This Watcher was asked to stop between the reading and the Switch. Told apart
+    /// from being replaced because nothing replaced it: the word is what a day of
+    /// these is skimmed by, and it is the difference between a machine somebody is
+    /// still watching and one nobody is.
+    Stopped { why: String },
 }
 
 impl Outcome {
@@ -606,7 +611,9 @@ impl Outcome {
             Outcome::Nowhere { .. } => EXIT_NO_CANDIDATE,
             // Both are the code for a contended lock: nothing was changed, and
             // asking again is what resolves it.
-            Outcome::Held { .. } | Outcome::HandedOver { .. } => EXIT_HELD,
+            Outcome::Held { .. } | Outcome::HandedOver { .. } | Outcome::Stopped { .. } => {
+                EXIT_HELD
+            }
         }
     }
 
@@ -623,6 +630,7 @@ impl Outcome {
             // One lowercase token, as every other word is: two of them are eleven
             // cells in a field of eight, and a space where a reader counts columns.
             Outcome::HandedOver { .. } => "replaced",
+            Outcome::Stopped { .. } => "stopped",
         }
     }
 }
@@ -676,7 +684,16 @@ impl Round {
                 retrying_in: Some(millis),
                 ..
             } => *millis,
-            Outcome::Nowhere { .. } => NOWHERE_INTERVAL_MILLIS,
+            // Read off the round, as the hold's is: they agree today only
+            // because `act` passes this same constant.
+            Outcome::Nowhere {
+                looking_again: Some(millis),
+                ..
+            } => *millis,
+            Outcome::Nowhere {
+                looking_again: None,
+                ..
+            } => NOWHERE_INTERVAL_MILLIS,
             // Named one by one rather than caught by a wildcard, so an outcome added
             // later has to say what the loop does after it. A hold carrying no wait is
             // a check's, and a check exits rather than asking.
@@ -689,7 +706,8 @@ impl Round {
             | Outcome::Refused { .. }
             // The loop leaves at the top of the next round rather than waiting this
             // out, so the number is only what the line would have promised.
-            | Outcome::HandedOver { .. } => REFRESH_INTERVAL_MILLIS,
+            | Outcome::HandedOver { .. }
+            | Outcome::Stopped { .. } => REFRESH_INTERVAL_MILLIS,
         }
     }
 
@@ -706,7 +724,8 @@ impl Round {
             | Outcome::Switched { .. }
             | Outcome::Nowhere { .. }
             | Outcome::Refused { .. }
-            | Outcome::HandedOver { .. } => None,
+            | Outcome::HandedOver { .. }
+            | Outcome::Stopped { .. } => None,
         }
     }
 
@@ -775,7 +794,7 @@ impl Round {
                 "nothing current to decide on, so nothing was decided: {why}"
             )),
             Outcome::Refused { why } => explaining(&format!("the Switch was turned away: {why}")),
-            Outcome::HandedOver { why } => explaining(why),
+            Outcome::HandedOver { why } | Outcome::Stopped { why } => explaining(why),
         }
     }
 }
@@ -1125,7 +1144,34 @@ mod tests {
                     why: "another Watcher has taken the watch over.".to_string(),
                 },
             ),
+            round(
+                at(86.0),
+                Outcome::Stopped {
+                    why: "this Watcher was asked to stop.".to_string(),
+                },
+            ),
         ]
+    }
+
+    /// A check exits rather than asking again, so its `nowhere` round promises
+    /// no interval — and the wait is read off the round, so the arm answering
+    /// for that one has to be the loop's own constant.
+    #[test]
+    fn a_nowhere_round_that_promised_no_interval_still_waits_the_loops_own() {
+        let promised = Outcome::Nowhere {
+            why: String::new(),
+            looking_again: Some(1_234),
+        };
+        let silent = Outcome::Nowhere {
+            why: String::new(),
+            looking_again: None,
+        };
+
+        assert_eq!(round(at(86.0), promised).waiting_for(), 1_234);
+        assert_eq!(
+            round(at(86.0), silent).waiting_for(),
+            NOWHERE_INTERVAL_MILLIS
+        );
     }
 
     /// The column a day of these is skimmed by. Every word is one lowercase token
@@ -1230,6 +1276,7 @@ mod tests {
             },
             Outcome::Refused { why: String::new() },
             Outcome::HandedOver { why: String::new() },
+            Outcome::Stopped { why: String::new() },
         ];
 
         for outcome in &outcomes {

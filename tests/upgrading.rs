@@ -84,6 +84,37 @@ fn a_homebrew_installation_is_handed_to_the_brew_that_owns_it() {
     );
 }
 
+/// Homebrew refuses `--release`, so the Release Perch resolves decides nothing
+/// but whether it says "already the newest" — and unauthenticated
+/// `api.github.com` allows 60 requests an hour per address. An Upgrade that
+/// stopped there is one `brew upgrade perch` would have made.
+#[test]
+fn a_homebrew_upgrade_is_handed_over_even_where_github_will_not_answer() {
+    // 403 is what a shared address gets from the unauthenticated API.
+    let host = with_brew(machine_with_claude_code().with_reply(LATEST_URL, 403, "{}"))
+        .installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+
+    let (outcome, said) = upgrading(&host, UpgradeArgs::default());
+
+    assert_eq!(outcome.expect("it ran brew"), EXIT_OK, "{said}");
+    assert_eq!(
+        ran(&host)
+            .into_iter()
+            .map(|(program, args, _)| (program, args))
+            .next(),
+        Some((
+            "/opt/homebrew/bin/brew".to_string(),
+            vec!["upgrade".to_string(), "perch".to_string()]
+        )),
+        "{said}"
+    );
+    assert!(
+        host.notes().iter().any(|note| note.contains("Homebrew")),
+        "and it says the compare was lost rather than doing it quietly: {:?}",
+        host.notes()
+    );
+}
+
 #[test]
 fn an_npm_installation_is_handed_to_npm() {
     let host = machine().with_file("/usr/bin/npm", "").installed_at(
@@ -183,6 +214,21 @@ fn an_installer_installation_runs_the_embedded_installer_at_the_tag() {
          whatever happened to be newest"
     );
     assert!(said.contains(&format!("v{NEWER}")), "{said}");
+}
+
+/// The half the Channel that resolves its own does not have: nothing here works
+/// out which Release to fetch but Perch, so an API that will not answer is a
+/// refusal rather than a note and a hand-over.
+#[test]
+fn an_installer_upgrade_refuses_where_github_will_not_answer() {
+    let host = machine_with_claude_code()
+        .with_reply(LATEST_URL, 403, "{}")
+        .installed_at("/Users/someone/.local/bin/perch");
+
+    let (outcome, said) = upgrading(&host, UpgradeArgs::default());
+
+    outcome.expect_err("there is no newest Release to install");
+    assert!(ran(&host).is_empty(), "and nothing was run: {said}");
 }
 
 /// The Windows installer's default is `%LOCALAPPDATA%\Perch\bin`, which is not

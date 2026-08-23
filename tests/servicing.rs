@@ -622,6 +622,21 @@ fn status_says_when_the_unit_names_a_binary_that_is_no_longer_there() {
     );
 }
 
+/// `binary` and `binary_exists` are already `null` on a machine with no Service,
+/// and `log` was a path — so a script reading it tailed a file nothing appends
+/// to and read the Watcher's silence as a Watcher saying nothing.
+#[test]
+fn status_names_no_log_on_a_machine_with_no_service() {
+    let host = mac();
+
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: true });
+
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
+    assert_eq!(reported["installed"], false);
+    assert_eq!(reported["log"], serde_json::Value::Null, "{said}");
+}
+
 #[test]
 fn status_says_where_the_installed_service_actually_writes_its_log() {
     let host = mac().with_env("PERCH_HOME", "/Users/someone/elsewhere");
