@@ -289,7 +289,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
             wrote_the_identity_file: false,
             store: store.clone(),
         });
-        let a_credential_travelled = credential.is_some();
+        let a_credential_traveled = credential.is_some();
         // A Quarantined Account travels with no Credential and with the
         // `.claude.json` that names it, so the Profile is made for the file
         // alone: dropped, it is a re-Export smaller than the one that made it.
@@ -300,7 +300,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         // Set as each step lands rather than before the first: a write that
         // failed left whatever the store held, which is the best Credential
         // there is, and taking it back out takes back one this never wrote.
-        placed.touched[at].wrote_a_credential = stored.is_ok() && a_credential_travelled;
+        placed.touched[at].wrote_a_credential = stored.is_ok() && a_credential_traveled;
         let landed = stored.and_then(|()| login::carry_identity_file(host, &identity_file, &store));
         placed.touched[at].wrote_the_identity_file = landed.is_ok();
         if let Err(error) = landed {
