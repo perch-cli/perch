@@ -597,9 +597,7 @@ pub fn credential_after_rotation(
         None => block.remove("expiresAt"),
     };
 
-    let written = serde_json::to_string(&document)
-        .map(Zeroizing::new)
-        .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")));
+    let written = crate::json::sealed(&document);
 
     // The document is still holding both tokens, and dropping a
     // `serde_json::Value` frees its strings untouched. This is the freshly
@@ -615,7 +613,7 @@ pub fn credential_after_rotation(
         }
     }
 
-    written
+    Ok(written)
 }
 
 /// Wipes a token a `serde_json::Map` handed back, if it handed one back.
