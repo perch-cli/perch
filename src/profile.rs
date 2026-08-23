@@ -26,10 +26,21 @@ pub fn make_dir(host: &dyn Host, dir: &Path) -> Result<()> {
 /// Creates `dir` and stores `credential` where the Claude Code on this machine
 /// would keep it, returning the store that now holds it.
 pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
+    // Asked before the directory is made, which is the only moment the answer
+    // is knowable.
+    let made_here = !host.path_exists(dir);
     make_dir(host, dir)?;
 
     let store = probe::store_for_profile(host, dir)?;
-    store_credential(host, &store, credential)?;
+    if let Err(error) = store_credential(host, &store, credential) {
+        // Here rather than at the callers, all three of which open their undo
+        // with the Store this hands back — so this failure is outside every one
+        // of them, and what it leaves nothing walks. Only a directory this made.
+        if made_here {
+            discard(host, &store);
+        }
+        return Err(error);
+    }
     Ok(store)
 }
 
