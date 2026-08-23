@@ -537,6 +537,42 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
     );
 }
 
+/// The undo took a Profile's Credential and its `.claude.json` back out on the
+/// strength of what the Import *meant* to write there. The Account it stops on
+/// is the last one recorded and wrote neither, so what it took was whatever the
+/// directory's owner had left in it.
+#[test]
+fn a_rollback_leaves_what_the_account_it_stopped_on_never_wrote() {
+    let sealed = an_export_of_a_whole_machine();
+    let host = machine_with_claude_code()
+        .with_platform(Platform::Other)
+        .with_file(AT, &sealed)
+        .with_secrets(&[PASSPHRASE]);
+    // The directory a `perch add` that died at the browser step leaves, holding
+    // a live Credential and a `.claude.json` — and the store the Import cannot
+    // write, so this is the Account it stops on.
+    let landing = store_of(&host, SECOND_EMAIL);
+    let host = host
+        .with_file(&landing.credentials_file, THIRD_CREDENTIAL)
+        .with_file(&landing.identity_file, r#"{"hasCompletedOnboarding":true}"#)
+        .with_unwritable_file(&landing.credentials_file, "No space left on device");
+
+    let (outcome, _printed) = run_import(&host, AT);
+
+    outcome.expect_err("that Credential cannot be stored");
+    assert_eq!(
+        host.file(&landing.credentials_file).as_deref(),
+        Some(THIRD_CREDENTIAL),
+        "the write that failed left what the store held, which is the best \
+         Credential there is — and it is not this Import's to take back"
+    );
+    assert_eq!(
+        host.file(&landing.identity_file).as_deref(),
+        Some(r#"{"hasCompletedOnboarding":true}"#),
+        "and the `.claude.json` this Import never got as far as writing stays too"
+    );
+}
+
 /// A Profile is made for the `.claude.json` alone where the Export carries no
 /// Credential, so a rollback that forgets that store destroys a refresh token
 /// this Import never wrote and nothing can recover.
