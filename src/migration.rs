@@ -144,14 +144,19 @@ pub fn forward(document: &str) -> Result<Option<String>> {
 }
 
 /// What a name is called after the rename pass, which is itself where nothing
-/// renamed it. Folded, as `renames_in` decides collisions and every other
-/// question about a name: matched byte-exactly, an Account claiming `-DEV` of a
-/// Group declared `-dev` keeps a claim naming nothing, and `validate` refuses
-/// the very name this pass exists to rename.
+/// renamed it.
+///
+/// Byte-exactly first and folded after: `renames_in` gives two names that fold
+/// together two different new names, so a fold alone hands the second one the
+/// first one's answer and the two collapse into one. The fold is still needed
+/// behind it — an Account claiming `-DEV` of a Group declared `-dev` would
+/// otherwise keep a claim naming nothing, and `validate` refuses the very name
+/// this pass exists to rename.
 fn now_called(kind: NameKind, name: &str, renamed: &[Renamed]) -> String {
-    renamed
-        .iter()
-        .find(|entry| entry.kind == kind && crate::registry::same_name(&entry.was, name))
+    let of_the_kind = || renamed.iter().filter(|entry| entry.kind == kind);
+    of_the_kind()
+        .find(|entry| entry.was == name)
+        .or_else(|| of_the_kind().find(|entry| crate::registry::same_name(&entry.was, name)))
         .map_or_else(|| name.to_string(), |entry| entry.is_now.clone())
 }
 
@@ -623,6 +628,41 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// v0.2.0 told two names apart by `to_lowercase`, and this build folds both
+    /// spellings of a Greek sigma together — so a registry it wrote can hold two
+    /// Groups this build reads as one name. The rename pass gives them two, and
+    /// carrying the second one to the first one's new name would file both
+    /// Groups' Accounts under one and lose the other Group's Settings outright.
+    #[test]
+    fn two_v1_names_this_build_folds_together_come_forward_as_two_groups() {
+        let moved = forwarded(
+            &serde_json::json!({
+                "version": 1,
+                "groups": { "-\u{3bf}\u{3b4}\u{3bf}\u{3c2}": { "watcher_threshold_percent": 90 },
+                            "-\u{3bf}\u{3b4}\u{3bf}\u{3c3}": { "watcher_threshold_percent": 50 } },
+                "accounts": [
+                    { "identity": { "email": "a@b.com" }, "group": "-\u{3bf}\u{3b4}\u{3bf}\u{3c2}" },
+                    { "identity": { "email": "c@d.com" }, "group": "-\u{3bf}\u{3b4}\u{3bf}\u{3c3}" },
+                ],
+            })
+            .to_string(),
+        );
+
+        let groups = moved["groups"].as_object().expect("the Groups");
+        assert_eq!(groups.len(), 2, "both Groups come forward: {groups:?}");
+        assert_ne!(
+            moved["accounts"][0]["group"], moved["accounts"][1]["group"],
+            "and the two Accounts stay in the two Groups they were in"
+        );
+        for account in moved["accounts"].as_array().expect("the Accounts") {
+            let claimed = account["group"].as_str().expect("a claim");
+            assert!(
+                groups.contains_key(claimed),
+                "`{claimed}` is a Group that was declared"
+            );
+        }
     }
 
     /// The rename walks `accounts` to move the Group each one claims, and one
