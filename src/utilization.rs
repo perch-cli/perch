@@ -14,6 +14,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::commands::write_failed;
 use crate::error::Result;
+use crate::host::Shown;
 use crate::registry::{Account, CachedUtilization};
 
 /// How many terminal cells a string is drawn in. Not its bytes and not its
@@ -21,8 +22,8 @@ use crate::registry::{Account, CachedUtilization};
 /// combining mark in none, and because a width is shared down a column, one such
 /// name puts a whole block out of line. `unicode-width` carries the East Asian
 /// width table nobody should keep by hand (ADR a-crate-must-not-cost-a-seam).
-pub fn cells(text: &str) -> usize {
-    UnicodeWidthStr::width(text)
+pub fn cells(text: &Shown) -> usize {
+    UnicodeWidthStr::width(text.as_str())
 }
 
 /// `text` with spaces after it until it fills `width` cells.
@@ -30,7 +31,7 @@ pub fn cells(text: &str) -> usize {
 /// `format!("{text:width$}")` pads to a count of characters, which is
 /// [`cells`]'s mistake from the other side: it would take the right width and
 /// then fill it wrongly.
-pub fn padded(text: &str, width: usize) -> String {
+pub fn padded(text: &Shown, width: usize) -> String {
     format!("{text}{}", " ".repeat(width.saturating_sub(cells(text))))
 }
 
@@ -44,10 +45,10 @@ pub const LABEL_WIDTH: usize = 14;
 /// a window's name is Anthropic's and there is one per model: a fixed width
 /// either steps the per-model rows out of line or widens every block whether it
 /// needs it or not. The floor keeps a block of short names in the usual column.
-fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
+fn window_width(windows: impl Iterator<Item = Shown>) -> usize {
     windows
-        .map(cells)
-        .chain(std::iter::once(cells("5-hour")))
+        .chain(std::iter::once(Shown::of("5-hour")))
+        .map(|window| cells(&window))
         .max()
         // The floor is chained on, so there is always one.
         .expect("the floor is always among them")
@@ -63,14 +64,19 @@ pub fn window_width_across<'a>(accounts: impl IntoIterator<Item = &'a Account>) 
         accounts
             .into_iter()
             .filter_map(Account::observed_utilization)
-            .flat_map(|cached| cached.windows.iter().map(|window| window.window.as_str())),
+            .flat_map(|cached| {
+                cached
+                    .windows
+                    .iter()
+                    .map(|window| Shown::of(&window.window))
+            }),
     )
 }
 
 /// Writes a label and a value in that column, for the surfaces that render an
 /// Account as labeled lines.
-pub fn write_labeled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
-    writeln!(out, "{}{value}", padded(label, LABEL_WIDTH)).map_err(write_failed)
+pub fn write_labeled(out: &mut dyn Write, label: &str, value: &Shown) -> Result<()> {
+    writeln!(out, "{}{value}", padded(&Shown::of(label), LABEL_WIDTH)).map_err(write_failed)
 }
 
 /// Writes the cached Utilization under one `Utilization` label, however many
@@ -81,7 +87,7 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
     let width = window_width_across([account]);
     for (index, figure) in lines(account, now, width).iter().enumerate() {
         let label = if index == 0 { "Utilization" } else { "" };
-        write_labeled(out, label, figure)?;
+        write_labeled(out, label, &Shown::of(figure))?;
     }
     Ok(())
 }
@@ -107,7 +113,7 @@ pub fn lines(
                 .map(|window| {
                     format!(
                         "{} {:>3}%  (as of {age})",
-                        padded(&window.window, width),
+                        padded(&Shown::of(&window.window), width),
                         percentage(window.used_percent)
                     )
                 })
@@ -300,21 +306,36 @@ mod tests {
 
     #[test]
     fn a_width_is_measured_in_the_cells_a_terminal_draws_it_in() {
-        assert_eq!(cells("作業"), 4, "two characters, four columns");
-        assert_eq!(cells("øverfløw"), 8, "and a narrow one is still one each");
+        assert_eq!(cells(&Shown::of("作業")), 4, "two characters, four columns");
         assert_eq!(
-            cells("øverfløw"),
+            cells(&Shown::of("øverfløw")),
             8,
-            "not the ten bytes it happens to occupy"
+            "and a narrow one is still one each, not the ten bytes it occupies"
+        );
+        assert_eq!(
+            cells(&Shown::of("5-hour\u{1b}[2K")),
+            "5-hour[2K".len(),
+            "and a column is measured on what will be drawn: the character a \
+             terminal would act on is gone by the time this is asked"
         );
     }
 
     #[test]
     fn padding_fills_a_width_in_cells_rather_than_in_characters() {
-        assert_eq!(padded("作業", 6), "作業  ", "four cells, two to fill");
-        assert_eq!(padded("ab", 4), "ab  ");
         assert_eq!(
-            padded("作業作業", 4),
+            padded(&Shown::of("作業"), 6),
+            "作業  ",
+            "four cells, two to fill"
+        );
+        assert_eq!(padded(&Shown::of("ab"), 4), "ab  ");
+        assert_eq!(
+            padded(&Shown::of("5-hour\u{1b}[2K"), 10),
+            "5-hour[2K ",
+            "and what a terminal would act on is not written at all, while what \
+             it would draw is"
+        );
+        assert_eq!(
+            padded(&Shown::of("作業作業"), 4),
             "作業作業",
             "and nothing is trimmed to fit: a cell count is a floor here"
         );
@@ -325,11 +346,11 @@ mod tests {
     #[test]
     fn a_labeled_row_is_padded_in_cells_like_every_other_column() {
         let mut written = Vec::new();
-        write_labeled(&mut written, "作業", "Overflow Ltd").unwrap();
+        write_labeled(&mut written, "作業", &Shown::of("Overflow Ltd")).unwrap();
         let line = String::from_utf8(written).unwrap();
         assert_eq!(
             line.find("Overflow").unwrap(),
-            LABEL_WIDTH - cells("作業") + "作業".len(),
+            LABEL_WIDTH - cells(&Shown::of("作業")) + "作業".len(),
             "the value starts in the column every other labeled row starts in"
         );
     }

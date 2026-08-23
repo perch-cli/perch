@@ -17,7 +17,7 @@ use serde_json::json;
 use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, group, say, say_json, write_failed};
 use crate::cycle;
 use crate::error::{PerchError, Result};
-use crate::host::Host;
+use crate::host::{Host, Shown};
 use crate::listing::{self, Section};
 use crate::observe::Report;
 use crate::registry::{self, Account, Registry, UNGROUPED};
@@ -198,21 +198,22 @@ const GROUP_COLUMN: usize = 2;
 /// it two ways.
 const NOTHING_TO_SAY: &str = "-";
 
+/// A row of Perch's own words, in the shape the writer takes: a heading row and
+/// the blank one a second Quota Window sits under go through the same door as a
+/// row holding an address somebody else chose.
+fn drawn(columns: [&str; COLUMNS]) -> [Shown; COLUMNS] {
+    columns.map(Shown::of)
+}
+
 /// What those columns hold for one Account: the name you reach it by, what it
 /// is interchangeable with, whether it is any use, and how much of it is left.
-fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
+fn columns(registry: &Registry, account: &Account) -> [Shown; COLUMNS] {
     [
-        account.email().to_string(),
-        registry
-            .alias_of(account.email())
-            .unwrap_or(NOTHING_TO_SAY)
-            .to_string(),
-        account
-            .group
-            .clone()
-            .unwrap_or_else(|| registry::NO_GROUP.to_string()),
-        state_of(account),
-        cycle::headroom_phrase(account),
+        Shown::of(account.email()),
+        Shown::of(registry.alias_of(account.email()).unwrap_or(NOTHING_TO_SAY)),
+        Shown::of(account.group.as_deref().unwrap_or(registry::NO_GROUP)),
+        Shown::of(&state_of(account)),
+        Shown::of(&cycle::headroom_phrase(account)),
     ]
 }
 
@@ -220,12 +221,14 @@ fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
 /// measured in the cells a terminal draws them in. The headers are not a
 /// parameter: a column measured against anything else is one padded to a width
 /// its own heading does not fit in.
-fn widths<'a>(rows: impl IntoIterator<Item = &'a [String; COLUMNS]> + Clone) -> [usize; COLUMNS] {
+fn widths<'a>(rows: impl IntoIterator<Item = &'a [Shown; COLUMNS]> + Clone) -> [usize; COLUMNS] {
     std::array::from_fn(|column| {
         rows.clone()
             .into_iter()
             .map(|row| utilization::cells(&row[column]))
-            .chain(std::iter::once(utilization::cells(HEADERS[column])))
+            .chain(std::iter::once(utilization::cells(&Shown::of(
+                HEADERS[column],
+            ))))
             .max()
             .unwrap_or_default()
     })
@@ -235,13 +238,13 @@ fn widths<'a>(rows: impl IntoIterator<Item = &'a [String; COLUMNS]> + Clone) -> 
 /// own so no figure is dropped for want of a column.
 struct Row {
     active: bool,
-    cells: [String; COLUMNS],
+    cells: [Shown; COLUMNS],
     figures: Vec<String>,
 }
 
 impl Row {
-    fn columns(&self) -> [&str; COLUMNS] {
-        self.cells.each_ref().map(String::as_str)
+    fn columns(&self) -> [&Shown; COLUMNS] {
+        self.cells.each_ref()
     }
 
     fn marker(&self) -> char {
@@ -339,23 +342,26 @@ fn render_human(
     let show_group = matches!(scope, Scope::Everything);
     let widths = widths(rows.iter().map(|row| &row.cells));
 
-    write_row(out, ' ', HEADERS, "Utilization", &widths, show_group)?;
+    let headings = drawn(HEADERS);
+    // A second Quota Window belongs to the Account above it, so it is shown
+    // under that Account's first figure and nothing else is repeated.
+    let again = drawn([""; COLUMNS]);
+
+    write_row(
+        out,
+        ' ',
+        headings.each_ref(),
+        "Utilization",
+        &widths,
+        show_group,
+    )?;
     for row in &rows {
         for (index, figure) in row.figures.iter().enumerate() {
-            match index {
-                0 => write_row(
-                    out,
-                    row.marker(),
-                    row.columns(),
-                    figure,
-                    &widths,
-                    show_group,
-                )?,
-                // A second Quota Window belongs to the Account above it, so it
-                // is shown under that Account's first figure and nothing else
-                // is repeated.
-                _ => write_row(out, ' ', [""; COLUMNS], figure, &widths, show_group)?,
-            }
+            let (marker, columns) = match index {
+                0 => (row.marker(), row.columns()),
+                _ => (' ', again.each_ref()),
+            };
+            write_row(out, marker, columns, figure, &widths, show_group)?;
         }
     }
 
@@ -413,7 +419,7 @@ fn reserve_lines(
 fn write_row(
     out: &mut dyn Write,
     marker: char,
-    columns: [&str; COLUMNS],
+    columns: [&Shown; COLUMNS],
     figure: &str,
     widths: &[usize; COLUMNS],
     show_group: bool,
@@ -491,8 +497,8 @@ mod tests {
     use super::*;
     use crate::registry::Quarantine;
 
-    fn row(email: &str, alias: &str) -> [String; COLUMNS] {
-        [email, alias, "none", NOTHING_TO_SAY, "40%"].map(str::to_string)
+    fn row(email: &str, alias: &str) -> [Shown; COLUMNS] {
+        drawn([email, alias, "none", NOTHING_TO_SAY, "40%"])
     }
 
     fn account_in(disabled: bool, quarantine: Option<Quarantine>) -> Account {
@@ -545,9 +551,9 @@ mod tests {
     /// it out of line on every row rather than only its own.
     #[test]
     fn a_column_is_measured_in_the_cells_a_terminal_draws_it_in() {
-        let in_group = |name: &str| -> [[String; COLUMNS]; 1] {
+        let in_group = |name: &str| -> [[Shown; COLUMNS]; 1] {
             let mut row = row("a@b.com", "-");
-            row[2] = name.to_string();
+            row[2] = Shown::of(name);
             [row]
         };
         assert_eq!(

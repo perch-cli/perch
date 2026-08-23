@@ -1328,3 +1328,41 @@ fn a_narrowed_scope_holding_no_accounts_still_says_a_switch_was_in_flight() {
         "and the machine still says the question is open:\n{printed}"
     );
 }
+
+/// The three values a surface draws that nobody chose: a Quota Window's name is
+/// Anthropic's, a plan is Claude Code's, and an organization reaches the registry
+/// through an Import as well as through the file `probe` guards
+/// (ADR nothing-drawn-is-obeyed).
+#[test]
+fn a_value_perch_did_not_choose_is_drawn_rather_than_obeyed() {
+    let mut registry = Registry::default();
+    let mut held = account(EMAIL, "Acme\u{202e}gnihtemos");
+    held.plan = Some("pro\u{1b}[31m".to_string());
+    held.utilization = Some(observed(
+        at(11, 57),
+        &[("5-hour\u{1b}[2K", 42.0), ("7-day", 18.0)],
+    ));
+    registry.upsert(held);
+    registry.settle(Some(EMAIL.to_string()));
+    let host = machine_holding(&registry);
+
+    for (surface, printed) in [
+        ("perch list", run_list(&host, false).1),
+        ("perch status", run_status(&host, false).1),
+    ] {
+        assert!(
+            !printed.contains('\u{1b}') && !printed.contains('\u{202e}'),
+            "{surface} writes nothing a terminal acts on:\n{printed:?}"
+        );
+        assert!(
+            printed.contains("5-hour[2K"),
+            "and everything it draws:\n{printed:?}"
+        );
+    }
+
+    let printed = run_status(&host, false).1;
+    assert!(
+        printed.contains("Acmegnihtemos") && printed.contains("pro[31m"),
+        "the organization and the plan alike:\n{printed:?}"
+    );
+}

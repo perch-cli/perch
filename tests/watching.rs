@@ -559,6 +559,51 @@ fn a_hold_that_asked_anthropic_nothing_does_not_pace_the_loop_down() {
     );
 }
 
+/// The mirror, and the half a shared constant got wrong: the same refusal is
+/// reached again *after* a reading has gone out and Anthropic has turned a live
+/// token away. That round spent, so the Back-off paces it and the sentence says
+/// what actually happened rather than naming an expiry that has not.
+#[test]
+fn a_hold_after_anthropic_refused_a_live_token_paces_the_loop_down() {
+    let host = watched()
+        .with_reply_to(PROFILE_URL, ACTIVE_TOKEN, 200, &profile_of(EMAIL))
+        .with_replies_to(
+            USAGE_URL,
+            ACTIVE_TOKEN,
+            &[(401, r#"{"error":"unauthorized"}"#)],
+        );
+    let host = answering(host, SPARE_TOKEN, SECOND_EMAIL, &[5.0]).with_interrupt_after(4);
+    let host = client_running_against(host, DEFAULT_CONFIG_DIR, 4242);
+    host.forget_effects();
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    assert!(
+        !asked_by(&host).is_empty(),
+        "the round asked Anthropic and was refused: {printed}"
+    );
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "and nothing was renewed under the running session: {printed}"
+    );
+    assert_eq!(
+        waits(&host),
+        vec![150_000, 300_000, 600_000, 1_200_000],
+        "so the wait doubles, bounded — a flat beat here is a refused request \
+         every interval for as long as that session runs: {printed}"
+    );
+    let held = decisions(&printed);
+    assert!(
+        held[0].contains("Anthropic would not accept its access token"),
+        "and the line says what happened: {printed}"
+    );
+    assert!(
+        !held[0].contains("has expired"),
+        "rather than an expiry the Credential has months left before: {printed}"
+    );
+}
+
 #[test]
 fn nowhere_to_go_is_a_decision_and_the_loop_goes_on_watching() {
     let host = watching(&[100.0, 100.0], 100.0);

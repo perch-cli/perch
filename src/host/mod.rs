@@ -342,6 +342,37 @@ pub fn is_unshowable(c: char) -> bool {
             | '\u{2066}'..='\u{206F}')
 }
 
+/// Text on its way to a terminal, with everything a terminal would act on
+/// rather than draw taken out ([`is_unshowable`]).
+///
+/// A type because the rule had six call sites and no reader: three refused
+/// their own copy of it and three drew a value (ADR nothing-drawn-is-obeyed).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shown(String);
+
+impl Shown {
+    /// Whatever a terminal would draw of `text`, which is all of it for
+    /// everything Perch authors. Nothing to refuse with, on purpose.
+    pub fn of(text: &str) -> Shown {
+        match control_character_in(text) {
+            // Filtering unconditionally would walk and rebuild every cell of
+            // every table, and nearly none of them holds one of these.
+            None => Shown(text.to_string()),
+            Some(_) => Shown(text.chars().filter(|c| !is_unshowable(*c)).collect()),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Shown {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 /// The first such character in a value, named the way a refusal names one.
 /// Shared with [`crate::keychain`]'s refusal, for the reason [`write_double_quoted`]
 /// is one copy. What each caller *says* about it stays theirs: the two protocols
@@ -779,6 +810,18 @@ impl Settled {
         }
     }
 
+    /// Whether this path and `other` name one place.
+    ///
+    /// A path that would not settle is nowhere rather than everywhere, which is
+    /// [`Settled::is_inside`]'s answer turned over: both callers of that refuse
+    /// or skip on `true`, and this one goes on to act on the two as one.
+    pub(crate) fn is_the_same_place_as(&self, other: &Settled) -> bool {
+        match (&self.0, &other.0) {
+            (Some(here), Some(there)) => here == there,
+            _ => false,
+        }
+    }
+
     /// Where the walk landed, for the cases that are about the walk itself.
     #[cfg(test)]
     fn at(&self) -> Option<&Path> {
@@ -790,6 +833,13 @@ impl Settled {
 /// it of many paths settles the fixed side itself.
 pub(crate) fn is_inside(host: &dyn Host, inner: &Path, outer: &Path) -> bool {
     settled(host, inner).is_inside(&settled(host, outer))
+}
+
+/// The other question about two paths, asked in the one shape it has an answer
+/// in: `==` on two `Path`s compares spellings, and a directory reached through a
+/// link has a spelling sharing no component with its own.
+pub(crate) fn is_the_same_place(host: &dyn Host, one: &Path, other: &Path) -> bool {
+    settled(host, one).is_the_same_place_as(&settled(host, other))
 }
 
 /// The deepest component of `path` that is a link, replaced by what it points
