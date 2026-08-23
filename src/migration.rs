@@ -135,10 +135,8 @@ pub fn forward(document: &str) -> Result<Option<String>> {
             false => now_called(NameKind::Group, &group, &renamed),
         };
         // Two v1 keys can land on one — a Group called `Ungrouped` beside the
-        // Ungrouped Scope's own record — and the later of the two wins, as
-        // `with_every_check_under_the_declared_spelling` decides the same
-        // collision: byte order would otherwise pick, and the older record
-        // winning is a Check free to Switch inside a Cooldown still running.
+        // Ungrouped Scope's own record — and the later Switch wins, as
+        // `with_every_check_under_the_declared_spelling` settles the same one.
         let kept = Value::Object(kept);
         match checks.get(&under).and_then(switched_at) {
             Some(held) if switched_at(&kept).is_none_or(|arriving| arriving < held) => {}
@@ -155,14 +153,10 @@ pub fn forward(document: &str) -> Result<Option<String>> {
 }
 
 /// What a name is called after the rename pass, which is itself where nothing
-/// renamed it.
-///
-/// Byte-exactly first and folded after: `renames_in` gives two names that fold
-/// together two different new names, so a fold alone hands the second one the
-/// first one's answer and the two collapse into one. The fold is still needed
-/// behind it — an Account claiming `-DEV` of a Group declared `-dev` would
-/// otherwise keep a claim naming nothing, and `validate` refuses the very name
-/// this pass exists to rename.
+/// renamed it. Byte-exactly first, since two names that fold together get two
+/// different new ones and a fold alone collapses them into one; folded behind
+/// that, since an Account claiming `-DEV` of a Group declared `-dev` would
+/// otherwise keep a claim naming the name this pass exists to take away.
 fn now_called(kind: NameKind, name: &str, renamed: &[Renamed]) -> String {
     let of_the_kind = || renamed.iter().filter(|entry| entry.kind == kind);
     of_the_kind()
@@ -214,13 +208,13 @@ fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
             .unwrap_or_default()
     };
     let aliases = names("aliases");
-    // A Group an Account claims is a Group name whether or not `groups`
-    // declares it: `load` declares every claim it finds, so a claim left
-    // unrenamed is the name `validate` refuses and there is no command left to
-    // repair it with. Folded against what is already there, so a claim spelling
-    // a declared Group in another case is not a second name.
+    // A Group an Account claims is a Group name whether or not `groups` declares
+    // it: `load` declares every claim it finds, so a claim left unrenamed is the
+    // name `validate` refuses and no command is left to repair it with.
     let mut groups = names("groups");
     for claimed in claimed_groups(held) {
+        // Folded, so a claim spelling a declared Group in another case is not a
+        // second name.
         if !groups
             .iter()
             .any(|held| crate::registry::same_name(held, &claimed))
@@ -250,11 +244,10 @@ fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
     renamed
 }
 
-/// When a `checks` record says its Switch happened.
-///
-/// Parsed rather than compared as text: chrono writes a fractional second only
-/// where there is one, and `.` sorts below `Z`, so text order puts a record
-/// carrying one before a record of the same instant without.
+/// When a `checks` record says its Switch happened. Parsed rather than compared
+/// as text: chrono writes a fractional second only where there is one, and `.`
+/// sorts below `Z`, so text order puts a record carrying one before a record of
+/// the same instant without.
 fn switched_at(check: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
     check
         .get("switched_at")
