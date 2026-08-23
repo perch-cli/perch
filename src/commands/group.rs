@@ -178,6 +178,20 @@ fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) ->
 /// `perch config` and `perch list` address Groups too, and answer a typo with
 /// this same sentence rather than one of their own.
 pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
+    // Before the naming rules, because an address breaks one of them: a name
+    // Perch holds an Account under is a mistake about which noun this argument
+    // takes, and answering it with the rule about `@` says nothing about that.
+    if let Some(account) = registry.account(name) {
+        let sits = match &account.group {
+            Some(group) => format!("in Group `{group}`"),
+            None => "in no Group".to_string(),
+        };
+        return PerchError::NotFound(format!(
+            "No Group called `{name}`. That is an Account Perch holds, {sits}. \
+             This takes the Group rather than one of the Accounts in it — \
+             `perch group list` shows the ones that have been declared."
+        ));
+    }
     // A word that could never be a Group is told so rather than offered a
     // `perch group add` the next command refuses — `global` above all. Asked
     // here rather than at each caller, in `validate_name`'s own words.

@@ -537,3 +537,77 @@ fn an_enabled_flag_that_is_not_a_boolean_is_refused_rather_than_read_as_true() {
          one — a field with no file is a repair nobody can start: {refused}"
     );
 }
+
+/// The pass read the Group names off `groups` alone, so a Group only an Account
+/// claimed was carried through untouched — and `load`, which declares every
+/// claim it finds, then declared the very name `validate` refuses.
+#[test]
+fn a_group_only_an_account_claims_is_renamed_rather_than_left_to_brick_the_machine() {
+    let held: serde_json::Value = serde_json::from_str(V0_2_0).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    held.insert("groups".to_string(), serde_json::json!({}));
+    held.insert("checks".to_string(), serde_json::json!({}));
+    for account in held
+        .get_mut("accounts")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the fixture lists Accounts")
+    {
+        account["group"] = serde_json::json!("-dev");
+    }
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let (outcome, printed) = run_list(&host, false);
+    outcome.expect("and every command works afterwards, the repairs among them");
+    assert!(
+        printed.contains("dev"),
+        "under the accepted name: {printed}"
+    );
+    let registry = registry::load(&host)
+        .expect("the registry reads")
+        .expect("a registry is there");
+    assert!(
+        registry.group("dev").is_some(),
+        "the claim declares the renamed Group: {:?}",
+        registry.groups.keys().collect::<Vec<_>>()
+    );
+}
+
+/// A Group called `Ungrouped` and the Ungrouped Scope itself both key a record
+/// here, and both come forward under the one spelling `record_check` writes. The
+/// later of the two is the one that survives: the older one winning is a Check
+/// free to Switch inside a Cooldown that is still running.
+#[test]
+fn two_v1_cooldowns_landing_on_one_key_keep_the_later_switch() {
+    let held: serde_json::Value = serde_json::from_str(V0_2_0).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    held.insert(
+        "groups".to_string(),
+        serde_json::json!({ "Ungrouped": { "watcher_threshold_percent": 70 } }),
+    );
+    held.insert(
+        "checks".to_string(),
+        serde_json::json!({
+            "Ungrouped": { "switched_at": "2026-08-14T10:00:00Z" },
+            "ungrouped": { "switched_at": "2026-01-01T00:00:00Z" },
+        }),
+    );
+    for account in held
+        .get_mut("accounts")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the fixture lists Accounts")
+    {
+        account["group"] = serde_json::json!("Ungrouped");
+    }
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let written: serde_json::Value =
+        serde_json::from_str(&on_disk(&host)).expect("a document came back");
+    assert_eq!(
+        written["checks"]["ungrouped"]["switched_at"], "2026-08-14T10:00:00Z",
+        "the August record paces the Scope, not the January one: {written}"
+    );
+}

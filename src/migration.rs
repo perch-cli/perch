@@ -134,7 +134,16 @@ pub fn forward(document: &str) -> Result<Option<String>> {
             true => crate::registry::UNGROUPED.to_string(),
             false => now_called(NameKind::Group, &group, &renamed),
         };
-        checks.insert(under, Value::Object(kept));
+        // Two v1 keys can land on one — a Group called `Ungrouped` beside the
+        // Ungrouped Scope's own record — and the later Switch wins, as
+        // `with_every_check_under_the_declared_spelling` settles the same one.
+        let kept = Value::Object(kept);
+        match checks.get(&under).and_then(switched_at) {
+            Some(held) if switched_at(&kept).is_none_or(|arriving| arriving < held) => {}
+            _ => {
+                checks.insert(under, kept);
+            }
+        }
     }
     moved.insert("checks".to_string(), Value::Object(checks));
 
@@ -144,14 +153,15 @@ pub fn forward(document: &str) -> Result<Option<String>> {
 }
 
 /// What a name is called after the rename pass, which is itself where nothing
-/// renamed it. Folded, as `renames_in` decides collisions and every other
-/// question about a name: matched byte-exactly, an Account claiming `-DEV` of a
-/// Group declared `-dev` keeps a claim naming nothing, and `validate` refuses
-/// the very name this pass exists to rename.
+/// renamed it. Byte-exactly first, since two names that fold together get two
+/// different new ones and a fold alone collapses them into one; folded behind
+/// that, since an Account claiming `-DEV` of a Group declared `-dev` would
+/// otherwise keep a claim naming the name this pass exists to take away.
 fn now_called(kind: NameKind, name: &str, renamed: &[Renamed]) -> String {
-    renamed
-        .iter()
-        .find(|entry| entry.kind == kind && crate::registry::same_name(&entry.was, name))
+    let of_the_kind = || renamed.iter().filter(|entry| entry.kind == kind);
+    of_the_kind()
+        .find(|entry| entry.was == name)
+        .or_else(|| of_the_kind().find(|entry| crate::registry::same_name(&entry.was, name)))
         .map_or_else(|| name.to_string(), |entry| entry.is_now.clone())
 }
 
@@ -197,16 +207,29 @@ fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
             .map(|entries| entries.keys().cloned().collect())
             .unwrap_or_default()
     };
+    let aliases = names("aliases");
+    // A Group an Account claims is a Group name whether or not `groups` declares
+    // it: `load` declares every claim it finds, so a claim left unrenamed is the
+    // name `validate` refuses and no command is left to repair it with.
+    let mut groups = names("groups");
+    for claimed in claimed_groups(held) {
+        // Folded, so a claim spelling a declared Group in another case is not a
+        // second name.
+        if !groups
+            .iter()
+            .any(|held| crate::registry::same_name(held, &claimed))
+        {
+            groups.push(claimed);
+        }
+    }
+
     // One namespace, so a Group renamed out of the way of an Alias is a Group
     // that has not been renamed at all.
-    let mut taken: Vec<String> = names("groups");
-    taken.extend(names("aliases"));
+    let mut taken: Vec<String> = groups.clone();
+    taken.extend(aliases.clone());
 
     let mut renamed = Vec::new();
-    for (kind, held) in [
-        (NameKind::Group, names("groups")),
-        (NameKind::Alias, names("aliases")),
-    ] {
+    for (kind, held) in [(NameKind::Group, groups), (NameKind::Alias, aliases)] {
         for was in held {
             if crate::registry::validate_name(kind, &was).is_ok() {
                 continue;
@@ -219,6 +242,34 @@ fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
         }
     }
     renamed
+}
+
+/// When a `checks` record says its Switch happened. Parsed rather than compared
+/// as text: chrono writes a fractional second only where there is one, and `.`
+/// sorts below `Z`, so text order puts a record carrying one before a record of
+/// the same instant without.
+fn switched_at(check: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+    check
+        .get("switched_at")
+        .and_then(Value::as_str)
+        .and_then(|at| at.parse().ok())
+}
+
+/// Every Group name an Account claims, in the order the Accounts are listed.
+///
+/// Duplicates and all: the caller folds them against the declared names, which
+/// is the same question it asks of the declared ones themselves.
+fn claimed_groups(held: &Map<String, Value>) -> Vec<String> {
+    held.get("accounts")
+        .and_then(Value::as_array)
+        .map(|accounts| {
+            accounts
+                .iter()
+                .filter_map(|account| account.get("group").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The nearest name to this one that this build accepts and nothing else in the
@@ -623,6 +674,41 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// v0.2.0 told two names apart by `to_lowercase`, and this build folds both
+    /// spellings of a Greek sigma together — so a registry it wrote can hold two
+    /// Groups this build reads as one name. The rename pass gives them two, and
+    /// carrying the second one to the first one's new name would file both
+    /// Groups' Accounts under one and lose the other Group's Settings outright.
+    #[test]
+    fn two_v1_names_this_build_folds_together_come_forward_as_two_groups() {
+        let moved = forwarded(
+            &serde_json::json!({
+                "version": 1,
+                "groups": { "-\u{3bf}\u{3b4}\u{3bf}\u{3c2}": { "watcher_threshold_percent": 90 },
+                            "-\u{3bf}\u{3b4}\u{3bf}\u{3c3}": { "watcher_threshold_percent": 50 } },
+                "accounts": [
+                    { "identity": { "email": "a@b.com" }, "group": "-\u{3bf}\u{3b4}\u{3bf}\u{3c2}" },
+                    { "identity": { "email": "c@d.com" }, "group": "-\u{3bf}\u{3b4}\u{3bf}\u{3c3}" },
+                ],
+            })
+            .to_string(),
+        );
+
+        let groups = moved["groups"].as_object().expect("the Groups");
+        assert_eq!(groups.len(), 2, "both Groups come forward: {groups:?}");
+        assert_ne!(
+            moved["accounts"][0]["group"], moved["accounts"][1]["group"],
+            "and the two Accounts stay in the two Groups they were in"
+        );
+        for account in moved["accounts"].as_array().expect("the Accounts") {
+            let claimed = account["group"].as_str().expect("a claim");
+            assert!(
+                groups.contains_key(claimed),
+                "`{claimed}` is a Group that was declared"
+            );
+        }
     }
 
     /// The rename walks `accounts` to move the Group each one claims, and one

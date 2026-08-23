@@ -307,7 +307,9 @@ fn no_longer_on_anybody(
 /// The Account you are on — and the one state where Perch cannot say which that
 /// is: a Landing names two, and repairing **either** of them lands.
 fn will_land_in_the_default_profile(registry: &Registry, account: &Account) -> bool {
-    registry.is_active(account.email()) || registry.active().names(account.email())
+    // `names` alone: `is_active` asks `whose`, which for a Landing answers with
+    // the Account being *left* — a subset of the two this already covers.
+    registry.active().names(account.email())
 }
 
 fn announcement(registry: &Registry, account: &Account, landing_here: bool) -> String {

@@ -119,7 +119,18 @@ impl std::fmt::Debug for HttpRequest<'_> {
     }
 }
 
+/// The bound on a request that carries none of its own.
+///
+/// At the port rather than in the real adapter, because a fake that answered a
+/// request after longer than this would be answering one no machine answers.
+pub const ORDINARY_BOUND_MILLIS: u64 = 30_000;
+
 impl<'a> HttpRequest<'a> {
+    /// How long this request may take, whether or not it says.
+    pub fn bound_millis(&self) -> u64 {
+        self.within_millis.unwrap_or(ORDINARY_BOUND_MILLIS)
+    }
+
     pub fn get(url: &'a str, headers: &'a [(&'a str, &'a str)]) -> Self {
         HttpRequest {
             url,
@@ -714,9 +725,16 @@ pub(crate) fn through_any_link(host: &dyn Host, path: &Path) -> PathBuf {
     let Ok(Some(target)) = host.link_target(path) else {
         return path.to_path_buf();
     };
+    against(path, target)
+}
+
+/// Where a link's target lands, given where the link sits. `ln -s`, stow and
+/// chezmoi all record a relative target unless handed an absolute path, and a
+/// relative one is read against the link's own directory.
+pub(crate) fn against(link_at: &Path, target: PathBuf) -> PathBuf {
     match target.is_absolute() {
         true => target,
-        false => path.parent().unwrap_or(Path::new("")).join(target),
+        false => link_at.parent().unwrap_or(Path::new("")).join(target),
     }
 }
 
@@ -746,11 +764,7 @@ fn deepest_link_on(host: &dyn Host, path: &Path) -> Option<PathBuf> {
     let mut at = path.to_path_buf();
     loop {
         if let Ok(Some(target)) = host.link_target(&at) {
-            let resolved = match target.is_absolute() {
-                true => target,
-                false => at.parent().unwrap_or(Path::new("")).join(target),
-            };
-            return Some(resolved.join(&beneath));
+            return Some(against(&at, target).join(&beneath));
         }
         let name = at.file_name()?;
         beneath = Path::new(name).join(&beneath);

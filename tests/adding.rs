@@ -11,7 +11,7 @@ use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
 use perch::host::prelude::*;
-use perch::host::{FakeHost, fake::Effect};
+use perch::host::{FakeHost, Platform, fake::Effect};
 
 /// A machine with the first Account already adopted and a second login waiting
 /// to be run.
@@ -531,6 +531,35 @@ fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
         host.keychain_services(),
         services_before,
         "and no Credential is left in a namespace nothing names"
+    );
+    assert_the_active_account_survived(&host);
+}
+
+/// One step *earlier* than either: the Credential itself will not go down.
+/// `profile::create` sat outside every caller's undo, because each one opens
+/// its undo with the Store this hands back — so what it left was a directory,
+/// and on the path where the fallback store takes the Credential and the
+/// preferred one keeps the copy it replaces, a live Credential inside it.
+#[test]
+fn a_profile_whose_credential_would_not_go_down_is_not_left_behind() {
+    let host = logged_in_machine();
+    run_status(&host, false).0.unwrap();
+
+    let host = host
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
+        .with_platform(Platform::Other)
+        .with_unwritable_file(
+            "/Users/someone/.config/perch/profiles/overflow-example-com/.credentials.json",
+            "Permission denied (os error 13)",
+        );
+    let profile = store_of(&host, SECOND_EMAIL).config_dir;
+
+    let (result, _) = run_add(&host, add_to_group("work"));
+
+    result.expect_err("the Credential could not be stored");
+    assert!(
+        !host.path_exists(&profile),
+        "the directory this made goes with the failure that made it useless"
     );
     assert_the_active_account_survived(&host);
 }

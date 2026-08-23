@@ -31,10 +31,20 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    // Nothing to hand back to: this command's own failure says where the file
-    // is, because the path is the argument the person typed.
     let mut landed = None;
-    write_the_export(host, &mut perch, &mut registry, path, &mut landed, out)
+    let written = write_the_export(host, &mut perch, &mut registry, path, &mut landed, out);
+    match (written, landed) {
+        // The bytes land before the report, so a terminal that has gone away
+        // fails a command whose file is there — and a re-run is refused for the
+        // path being taken, which reads as somebody else's file.
+        (Err(error), Some(at)) => Err(error.with_note(&format!(
+            "The Export at {} was written and holds a working Credential for \
+             every Account. Only saying so failed, so there is nothing to run \
+             again — keep it somewhere you would keep those, or delete it.",
+            at.display(),
+        ))),
+        (written, _) => written,
+    }
 }
 
 /// Everything an Export is, given a registry somebody else has read: the path

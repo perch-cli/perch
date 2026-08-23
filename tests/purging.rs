@@ -360,6 +360,31 @@ fn a_windows_tilde_means_home_too_because_windows_writes_the_other_separator() {
     );
 }
 
+/// The other half of a Windows path: rootedness was asked through
+/// `Path::is_absolute`, which reads the separator of the platform the *build*
+/// runs on — so `C:\...` was judged relative and joined onto the current
+/// directory, and the Windows branch could not be honestly tested at all.
+#[test]
+fn a_windows_path_from_the_root_is_written_where_it_says() {
+    let host = a_machine_to_give_back()
+        .with_platform(Platform::Windows)
+        .with_answers(&["y", "C:\\backups\\perch.age", "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+    // An Export is refused where its directory is not there, and `Path::parent`
+    // reads the separator of the platform this build runs on — so only a runner
+    // that spells `\` finds a parent here. Made, so both ask one question.
+    host.create_dir_all(Path::new("C:\\backups"))
+        .expect("the directory is made");
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(
+        host.file("C:\\backups\\perch.age").is_some(),
+        "the Export is at the path that was typed: {printed}"
+    );
+}
+
 /// The only thing that makes a Purge survivable must not be written where the
 /// Purge is about to delete it — and `starts_with` matches components, so a
 /// linked spelling of the same directory is a different string.
@@ -720,6 +745,53 @@ fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
     );
 }
 
+/// The Export's whereabouts is the last line of a finished Purge's report, so a
+/// terminal that goes away partway through that report loses the one path
+/// naming the Holdings — after the Holdings are gone.
+#[test]
+fn a_terminal_that_goes_away_during_the_report_does_not_lose_the_export() {
+    /// Writes until the report of what was purged, and then is not there.
+    struct GoesAwayReporting;
+
+    impl std::io::Write for GoesAwayReporting {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Purged") {
+                true => Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the pipe closed",
+                )),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", AT, "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let outcome = perch::commands::purge::run(&host, false, &mut GoesAwayReporting);
+
+    let refused = outcome.expect_err("the report could not be written");
+    let said = refused.to_string();
+    assert!(
+        said.contains(AT),
+        "the Export is named, and it is the only thing left that names the \
+         Holdings: {said}"
+    );
+    assert!(
+        said.contains("Purge itself finished"),
+        "and what happened is said, because there is nothing to run again: {said}"
+    );
+    assert!(
+        !host.path_exists(Path::new(PERCH_HOME)),
+        "which is true: the Holdings went"
+    );
+}
+
 /// `write_the_export` does one more fallible thing after the bytes have landed:
 /// it reports what it wrote. An `Err` from that is not an Export that was never
 /// written, and the armored file at the path is what has to be said.
@@ -1029,6 +1101,54 @@ fn a_home_holding_a_registry_and_nothing_else_is_taken_and_said_as_that() {
          nothing:\n{printed}"
     );
     assert!(!printed.contains("Profile"), "{printed}");
+}
+
+/// The prompt read "its registry says nothing this Perch can read" off the
+/// Accounts being empty, which a registry that parsed perfectly can also be. A
+/// login that died at the browser step is exactly that machine, and telling the
+/// person their registry is corrupt is a false thing to be agreeing to in the
+/// one command nothing undoes.
+#[test]
+fn a_readable_registry_naming_nobody_is_not_said_to_be_unreadable() {
+    let host = machine_with_claude_code().with_answers(&["purge"]);
+    host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
+    let landing = perch::registry::pending_logins_dir(&host)
+        .expect("home is known")
+        .join("login-1");
+    host.create_dir_all(&landing)
+        .expect("the directory is made");
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(
+        printed.contains("that it cannot name"),
+        "the Profile is counted: {printed}"
+    );
+    assert!(
+        !printed.contains("says nothing this Perch can read"),
+        "and the registry it read is not called unreadable: {printed}"
+    );
+}
+
+/// A `.DS_Store` beside the Profiles is not a Profile, and counting one tells
+/// somebody agreeing to a Purge that Perch holds one it cannot name.
+#[test]
+fn a_stray_file_under_the_profiles_is_not_counted_as_one() {
+    let host = machine_with_claude_code().with_answers(&["purge"]);
+    host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
+    let stray = perch::registry::profiles_dir(&host)
+        .expect("home is known")
+        .join(".DS_Store");
+    host.set_file(&stray, "");
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(
+        !printed.contains("Profile"),
+        "nothing under the Profiles is a Profile: {printed}"
+    );
 }
 
 /// The same from the other side: a `perch add` whose registry write failed

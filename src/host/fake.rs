@@ -918,8 +918,9 @@ impl FakeHost {
         );
     }
 
-    /// A network that answers slowly, and how slowly. The stall a round has no
-    /// bound on: one read per candidate, each waited thirty seconds for.
+    /// A network that answers slowly, and how slowly — per request, as `curl`'s
+    /// `max-time` is per request. Longer than the request's bound is a request
+    /// that times out rather than one that answers late.
     pub fn with_a_network_that_answers_slowly(self, takes_millis: u64) -> Self {
         *self.network.takes_millis.borrow_mut() = takes_millis;
         self
@@ -1114,13 +1115,7 @@ impl FakeHost {
                 .get(&at)
                 .map(|(_, target)| target.clone())
             {
-                // Resolved against where the link sits where it is relative, as
-                // `host::through_every_link` does: `ln -s`, stow and chezmoi all
-                // record a relative target unless given an absolute path.
-                at = match target.is_absolute() {
-                    true => target,
-                    false => at.parent().unwrap_or(Path::new("")).join(target),
-                };
+                at = crate::host::against(&at, target);
                 continue;
             }
             // Nothing of that name, which does not mean nothing is there: a
@@ -1663,6 +1658,14 @@ impl port::Files for FakeHost {
         // component — which the arm below is about.
         let from = &self.lands_at(from);
         let to = &self.lands_at(to);
+        // A directory at the destination refuses on every real adapter, and the
+        // fake would otherwise describe a path that is a file and a directory
+        // at once. `replace_via_tmp` ends here, so this is every private write.
+        if self.fs.dirs.borrow().contains(to) {
+            return Err(HostError::Io(std::io::Error::from(
+                std::io::ErrorKind::IsADirectory,
+            )));
+        }
         // `Io`, which is what the real host answers: `NotFound` is load-bearing
         // elsewhere — `CredentialStore::read` reads it as "this store holds
         // nothing" and `clients_in` as "nothing is running".
@@ -1707,6 +1710,14 @@ impl port::Files for FakeHost {
             return Err(HostError::Other(detail.clone()));
         }
         let at = self.lands_at(path);
+        // A directory is a refusal rather than a no-op: `credentials::forget`
+        // reads `Ok` here as a store it emptied, and answering that for a
+        // directory it did not touch reports a Credential as deleted.
+        if self.fs.dirs.borrow().contains(&at) {
+            return Err(HostError::Io(std::io::Error::from(
+                std::io::ErrorKind::IsADirectory,
+            )));
+        }
         self.fs.files.borrow_mut().remove(&at);
         self.fs.links.borrow_mut().remove(&at);
         self.fs.modified.borrow_mut().remove(&at);
@@ -1846,6 +1857,10 @@ impl port::Links for FakeHost {
     }
 
     fn link_target(&self, path: &Path) -> Result<Option<PathBuf>, HostError> {
+        // Through the directories above and never the last component, as
+        // `symlink_metadata` reads a path: a Profile `reconcile` has been over
+        // has a linked directory in front of every name it then asks about.
+        let path = &self.lands_at(path);
         match self.fs.links.borrow().get(path) {
             // A hard link tells nothing about itself, so it answers as the
             // ordinary file it is indistinguishable from.
@@ -2167,11 +2182,21 @@ impl port::Network for FakeHost {
         let bearer = sent.bearer().map(str::to_string);
         self.network.sent.borrow_mut().push(sent);
 
+        // Bounded as `curl` is bounded, by the request's own `max-time` or by
+        // the ceiling every request without one gets: a reply arriving after
+        // that does not arrive, so a fixture arranging one arranges no machine.
         let takes = *self.network.takes_millis.borrow();
+        let bound = request.bound_millis();
         if takes > 0 {
-            let answered = *self.stall.now.borrow() + chrono::Duration::milliseconds(takes as i64);
+            let waited = takes.min(bound);
+            let answered = *self.stall.now.borrow() + chrono::Duration::milliseconds(waited as i64);
             *self.stall.now.borrow_mut() = answered;
             self.somebody_else_arrives();
+        }
+        if takes > bound {
+            return Err(HostError::Other(format!(
+                "curl exited 28: Operation timed out after {bound} milliseconds"
+            )));
         }
 
         // A trace answers before a fixed reply does, and its last entry stays

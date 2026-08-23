@@ -32,6 +32,10 @@ pub const TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
 /// every read.
 pub const BETA: &str = "oauth-2025-04-20";
 
+/// What an access token is presented as, and the whole of the rest of that
+/// header's value.
+const BEARER: &str = "Bearer ";
+
 /// The OAuth client the Credentials Perch holds were issued to. A refresh token
 /// can only be renewed by the client it was issued to, so this is Claude Code's
 /// rather than one of Perch's own.
@@ -157,15 +161,16 @@ pub fn whose(host: &dyn Host, access_token: &str) -> Result<String, Refused> {
 
 /// Renews an access token, and reports the Rotation when there was one.
 pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
-    // `Zeroizing`: this body carries the refresh token, the only copy there is.
-    let body = Zeroizing::new(
-        json!({
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": CLIENT_ID,
-        })
-        .to_string(),
-    );
+    // Through `sealed`, because this body carries the only copy there is of the
+    // refresh token: `to_string` would grow into it and abandon prefixes.
+    let mut asking = json!({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": CLIENT_ID,
+    });
+    let body = crate::json::sealed(&asking);
+    // The tree holds a second copy and frees its strings untouched.
+    wipe_the_tokens_in(&mut asking);
     let headers = [("Content-Type", "application/json")];
 
     // Before the request: `expires_in` is measured from when the server issued
@@ -236,9 +241,13 @@ fn missing(field: &str) -> Refused {
 /// A read as this Account: a Bearer token, and the beta the OAuth endpoints are
 /// behind.
 fn read(host: &dyn Host, url: &str, access_token: &str) -> Result<Value, Refused> {
-    // Wiped on drop for the reason `renew`'s body is: this is a Credential in a
-    // buffer, built twice per Account per Refresh.
-    let authorization = Zeroizing::new(format!("Bearer {access_token}"));
+    // Wiped on drop for the reason `renew`'s body is, and reserved for it too:
+    // `format!` reserves off the literal alone, so the token's own bytes are
+    // what every doubling abandons.
+    let mut authorization =
+        Zeroizing::new(String::with_capacity(BEARER.len() + access_token.len()));
+    authorization.push_str(BEARER);
+    authorization.push_str(access_token);
     let headers = [
         ("Authorization", authorization.as_str()),
         ("anthropic-beta", BETA),

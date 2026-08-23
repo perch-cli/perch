@@ -8,8 +8,12 @@
 //! times in one file reads apt at every site. So passing this is not passing
 //! the standard. The reasoning is `docs/agents/comments.md`'s.
 
+mod tree;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+use tree::{read, relative};
 
 /// What a block of each role may spend, from `CLAUDE.md`'s table. Read by role
 /// rather than by marker, because a file with no `///` still has a header, a
@@ -36,37 +40,10 @@ fn syntax(path: &Path) -> Option<(&'static [&'static str], bool)> {
     }
 }
 
-fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-/// Build output and a dependency tree nobody here wrote.
-fn skipped(name: &str) -> bool {
-    matches!(name, ".git" | "target" | "node_modules" | "dist" | ".astro")
-}
-
 /// Every file the standard binds, which is every file it knows a comment syntax
-/// for. A list of areas instead would be a list to keep in step with the tree,
-/// and a file on nobody's list is the gap eleven green pull requests hide.
+/// for.
 fn sources() -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let mut pending = vec![repo()];
-    while let Some(directory) = pending.pop() {
-        for entry in std::fs::read_dir(&directory).expect("a readable directory") {
-            let path = entry.expect("a readable entry").path();
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if skipped(name) {
-                continue;
-            }
-            if path.is_dir() {
-                pending.push(path);
-            } else if syntax(&path).is_some() {
-                found.push(path);
-            }
-        }
-    }
-    found.sort();
-    found
+    tree::sources(|path| syntax(path).is_some())
 }
 
 struct Block {
@@ -164,17 +141,6 @@ fn blocks(text: &str, markers: &[&'static str], paired: bool) -> Vec<Block> {
         at = end;
     }
     found
-}
-
-fn relative(path: &Path) -> String {
-    path.strip_prefix(repo())
-        .unwrap_or(path)
-        .display()
-        .to_string()
-}
-
-fn read(path: &Path) -> Option<String> {
-    String::from_utf8(std::fs::read(path).ok()?).ok()
 }
 
 /// The lines clap renders as `--help`, as a half-open range. A `///` inside an

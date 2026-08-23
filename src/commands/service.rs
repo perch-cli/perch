@@ -9,7 +9,7 @@
 //! (ADR perch-takes-back-what-it-wrote).
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::commands::{say, say_json};
 use crate::cycle;
@@ -110,14 +110,7 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // running", so this drives them all and then judges by what is left.
     let _ = drive(host, service::stopping(host.platform(), host.user_id()));
 
-    if let Some(at) = &at
-        && host.path_exists(at)
-    {
-        host.remove_file(at)
-            .map_err(|err| PerchError::file_write(at, err))?;
-    }
-    // After the removal, which is the whole reason it is not part of `stopping`.
-    let _ = drive(host, service::forgetting(host.platform()));
+    take_the_unit_back(host, at.as_deref())?;
 
     // Asked again rather than reported off the `installed` above: every step
     // above may fail, and a refused `schtasks /Delete` leaves a task that runs
@@ -132,7 +125,7 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 
     match installed {
         true => {
-            say(out, "The Service is stopped and its unit is gone.")?;
+            say(out, TAKEN_BACK)?;
             Ok(EXIT_OK)
         }
         // The code for a request that was already true: a machine with no Service is
@@ -298,17 +291,28 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
         )));
     }
 
-    if let Some(at) = &at
+    take_the_unit_back(host, at.as_deref())?;
+
+    say(out, TAKEN_BACK)?;
+    Ok(true)
+}
+
+/// The unit file gone and the service manager told to forget it — one step,
+/// because `forgetting` goes after the removal, which is the whole reason it is
+/// not part of `stopping`. What is left is the caller's to judge.
+fn take_the_unit_back(host: &dyn Host, at: Option<&Path>) -> Result<()> {
+    if let Some(at) = at
         && host.path_exists(at)
     {
         host.remove_file(at)
             .map_err(|err| PerchError::file_write(at, err))?;
     }
     let _ = drive(host, service::forgetting(host.platform()));
-
-    say(out, "The Service is stopped and its unit is gone.")?;
-    Ok(true)
+    Ok(())
 }
+
+/// What both ways of taking a Service back say when it is gone.
+const TAKEN_BACK: &str = "The Service is stopped and its unit is gone.";
 
 /// Whether a Service is installed at all, for the commands that have to mention one
 /// without managing it.

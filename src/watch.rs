@@ -580,8 +580,9 @@ pub enum Outcome {
     /// A Switch was wanted, attempted, and turned away without changing anything — most
     /// often a client running against the Profile the Capture would write into
     /// (ADR a-profile-is-live-by-evidence). Only where waiting is an answer: a failure
-    /// that does not clear itself is reported as itself instead.
-    Refused { why: String },
+    /// that does not clear itself is reported as itself instead. `after_reading` is
+    /// whether the candidates were read first, which decides how long the loop rests.
+    Refused { why: String, after_reading: bool },
     /// The watch was taken over between the reading and the Switch. Its own outcome
     /// rather than a [`Outcome::Refused`], because a scheduler branching on "nothing
     /// to do" would record a round that was in fact displaced.
@@ -647,6 +648,8 @@ pub fn refused_or_raised(not_idle: NotIdle) -> Result<Outcome> {
         // and the round after it moves.
         NotIdle::Live(why) => Ok(Outcome::Refused {
             why: PerchError::ProfileLive(why).to_string(),
+            // Asked before the burst, so nothing has been spent on it.
+            after_reading: false,
         }),
         // Neither of these clears itself: a `sessions` directory nobody can read and an
         // address no Profile can be named after are both a machine somebody has to look
@@ -694,6 +697,13 @@ impl Round {
                 looking_again: None,
                 ..
             } => NOWHERE_INTERVAL_MILLIS,
+            // Turned away after every candidate was read, which is the burst
+            // `NOWHERE_INTERVAL_MILLIS` exists to stop repeating: an hourly
+            // allowance per Account, spent on a Switch that was refused.
+            Outcome::Refused {
+                after_reading: true,
+                ..
+            } => NOWHERE_INTERVAL_MILLIS,
             // Named one by one rather than caught by a wildcard, so an outcome added
             // later has to say what the loop does after it. A hold carrying no wait is
             // a check's, and a check exits rather than asking.
@@ -703,7 +713,10 @@ impl Round {
             | Outcome::Waiting
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
-            | Outcome::Refused { .. }
+            | Outcome::Refused {
+                after_reading: false,
+                ..
+            }
             // The loop leaves at the top of the next round rather than waiting this
             // out, so the number is only what the line would have promised.
             | Outcome::HandedOver { .. }
@@ -793,7 +806,9 @@ impl Round {
             } => explaining(&format!(
                 "nothing current to decide on, so nothing was decided: {why}"
             )),
-            Outcome::Refused { why } => explaining(&format!("the Switch was turned away: {why}")),
+            Outcome::Refused { why, .. } => {
+                explaining(&format!("the Switch was turned away: {why}"))
+            }
             Outcome::HandedOver { why } | Outcome::Stopped { why } => explaining(why),
         }
     }
@@ -811,19 +826,18 @@ fn explaining(said: &str) -> String {
 /// Said in the same shape as every other line, with the figure it does not have said as
 /// unread. `retrying_in` is [`Outcome::Held`]'s.
 pub fn held_line(why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> String {
-    let asking_again = match retrying_in {
-        Some(millis) => format!(" Asking again in {}.", how_long(millis)),
-        None => String::new(),
-    };
-    format!(
-        "{}  {:<8}  unread{}",
-        now.to_rfc3339_opts(SecondsFormat::Secs, true),
-        "held",
-        explaining(&format!(
-            "nothing current to decide on, so nothing was decided: \
-             {why}{asking_again}",
-        )),
-    )
+    // The Round it would have been, so the sentence has one spelling: a figure
+    // that was not read renders as `unread` whatever the threshold says, which
+    // is why a threshold this round never saw can be any number.
+    Round {
+        fullest: None,
+        threshold: 0,
+        outcome: Outcome::Held {
+            why: why.to_string(),
+            retrying_in,
+        },
+    }
+    .line(now)
 }
 
 /// A message from anywhere else, as one line.
@@ -1094,6 +1108,7 @@ mod tests {
             at(86.0),
             Outcome::Refused {
                 why: "a client is running against that Profile.".to_string(),
+                after_reading: false,
             },
         )
         .line(now());
@@ -1136,6 +1151,7 @@ mod tests {
                 at(86.0),
                 Outcome::Refused {
                     why: "a client is running against that Profile.".to_string(),
+                    after_reading: false,
                 },
             ),
             round(
@@ -1274,7 +1290,10 @@ mod tests {
                 why: String::new(),
                 retrying_in: None,
             },
-            Outcome::Refused { why: String::new() },
+            Outcome::Refused {
+                why: String::new(),
+                after_reading: false,
+            },
             Outcome::HandedOver { why: String::new() },
             Outcome::Stopped { why: String::new() },
         ];
@@ -1364,7 +1383,10 @@ mod tests {
                 to: String::new(),
                 unread: Vec::new(),
             },
-            Outcome::Refused { why: String::new() },
+            Outcome::Refused {
+                why: String::new(),
+                after_reading: false,
+            },
         ] {
             let round = round(at(86.0), outcome);
             assert_eq!(
@@ -1389,6 +1411,21 @@ mod tests {
             .waiting_for(),
             NOWHERE_INTERVAL_MILLIS,
             "nowhere to go rests for the Cooldown rather than an interval"
+        );
+
+        // And the other one: a Switch turned away *after* the burst has spent
+        // every candidate's allowance costs exactly what nowhere-to-go costs.
+        assert_eq!(
+            round(
+                at(86.0),
+                Outcome::Refused {
+                    why: String::new(),
+                    after_reading: true,
+                }
+            )
+            .waiting_for(),
+            NOWHERE_INTERVAL_MILLIS,
+            "a refusal that read the candidates rests for the Cooldown too"
         );
 
         assert_eq!(
@@ -1690,7 +1727,7 @@ mod tests {
         ))
         .expect("a client that will exit is a round that decided, not a failure");
         assert!(
-            matches!(&refused, Outcome::Refused { why } if why.contains("pid 4242")),
+            matches!(&refused, Outcome::Refused { why, .. } if why.contains("pid 4242")),
             "{refused:?}",
         );
         assert_eq!(refused.exit_code(), EXIT_NOTHING_TO_DO);
@@ -1699,6 +1736,7 @@ mod tests {
             assumption: "session marker".to_string(),
             detail: "sessions could not be read".to_string(),
             version: "1.2.3".to_string(),
+            note: None,
         }))
         .expect_err("a directory nobody can read does not clear itself");
         assert_eq!(unreadable.exit_code(), crate::error::EXIT_PROBE_REFUSED);

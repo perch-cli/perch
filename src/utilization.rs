@@ -44,7 +44,7 @@ pub const LABEL_WIDTH: usize = 14;
 /// a window's name is Anthropic's and there is one per model: a fixed width
 /// either steps the per-model rows out of line or widens every block whether it
 /// needs it or not. The floor keeps a block of short names in the usual column.
-pub fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
+fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
     windows
         .map(cells)
         .chain(std::iter::once(cells("5-hour")))
@@ -91,25 +91,11 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
 ///
 /// An Account with no observation is never rendered as zero: "no figure" and
 /// "plenty of room" are opposite pieces of advice.
-pub fn lines(account: &Account, now: DateTime<Utc>, width: usize) -> Vec<String> {
-    rows(account, now, width, |window, width| {
-        format!(
-            "{} {:>3}%",
-            padded(&window.window, width),
-            percentage(window.used_percent)
-        )
-    })
-}
-
-/// One row per Quota Window, however each surface says the window itself, with
-/// the age of the observation on every one — or the single line that says
-/// nothing has ever been observed.
-fn rows(
+pub fn lines(
     account: &Account,
     now: DateTime<Utc>,
     // The caller's, not this Account's: see [`window_width_across`].
     width: usize,
-    said: impl Fn(&crate::registry::WindowUtilization, usize) -> String,
 ) -> Vec<String> {
     match account.observed_utilization() {
         None => vec!["never observed".to_string()],
@@ -118,7 +104,13 @@ fn rows(
             cached
                 .windows
                 .iter()
-                .map(|window| format!("{}  (as of {age})", said(window, width)))
+                .map(|window| {
+                    format!(
+                        "{} {:>3}%  (as of {age})",
+                        padded(&window.window, width),
+                        percentage(window.used_percent)
+                    )
+                })
                 .collect()
         }
     }

@@ -103,7 +103,7 @@ const CURL_ARGS: [&str; 7] = [
 /// In the configuration rather than in [`CURL_ARGS`], so that a request
 /// carrying its own bound has one place to put it.
 const CONNECT_TIMEOUT_SECONDS: u64 = 10;
-const MAX_TIME_SECONDS: u64 = 30;
+const MAX_TIME_SECONDS: u64 = super::ORDINARY_BOUND_MILLIS / 1_000;
 
 /// The other bound a reply needs. The timeouts make a *silent* endpoint a
 /// refusal and neither makes a talkative one: a reply that keeps arriving is

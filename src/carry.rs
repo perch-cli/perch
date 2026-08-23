@@ -34,6 +34,21 @@ pub const PERSON_KEYS: [&str; 4] = [
 /// there, the tools it was allowed, and that directory's MCP configuration.
 const PROJECTS: &str = "projects";
 
+/// The keys of one `projects` entry that cross, on the same terms as
+/// [`PERSON_KEYS`]: what a person decided about this directory, and nothing an
+/// Account filled in working there. Claude Code keeps its per-directory figures
+/// here too — what the last session cost, how many tokens it spent, which
+/// session it was — and a figure is read for one Account.
+pub const PROJECT_KEYS: [&str; 7] = [
+    "hasTrustDialogAccepted",
+    "hasCompletedProjectOnboarding",
+    "projectOnboardingSeenCount",
+    "allowedTools",
+    "mcpServers",
+    "enabledMcpjsonServers",
+    "disabledMcpjsonServers",
+];
+
 /// Copies what belongs to the person into the Profile a Run is about to launch,
 /// or leaves it exactly as it is. `default_profile` is where the active
 /// Account's state lives, which is not that Account's Profile
@@ -129,7 +144,7 @@ fn project_entry(
     };
     let here = here.to_string_lossy();
 
-    let Some(entry) =
+    let Some(theirs_here) =
         json::value_at(theirs, PROJECTS).and_then(|projects| json::value_at(projects, &here))
     else {
         return patched;
@@ -137,9 +152,27 @@ fn project_entry(
 
     let against = patched.as_deref().unwrap_or(mine);
     // A Profile that has never been run holds no `projects` at all, which is an
-    // empty one for this purpose.
+    // empty one for this purpose, as is an entry it holds for no directory.
     let held = json::value_at(against, PROJECTS).unwrap_or("{}");
-    let Some(projects) = json::set_value_at(held, &here, entry) else {
+    let mine_here = json::value_at(held, &here).unwrap_or("{}").to_string();
+
+    let mut entry: Option<String> = None;
+    for key in PROJECT_KEYS {
+        let Some(value) = json::value_at(theirs_here, key) else {
+            continue;
+        };
+        let into = entry.as_deref().unwrap_or(&mine_here);
+        if let Some(written) = json::set_value_at(into, key, value) {
+            entry = Some(written);
+        }
+    }
+    // Nothing of the person's in their entry leaves this Profile's own alone,
+    // rather than writing back a copy of what was already there.
+    let Some(entry) = entry else {
+        return patched;
+    };
+
+    let Some(projects) = json::set_value_at(held, &here, &entry) else {
         return patched;
     };
     json::set_value_at(against, PROJECTS, &projects).or(patched)

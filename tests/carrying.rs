@@ -63,7 +63,10 @@ fn a_file_in_use(email: &str, tips: u32) -> String {
   "projects": {{
     "{HERE}": {{
       "hasTrustDialogAccepted": true,
-      "allowedTools": ["Bash(git status)"]
+      "allowedTools": ["Bash(git status)"],
+      "lastCost": 1.25,
+      "lastTotalInputTokens": 90210,
+      "lastSessionId": "session-of-{email}"
     }},
     "{ELSEWHERE}": {{
       "hasTrustDialogAccepted": true,
@@ -476,5 +479,53 @@ fn the_keys_that_cross_are_named_in_one_place() {
     let carried = read(&host, SECOND_EMAIL);
     for key in carry::PERSON_KEYS {
         assert!(!carried[key].is_null(), "{key} did not cross: {carried}");
+    }
+}
+
+/// The entry holds Claude Code's per-directory figures beside the person's
+/// decisions. Carrying it whole put the spend and the session of the Account
+/// being left under the name of the one being launched.
+#[test]
+fn what_one_account_spent_in_this_directory_does_not_cross_with_it() {
+    let host = machine();
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    let carried = read(&host, SECOND_EMAIL);
+    let entry = &carried["projects"][HERE];
+    assert_eq!(
+        entry["hasTrustDialogAccepted"],
+        serde_json::json!(true),
+        "what the person decided about this directory still crosses: {carried}"
+    );
+    for figure in ["lastCost", "lastTotalInputTokens", "lastSessionId"] {
+        assert!(
+            entry[figure].is_null(),
+            "{figure} is the other Account's to have spent: {carried}"
+        );
+    }
+}
+
+/// The counterpart to `the_keys_that_cross_are_named_in_one_place`, one level
+/// down: the entry is a named set too.
+#[test]
+fn the_keys_of_a_project_entry_that_cross_are_named_in_one_place() {
+    let host = machine();
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    let carried = read(&host, SECOND_EMAIL);
+    let entry = &carried["projects"][HERE];
+    for key in ["hasTrustDialogAccepted", "allowedTools"] {
+        assert!(
+            carry::PROJECT_KEYS.contains(&key) && !entry[key].is_null(),
+            "{key} is named and crossed: {carried}"
+        );
+    }
+    for key in ["lastCost", "lastTotalInputTokens", "lastSessionId"] {
+        assert!(
+            !carry::PROJECT_KEYS.contains(&key),
+            "{key} is not one of the names"
+        );
     }
 }

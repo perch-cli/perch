@@ -85,6 +85,10 @@ struct Touched {
     /// alone — and forgetting a store this Import never wrote to would destroy a
     /// refresh token nothing here put there and nothing can recover.
     wrote_a_credential: bool,
+    /// Whether this Import wrote the `.claude.json`. Recorded for the same
+    /// reason and set the same way: the Account that *fails* is the last one
+    /// recorded, and what it did not manage to write is not the undo's to take.
+    wrote_the_identity_file: bool,
 }
 
 /// The Profiles an Import has touched, so they can be taken back out if
@@ -114,12 +118,18 @@ impl Placed {
                     let _ = kept_in.forget(host);
                 }
             }
-            let _ = host.remove_file(&touched.store.identity_file);
-            let taken_back = match touched.wrote_a_credential {
-                true => "the Credential and the `.claude.json`",
+            if touched.wrote_the_identity_file {
+                let _ = host.remove_file(&touched.store.identity_file);
+            }
+            let taken_back = match (touched.wrote_a_credential, touched.wrote_the_identity_file) {
+                (true, true) => "the Credential and the `.claude.json`",
+                (true, false) => "the Credential",
                 // This Account travels with no Credential, so whatever is in that
                 // store belongs to whoever left the directory behind.
-                false => "the `.claude.json`",
+                (false, true) => "the `.claude.json`",
+                // The Account this Import stopped on: nothing of its own landed,
+                // so the directory is exactly as its owner left it.
+                (false, false) => continue,
             };
             host.note(&format!(
                 "{} was already on this machine, so it was left where it is \
@@ -272,21 +282,28 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         // Recorded before it is written, because what has to come back out is
         // everything this made — and asked before the directory is made, which
         // is the only moment the answer is still knowable.
+        let at = placed.touched.len();
         placed.touched.push(Touched {
             was_already_there: host.path_exists(&store.config_dir),
-            wrote_a_credential: credential.is_some(),
+            wrote_a_credential: false,
+            wrote_the_identity_file: false,
             store: store.clone(),
         });
+        let a_credential_traveled = credential.is_some();
         // A Quarantined Account travels with no Credential and with the
         // `.claude.json` that names it, so the Profile is made for the file
         // alone: dropped, it is a re-Export smaller than the one that made it.
-        if let Err(error) = profile::make_dir(host, &store.config_dir)
-            .and_then(|()| match credential {
-                Some(credential) => profile::store_credential(host, &store, credential),
-                None => Ok(()),
-            })
-            .and_then(|()| login::carry_identity_file(host, &identity_file, &store))
-        {
+        let stored = profile::make_dir(host, &store.config_dir).and_then(|()| match credential {
+            Some(credential) => profile::store_credential(host, &store, credential),
+            None => Ok(()),
+        });
+        // Set as each step lands rather than before the first: a write that
+        // failed left whatever the store held, which is the best Credential
+        // there is, and taking it back out takes back one this never wrote.
+        placed.touched[at].wrote_a_credential = stored.is_ok() && a_credential_traveled;
+        let landed = stored.and_then(|()| login::carry_identity_file(host, &identity_file, &store));
+        placed.touched[at].wrote_the_identity_file = landed.is_ok();
+        if let Err(error) = landed {
             placed.undo(host);
             // Said as "every Profile this had made" rather than as a count: the
             // count is nothing when the first Account is the one that fails, and

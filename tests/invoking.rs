@@ -168,6 +168,37 @@ fn the_version_question_is_answered_by_the_process_in_one_line() {
     }
 }
 
+/// Answered before the parser and so outside the path every other command's
+/// output goes down: the write failure was thrown away and the process exited 0
+/// having written nothing. Linux alone, because `/dev/full` is the one way to
+/// fail a write without a closed pipe's timing in it.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_version_that_could_not_be_written_is_a_failure_rather_than_a_silent_zero() {
+    let machine = Scratch::holding_an_account("version-full");
+
+    let ran = Command::new(env!("CARGO_BIN_EXE_perch"))
+        .arg("--version")
+        .env("PERCH_HOME", machine.home())
+        .env("CLAUDE_CONFIG_DIR", machine.claude())
+        .stdout(std::fs::File::create("/dev/full").expect("/dev/full is there"))
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(
+        ran.status.code(),
+        // Named in full rather than imported: this case is Linux-only, and an
+        // import it is the sole user of is an unused one everywhere else.
+        Some(perch::error::EXIT_GENERAL),
+        "the same code every other command's failed output earns"
+    );
+    let said = String::from_utf8(ran.stderr).expect("output is UTF-8");
+    assert!(
+        said.contains("could not write its output"),
+        "and it says whose write failed: {said}"
+    );
+}
+
 /// `--help` lists the commands in the order the enum declares them, and somebody
 /// scanning that list is scanning alphabetically. Two had drifted out of it —
 /// `run` above `list`, `switch` above `status` — so `list` was to be found

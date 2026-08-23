@@ -628,36 +628,6 @@ pub fn headroom_document(account: &Account) -> serde_json::Value {
     serde_json::json!({ "state": state, "percent": percent })
 }
 
-/// How much of an Account is left to spend, with the Quota Window the figure was
-/// taken from and the age of the observation it came from.
-///
-/// The long form of [`headroom_phrase`]: naming the fullest window makes the
-/// claim checkable against the rows underneath.
-pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
-    match headroom_of(account) {
-        Headroom::Room {
-            percent,
-            fullest_window,
-            observed_at,
-            ..
-        } => format!(
-            "{}%  ({fullest_window} is its fullest, as of {})",
-            utilization::percentage(percent),
-            utilization::age_phrase(observed_at, now)
-        ),
-        // The rows underneath say which window is full and when it comes back,
-        // so this says the state and leaves the arithmetic to them.
-        Headroom::Exhausted { .. } => match account.observed_utilization() {
-            Some(cached) => format!(
-                "exhausted  (as of {})",
-                utilization::age_phrase(cached.observed_at, now)
-            ),
-            None => "exhausted".to_string(),
-        },
-        Headroom::Unobserved => "never observed".to_string(),
-    }
-}
-
 /// What the winner won on, in the terms it was actually judged on, which are not
 /// always the terms the Strategy asked for: a Scope set to `soonest-reset` with
 /// no reset in sight lands on the most room and says so. Why the Strategy could
@@ -744,9 +714,16 @@ fn everyone_is_exhausted(
     // leaving it out silently turns "the soonest Perch can vouch for" into
     // advice to wait longer than you have to.
     if unsaid > 0 && soonest.is_some() {
+        // Not "cache no reset time": an elapsed one caches a reset and it is
+        // simply behind us, which says as little about the next window as no
+        // reset at all — which is why the two are counted together.
+        let say = match unsaid {
+            1 => "says",
+            _ => "say",
+        };
         waiting.push_str(&format!(
-            " {unsaid} of them cache no reset time, so the wait could be \
-             shorter than that — {}",
+            " {unsaid} of them {say} nothing about when they come back, so the \
+             wait could be shorter than that — {}",
             how_to_get_figures(scope)
         ));
     }
@@ -1072,29 +1049,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_headroom_said_in_full_names_its_window_and_its_age() {
-        let roomy = account(
-            "a@example.com",
-            vec![window("5-hour", 4.0), window("7-day", 95.0)],
-        );
-        assert_eq!(
-            headroom_in_full(&roomy, now()),
-            "5%  (7-day is its fullest, as of 4m ago)"
-        );
-
-        // The rows underneath say which window is full and when it comes back,
-        // so this says the state and leaves the arithmetic to them.
-        let full = account("a@example.com", vec![window("5-hour", 100.0)]);
-        assert_eq!(headroom_in_full(&full, now()), "exhausted  (as of 4m ago)");
-
-        assert_eq!(
-            headroom_in_full(&account("a@example.com", vec![]), now()),
-            "never observed",
-            "'no figure' and 'plenty of room' are opposite pieces of advice",
-        );
-    }
-
-    #[test]
     fn how_much_is_left_tells_the_three_answers_apart_in_one_pass() {
         assert_eq!(
             how_much_is_left(&account("a@example.com", vec![window("5-hour", 40.0)])),
@@ -1274,7 +1228,9 @@ pub(crate) mod tests {
 
         assert!(error.to_string().contains("here@example.com"), "{error}");
         assert!(
-            error.to_string().contains("1 of them cache no reset time"),
+            error
+                .to_string()
+                .contains("1 of them says nothing about when they come back"),
             "advising a three-hour wait while one Account may be back sooner is \
              worse than saying so: {error}"
         );

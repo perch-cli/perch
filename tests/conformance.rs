@@ -230,6 +230,9 @@ const CASES: &[Case] = &[
         named: "asking when a dangling link was written is not an answer",
         asserts: |host, root, adapter, _now| {
             let link = root.join("points-nowhere");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
             host.link(Link::Symbolic, &root.join("was-never-there"), &link)
                 .expect("a link to nothing is still a link");
 
@@ -251,6 +254,9 @@ const CASES: &[Case] = &[
                 .expect("with something in it");
 
             let link = root.join("points-at-it");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
             host.link(Link::Symbolic, &real, &link).expect("linked");
 
             host.remove_dir_all(&link)
@@ -507,6 +513,78 @@ const CASES: &[Case] = &[
             assert!(
                 !host.path_exists(&from),
                 "{adapter}: and nothing is left at the source"
+            );
+        },
+    },
+    Case {
+        named: "asking what a name under a linked directory links to reads through the link",
+        asserts: |host, root, adapter, _now| {
+            let real = root.join("the-real-directory");
+            let held = real.join("an-ordinary-file");
+            host.create_dir_all(&real).expect("it is made");
+            host.create_file_with_mode(&held, "what it holds", PRIVATE_FILE_MODE)
+                .expect("with something in it");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            let linked = root.join("the-linked-directory");
+            host.link(Link::Symbolic, &real, &linked)
+                .expect("the directory is linked");
+
+            // `symlink_metadata` follows every component but the last, and the
+            // three answers here are what `reconcile::establish` branches on:
+            // `NotFound` is "make it" and `Ok(None)` is "something is in the way".
+            assert_eq!(
+                host.link_target(&linked.join("an-ordinary-file")).ok(),
+                Some(None),
+                "{adapter}: a file under a linked directory is a file, not absent"
+            );
+            assert!(
+                matches!(
+                    host.link_target(&linked.join("never-there")),
+                    Err(HostError::NotFound { .. })
+                ),
+                "{adapter}: and a name nothing holds under one is still absent"
+            );
+        },
+    },
+    Case {
+        named: "a rename onto a directory fails and moves nothing",
+        asserts: |host, root, adapter, _now| {
+            let from = root.join("would-move");
+            let onto = root.join("a-directory-in-the-way");
+            host.create_file_with_mode(&from, "incoming", PRIVATE_FILE_MODE)
+                .expect("the source");
+            host.create_dir_all(&onto).expect("the destination");
+
+            host.rename(&from, &onto)
+                .expect_err("a directory is not a name a rename may take over");
+
+            assert_eq!(
+                host.read_file(&from).ok().as_deref(),
+                Some("incoming"),
+                "{adapter}: and the source is where it was"
+            );
+        },
+    },
+    Case {
+        named: "removing a file at a directory fails rather than doing nothing",
+        asserts: |host, root, adapter, _now| {
+            let at = root.join("a-directory-not-a-file");
+            let held = at.join("held");
+            host.create_dir_all(&at).expect("it is made");
+            host.create_file_with_mode(&held, "still here", PRIVATE_FILE_MODE)
+                .expect("with something in it");
+
+            // `Ok` here reads as a store this emptied — `credentials::forget`
+            // says so on the strength of it — so answering it for a directory
+            // reports a Credential as deleted that is still on the machine.
+            host.remove_file(&at)
+                .expect_err("a directory is not a file to unlink");
+
+            assert!(
+                host.read_file(&held).is_ok(),
+                "{adapter}: and what was under it is untouched"
             );
         },
     },

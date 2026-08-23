@@ -285,7 +285,7 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
 /// wherever Perch was run. Asked of the platform the host reports rather than
 /// through `Path::is_absolute`, which reads the separator of the platform this
 /// build runs on — the reason the search above joins with `/` by hand.
-fn rooted(dir: &str, on_windows: bool) -> bool {
+pub(crate) fn rooted(dir: &str, on_windows: bool) -> bool {
     if dir.starts_with('/') {
         return true;
     }
@@ -597,9 +597,7 @@ pub fn credential_after_rotation(
         None => block.remove("expiresAt"),
     };
 
-    let written = serde_json::to_string(&document)
-        .map(Zeroizing::new)
-        .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")));
+    let written = crate::json::sealed(&document);
 
     // The document is still holding both tokens, and dropping a
     // `serde_json::Value` frees its strings untouched. This is the freshly
@@ -615,7 +613,7 @@ pub fn credential_after_rotation(
         }
     }
 
-    written
+    Ok(written)
 }
 
 /// Wipes a token a `serde_json::Map` handed back, if it handed one back.
@@ -895,7 +893,10 @@ pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
         )));
     }
 
-    host.create_dir_all(&sessions)
+    // Private, because this is the third path that brings a Profile directory
+    // into being and 0700 is what a Profile owes. One already there is left as
+    // it is, so the Default Profile keeps whatever mode it has.
+    host.create_private_dir_all(&sessions)
         .and_then(|()| {
             crate::host::write_atomically(host, &marker, &session_marker(pid, host.now()))
         })
@@ -1225,6 +1226,7 @@ fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
         assumption: assumption.to_string(),
         detail: detail.to_string(),
         version: version.to_string(),
+        note: None,
     }
 }
 
@@ -2011,6 +2013,7 @@ mod tests {
                 assumption,
                 detail,
                 version,
+                ..
             } => {
                 assert_eq!(assumption, assumption::INSTALLED);
                 assert!(

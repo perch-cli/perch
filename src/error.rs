@@ -62,11 +62,16 @@ pub enum PerchError {
     /// The probe does not recognize the installed Claude Code well enough to
     /// touch anything. Names the assumption that failed
     /// (ADR an-assumption-is-probed).
-    #[error("Perch declined to act: {assumption} ({detail}), Claude Code {version}")]
+    #[error("Perch declined to act: {assumption} ({detail}), Claude Code {version}{}", note.as_deref().unwrap_or(""))]
     ProbeRefused {
         assumption: String,
         detail: String,
         version: String,
+        /// What the sequence around the failure left behind, said after the
+        /// whole sentence. Its own field because `detail` is rendered inside a
+        /// parenthetical: a note appended there lands mid-sentence, and this is
+        /// the variant a half-finished Switch reports itself as.
+        note: Option<String>,
     },
 
     /// The keychain could not be consulted at all. Deliberately distinct from
@@ -222,6 +227,13 @@ impl PerchError {
     /// whatever was running the sequence, so both are said. The kind is kept,
     /// so the exit code a script branches on is the one the failure earned.
     pub fn with_note(mut self, note: &str) -> PerchError {
+        // The one variant whose message is not its whole sentence: `detail` is
+        // rendered inside a parenthetical, so its note has a field of its own.
+        if let PerchError::ProbeRefused { note: held, .. } = &mut self {
+            held.get_or_insert_default()
+                .push_str(&format!("\n\n{note}"));
+            return self;
+        }
         // Where keeping the kind matters most is `Busy`: it is the one failure
         // that resolves on its own, and a note about what was left behind must
         // not cost a scheduler the fact that retrying works.
@@ -243,7 +255,6 @@ impl PerchError {
     /// and the difference would be an exit code changing under a note.
     fn message_mut(&mut self) -> Option<&mut String> {
         match self {
-            PerchError::ProbeRefused { detail, .. } => Some(detail),
             PerchError::Quarantined { said, .. } => Some(said),
             PerchError::KeychainUnavailable(message)
             | PerchError::NotUnderstood(message)
@@ -261,7 +272,9 @@ impl PerchError {
             // `Other` and exit as a general failure, silently.
             PerchError::FileRead { .. }
             | PerchError::FileWrite { .. }
-            | PerchError::Malformed { .. } => None,
+            | PerchError::Malformed { .. }
+            // Its note has a field of its own, taken above.
+            | PerchError::ProbeRefused { .. } => None,
         }
     }
 
@@ -319,6 +332,7 @@ mod tests {
                     assumption: "the credential lives in the keychain".to_string(),
                     detail: "it does not".to_string(),
                     version: "2.1.221".to_string(),
+                    note: None,
                 },
             ),
             (
@@ -400,9 +414,11 @@ mod tests {
         }
     }
 
-    /// Where the note lands differs by variant — [`PerchError::ProbeRefused`]
-    /// renders its detail mid-sentence — so what is asserted is that nothing
-    /// else about the message moved.
+    /// A note says what the sequence around the failure left behind, so it is
+    /// read after the failure rather than inside it — which for
+    /// [`PerchError::ProbeRefused`] means after the parenthetical its detail is
+    /// rendered in, and that is the variant a half-finished Switch reports
+    /// itself as.
     #[test]
     fn a_note_is_said_alongside_what_failed_rather_than_instead_of_it() {
         for (name, error) in one_of_each() {
@@ -410,8 +426,8 @@ mod tests {
             let noted = error.with_note("Nothing was removed.").to_string();
 
             assert!(
-                noted.contains("Nothing was removed."),
-                "{name} dropped the note: {noted}"
+                noted.ends_with("\n\nNothing was removed."),
+                "{name} did not say the note after the whole of what failed: {noted}"
             );
             assert_eq!(
                 noted.replace("\n\nNothing was removed.", ""),

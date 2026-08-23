@@ -14,13 +14,12 @@ use std::io::Write;
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
-use crate::adopt;
 use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, group, say, say_json, write_failed};
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::listing::{self, Section};
-use crate::observe::{self, Report};
+use crate::observe::Report;
 use crate::registry::{self, Account, Registry, UNGROUPED};
 use crate::utilization;
 
@@ -122,42 +121,15 @@ fn group_heading(name: &str) -> String {
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
-    // Exclusively only when there is something to write, which is `--refresh`
-    // and nothing else: two listings drawn at the same moment are the ordinary
-    // case, and a read that took the write lock would fail on one of them.
-    let (mut perch, mut registry) = match args.refresh {
-        true => {
-            let (perch, registry) = adopt::ensure_adopted_exclusively(host)?;
-            (Some(perch), registry)
-        }
-        false => (None, adopt::ensure_adopted(host)?),
-    };
+    let (mut perch, mut registry) = crate::commands::opened_for(host, args.refresh)?;
 
     let scope = match &args.scope {
         Some(name) => narrowed(&registry, name)?,
         None => Scope::Everything,
     };
 
-    // Exactly the Accounts about to be shown, so narrowing the listing narrows
-    // the reads with it and nothing is spent on an Account nobody asked about.
-    let report = match &mut perch {
-        Some(perch) => {
-            let asking_about = scope.emails(&registry);
-            observe::refresh(
-                host,
-                perch,
-                &mut registry,
-                &asking_about,
-                &crate::probe::Installed::probed(host),
-                // Nothing else is held across this: a listing takes the registry
-                // lock and nothing more.
-                &mut || {},
-            )
-        }
-        // Nothing to report about a refresh nobody asked for: the empty report
-        // renders as "nobody asked".
-        None => Report::default(),
-    };
+    let asking_about = scope.emails(&registry);
+    let report = crate::commands::refreshed(host, &mut perch, &mut registry, &asking_about);
 
     let now = host.now();
     render(host, out, &registry, scope, now, args.json, &report)

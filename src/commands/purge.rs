@@ -41,7 +41,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     }
 
     let mut perch = registry::lock(host)?;
-    let mut registry = whatever_can_be_read_of_the_registry(host, &home);
+    let (mut registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
 
     purge::refuse_while_anything_is_running(host, &registry)?;
 
@@ -52,6 +52,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
             &home,
             purge::profiles_held(host).unwrap_or(0),
             crate::commands::service::is_there(host),
+            readable,
         ),
     )?;
     // Filled by the Export the instant its bytes land rather than by the call
@@ -108,7 +109,15 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     crate::commands::service::take_back_before_a_purge(host, out).map_err(and_the_export)?;
 
     let purged = purge::erase(host, &mut perch, &registry).map_err(and_the_export)?;
-    report(host, out, &home, &purged, exported.as_deref())
+    // The Export's whereabouts is the report's *last* line, so a report that
+    // failed before it leaves the Holdings gone and the file holding them named
+    // nowhere. What the note adds is that there is nothing to run again.
+    report(host, out, &home, &purged, exported.as_deref()).map_err(|error| {
+        and_the_export(error.with_note(
+            "The Purge itself finished: the Holdings are gone, and only the \
+             report could not be printed.",
+        ))
+    })
 }
 
 /// Adds the whereabouts of an Export this run wrote to a failure after it.
@@ -151,12 +160,12 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
 /// The one caller for which `load`'s refusal is the wrong answer: `erase` walks
 /// the directories rather than the registry, and refusing is the only way off a
 /// machine whose registry is corrupt (ADR the-holdings-outlive-a-perch).
-fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> Registry {
+fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> (Registry, bool) {
     // Read directly rather than through adoption, for the reason an Import reads
     // it directly: adoption would make an Account on the way to destroying every
     // Account. A home holding no registry is what an interrupted Purge leaves.
     match registry::load(host) {
-        Ok(held) => held.unwrap_or_default(),
+        Ok(held) => (held.unwrap_or_default(), true),
         Err(unreadable) => {
             host.note(&format!(
                 "{unreadable}\n\nSo the Accounts cannot be named. Every Profile \
@@ -165,7 +174,7 @@ fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> Registr
                  Accounts.",
                 home.display(),
             ));
-            Registry::default()
+            (Registry::default(), false)
         }
     }
 }
@@ -175,7 +184,13 @@ fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> Registr
 ///
 /// By address rather than by Alias, although every other command names an Account
 /// the way the user named it: what is being agreed to is the loss of the login.
-fn what_will_go(registry: &Registry, home: &Path, profiles: usize, service: bool) -> String {
+fn what_will_go(
+    registry: &Registry,
+    home: &Path,
+    profiles: usize,
+    service: bool,
+    readable: bool,
+) -> String {
     // Said in the same breath as the Profiles rather than left for the report,
     // because it is the one thing a Purge takes that lives *outside* Perch's home
     // (ADR the-machine-runs-the-watcher).
@@ -200,13 +215,19 @@ fn what_will_go(registry: &Registry, home: &Path, profiles: usize, service: bool
                 home.display(),
             ),
             profiles => format!(
-                "Perch holds {} under {} that it cannot name — its registry says \
-                 nothing this Perch can read. A Purge empties every one of their \
-                 Credential Stores and deletes {} itself. Nothing undoes it: only \
-                 a fresh login brings an Account back, and it comes back as a new \
-                 one.{and_the_service}",
+                "Perch holds {} under {} that it cannot name{}. A Purge empties \
+                 every one of their Credential Stores and deletes {} itself. \
+                 Nothing undoes it: only a fresh login brings an Account back, \
+                 and it comes back as a new one.{and_the_service}",
                 crate::commands::profiles(profiles),
                 home.display(),
+                // Only where the registry is the reason: one that parsed and
+                // names nobody is the ordinary leftover of a login that died at
+                // the browser step, and is not a corrupt file to be agreed to.
+                match readable {
+                    true => "",
+                    false => " — its registry says nothing this Perch can read",
+                },
                 home.display(),
             ),
         };
@@ -287,27 +308,25 @@ fn offer_an_export(
 /// The one path in Perch no shell has been over. Only a leading `~/`, and every
 /// other one is refused rather than read as a file beside the current directory.
 fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
+    let on_windows = host.platform() == Platform::Windows;
     let Some(rest) = typed.strip_prefix('~') else {
-        let typed = PathBuf::from(typed);
-        // Resolved here rather than left for whoever writes it, because the
-        // guard below matches components: a bare `backup.age` typed from inside
-        // the directory this Purge is about to delete shares none with it.
-        if typed.is_absolute() || typed.as_os_str().is_empty() {
-            return Ok(typed);
+        // Rooted asked of the platform the *Host* reports, and joined with `/`
+        // by hand, for `probe::rooted`'s reason: `is_absolute` and `join` read
+        // the separator of the platform this build runs on.
+        if typed.is_empty() || crate::probe::rooted(typed, on_windows) {
+            return Ok(PathBuf::from(typed));
         }
-        // A machine that cannot say where it is says so through the guard
-        // refusing nothing, which is where it stood before this line.
+        // Resolved rather than left for whoever writes it, because the guard
+        // below matches components: a bare `backup.age` typed inside the
+        // directory this Purge deletes shares none with it.
         return Ok(match host.current_dir() {
-            Ok(here) => here.join(typed),
-            Err(_) => typed,
+            Ok(here) => PathBuf::from(format!("{}/{typed}", here.display())),
+            Err(_) => PathBuf::from(typed),
         });
     };
     // Either separator, because Windows reads both and somebody typing here is
-    // typing at Perch rather than at a shell — as `upgrade::beneath` and
-    // `segments` already establish for every path Perch reads there.
-    let separator = |character: char| {
-        character == '/' || (host.platform() == Platform::Windows && character == '\\')
-    };
+    // typing at Perch rather than at a shell.
+    let separator = |character: char| character == '/' || (on_windows && character == '\\');
     let Some(rest) = rest.strip_prefix(separator) else {
         return Err(PerchError::Invalid(format!(
             "`{typed}` begins with a `~` that does not name this machine's home, \

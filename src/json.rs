@@ -1,5 +1,5 @@
 //! Replacing one key of a JSON document and leaving every other byte of it
-//! alone.
+//! alone — and writing a whole one into a buffer that is wiped ([`sealed`]).
 //!
 //! Perch patches files it does not own — `.claude.json` holds project history,
 //! MCP configuration and settings beside the one block belonging to an Account
@@ -8,6 +8,46 @@
 //! invisibly, so the value is found as a span of text and spliced.
 //!
 //! Narrow, and not a JSON library: one top-level key, and deeper is this twice.
+
+use zeroize::{Zeroize, Zeroizing};
+
+/// `document` as JSON text, in a buffer wiped on drop and reserved at the width
+/// the finished text takes. `to_string` starts at zero and doubles, so every
+/// growth abandons a prefix of what it wrote un-wiped — and each document that
+/// comes through here holds the only copy there is of a refresh token.
+pub fn sealed(document: &serde_json::Value) -> Zeroizing<String> {
+    let mut width = Width(0);
+    // A failure here costs the reserve and nothing else, so it is not a reason
+    // to refuse: the pass below writes the same bytes either way.
+    let _ = serde_json::to_writer(&mut width, document);
+
+    let mut bytes = Vec::with_capacity(width.0);
+    if serde_json::to_writer(&mut bytes, document).is_err() {
+        // Unreachable — a `Value` and a `Vec<u8>` have nothing between them
+        // that can fail — and truncated bytes would be worse than a lost wipe.
+        bytes.zeroize();
+        return Zeroizing::new(document.to_string());
+    }
+    // Borrowed over what `to_writer` wrote, and `into_owned` of a borrowed one
+    // reserves exactly: one copy, no growth.
+    let text = Zeroizing::new(String::from_utf8_lossy(&bytes).into_owned());
+    bytes.zeroize();
+    text
+}
+
+/// Counts the bytes a serialization writes without keeping one of them.
+struct Width(usize);
+
+impl std::io::Write for Width {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 += bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 /// The value of a top-level `key`, exactly as it is written, whatever kind of
 /// value it is.
@@ -523,5 +563,32 @@ mod tests {
         assert_eq!(set_value_at("[1, 2]", "seen", "true"), None);
         assert_eq!(set_value_at("not json at all", "seen", "true"), None);
         assert_eq!(set_value_at("", "seen", "true"), None);
+    }
+
+    /// The whole of what `sealed` is for: the buffer never grows, so no prefix
+    /// of the token it holds is handed back to the allocator un-wiped. Said as
+    /// capacity, because that is the property — the text being right is what
+    /// every other caller of `serde_json` already gets.
+    #[test]
+    fn a_sealed_document_is_written_into_a_buffer_that_never_grew() {
+        let document = serde_json::json!({
+            "grant_type": "refresh_token",
+            "refresh_token": "sk-ant-ort01-a-refresh-token-of-a-realistic-length",
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+        });
+
+        let written = sealed(&document);
+
+        assert_eq!(
+            written.as_str(),
+            serde_json::to_string(&document).expect("a Value serializes"),
+            "the same bytes `to_string` would have written"
+        );
+        assert_eq!(
+            written.capacity(),
+            written.len(),
+            "and in exactly the room they take: anything larger is a reserve \
+             that was guessed, anything smaller is impossible"
+        );
     }
 }
