@@ -370,6 +370,11 @@ fn a_windows_path_from_the_root_is_written_where_it_says() {
         .with_platform(Platform::Windows)
         .with_answers(&["y", "C:\\backups\\perch.age", "purge"])
         .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+    // An Export is refused where its directory is not there, and `Path::parent`
+    // reads the separator of the platform this build runs on — so only a runner
+    // that spells `\` finds a parent here. Made, so both ask one question.
+    host.create_dir_all(Path::new("C:\\backups"))
+        .expect("the directory is made");
 
     let (outcome, printed) = run_purge(&host);
 
