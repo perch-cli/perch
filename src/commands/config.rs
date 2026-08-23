@@ -242,7 +242,7 @@ fn how_set_is_addressed(registry: &Registry, words: &[String]) -> PerchError {
         "`perch config set` was given {}. It takes a Scope, a key and a value — \
          `perch config set <scope> <key> <value>`, where a Scope is a Group or \
          `{UNGROUPED}`. {}",
-        counted(words),
+        super::words(words.len()),
         the_scopes(registry),
     ))
 }
@@ -255,15 +255,8 @@ fn how_get_is_addressed(words: &[String]) -> PerchError {
         "`perch config get` was given {}. It takes a Scope and a key — `perch \
          config get <scope> <key>` — or a Scope alone to read every Setting it \
          holds. `perch config get` on its own reads every Scope there is.",
-        counted(words),
+        super::words(words.len()),
     ))
-}
-
-fn counted(words: &[String]) -> String {
-    match words.len() {
-        1 => "1 word".to_string(),
-        count => format!("{count} words"),
-    }
 }
 
 #[cfg(test)]

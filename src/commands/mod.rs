@@ -264,6 +264,12 @@ pub fn groups(count: usize) -> String {
     counted(count, "Group")
 }
 
+/// Not a noun of Perch's: what `perch config` says about a command line it was
+/// given too many of.
+pub fn words(count: usize) -> String {
+    counted(count, "word")
+}
+
 fn counted(count: usize, noun: &str) -> String {
     match count {
         1 => format!("1 {noun}"),
