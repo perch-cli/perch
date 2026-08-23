@@ -260,6 +260,10 @@ pub fn credentials(count: usize) -> String {
     counted(count, "Credential")
 }
 
+pub fn groups(count: usize) -> String {
+    counted(count, "Group")
+}
+
 fn counted(count: usize, noun: &str) -> String {
     match count {
         1 => format!("1 {noun}"),

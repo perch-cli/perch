@@ -21,26 +21,41 @@ use crate::probe::{self, Store};
 use crate::profile;
 use crate::registry::{self, Registry};
 
-/// Refuses to import onto a machine that is already holding Accounts, and names
-/// the one command that makes room.
+/// Refuses to import onto a machine still holding anything, and names the one
+/// command that makes room.
 ///
-/// `None` is a machine Perch has never run on. A registry that is there and
-/// holds nothing — what a Purge leaves — is just as empty.
+/// The whole registry rather than its Accounts: `Registry::forget` leaves a
+/// Group declared, so the last Remove leaves Settings held nowhere else.
 pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()> {
-    let accounts = held.map_or(0, |registry| registry.accounts.len());
-    if accounts == 0 {
+    let Some(registry) = held else {
+        return Ok(());
+    };
+    let accounts = registry.accounts.len();
+    let groups = registry.groups.len();
+    let ungrouped_says_something =
+        registry.ungrouped != crate::registry::UngroupedConfig::default();
+    if accounts == 0 && groups == 0 && !ungrouped_says_something {
         return Ok(());
     }
 
+    let holding = match (accounts, groups) {
+        (0, declared) => format!("no Account but {}", crate::commands::groups(declared)),
+        (held, 0) => crate::commands::accounts(held),
+        (held, declared) => format!(
+            "{} and {}",
+            crate::commands::accounts(held),
+            crate::commands::groups(declared)
+        ),
+    };
     Err(PerchError::Conflict(format!(
-        "Perch already holds {}, and an Import does not merge: the \
+        "Perch already holds {holding}, and an Import does not merge: the \
          same Account on both sides one Rotation apart has no answer to which \
          Credential is live, and an Alias can mean different Accounts on two \
-         machines.\n\
+         machines. A Group and what it carries are declarations this machine \
+         holds alone.\n\
          Nothing was imported and the file was not opened. `perch holdings \
          purge` gives the machine back and is what makes room — it offers to \
-         write an Export first.",
-        crate::commands::accounts(accounts),
+         write an Export first."
     )))
 }
 
