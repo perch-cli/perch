@@ -2052,6 +2052,18 @@ impl port::Processes for FakeHost {
             return Ok(arranged.status);
         }
 
+        // A program the machine does not hold is one no machine launches: the
+        // real adapter fails at `spawn`, and a `0` here is a Run reporting a
+        // success it never had. A bare word is `PATH`'s answer, not this one's.
+        let names_a_place = Path::new(program)
+            .parent()
+            .is_some_and(|at| !at.as_os_str().is_empty());
+        if names_a_place && !self.path_exists(Path::new(program)) {
+            return Err(HostError::NotFound {
+                path: PathBuf::from(program),
+            });
+        }
+
         let login = self.processes.login.borrow();
         match login.as_ref() {
             Some(login) => Ok(login(self, &config_dir)),
