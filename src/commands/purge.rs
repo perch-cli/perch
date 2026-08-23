@@ -63,7 +63,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         // The offer's *own* failure carries the note as well, because the bytes
         // land before the report. Taken as a value first, so the borrow of
         // `exported` the call holds is over before the note reads it.
-        let offered = offer_an_export(host, &mut perch, &mut registry, &home, &mut exported, out);
+        let offered = offer_an_export(host, &mut perch, &mut registry, &mut exported, out);
         offered.map_err(|error| still_standing(error, exported.as_deref()))?;
         // The note again, because the question *between* the offer and the
         // decision is a failure path of its own: `agreed` writes a prompt and
@@ -255,7 +255,6 @@ fn offer_an_export(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
     registry: &mut Registry,
-    home: &Path,
     landed: &mut Option<PathBuf>,
     out: &mut dyn Write,
 ) -> Result<()> {
@@ -288,8 +287,6 @@ fn offer_an_export(
                 .to_string(),
         ));
     };
-    refuse_a_path_the_purge_would_take(host, &path, home)?;
-
     // The Export's own refusals are about the Export, and every one of them is
     // true. None says what the person typing `perch holdings purge` is waiting to
     // hear, which is whether the Purge happened.
@@ -344,22 +341,6 @@ fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
         // Verbatim is honest either way: the refusal names the `~` that was typed.
         Err(_) => Ok(PathBuf::from(typed)),
     }
-}
-
-/// Refuses to write the Export inside the directory this Purge is about to delete.
-///
-/// Only the absolute case, which is the one somebody types here.
-fn refuse_a_path_the_purge_would_take(host: &dyn Host, path: &Path, home: &Path) -> Result<()> {
-    if !crate::host::is_inside(host, path, home) {
-        return Ok(());
-    }
-    Err(PerchError::Invalid(format!(
-        "{} is inside {}, which this Purge is about to delete — so the Export \
-         would go with it.\n\
-         Nothing was purged. Name a path somewhere Perch does not own.",
-        path.display(),
-        home.display(),
-    )))
 }
 
 /// Whether the Purge is to go ahead.

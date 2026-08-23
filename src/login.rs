@@ -14,6 +14,7 @@ use crate::host::Host;
 use crate::probe::{self, Credential, Identity, Installed};
 use crate::profile;
 use crate::registry;
+use zeroize::Zeroizing;
 
 /// What a login left behind, taken out of the directory it ran in.
 pub struct Produced {
@@ -21,7 +22,10 @@ pub struct Produced {
     pub credential: Credential,
     /// The `.claude.json` the login wrote, kept verbatim — it describes this
     /// Account in Claude Code's own terms, which is more than Perch records.
-    pub identity_json: String,
+    ///
+    /// Wiped on drop for [`crate::json`]'s reason: this file is where an MCP
+    /// server's `env` block lives, and a plain `String` frees one untouched.
+    pub identity_json: Zeroizing<String>,
 }
 
 /// Launches a login and returns what it produced.
@@ -110,12 +114,15 @@ fn what_the_login_left(
         }
     };
 
-    let identity_json = host.read_file(&store.identity_file).map_err(|err| {
-        PerchError::Other(format!(
-            "could not read {}: {err}",
-            store.identity_file.display()
-        ))
-    })?;
+    let identity_json = host
+        .read_file(&store.identity_file)
+        .map(Zeroizing::new)
+        .map_err(|err| {
+            PerchError::Other(format!(
+                "could not read {}: {err}",
+                store.identity_file.display()
+            ))
+        })?;
 
     Ok(Produced {
         identity,

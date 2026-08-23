@@ -1258,6 +1258,29 @@ struct WholeHostCase {
 
 const WHOLE_HOST_CASES: &[WholeHostCase] = &[
     WholeHostCase {
+        named: "a program that is not there is not launched",
+        asserts: |host, adapter| {
+            // The one thing `exec_interactive` can be asked without a terminal
+            // being handed anywhere: the real adapter fails at `spawn`, so no
+            // child exists. A path, because `PATH` answers for a bare name.
+            let nowhere = match host.platform() {
+                Platform::Windows => r"C:\perch-conformance-no-such-directory\nothing.exe",
+                _ => "/perch-conformance-no-such-directory/nothing",
+            };
+
+            assert!(
+                host.exec(nowhere, &[]).is_err(),
+                "{adapter}: {nowhere} is not a program, so running it is a failure"
+            );
+            assert!(
+                host.exec_interactive(nowhere, &[], &[]).is_err(),
+                "{adapter}: {nowhere} is not a program, so launching it is a \
+                 failure — an exit code here is a Run, a login or an Upgrade \
+                 reporting a success nothing had"
+            );
+        },
+    },
+    WholeHostCase {
         named: "a number that names no process is neither alive nor started",
         asserts: |host, adapter| {
             // `probe::clients_in` parses a pid out of any filename in a
@@ -1534,10 +1557,6 @@ fn methods_on(name: &str, source: &str) -> Vec<String> {
 /// have, rather than a case somebody has not got round to: a method left off
 /// for the second reason is one the fake may answer however it likes.
 const UNASKED: &[(&str, &str)] = &[
-    (
-        "exec_interactive",
-        "hands this process's terminal to a child and waits for a person",
-    ),
     (
         "http",
         "reaches Anthropic; `your_machine.rs` is where that is asked",

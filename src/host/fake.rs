@@ -2002,6 +2002,15 @@ impl port::Keys for FakeHost {
     }
 }
 
+/// Whether a program is named as a path rather than as a word `PATH` answers.
+///
+/// Off the platform the Host reports rather than through `Path::parent`, for
+/// [`crate::probe::rooted`]'s reason: a backslash separates on Windows alone, so
+/// a fake claiming it must not answer by the runner it is on.
+fn names_a_place(program: &str, on_windows: bool) -> bool {
+    program.contains('/') || (on_windows && program.contains('\\'))
+}
+
 impl port::Processes for FakeHost {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
         self.record(Effect::Exec {
@@ -2050,6 +2059,17 @@ impl port::Processes for FakeHost {
             .get(&exec_key(program, args))
         {
             return Ok(arranged.status);
+        }
+
+        // A program the machine does not hold is one no machine launches: the
+        // real adapter fails at `spawn`, and a `0` here is a Run reporting a
+        // success it never had. A bare word is `PATH`'s answer, not this one's.
+        if names_a_place(program, self.platform() == Platform::Windows)
+            && !self.path_exists(Path::new(program))
+        {
+            return Err(HostError::NotFound {
+                path: PathBuf::from(program),
+            });
         }
 
         let login = self.processes.login.borrow();
@@ -2150,10 +2170,13 @@ impl port::Terminal for FakeHost {
         *self.terminal.interactive.borrow()
     }
 
+    /// Kept as the real one writes it, stripped and all: a fake that recorded
+    /// the raw line is one no case could read the rule off.
     fn note(&self, line: &str) {
+        let line = crate::host::Shown::in_prose(line).as_str().to_string();
         let mut notes = self.terminal.notes.borrow_mut();
-        if !notes.iter().any(|said| said == line) {
-            notes.push(line.to_string());
+        if !notes.contains(&line) {
+            notes.push(line);
         }
     }
 

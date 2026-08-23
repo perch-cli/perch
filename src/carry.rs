@@ -17,6 +17,8 @@ use crate::host::{self, Host};
 use crate::json;
 use crate::probe::{self, Store};
 use crate::registry::{Account, Registry};
+use crate::secret::Secret;
+use zeroize::Zeroizing;
 
 /// The keys of `.claude.json` that belong to the person rather than to the
 /// Account, and therefore cross into the Profile a Run launches: state Claude
@@ -91,7 +93,7 @@ pub fn carry(
     let Some(patched) = crossed(host, &theirs, &mine) else {
         return;
     };
-    if patched == mine {
+    if patched.as_str() == mine.as_str() {
         return;
     }
     // A source truncated mid-token has no `,` or brace for `json::value_at` to
@@ -116,8 +118,8 @@ pub fn carry(
 /// and a bounded write of its own ([`crate::json`]), and `Option` rather than a
 /// `String` that may equal what went in, so a source holding none of these keys
 /// costs no copy at all.
-fn crossed(host: &dyn Host, theirs: &str, mine: &str) -> Option<String> {
-    let mut patched: Option<String> = None;
+fn crossed(host: &dyn Host, theirs: &str, mine: &str) -> Option<Secret> {
+    let mut patched: Option<Secret> = None;
     for key in PERSON_KEYS {
         let Some(value) = json::value_at(theirs, key) else {
             continue;
@@ -136,9 +138,9 @@ fn crossed(host: &dyn Host, theirs: &str, mine: &str) -> Option<String> {
 fn project_entry(
     host: &dyn Host,
     theirs: &str,
-    patched: Option<String>,
+    patched: Option<Secret>,
     mine: &str,
-) -> Option<String> {
+) -> Option<Secret> {
     let Ok(here) = host.current_dir() else {
         return patched;
     };
@@ -154,9 +156,9 @@ fn project_entry(
     // A Profile that has never been run holds no `projects` at all, which is an
     // empty one for this purpose, as is an entry it holds for no directory.
     let held = json::value_at(against, PROJECTS).unwrap_or("{}");
-    let mine_here = json::value_at(held, &here).unwrap_or("{}").to_string();
+    let mine_here = Secret::copied(json::value_at(held, &here).unwrap_or("{}"));
 
-    let mut entry: Option<String> = None;
+    let mut entry: Option<Secret> = None;
     for key in PROJECT_KEYS {
         let Some(value) = json::value_at(theirs_here, key) else {
             continue;
@@ -260,8 +262,8 @@ fn where_it_works(
 
 /// A file, where there is one to read. Not there, or unreadable, is nothing to
 /// copy from and nothing to copy into — the ordinary state of a machine.
-fn read(host: &dyn Host, path: &Path) -> Option<String> {
-    host.read_file(path).ok()
+fn read(host: &dyn Host, path: &Path) -> Option<Zeroizing<String>> {
+    host.read_file(path).ok().map(Zeroizing::new)
 }
 
 #[cfg(test)]

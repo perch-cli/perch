@@ -30,8 +30,13 @@ fn latest(version: &str) -> String {
 }
 
 /// A machine where the newest published Release is newer than this build.
+///
+/// With a shell on it, because the Installer Channel hands the script it writes
+/// to `/bin/sh` — and a machine that holds no such file launches nothing.
 fn machine() -> FakeHost {
-    machine_with_claude_code().with_reply(LATEST_URL, 200, &latest(NEWER))
+    machine_with_claude_code()
+        .with_reply(LATEST_URL, 200, &latest(NEWER))
+        .with_file("/bin/sh", "")
 }
 
 /// The `brew` beside a Cellar, which every Homebrew Installation has and which
@@ -253,11 +258,18 @@ fn a_windows_installer_installation_is_recognized_where_windows_puts_it() {
     );
 }
 
+/// With the PowerShell `%SystemRoot%` names on it, for the reason [`machine`]
+/// has a shell: the Installer Channel hands the script it writes to that
+/// binary, and a machine holding no such file launches nothing.
 fn windows_machine() -> perch::host::FakeHost {
     machine()
         .with_platform(Platform::Windows)
         .with_env("LOCALAPPDATA", "C:\\Users\\someone\\AppData\\Local")
         .with_env("SystemRoot", "C:\\Windows")
+        .with_file(
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "",
+        )
 }
 
 /// A bare name is searched for in the working directory before `PATH`, so a

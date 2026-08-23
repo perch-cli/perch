@@ -331,6 +331,33 @@ fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {
     );
 }
 
+/// The column writers ask, and a sentence is not a column: an Account's plan
+/// comes out of `subscriptionType` in a Credential file, and the very first
+/// command anyone runs writes it into a remark on stderr, raw. `perch status`
+/// drew the same value stripped, one screen away (ADR nothing-drawn-is-obeyed).
+#[test]
+fn a_remark_carries_no_more_than_a_column_would() {
+    let loud = CREDENTIAL.replace(
+        r#""subscriptionType":"pro""#,
+        r#""subscriptionType":"pro\u001b[2K\u001b[31mQUOTA GONE""#,
+    );
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, &loud)
+        .with_file(IDENTITY_PATH, IDENTITY_FILE);
+
+    run_list(&host, false).0.expect("the login is adopted");
+
+    let said = host.notes().join("\n");
+    assert!(
+        !said.contains('\u{1b}'),
+        "nothing in a remark is something a terminal acts on: {said:?}"
+    );
+    assert!(
+        said.contains("pro[2K[31mQUOTA GONE"),
+        "and everything in it is drawn: {said:?}"
+    );
+}
+
 /// An `oauthAccount` block that is there and names nobody: different from a file
 /// with no block at all, which is a Claude Code nobody has logged into, and
 /// different again from one Perch cannot parse.

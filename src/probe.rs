@@ -710,17 +710,21 @@ pub fn read_identity(
         ));
     }
 
-    // The address is guarded against this in `registry::validate`, and the
-    // organization is drawn into the same labeled block by the same writer.
-    // Here rather than there because nobody chose it: this file can be edited.
-    if let Some(said) =
-        crate::host::control_character_in(account.organization_name.as_deref().unwrap_or_default())
-    {
+    // Both refused here rather than in `registry::validate`: one met at `load`
+    // is met over a value Perch itself wrote down, and takes with it the
+    // command that would repair it (ADR a-registry-comes-forward).
+    for (what, value) in [
+        ("the account", Some(email.as_str())),
+        ("an organization", account.organization_name.as_deref()),
+    ] {
+        let Some(said) = crate::host::control_character_in(value.unwrap_or_default()) else {
+            continue;
+        };
         return Err(refusal(
             assumption::IDENTITY_BLOCK,
             &format!(
-                "{} names an organization carrying {said}, which no line of \
-                 Perch's output could show as part of one",
+                "{} names {what} carrying {said}, which no line of Perch's \
+                 output could show as part of one",
                 store.identity_file.display()
             ),
             installed.version(),
@@ -1129,7 +1133,7 @@ pub fn patch_oauth_account(
     block: &str,
     path: &Path,
     installed: &Installed,
-) -> Result<String> {
+) -> Result<Secret> {
     // Written rather than replaced, so a file with no `oauthAccount` yet gets
     // one: Claude Code writes the identity block only at a login. The one
     // refusal left is a file that is not a JSON object at all.
@@ -1235,6 +1239,18 @@ fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The patch as text a case can compare: it answers a `Secret`, which
+    /// neither prints nor compares.
+    fn patched_block(
+        contents: &str,
+        block: &str,
+        path: &Path,
+        installed: &Installed,
+    ) -> Result<String> {
+        patch_oauth_account(contents, block, path, installed)
+            .map(|written| written.as_str().to_string())
+    }
 
     /// A version to quote, for the tests that are not about the quoting.
     fn version_under_test() -> Installed {
@@ -1574,7 +1590,7 @@ mod tests {
 
     #[test]
     fn patching_the_identity_leaves_every_other_byte_alone() {
-        let patched = patch_oauth_account(
+        let patched = patched_block(
             IDENTITY_FILE,
             "{\n  \"emailAddress\": \"overflow@example.com\"\n}",
             Path::new("/Users/someone/.claude.json"),
@@ -1604,7 +1620,7 @@ mod tests {
         // hands over: already indented, for a file that is not this one.
         let from_elsewhere = "{\n    \"emailAddress\": \"overflow@example.com\"\n  }";
 
-        let patched = patch_oauth_account(
+        let patched = patched_block(
             IDENTITY_FILE,
             from_elsewhere,
             Path::new("/Users/someone/.claude.json"),
@@ -1626,7 +1642,7 @@ mod tests {
     /// with an API key — rather than drift.
     #[test]
     fn a_file_that_has_no_block_yet_gets_one_rather_than_refusing_for_ever() {
-        let patched = patch_oauth_account(
+        let patched = patched_block(
             r#"{"numStartups": 41}"#,
             r#"{"emailAddress": "someone@example.com"}"#,
             Path::new("/Users/someone/.claude.json"),
@@ -1649,7 +1665,7 @@ mod tests {
     /// written into a `.claude.json` that is not a JSON object.
     #[test]
     fn a_file_that_is_not_an_object_is_a_refusal_naming_the_assumption() {
-        let error = patch_oauth_account(
+        let error = patched_block(
             r#"["not what this file is"]"#,
             "{}",
             Path::new("/Users/someone/.claude.json"),
@@ -2172,26 +2188,37 @@ mod tests {
 
     /// `perch status` writes the organization into the same labeled block as the
     /// address beside it, and the address is guarded against exactly this. A
-    /// `\r` there overwrites the line from column nought, taking the label and
-    /// half the name with it; a `\n` splits the block so the rows below stop
-    /// lining up under it.
+    /// `\r` overwrites the line from column nought, taking the label and half
+    /// the name with it. Both values, because both come out of this block —
+    /// and refused here, because `registry::validate` refuses at `load`.
     #[test]
-    fn an_organization_name_a_terminal_would_obey_is_refused_like_the_address() {
-        let host = FakeHost::new()
-            .with_env("HOME", "/Users/someone")
-            .with_env("USER", "someone")
-            .with_file(
-                "/Users/someone/.claude.json",
-                r#"{"oauthAccount":{"emailAddress":"someone@example.com","organizationName":"Acme\u001b[31m Ltd"}}"#,
-            );
-        let store = default_store(&host).expect("the store is derivable");
+    fn a_block_a_terminal_would_obey_is_refused_where_it_enters() {
+        for (block, names) in [
+            (
+                r#"{"emailAddress":"some\u001b[31mone@example.com"}"#,
+                "names the account",
+            ),
+            (
+                r#"{"emailAddress":"someone@example.com","organizationName":"Acme\u001b[31m Ltd"}"#,
+                "names an organization",
+            ),
+        ] {
+            let host = FakeHost::new()
+                .with_env("HOME", "/Users/someone")
+                .with_env("USER", "someone")
+                .with_file(
+                    "/Users/someone/.claude.json",
+                    &format!(r#"{{"oauthAccount":{block}}}"#),
+                );
+            let store = default_store(&host).expect("the store is derivable");
 
-        let refused = read_identity(&host, &store, &version_under_test())
-            .expect_err("an escape is not something Perch can render");
+            let refused = read_identity(&host, &store, &version_under_test())
+                .expect_err("an escape is not something Perch can render");
 
-        let said = refused.to_string();
-        assert!(said.contains("control character (U+001B)"), "{said}");
-        assert!(said.contains("names an organization"), "{said}");
+            let said = refused.to_string();
+            assert!(said.contains("control character (U+001B)"), "{said}");
+            assert!(said.contains(names), "{said}");
+        }
     }
 
     #[test]

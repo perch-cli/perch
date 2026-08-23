@@ -70,6 +70,12 @@ pub struct Report {
     /// Accounts would otherwise answer `"refresh": null`, which is this document's word
     /// for *nobody asked*.
     pub asked: bool,
+    /// Why the reads stopped where they did, for the caller holding the watch.
+    ///
+    /// Handed back rather than swallowed: a round that stopped read fewer Accounts
+    /// than it was given, and read as a reading that failed it would pace a Back-off
+    /// off a question nobody was asked.
+    pub stopped: Option<Lost>,
 }
 
 /// One step of an observation: what it produced, or the outcome that stopped it there.
@@ -215,18 +221,16 @@ pub fn refresh(
     let mut report = Report::asked_for();
     let mut anything_to_keep = false;
 
-    for (at, email) in emails.iter().enumerate() {
+    for email in emails {
         // A round trip to Anthropic each, so the hold is renewed between them and again
         // inside the turn: one Account's turn is up to six requests bounded at thirty
         // seconds, twice the ninety the registry hold goes stale in.
         perch.renew();
-        // And whatever else the caller holds, and where it says whether the reads may
-        // go on: five candidates is three hundred seconds against a thirty-second
-        // grace and a watch stale in twenty-two minutes, which a burst can outlast.
-        let go_on = still_ours();
-        // Never before the first: nothing has been spent yet, and a round held
-        // before it read anything would pace a Back-off.
-        if at > 0 && go_on.is_err() {
+        // And whatever else the caller holds. Before the first as well as between
+        // them: the round's own Refresh is one address, so an ask made only after
+        // one is an ask this reading never makes.
+        if let Err(lost) = still_ours() {
+            report.stopped = Some(lost);
             break;
         }
 
@@ -281,11 +285,17 @@ fn observe(
         why: err.to_string(),
         spent: false,
     })?;
-    let asked = holding(host, registry, account)?;
-    let theirs =
-        |outcome| only_off_a_credential_that_is_theirs(host, outcome, &asked, account, installed);
+    let asked = &holding(host, registry, account)?;
+    // Taking the `Because` it was reached through, because what it answers with
+    // is a `Failed`, and every `Failed` says whether the round spent a request.
+    let theirs = move |because| {
+        move |outcome| {
+            only_off_a_credential_that_is_theirs(host, outcome, asked, account, installed, because)
+        }
+    };
 
-    let asking = usable_token(host, perch, &asked, installed).map_err(theirs)?;
+    let asking =
+        usable_token(host, perch, asked, installed).map_err(theirs(Because::ItSaysItRanOut))?;
     match read_off(host, perch, &asking.token, account) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
@@ -302,9 +312,10 @@ fn observe(
     // Anthropic would not take the token, and the Credential holding it did not think
     // it had run out — the state one carrying no `expiresAt` is permanently in. Once,
     // and only off a rejection.
-    refuse_if_live(host, &asked, installed, Because::AnthropicRefusedIt).map_err(theirs)?;
-    let renewed = renew_under_the_lock(host, perch, &asked, installed, Because::AnthropicRefusedIt)
-        .map_err(theirs)?;
+    refuse_if_live(host, asked, installed, Because::AnthropicRefusedIt)
+        .map_err(theirs(Because::AnthropicRefusedIt))?;
+    let renewed = renew_under_the_lock(host, perch, asked, installed, Because::AnthropicRefusedIt)
+        .map_err(theirs(Because::AnthropicRefusedIt))?;
     read_off(host, perch, &renewed.token, account).map_err(Turned::settled)
 }
 
@@ -366,6 +377,7 @@ fn only_off_a_credential_that_is_theirs(
     asked: &Asked,
     account: &Account,
     installed: &Installed,
+    because: Because,
 ) -> Outcome {
     let Outcome::Quarantined { why, detail } = &outcome else {
         return outcome;
@@ -391,7 +403,7 @@ fn only_off_a_credential_that_is_theirs(
                 why.because(),
                 account.email(),
             ),
-            spent: true,
+            spent: because.spent(),
         };
     }
 
@@ -410,7 +422,7 @@ fn only_off_a_credential_that_is_theirs(
             account.email(),
             account.email(),
         ),
-        spent: true,
+        spent: because.spent(),
     }
 }
 
@@ -951,6 +963,7 @@ mod tests {
             attempts: vec![attempt("someone@example.com", Outcome::Observed)],
             not_kept: None,
             asked: true,
+            stopped: None,
         };
         assert!(report.notes().is_empty(), "the age of the figure says it");
         assert_eq!(report.document()["kept"], true);
@@ -971,6 +984,7 @@ mod tests {
             ],
             not_kept: None,
             asked: true,
+            stopped: None,
         };
 
         let notes = report.notes();
@@ -1008,6 +1022,7 @@ mod tests {
             attempts: vec![attempt("someone@example.com", Outcome::Observed)],
             not_kept: Some("the registry is read-only".to_string()),
             asked: true,
+            stopped: None,
         };
 
         let document = report.document();

@@ -36,9 +36,13 @@ pub fn write_failed(err: std::io::Error) -> PerchError {
     PerchError::Other(format!("Perch could not write its output: {err}"))
 }
 
-/// One line to the person running the command.
+/// One line to the person running the command, with whatever a terminal would
+/// act on taken out (ADR nothing-drawn-is-obeyed). At the writer, because a
+/// sentence is a `format!` and there is no column to hang the question on: a
+/// plan, a Quota Window's name and a path read out of a unit file reach a
+/// person this way, and nobody chose any of them.
 pub fn say(out: &mut dyn Write, line: &str) -> Result<()> {
-    writeln!(out, "{line}").map_err(write_failed)
+    writeln!(out, "{}", crate::host::Shown::in_prose(line)).map_err(write_failed)
 }
 
 /// One document to whatever is parsing the command, which is what `--json`
@@ -48,7 +52,10 @@ pub fn say(out: &mut dyn Write, line: &str) -> Result<()> {
 pub fn say_json(out: &mut dyn Write, document: &serde_json::Value) -> Result<()> {
     let rendered =
         serde_json::to_string_pretty(document).map_err(|err| PerchError::Other(err.to_string()))?;
-    say(out, &rendered)
+    // Written rather than said: serde has already escaped a control character as
+    // six characters a parser wants, and a second pass would take those six out
+    // of a document a script is reading.
+    writeln!(out, "{rendered}").map_err(write_failed)
 }
 
 /// Puts a question to the person at the terminal and waits for their answer, or

@@ -109,7 +109,7 @@ fn store_as_first_profile(
 /// by the four fields Perch records rather than in Claude Code's own terms.
 fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store) -> Result<()> {
     let contents = match host.read_file(&findings.store.identity_file) {
-        Ok(contents) => contents,
+        Ok(contents) => zeroize::Zeroizing::new(contents),
         // The probe read an Identity out of this file moments ago, so it has
         // gone away underneath us. Adoption still holds the Credential, which
         // is the part that cannot be reconstructed.

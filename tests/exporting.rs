@@ -654,6 +654,39 @@ fn a_live_credential_belonging_to_somebody_else_is_left_out_with_claude_code_gon
     );
 }
 
+/// The one artifact that makes a Purge survivable, written where the Purge
+/// deletes it. The offer inside `perch holdings purge` has refused this since
+/// the review that found it; the command that writes the same file at the same
+/// path had the guard nowhere, so a backup taken today is gone with the
+/// Holdings it is the only copy of.
+#[test]
+fn an_export_inside_perchs_own_home_is_refused() {
+    for typed in [
+        "/Users/someone/.config/perch/backup.age",
+        // The same directory, reached by a name sharing no component with it.
+        "/Users/someone/backups/backup.age",
+    ] {
+        let host = typing_the_passphrase(machine_with_two_accounts()).with_link(
+            perch::host::Link::Symbolic,
+            "/Users/someone/.config/perch",
+            "/Users/someone/backups",
+        );
+
+        let (outcome, printed) = run_export(&host, typed);
+
+        let refused = outcome.expect_err("that is where a Purge deletes it");
+        assert_eq!(refused.exit_code(), EXIT_INVALID, "{refused}");
+        assert!(
+            refused.to_string().contains("perch holdings purge"),
+            "and says what would take it: {refused}"
+        );
+        assert!(
+            host.file(typed).is_none(),
+            "{typed}: nothing was written: {printed}"
+        );
+    }
+}
+
 /// The bytes land before the command says so, and the path an Export is never
 /// written over is refused on a re-run — which reads as somebody else's file.
 /// So a report that could not be printed has to say the Export is there.

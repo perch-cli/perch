@@ -145,8 +145,8 @@ fn beneath(parts: &[&str]) -> PathBuf {
 ///
 /// The path is the whole of the evidence: every Channel installs the same bytes,
 /// and a marker file beside one would be absent for Homebrew and npm both.
-pub fn channel_at(platform: Platform, installer_dir: &Path, exe: &Path) -> Option<Channel> {
-    let parts = segments(platform, exe);
+pub fn channel_at(host: &dyn Host, installer_dir: &Path, exe: &Path) -> Option<Channel> {
+    let parts = segments(host.platform(), exe);
 
     // npm first: `brew install node` puts an npm prefix inside a Homebrew one,
     // so a path holding both is npm's Perch under Homebrew's Node.
@@ -165,7 +165,17 @@ pub fn channel_at(platform: Platform, installer_dir: &Path, exe: &Path) -> Optio
     // Exactly where the installer puts it, and nowhere else. `/usr/local/bin` is
     // where a hand-unpacked Release lands, and is deliberately not here.
     let holding = &parts[..parts.len().saturating_sub(1)];
-    match holding == segments(platform, installer_dir) {
+    let spelled_the_same = holding == segments(host.platform(), installer_dir);
+
+    // The same question of the place rather than of the spelling: `current_exe`
+    // resolves every link and `home_dir` reads `$HOME` verbatim, so a link above
+    // `bin` hands this one directory under two names.
+    let the_same_place = || {
+        exe.parent()
+            .is_some_and(|holding| crate::host::is_the_same_place(host, holding, installer_dir))
+    };
+
+    match spelled_the_same || the_same_place() {
         true => Some(Channel::Installer),
         false => None,
     }
@@ -195,7 +205,7 @@ pub fn channel(host: &dyn Host) -> Result<Option<Channel>> {
     let exe = host
         .current_exe()
         .map_err(|err| PerchError::Other(format!("could not find Perch's own binary: {err}")))?;
-    Ok(channel_at(host.platform(), &installer_dir(host)?, &exe))
+    Ok(channel_at(host, &installer_dir(host)?, &exe))
 }
 
 /// A Release as somebody typed it, as the number Perch compares.
@@ -482,8 +492,18 @@ mod tests {
 
     const INSTALLER_DIR: &str = "/home/someone/.local/bin";
 
+    /// A machine of the platform being asked about and nothing else on it, so
+    /// the two paths settle to themselves and the spelling is the whole answer.
+    fn machine(platform: Platform) -> crate::host::FakeHost {
+        crate::host::FakeHost::new().with_platform(platform)
+    }
+
     fn channel_of(exe: &str) -> Option<Channel> {
-        channel_at(Platform::Other, Path::new(INSTALLER_DIR), Path::new(exe))
+        channel_at(
+            &machine(Platform::Other),
+            Path::new(INSTALLER_DIR),
+            Path::new(exe),
+        )
     }
 
     #[test]
@@ -610,7 +630,7 @@ mod tests {
             "c:\\users\\someone\\appdata\\local\\perch\\bin\\PERCH.EXE",
         ] {
             assert_eq!(
-                channel_at(Platform::Windows, installer, Path::new(exe)),
+                channel_at(&machine(Platform::Windows), installer, Path::new(exe)),
                 Some(Channel::Installer),
                 "{exe}"
             );
@@ -618,12 +638,45 @@ mod tests {
 
         assert_eq!(
             channel_at(
-                Platform::Windows,
+                &machine(Platform::Windows),
                 installer,
                 Path::new("C:\\Program Files\\perch\\perch.exe")
             ),
             None,
             "and somewhere else is still somewhere else"
+        );
+    }
+
+    /// `current_exe` canonicalizes — it has to, or a Homebrew binary is a
+    /// `<prefix>/bin/perch` saying nothing about a Cellar — and `home_dir` reads
+    /// `$HOME` verbatim. Compared as spellings, a link above `bin` says a binary
+    /// the installer placed was placed by hand, and `perch upgrade` refuses it
+    /// naming both paths as though they were two places.
+    #[test]
+    fn the_installers_directory_reached_through_a_link_is_still_the_installers() {
+        let host = machine(Platform::Other).with_link(
+            crate::host::Link::Symbolic,
+            "/export/home/someone",
+            "/home/someone",
+        );
+
+        assert_eq!(
+            channel_at(
+                &host,
+                Path::new(INSTALLER_DIR),
+                Path::new("/export/home/someone/.local/bin/perch"),
+            ),
+            Some(Channel::Installer),
+            "one directory under the two names the two Host answers spell it"
+        );
+        assert_eq!(
+            channel_at(
+                &host,
+                Path::new(INSTALLER_DIR),
+                Path::new("/export/home/someone/elsewhere/perch"),
+            ),
+            None,
+            "and somewhere else under the link is still somewhere else"
         );
     }
 

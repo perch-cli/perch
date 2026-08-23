@@ -71,16 +71,25 @@ pub fn object_at<'a>(contents: &'a str, key: &str) -> Option<&'a str> {
 /// outside that value is identical, and the value is written at the indentation
 /// of the key that introduces it, so a block copied between two files does not
 /// step further right each time.
-pub fn set_value_at(contents: &str, key: &str, value: &str) -> Option<String> {
+pub fn set_value_at(contents: &str, key: &str, value: &str) -> Option<Secret> {
     let Some((start, end)) = span_of(contents, key) else {
         return insert(contents, key, value);
     };
     let indented = indent_to_match(value, indentation_of_the_line(contents, start));
-    Some(format!(
-        "{}{indented}{}",
-        &contents[..start],
-        &contents[end..]
-    ))
+    Some(spliced(&[&contents[..start], &indented, &contents[end..]]))
+}
+
+/// The pieces of a document, joined in a buffer wiped on drop and reserved at
+/// the width the whole comes to.
+///
+/// `format!` would grow into it and free every prefix it outgrew, and what comes
+/// through here is a `.claude.json` — which carries an MCP server's `env` block.
+fn spliced(pieces: &[&str]) -> Secret {
+    let mut written = Secret::with_room_for(pieces.iter().map(|piece| piece.len()).sum());
+    for piece in pieces {
+        written.push_str(piece);
+    }
+    written
 }
 
 /// Writes a key the document does not have yet, as the first member of it.
@@ -88,7 +97,7 @@ pub fn set_value_at(contents: &str, key: &str, value: &str) -> Option<String> {
 /// First rather than last because it is the one position needing no commas
 /// moved: the member the file already opens with keeps its comma, and everything
 /// after it is untouched. A document that is not an object has nowhere to write.
-fn insert(contents: &str, key: &str, value: &str) -> Option<String> {
+fn insert(contents: &str, key: &str, value: &str) -> Option<Secret> {
     let bytes = contents.as_bytes();
     let open = skip_whitespace(bytes, 0);
     if bytes.get(open) != Some(&b'{') {
@@ -98,28 +107,31 @@ fn insert(contents: &str, key: &str, value: &str) -> Option<String> {
     let inside = &contents[open + 1..end - 1];
 
     let column = member_indentation(contents, open, inside);
-    let member = format!(
-        "\n{}{}: {}",
-        " ".repeat(column),
-        quoted(key),
-        indent_to_match(value, column)
-    );
+    let padding = " ".repeat(column);
+    let indented = indent_to_match(value, column);
+    let member = spliced(&["\n", &padding, &quoted(key), ": ", &indented]);
 
     // An object holding nothing has no first member to keep, and needs its
     // closing brace put back on a line of its own.
     if inside.trim().is_empty() {
         let brace = " ".repeat(indentation_of_the_line(contents, open));
-        return Some(format!(
-            "{}{{{member}\n{brace}}}{}",
+        return Some(spliced(&[
             &contents[..open],
-            &contents[end..]
-        ));
+            "{",
+            &member,
+            "\n",
+            &brace,
+            "}",
+            &contents[end..],
+        ]));
     }
-    Some(format!(
-        "{}{{{member},{}",
+    Some(spliced(&[
         &contents[..open],
-        &contents[open + 1..]
-    ))
+        "{",
+        &member,
+        ",",
+        &contents[open + 1..],
+    ]))
 }
 
 /// The column an object's members are written at: whatever the first one uses,
@@ -283,7 +295,7 @@ fn indentation_of_the_line(contents: &str, at: usize) -> usize {
 /// Counted in characters, as [`indentation_of_the_line`] counts what it is being
 /// matched to: the block is read verbatim out of a file Perch does not own, so a
 /// width measured in bytes would slice a character in half and panic.
-fn indent_to_match(block: &str, indentation: usize) -> String {
+fn indent_to_match(block: &str, indentation: usize) -> Secret {
     let width_of = |line: &str| line.chars().take_while(|c| c.is_whitespace()).count();
     let own = block
         .lines()
@@ -294,24 +306,67 @@ fn indent_to_match(block: &str, indentation: usize) -> String {
         .unwrap_or(0);
 
     let padding = " ".repeat(indentation);
-    block
-        .lines()
-        .enumerate()
-        .map(|(index, line)| {
-            if index == 0 {
-                line.to_string()
-            } else {
-                let undented: String = line.chars().skip(own).collect();
-                format!("{padding}{undented}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    // Into one buffer for [`spliced`]'s reason, and by hand rather than through
+    // `join`, which builds every line as a `String` of its own first.
+    let mut written = Secret::with_room_for(block.len() + block.lines().count() * indentation);
+    for (index, line) in block.lines().enumerate() {
+        if index > 0 {
+            written.push('\n');
+            written.push_str(&padding);
+        }
+        match index {
+            0 => written.push_str(line),
+            _ => line.chars().skip(own).for_each(|c| written.push(c)),
+        }
+    }
+    written
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The two splices as text a case can compare. Both answer a `Secret`, which
+    /// neither prints nor compares — deliberately, since one holds a document
+    /// this module exists to keep out of freed heap.
+    fn text_at(contents: &str, key: &str, value: &str) -> Option<String> {
+        set_value_at(contents, key, value).map(|written| written.as_str().to_string())
+    }
+
+    fn indented_to(block: &str, indentation: usize) -> String {
+        indent_to_match(block, indentation).as_str().to_string()
+    }
+
+    /// The whole of what [`spliced`] is for, said as capacity because that is
+    /// the property: a buffer that never grew handed no prefix of what it holds
+    /// back to the allocator. `carry` chains eleven of these over one file, and
+    /// `mcpServers` — the key holding an API key — is one of the eleven.
+    #[test]
+    fn a_patched_document_is_written_into_a_buffer_that_never_grew() {
+        let carrying = r#"{
+  "numStartups": 4,
+  "projects": {
+    "/Users/someone/work": {
+      "mcpServers": {
+        "billing": { "env": { "API_KEY": "sk-live-a-third-party-secret" } }
+      }
+    }
+  }
+}"#;
+
+        for (key, value) in [
+            ("hasCompletedOnboarding", "true"),
+            ("numStartups", "9"),
+            ("projects", r#"{"/elsewhere": {}}"#),
+        ] {
+            let written = set_value_at(carrying, key, value).expect("it is an object");
+            assert_eq!(
+                written.capacity(),
+                written.as_str().len(),
+                "`{key}` was written into a buffer that grew"
+            );
+        }
+    }
 
     /// This runs after the incoming Credential is already live, where a panic
     /// replaces the recovery instructions the user actually needs.
@@ -322,7 +377,7 @@ mod tests {
         let block = "{\n\u{a0}\u{a0}\"a\": 1,\n\u{a0}\u{a0}\"b\": 2\n\u{a0}\u{a0}}";
 
         assert_eq!(
-            indent_to_match(block, 2),
+            indented_to(block, 2),
             "{\n  \"a\": 1,\n  \"b\": 2\n  }",
             "two characters of indentation are two characters, not four bytes"
         );
@@ -336,7 +391,7 @@ mod tests {
         // the middle of the second one.
         let block = "{\n\u{a0}\u{a0}\"a\": 1,\n\u{2028}\u{2028}\"b\": 2\n\u{a0}\u{a0}}";
 
-        let indented = indent_to_match(block, 0);
+        let indented = indented_to(block, 0);
 
         assert_eq!(indented, "{\n\"a\": 1,\n\"b\": 2\n}");
     }
@@ -357,8 +412,7 @@ mod tests {
 
     #[test]
     fn everything_outside_the_value_survives_byte_for_byte() {
-        let patched =
-            set_value_at(DOCUMENT, "block", "{\n  \"name\": \"someone-else\"\n}").unwrap();
+        let patched = text_at(DOCUMENT, "block", "{\n  \"name\": \"someone-else\"\n}").unwrap();
 
         assert!(patched.contains(r#""name": "someone-else""#));
         assert!(!patched.contains(r#""name": "someone""#));
@@ -375,7 +429,7 @@ mod tests {
     fn a_block_is_written_at_the_indentation_of_the_key_that_introduces_it() {
         // What taking a block out of another file hands over: indented already,
         // for a document that is not this one.
-        let patched = set_value_at(
+        let patched = text_at(
             DOCUMENT,
             "block",
             "{\n        \"name\": \"someone-else\"\n      }",
@@ -453,7 +507,7 @@ mod tests {
         let fresh =
             "{\n  \"oauthAccount\": {\n    \"emailAddress\": \"someone@example.com\"\n  }\n}";
 
-        let written = set_value_at(fresh, "hasCompletedOnboarding", "true").unwrap();
+        let written = text_at(fresh, "hasCompletedOnboarding", "true").unwrap();
 
         assert_eq!(
             written,
@@ -467,8 +521,7 @@ mod tests {
     /// no members, whose closing brace has to end up on a line of its own.
     #[test]
     fn a_key_written_into_an_empty_object_keeps_the_document_valid() {
-        let written =
-            set_value_at("{}", "/Users/someone/work", "{\n  \"allowedTools\": []\n}").unwrap();
+        let written = text_at("{}", "/Users/someone/work", "{\n  \"allowedTools\": []\n}").unwrap();
 
         assert_eq!(
             written,
@@ -483,7 +536,7 @@ mod tests {
     /// would mean rewriting bytes outside the value.
     #[test]
     fn a_key_written_into_a_document_on_one_line_leaves_the_rest_of_it_alone() {
-        let written = set_value_at(r#"{"numStartups": 4}"#, "hasSeenTasksHint", "true").unwrap();
+        let written = text_at(r#"{"numStartups": 4}"#, "hasSeenTasksHint", "true").unwrap();
 
         assert_eq!(
             written,
@@ -513,13 +566,13 @@ mod tests {
 
         let source_projects = value_at(SOURCE, "projects").unwrap();
         let entry = value_at(source_projects, "/Users/someone/work").unwrap();
-        let projects = set_value_at(
+        let projects = text_at(
             value_at(destination, "projects").unwrap(),
             "/Users/someone/work",
             entry,
         )
         .unwrap();
-        let written = set_value_at(destination, "projects", &projects).unwrap();
+        let written = text_at(destination, "projects", &projects).unwrap();
 
         assert!(written.contains(r#""Bash(git status)""#), "{written}");
         assert!(
@@ -547,7 +600,7 @@ mod tests {
         let entry = value_at(projects, here).expect("the directory is in it");
         assert!(entry.contains("Bash(git status)"));
 
-        let written = set_value_at("{}", here, entry).expect("written into an empty object");
+        let written = text_at("{}", here, entry).expect("written into an empty object");
         assert!(
             written.contains(r#""C:\\Users\\someone\\work""#),
             "{written}"
@@ -561,9 +614,9 @@ mod tests {
     /// has stopped being a JSON object is not one to guess at.
     #[test]
     fn there_is_nowhere_to_write_a_key_in_a_document_that_is_not_an_object() {
-        assert_eq!(set_value_at("[1, 2]", "seen", "true"), None);
-        assert_eq!(set_value_at("not json at all", "seen", "true"), None);
-        assert_eq!(set_value_at("", "seen", "true"), None);
+        assert_eq!(text_at("[1, 2]", "seen", "true"), None);
+        assert_eq!(text_at("not json at all", "seen", "true"), None);
+        assert_eq!(text_at("", "seen", "true"), None);
     }
 
     /// The whole of what `sealed` is for: the buffer never grows, so no prefix

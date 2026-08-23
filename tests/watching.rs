@@ -559,6 +559,44 @@ fn a_hold_that_asked_anthropic_nothing_does_not_pace_the_loop_down() {
     );
 }
 
+/// The third way to that refusal, and the one a constant true at the site got
+/// wrong: the live Credential says it has run out and carries no refresh token
+/// to buy another with, which is a fact about a file. Nothing is asked of
+/// Anthropic, so a doubling here is bought by a round that sent nothing — and
+/// waited out after the `perch relogin` that fixes it.
+#[test]
+fn a_credential_with_nothing_left_to_ask_with_does_not_pace_the_loop_down() {
+    // Expired and with no refresh token: a Renewal has nowhere to go.
+    const NOTHING_LEFT: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spent","expiresAt":1,"subscriptionType":"pro"}}"#;
+
+    let host = answering(watched(), SPARE_TOKEN, SECOND_EMAIL, &[5.0]).with_interrupt_after(4);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, NOTHING_LEFT);
+    // Naming somebody else, so the Quarantine is not recorded against the
+    // Account being watched and the round reports a reading that failed.
+    host.write_private_file(
+        std::path::Path::new("/Users/someone/.claude.json"),
+        SECOND_IDENTITY_FILE,
+    )
+    .expect("the identity file is written");
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+    host.forget_effects();
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    assert!(
+        asked_by(&host).is_empty(),
+        "nothing was asked of Anthropic: {printed}"
+    );
+    assert_eq!(
+        waits(&host),
+        vec![150_000; 4],
+        "so every round comes back on the ordinary beat — a doubling here is \
+         twenty minutes bought by four rounds that sent nothing, and waited \
+         out after the relogin that fixes it: {printed}"
+    );
+}
+
 /// The mirror, and the half a shared constant got wrong: the same refusal is
 /// reached again *after* a reading has gone out and Anthropic has turned a live
 /// token away. That round spent, so the Back-off paces it and the sentence says
@@ -1764,11 +1802,11 @@ fn a_check_held_settling_a_landing_says_so_on_standard_output() {
     );
 }
 
-/// The same again, inside the burst rather than after it. A `SIGKILL` here runs
-/// no `Drop`, so both locks are left on disk: every other `perch` waits out the
-/// registry's window, and the next login's Service waits out the watch's.
+/// The same again, inside the round rather than between two. A `SIGKILL` here
+/// runs no `Drop`, so both locks are left on disk: every other `perch` waits out
+/// the registry's window, and the next login's Service waits out the watch's.
 #[test]
-fn a_watcher_asked_to_stop_reads_no_further_candidates() {
+fn a_watcher_asked_to_stop_reads_nothing_and_pays_nothing() {
     // A third Account, so there is a second candidate for the burst to reach —
     // and its Credential is one that has not run out, or the round stops at a
     // Renewal rather than at the reads this is about.
@@ -1797,14 +1835,15 @@ fn a_watcher_asked_to_stop_reads_no_further_candidates() {
     result.expect("being asked to stop is not this Watcher's failure");
     let asked = asked_by(&host);
     assert!(
-        asked.contains(&SPARE_TOKEN.to_string()),
-        "the first candidate is read, or an empty report paces a Back-off that \
-         spent nothing: {asked:?}\n{printed}"
+        asked.is_empty(),
+        "the reads stop where the stop arrived, including before the first: a \
+         round given one address asks the question once, and an ask made only \
+         after the first read is one that reading never makes: {asked:?}\n{printed}"
     );
     assert!(
-        !asked.contains(&THIRD_TOKEN.to_string()),
-        "and the burst stops there rather than spending thirty seconds a \
-         candidate on a decision already not going to be made: {asked:?}\n{printed}"
+        printed.contains("asked to stop"),
+        "and the round says so rather than reporting a reading that failed, \
+         which is what would pace a Back-off off a request nobody sent: {printed}"
     );
     assert!(
         !host

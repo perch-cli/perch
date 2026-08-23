@@ -799,7 +799,7 @@ impl Terminal for RealHost {
     /// reading off stdout — and once each, however many Accounts provoke it.
     fn note(&self, line: &str) {
         if self.noted.borrow_mut().insert(line.to_string()) {
-            eprintln!("perch: {line}");
+            eprintln!("perch: {}", super::Shown::in_prose(line));
         }
     }
 
