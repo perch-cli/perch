@@ -163,6 +163,47 @@ pub fn only_the_registry(
     Ok(())
 }
 
+/// The registry, opened for what the command is about to do with it.
+///
+/// Exclusively only where something will be written, which is `--refresh` and
+/// nothing else: two listings drawn at once are ordinary, and a read that took
+/// the write lock would fail on one of them.
+pub fn opened_for(
+    host: &dyn Host,
+    refresh: bool,
+) -> Result<(Option<crate::lock::Held<'_>>, crate::registry::Registry)> {
+    match refresh {
+        true => {
+            let (perch, registry) = crate::adopt::ensure_adopted_exclusively(host)?;
+            Ok((Some(perch), registry))
+        }
+        false => Ok((None, crate::adopt::ensure_adopted(host)?)),
+    }
+}
+
+/// Current figures for exactly the Accounts the command is about to show, so
+/// narrowing what is shown narrows the reads with it. The empty report where
+/// nobody asked, which renders as "nobody asked". Nothing else is held across
+/// the read: both callers take the registry lock and nothing more.
+pub fn refreshed(
+    host: &dyn Host,
+    perch: &mut Option<crate::lock::Held<'_>>,
+    registry: &mut crate::registry::Registry,
+    about: &[String],
+) -> crate::observe::Report {
+    match perch {
+        Some(perch) => crate::observe::refresh(
+            host,
+            perch,
+            registry,
+            about,
+            &crate::probe::Installed::probed(host),
+            &mut || {},
+        ),
+        None => crate::observe::Report::default(),
+    }
+}
+
 /// The passphrase somebody typed, or `None` when they typed none. Empty and end
 /// of input are one answer, because they are one event. What it *cost* is the
 /// caller's to say: an Export that was not written and one that was not opened

@@ -14,12 +14,11 @@ use std::io::Write;
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
-use crate::adopt;
 use crate::commands::say_json;
 use crate::error::Result;
 use crate::host::Host;
 use crate::listing;
-use crate::observe::{self, Report};
+use crate::observe::Report;
 use crate::registry::{self, Account, Registry};
 use crate::utilization;
 
@@ -32,16 +31,7 @@ pub struct StatusArgs {
 }
 
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
-    // Exclusively only when there is something to write, which is `--refresh`
-    // and nothing else: two shell prompts rendering at once is the ordinary
-    // case, and a read that took the write lock would fail on one of them.
-    let (mut perch, mut registry) = match args.refresh {
-        true => {
-            let (perch, registry) = adopt::ensure_adopted_exclusively(host)?;
-            (Some(perch), registry)
-        }
-        false => (None, adopt::ensure_adopted(host)?),
-    };
+    let (mut perch, mut registry) = crate::commands::opened_for(host, args.refresh)?;
     // Perch on nobody *because* a Switch was in flight is the answer to why the
     // absence is there rather than an absence to report, so it exits 0
     // (ADR a-switch-is-written-down-first).
@@ -63,20 +53,13 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         }
     };
 
-    // This command shows one Account, so it reads one Account: a refresh reads
-    // exactly what it is about to show, at whatever breadth.
-    let report = match &mut perch {
-        Some(perch) => observe::refresh(
-            host,
-            perch,
-            &mut registry,
-            std::slice::from_ref(&active),
-            &crate::probe::Installed::probed(host),
-            // As `list`: the registry lock is the whole of what is held here.
-            &mut || {},
-        ),
-        None => Report::default(),
-    };
+    // This command shows one Account, so it reads one Account.
+    let report = crate::commands::refreshed(
+        host,
+        &mut perch,
+        &mut registry,
+        std::slice::from_ref(&active),
+    );
 
     let now = host.now();
     let account = registry.held(&active)?;
