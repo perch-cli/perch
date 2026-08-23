@@ -85,6 +85,8 @@ than a compile error. A design whose purpose is eliminating runtime ordering
 failures should not introduce one, and the locality it buys is locality a single
 command already has.
 
+That refusal is reopened below, against evidence it did not have.
+
 **A typestate chain.** Seven states, each consuming the last, from `Round::opens`
 through `Moving`. It gets the same compile-time ordering as the witnesses and
 dissolves the `Watcher` enum. It is refused on its own usage: the Check is the
@@ -92,6 +94,55 @@ same twelve lines with two differences, so the sequence gets written out once pe
 arrangement — reintroducing at the Round exactly the
 protocol-assembled-differently-by-two-callers that one door removed from the
 Switch.
+
+## The step protocol is reopened
+
+One shape has outlived every answer given to it: a Watcher that acts after it
+has lost the watch or been told to stop. ADR an-invariant-gets-a-door counts it
+in five of the six reviews it sorted, and answers it with a door,
+`commands::watch::Watch::goes_on`, which renews the hold and asks both questions
+in one call. The eighth review and the ninth found it again, on the far side of
+that door:
+
+| what acted after the watch was gone | how it got past `goes_on` |
+|---|---|
+| the round's own Refresh | `observe::refresh` asks once per address and threw the first answer away; the round hands it one address, so the ask was never made |
+| the refresh token a turn was holding | asked once at the top of a turn, and a turn is up to six requests bounded at thirty seconds |
+
+That ADR states the limit itself: **`Watch` cannot make a step exist that
+nobody wrote.** `goes_on` is called by hand at five sites, two of them
+as a closure `observe::refresh` takes as
+`&mut dyn FnMut() -> Result<(), Lost>`, so a step can hold the door, call it and
+discard what it says. A door removes the site that forgot the rule. It does not
+decide where the rule is asked, and both findings above are about where.
+
+Putting every step through one driver is the design refused here, and the ask
+becomes the driver's job rather than each step's — a step nobody has written yet
+cannot skip an ask it never makes.
+
+**The objection, and what answers it.** The refusal above is that the answers
+are not typed per step: replying to `Refresh` with what `SwitchTo` expects is a
+panic rather than a compile error, and a design whose purpose is ending runtime
+ordering failures should not open one. That holds against a `Step` enum answered
+by a shared reply type. It does not hold against a driver stated as a trait with
+one method per step, where each answer's type is that method's return type and
+no reply can be mismatched. That shape was not among the three designed before
+this one was chosen, and it is what a reopening weighs.
+
+**What it would also settle.** The consequences below record that *the three
+arrangements differ in exactly three places* is a rule no test checks, and that
+refusing the step protocol is what left it unproved. A driver makes it
+checkable. That was the refused design's best argument and nothing has answered
+it since.
+
+**What the reopening has to decide.** Not whether the driver asks, but what it
+drives. A driver that asks once per step answers the eighth review's finding and
+not the ninth's, where the step is one Account's turn and the requests inside it
+are six. Either the unit is the request, and the driver sits below
+`observe::refresh` rather than above it, or the driver buys the ordering without
+buying the granularity and the shape has somewhere left to live. The witnesses
+are untouched either way: they rule what must come after what, and a driver
+rules what every step passes through.
 
 ## Consequences
 
@@ -114,3 +165,6 @@ Switch.
   checks. It was the step protocol's best argument, and refusing that design
   leaves it unproved. If a fourth difference ever appears, this is the document
   that failed to prevent it.
+- The shape the witnesses were built against is still shipping defects, now
+  through the door built beside them. Reopening the step protocol is the
+  outstanding item this document owns.
