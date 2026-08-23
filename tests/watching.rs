@@ -559,6 +559,44 @@ fn a_hold_that_asked_anthropic_nothing_does_not_pace_the_loop_down() {
     );
 }
 
+/// The third way to that refusal, and the one a constant true at the site got
+/// wrong: the live Credential says it has run out and carries no refresh token
+/// to buy another with, which is a fact about a file. Nothing is asked of
+/// Anthropic, so a doubling here is bought by a round that sent nothing — and
+/// waited out after the `perch relogin` that fixes it.
+#[test]
+fn a_credential_with_nothing_left_to_ask_with_does_not_pace_the_loop_down() {
+    // Expired and with no refresh token: a Renewal has nowhere to go.
+    const NOTHING_LEFT: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spent","expiresAt":1,"subscriptionType":"pro"}}"#;
+
+    let host = answering(watched(), SPARE_TOKEN, SECOND_EMAIL, &[5.0]).with_interrupt_after(4);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, NOTHING_LEFT);
+    // Naming somebody else, so the Quarantine is not recorded against the
+    // Account being watched and the round reports a reading that failed.
+    host.write_private_file(
+        std::path::Path::new("/Users/someone/.claude.json"),
+        SECOND_IDENTITY_FILE,
+    )
+    .expect("the identity file is written");
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+    host.forget_effects();
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    assert!(
+        asked_by(&host).is_empty(),
+        "nothing was asked of Anthropic: {printed}"
+    );
+    assert_eq!(
+        waits(&host),
+        vec![150_000; 4],
+        "so every round comes back on the ordinary beat — a doubling here is \
+         twenty minutes bought by four rounds that sent nothing, and waited \
+         out after the relogin that fixes it: {printed}"
+    );
+}
+
 /// The mirror, and the half a shared constant got wrong: the same refusal is
 /// reached again *after* a reading has gone out and Anthropic has turned a live
 /// token away. That round spent, so the Back-off paces it and the sentence says

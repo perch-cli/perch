@@ -285,11 +285,17 @@ fn observe(
         why: err.to_string(),
         spent: false,
     })?;
-    let asked = holding(host, registry, account)?;
-    let theirs =
-        |outcome| only_off_a_credential_that_is_theirs(host, outcome, &asked, account, installed);
+    let asked = &holding(host, registry, account)?;
+    // Taking the `Because` it was reached through, because what it answers with
+    // is a `Failed`, and every `Failed` says whether the round spent a request.
+    let theirs = move |because| {
+        move |outcome| {
+            only_off_a_credential_that_is_theirs(host, outcome, asked, account, installed, because)
+        }
+    };
 
-    let asking = usable_token(host, perch, &asked, installed).map_err(theirs)?;
+    let asking =
+        usable_token(host, perch, asked, installed).map_err(theirs(Because::ItSaysItRanOut))?;
     match read_off(host, perch, &asking.token, account) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
@@ -306,9 +312,10 @@ fn observe(
     // Anthropic would not take the token, and the Credential holding it did not think
     // it had run out — the state one carrying no `expiresAt` is permanently in. Once,
     // and only off a rejection.
-    refuse_if_live(host, &asked, installed, Because::AnthropicRefusedIt).map_err(theirs)?;
-    let renewed = renew_under_the_lock(host, perch, &asked, installed, Because::AnthropicRefusedIt)
-        .map_err(theirs)?;
+    refuse_if_live(host, asked, installed, Because::AnthropicRefusedIt)
+        .map_err(theirs(Because::AnthropicRefusedIt))?;
+    let renewed = renew_under_the_lock(host, perch, asked, installed, Because::AnthropicRefusedIt)
+        .map_err(theirs(Because::AnthropicRefusedIt))?;
     read_off(host, perch, &renewed.token, account).map_err(Turned::settled)
 }
 
@@ -370,6 +377,7 @@ fn only_off_a_credential_that_is_theirs(
     asked: &Asked,
     account: &Account,
     installed: &Installed,
+    because: Because,
 ) -> Outcome {
     let Outcome::Quarantined { why, detail } = &outcome else {
         return outcome;
@@ -395,7 +403,7 @@ fn only_off_a_credential_that_is_theirs(
                 why.because(),
                 account.email(),
             ),
-            spent: true,
+            spent: because.spent(),
         };
     }
 
@@ -414,7 +422,7 @@ fn only_off_a_credential_that_is_theirs(
             account.email(),
             account.email(),
         ),
-        spent: true,
+        spent: because.spent(),
     }
 }
 
