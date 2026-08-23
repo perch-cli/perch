@@ -354,11 +354,28 @@ impl Shown {
     /// Whatever a terminal would draw of `text`, which is all of it for
     /// everything Perch authors. Nothing to refuse with, on purpose.
     pub fn of(text: &str) -> Shown {
-        match control_character_in(text) {
+        Shown::keeping(text, |_| false)
+    }
+
+    /// The same for a paragraph rather than a cell, where a newline is Perch's
+    /// own rather than something a terminal acts on.
+    ///
+    /// Two constructors because the two *writers* differ rather than because a
+    /// caller decides: a cell is one line and a refusal is several.
+    pub fn in_prose(text: &str) -> Shown {
+        Shown::keeping(text, |c| c == '\n')
+    }
+
+    fn keeping(text: &str, kept: impl Fn(char) -> bool) -> Shown {
+        match text.chars().any(|c| is_unshowable(c) && !kept(c)) {
             // Filtering unconditionally would walk and rebuild every cell of
             // every table, and nearly none of them holds one of these.
-            None => Shown(text.to_string()),
-            Some(_) => Shown(text.chars().filter(|c| !is_unshowable(*c)).collect()),
+            false => Shown(text.to_string()),
+            true => Shown(
+                text.chars()
+                    .filter(|c| !is_unshowable(*c) || kept(*c))
+                    .collect(),
+            ),
         }
     }
 
@@ -887,6 +904,24 @@ pub fn replace_via_tmp(
 
 #[cfg(test)]
 mod tests {
+
+    /// The one difference between the two constructors, and the reason there
+    /// are two: every refusal Perch writes is a paragraph, and a cell is a cell.
+    #[test]
+    fn a_paragraph_keeps_its_newlines_and_a_cell_has_none_to_keep() {
+        let refusal = "Nothing was switched.\nRun it again.";
+
+        assert_eq!(Shown::in_prose(refusal).as_str(), refusal);
+        assert_eq!(
+            Shown::of(refusal).as_str(),
+            "Nothing was switched.Run it again."
+        );
+        assert_eq!(
+            Shown::in_prose("a\u{1b}[2Kb\nc\u{202e}d").as_str(),
+            "a[2Kb\ncd",
+            "and everything else a terminal acts on goes from either"
+        );
+    }
     /// Following every link on a path, which is the question "is this inside
     /// that directory?" needs and [`through_any_link`] does not answer: the
     /// link that makes two spellings of one place is usually a directory

@@ -3,7 +3,9 @@
 **Text on its way to a terminal goes through `host::Shown`, which takes out
 whatever a terminal acts on rather than draws. The writers that lay out a column
 — `utilization::cells`, `padded` and `write_labeled` — take one instead of a
-`&str`, so a surface cannot render a value without having asked.**
+`&str`, so a surface cannot render a value without having asked. The three that
+write a sentence — `commands::say`, `Terminal::note` and the refusal `main`
+prints — put what they are handed through `Shown::in_prose` themselves.**
 
 ## What went wrong
 
@@ -82,6 +84,30 @@ construction: `Shown::of` has nothing to fail at, and takes any `&str` on purpos
 — a constructor that could refuse would put the decision back in the caller's
 hands, which is what this exists to take away.
 
+## The column is not the only writer
+
+`cells`, `padded` and `write_labeled` cover a table and a labeled block, and
+nothing else Perch writes is either. A sentence is a `format!`, and there is no
+column to hang the question on:
+
+| what it says | the value nobody chose |
+| --- | --- |
+| `adopt::report` | `subscriptionType`, out of a Credential file |
+| `adopt::report` | the leading token of `claude --version` |
+| every `probe::refusal` | the same version, quoted back |
+| `anthropic::drifted`, `went_missing` | a key out of the usage reply |
+| `perch watcher status` | a path read out of the installed unit |
+
+The first is the one that says the shape. `perch status` draws that plan
+stripped and the remark adoption writes says it raw, on the first command
+anybody runs, to a terminal — one value, two surfaces, one of them asked.
+
+So the rule moves to the writer again, one level out: the three that write a
+sentence ask for themselves. `Shown::in_prose` is the same strip keeping the
+newline, which is Perch's own rather than something a terminal acts on — a cell
+holds one line by construction and a refusal is several, so the two constructors
+are a difference between writers rather than a question put to a caller.
+
 ## What it does not buy
 
 Two organizations differing only in a formatting character draw as one name.
@@ -110,15 +136,18 @@ is a no-op on everything Perch writes itself.
 column by six cells per character to say something about a value nobody can
 correct. Perch has no escape vocabulary and this is not the place to start one.
 
-**Filtering the writer the commands are handed.** It would cover every surface at
-once, including ones nobody has written. It would also cover `--json`, where
-`serde_json` has already escaped the character correctly and a second pass would
-corrupt a document a script is parsing.
+**Filtering the `Write` the commands are handed.** It would cover `--json`,
+where `serde_json` has already escaped the character correctly and a second pass
+would take those six characters out of a document a script is parsing. Filtering
+`say` is not that: `say_json` writes its own line, and the split is one line of
+code in one file rather than a rule about which sink a caller reached for.
 
 ## Consequences
 
 - A new column in `perch list`, or a new labeled row in `perch status`, does not
   compile until its value is a `Shown`.
+- A new sentence needs nothing: `say`, `note` and the refusal printer ask for it.
+  A new *writer* is the thing to watch, and there are three.
 - `window_width_across` measures the stripped form, so a name's width and the
   bytes written for it cannot disagree.
 - `--json` is untouched: `serde_json` escapes a control character as six literal

@@ -2162,10 +2162,13 @@ impl port::Terminal for FakeHost {
         *self.terminal.interactive.borrow()
     }
 
+    /// Kept as the real one writes it, stripped and all: a fake that recorded
+    /// the raw line is one no case could read the rule off.
     fn note(&self, line: &str) {
+        let line = crate::host::Shown::in_prose(line).as_str().to_string();
         let mut notes = self.terminal.notes.borrow_mut();
-        if !notes.iter().any(|said| said == line) {
-            notes.push(line.to_string());
+        if !notes.contains(&line) {
+            notes.push(line);
         }
     }
 

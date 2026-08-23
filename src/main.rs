@@ -317,7 +317,14 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
         Err(error) => {
             let _ = out.flush();
             let mut stderr = std::io::stderr();
-            let _ = writeln!(stderr, "{error}");
+            // The third writer `commands::say` is the first of: a refusal quotes
+            // the Claude Code version, a store's own words and a path read out of
+            // a file, and none of the three is Perch's to vouch for.
+            let _ = writeln!(
+                stderr,
+                "{}",
+                perch::host::Shown::in_prose(&error.to_string())
+            );
             error.exit_code()
         }
     }
