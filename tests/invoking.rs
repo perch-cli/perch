@@ -14,8 +14,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use perch::error::{
-    EXIT_CONFLICT, EXIT_GENERAL, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_UNDERSTOOD,
-    EXIT_NOTHING_TO_DO, EXIT_OK,
+    EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_UNDERSTOOD, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
 use perch::probe::Identity;
 use perch::registry::{Account, Registry, Settings};
@@ -188,7 +187,9 @@ fn a_version_that_could_not_be_written_is_a_failure_rather_than_a_silent_zero() 
 
     assert_eq!(
         ran.status.code(),
-        Some(EXIT_GENERAL),
+        // Named in full rather than imported: this case is Linux-only, and an
+        // import it is the sole user of is an unused one everywhere else.
+        Some(perch::error::EXIT_GENERAL),
         "the same code every other command's failed output earns"
     );
     let said = String::from_utf8(ran.stderr).expect("output is UTF-8");
