@@ -895,7 +895,10 @@ pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
         )));
     }
 
-    host.create_dir_all(&sessions)
+    // Private, because this is the third path that brings a Profile directory
+    // into being and 0700 is what a Profile owes. One already there is left as
+    // it is, so the Default Profile keeps whatever mode it has.
+    host.create_private_dir_all(&sessions)
         .and_then(|()| {
             crate::host::write_atomically(host, &marker, &session_marker(pid, host.now()))
         })

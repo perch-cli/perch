@@ -17,6 +17,7 @@ use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED};
 use perch::host::FakeHost;
+use perch::host::PRIVATE_DIR_MODE;
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::prelude::*;
 
@@ -903,5 +904,25 @@ fn a_run_whose_sessions_is_a_link_is_refused_rather_than_marking_somewhere_else(
     assert!(
         host.file(shared("sessions/700.json")).is_none(),
         "and no marker was written into the directory it pointed at: {said}"
+    );
+}
+
+/// The claim is taken before Reconcile, and it brought the whole chain into
+/// being — the Profile directory included — at the ordinary mode. Reconcile's
+/// own `create_private_dir_all` then found a directory already there and left
+/// it, so a Profile that had gone missing came back world-traversable with a
+/// Credential written into it.
+#[test]
+fn a_profile_a_run_brings_back_is_the_owners_alone() {
+    let host = machine_with_two_accounts().with_login(client_exiting(0));
+    let profile = profile_of(&host, SECOND_EMAIL);
+    host.remove_dir_all(&profile).expect("it is taken away");
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert_eq!(
+        host.mode_of(&profile),
+        Some(PRIVATE_DIR_MODE),
+        "the Profile a Run made is its owner's alone"
     );
 }
