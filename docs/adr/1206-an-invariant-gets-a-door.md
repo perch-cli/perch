@@ -42,23 +42,34 @@ is written by somebody who did not read it.
 |---|---|
 | a containment guard follows every link on both sides | `host::Settled`, reached through `host::settled` and `host::is_inside`; `Path::starts_with` is a `disallowed_methods` entry in `clippy.toml` |
 | a buffer holding a secret never frees a copy of one | `secret::Secret`, whose growth wipes what it grew out of, and which `host::write_double_quoted` and `write_escaped` take instead of a `String` |
-| a Watcher acts only while it holds the watch and has not been asked to stop | `commands::watch::Watch::goes_on`, which renews and answers both, and which `observe::refresh` takes instead of a bare renewal |
+| a Watcher acts only while it holds the watch and has not been asked to stop | `anthropic::send`, the only path from that module to the network, whose ask is a required parameter; the port's `Network::http` is a `disallowed_methods` entry in `clippy.toml` naming the three senders that reach it, and `commands::watch::Watch::goes_on` is what a Watcher answers the ask with |
 | a step forward lands on the shape this build reads | `migration::CARRIED_TO`, a literal with `const _: () = assert!` against `registry::CURRENT_VERSION` |
 
-Three of the four are types, and the fourth is a lint because there is no type
-for "a path somebody resolved" that `std` will not also hand out unresolved.
-Each door carries the reasoning; each site that genuinely wants the raw form
-carries an `#[allow]` with a `reason`, which is the record that the question was
-asked rather than missed.
+Three of the four are types, and the first is a lint beside its type because
+there is no type for "a path somebody resolved" that `std` will not also hand out
+unresolved. The third is a lint beside its type for a narrower reason: the
+signature stops a *sender* from reaching the network unasked, and the lint stops
+a caller from going round the senders. Each door carries the reasoning; each site
+that genuinely wants the raw form carries an `#[allow]` with a `reason`, which is
+the record that the question was asked rather than missed.
 
 ## What a door is worth, and what it is not
 
 A door removes the class of bug where a site forgot the rule. It does not remove
 the class where the rule itself is wrong. `Secret` cannot tell whether a caller
-built a token in a plain `String` before handing it over; `Watch` cannot make a
-step exist that nobody wrote; `is_inside` cannot decide that an unresolvable
-path should count as inside — it decides it *once*, which is the whole of what
-a door buys.
+built a token in a plain `String` before handing it over; `is_inside` cannot
+decide that an unresolvable path should count as inside — it decides it *once*,
+which is the whole of what a door buys.
+
+The third door moved twice before it reached the only path out, and that is this
+document's own rule read back to it. It began as `Watch::goes_on` called by hand
+at five sites; a review added the closure `observe::refresh` takes; two further
+reviews found requests still going out past both, because a door decides which
+sites are correct and not which steps ask. It is a parameter of `anthropic::send`
+now — the one function every Anthropic request passes through — and a sender that
+does not take one does not compile. Each move was towards the narrowest place the
+invariant could be stated, and the two reviews in between are what stating it
+anywhere wider cost.
 
 So the fourth entry above is the weakest of the four and worth naming as such.
 `CARRIED_TO` is a compile-time assertion rather than a door: nothing forces a
@@ -88,11 +99,14 @@ with nothing to ask about.
 ## Consequences
 
 - A new containment guard that reaches for `Path::starts_with` does not build.
-- A new step in the Watcher's round that spends time takes a `&mut Watch`, and
-  the compiler does not enforce that it calls `goes_on` — this is the one door
-  of the four that a determined author can walk past. It is a door and not a
-  wall because the alternative, a step protocol, was refused in
-  ADR an-ordering-is-a-type for reasons that have not changed.
+- A new request to Anthropic asks before it goes out, because a function in
+  `anthropic` that does not take the ask cannot reach the port. A new step that
+  spends time *without* sending a request still asks by hand, and there this is a
+  door rather than a wall: the alternative, a step protocol, stays refused in
+  ADR an-ordering-is-a-type.
+- A stopped ask travels back as `Refused::Stopped` rather than as an unreachable
+  network. The two would otherwise pace a Back-off the same way, and one of them
+  is a question nobody was asked.
 - `observe::refresh` no longer asks the Host whether this process was asked to
   stop. Its callers answer, which is why `perch list --refresh` answers `Ok(())`
   unconditionally: it installs no handler, so the old call was always false.

@@ -9,4 +9,8 @@
 # sides, and decides what a path that will not resolve counts as.
 disallowed-methods = [
     { path = "std::path::Path::starts_with", reason = "use `host::is_inside`, which follows every link on both sides" },
+    # Reached directly, a request goes out with no still-ours question in front
+    # of it — the shape five reviews kept returning. `anthropic::send` asks it,
+    # and is the only path from that module to the port.
+    { path = "perch::host::Network::http", reason = "reach Anthropic through `anthropic::utilization`, `whose` or `renew`, each of which asks whether this Watcher is still the one to act" },
 ]

@@ -1921,3 +1921,94 @@ fn a_watcher_asked_to_stop_while_the_candidates_were_read_switches_nothing() {
          day of these is skimmed by that column: {printed}"
     );
 }
+
+/// A turn is up to six requests bounded at thirty seconds each, so a stop that
+/// arrives after the first of them is one the ask at the top of the turn is far
+/// too early to answer. Here it arrives after the ownership check and before the
+/// read the round is for — and past that read is a Renewal, which retires the
+/// only refresh token this Account has.
+#[test]
+fn a_stop_between_two_requests_of_one_turn_sends_no_more_of_them() {
+    let host = watched()
+        .with_reply_to(PROFILE_URL, ACTIVE_TOKEN, 200, &profile_of(EMAIL))
+        // What the round would find past the stop: a token Anthropic will not
+        // take, which is the one refusal that goes on to buy a new one.
+        .with_reply_to(USAGE_URL, ACTIVE_TOKEN, 401, "{}")
+        .with_interrupt_after_requests(1);
+    host.forget_effects();
+
+    let (result, printed) = run_watch_once(&host);
+
+    result.expect("being asked to stop is not this Watcher's failure");
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "the read the turn was for went out after the stop: {printed}"
+    );
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "and so did the Renewal past it, which Rotates the only refresh token \
+         this Account has: {printed}"
+    );
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::KeychainSet { .. })),
+        "no Rotation was written: {printed}"
+    );
+    let account = registry_of(&host)
+        .account(EMAIL)
+        .cloned()
+        .expect("the Account is still held");
+    assert!(
+        account.quarantine.is_none() && account.utilization.is_none(),
+        "and nothing was recorded against the Account, which learned nothing: \
+         {account:?}\n{printed}"
+    );
+    assert!(
+        printed.contains("asked to stop"),
+        "and the round carries the loss rather than a reading that failed: \
+         {printed}"
+    );
+}
+
+/// The burst takes no wait at all, so what happens between two of its reads has
+/// nowhere else to arrive. A second Watcher taking the watch over there leaves
+/// this one ranking candidates it is no longer the one to choose between.
+#[test]
+fn a_watch_handed_over_between_two_reads_of_the_burst_switches_nothing() {
+    let lock = "/Users/someone/.config/perch/.watch.lock";
+    // Twenty seconds a request, so the hold comes up for its once-a-minute
+    // renewal inside the candidate's turn: at thirty, a turn of two requests
+    // puts every renewal at a turn's edge.
+    let host = watching(&[86.0], 5.0)
+        .with_a_network_that_answers_slowly(20_000)
+        // Three requests in: the Account being watched answered both of its own,
+        // and the candidate has just been asked whose its token is.
+        .once_after_requests(3, move |host| {
+            let _ = host.remove_dir_all(std::path::Path::new(lock));
+        });
+    host.forget_effects();
+
+    let (result, printed) = run_watch_once(&host);
+
+    let code = result.expect("a watch taken over is not this Watcher's failure");
+    assert_eq!(code, perch::error::EXIT_HELD, "{printed}");
+    assert_eq!(
+        host.sent_to(USAGE_URL).len(),
+        1,
+        "the burst read on past the takeover: only the Account being watched \
+         was asked before it: {printed}"
+    );
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::KeychainSet { .. })),
+        "and nothing was switched, so no Credential moved: {printed}"
+    );
+    assert!(
+        printed.contains("taken over"),
+        "and the round says why it decided nothing: {printed}"
+    );
+}

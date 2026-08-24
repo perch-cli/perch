@@ -16,6 +16,7 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::host::{Host, HttpRequest, HttpResponse};
 use crate::registry::WindowUtilization;
 use crate::secret::Secret;
+use crate::watch::{Lost, StillOurs};
 
 /// Where an Account's Quota Windows are read from. Roughly 28-30 requests per
 /// rolling hour per Account, and it does not refill early
@@ -47,7 +48,7 @@ pub type QuotaWindows = Vec<WindowUtilization>;
 
 /// Why an endpoint did not answer the question.
 ///
-/// Four outcomes rather than one message, because a caller does something
+/// Five outcomes rather than one message, because a caller does something
 /// different with each: a throttle falls back to cache, a rejection means the
 /// Account has to be logged into again, and drift is not a network that failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +70,11 @@ pub enum Refused {
     Failed(u16),
     /// The request never got there.
     Unreachable(String),
+    /// The request was never sent: whoever wanted it is no longer the one to
+    /// act. Its own refusal rather than an [`Refused::Unreachable`], because a
+    /// Watcher that was stopped and a network that was down are different pieces
+    /// of news — one of them paces a Back-off and the other ends a round.
+    Stopped(Lost),
 }
 
 const THROTTLED: &str = "Anthropic is rate-limiting reads of this Account's \
@@ -78,6 +84,8 @@ const REJECTED: &str = "Anthropic did not accept the Credential";
 const UNRECOGNIZED: &str = "Anthropic answered something Perch does not understand";
 const FAILED: &str = "Anthropic answered with a failure";
 const UNREACHABLE: &str = "Anthropic could not be reached";
+const STOPPED: &str = "the request was not sent, because whoever wanted it is no \
+                       longer the one to act";
 
 impl std::fmt::Display for Refused {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -87,6 +95,7 @@ impl std::fmt::Display for Refused {
             Refused::Unrecognized(detail) => format!("{UNRECOGNIZED}: {detail}"),
             Refused::Failed(status) => format!("{FAILED} (HTTP {status})"),
             Refused::Unreachable(detail) => format!("{UNREACHABLE}: {detail}"),
+            Refused::Stopped(_) => STOPPED.to_string(),
         };
         formatter.write_str(&said)
     }
@@ -125,8 +134,12 @@ impl std::fmt::Debug for Fresh {
 }
 
 /// Every Quota Window this access token's Account currently has.
-pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, Refused> {
-    let document = read(host, USAGE_URL, access_token)?;
+pub fn utilization(
+    host: &dyn Host,
+    access_token: &str,
+    still_ours: StillOurs<'_>,
+) -> Result<QuotaWindows, Refused> {
+    let document = read(host, USAGE_URL, access_token, still_ours)?;
     let mut said = Vec::new();
     let windows = windows_in(&document, &mut said).map_err(Refused::Unrecognized)?;
     if windows.is_empty() {
@@ -147,8 +160,12 @@ pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, 
 /// nobody is `Unrecognized` rather than an answer, and says so out loud: handed
 /// back as an absence, the check that keeps one Account's figures out of
 /// another's goes silent on a rename (ADR a-figure-names-its-account).
-pub fn whose(host: &dyn Host, access_token: &str) -> Result<String, Refused> {
-    let document = read(host, PROFILE_URL, access_token)?;
+pub fn whose(
+    host: &dyn Host,
+    access_token: &str,
+    still_ours: StillOurs<'_>,
+) -> Result<String, Refused> {
+    let document = read(host, PROFILE_URL, access_token, still_ours)?;
     email_in(&document).ok_or_else(|| {
         Refused::Unrecognized(
             "the profile endpoint named no email address, so whose an access \
@@ -161,7 +178,11 @@ pub fn whose(host: &dyn Host, access_token: &str) -> Result<String, Refused> {
 }
 
 /// Renews an access token, and reports the Rotation when there was one.
-pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
+pub fn renew(
+    host: &dyn Host,
+    refresh_token: &str,
+    still_ours: StillOurs<'_>,
+) -> Result<Fresh, Refused> {
     // Through `sealed`, because this body carries the only copy there is of the
     // refresh token: `to_string` would grow into it and abandon prefixes.
     let mut asking = json!({
@@ -179,7 +200,11 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
     // by the whole round trip — up to `MAX_TIME_SECONDS`.
     let now = host.now();
 
-    let response = send(host, &HttpRequest::post(TOKEN_URL, &headers, &body))?;
+    let response = send(
+        host,
+        &HttpRequest::post(TOKEN_URL, &headers, &body),
+        still_ours,
+    )?;
     // A refresh token Anthropic has retired comes back as a bad request rather
     // than an unauthorized one, and it means the same thing here only where the
     // body agrees — see [`REVOKED`] and [`REFUSALS`].
@@ -241,7 +266,12 @@ fn missing(field: &str) -> Refused {
 
 /// A read as this Account: a Bearer token, and the beta the OAuth endpoints are
 /// behind.
-fn read(host: &dyn Host, url: &str, access_token: &str) -> Result<Value, Refused> {
+fn read(
+    host: &dyn Host,
+    url: &str,
+    access_token: &str,
+    still_ours: StillOurs<'_>,
+) -> Result<Value, Refused> {
     // A `Secret` for the reason `renew`'s body is one: `format!` would build
     // the header in a plain `String` and free it holding the token.
     let mut authorization = Secret::with_room_for(BEARER.len() + access_token.len());
@@ -253,11 +283,27 @@ fn read(host: &dyn Host, url: &str, access_token: &str) -> Result<Value, Refused
         ("Accept", "application/json"),
     ];
 
-    let response = send(host, &HttpRequest::get(url, &headers))?;
+    let response = send(host, &HttpRequest::get(url, &headers), still_ours)?;
     understand(response, &[])
 }
 
-fn send(host: &dyn Host, request: &HttpRequest<'_>) -> Result<HttpResponse, Refused> {
+/// The only path from this module to the network, and the door the Watcher's
+/// still-ours question is asked at (ADR an-invariant-gets-a-door).
+///
+/// `still_ours` is a parameter rather than a call each sender makes, so a sender
+/// nobody has written yet cannot reach the network without obtaining one.
+fn send(
+    host: &dyn Host,
+    request: &HttpRequest<'_>,
+    still_ours: StillOurs<'_>,
+) -> Result<HttpResponse, Refused> {
+    // Before the request and never after one: a Renewal's reply has already
+    // retired the refresh token Perch holds, so there is nothing left to stop.
+    still_ours().map_err(Refused::Stopped)?;
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "this is the way through that `clippy.toml` names"
+    )]
     host.http(request)
         .map_err(|err| Refused::Unreachable(err.to_string()))
 }
@@ -909,6 +955,28 @@ mod tests {
         assert_eq!(email_in(&json!({"organization": {"name": "Acme"}})), None);
     }
 
+    /// The ask is in front of the request rather than beside it: a Renewal is the
+    /// one request that cannot be taken back, because Anthropic retires the old
+    /// refresh token as it answers.
+    #[test]
+    fn a_stopped_ask_sends_nothing_and_travels_as_itself() {
+        let host = crate::host::FakeHost::new();
+        host.reply(
+            TOKEN_URL,
+            None,
+            200,
+            r#"{"access_token":"sk-ant-oat01-new"}"#,
+        );
+
+        let refused = renew(&host, "sk-ant-ort01-old", &mut || Err(Lost::Stopped));
+
+        assert_eq!(refused, Err(Refused::Stopped(Lost::Stopped)));
+        assert!(
+            host.http_calls().is_empty(),
+            "and the request the endpoint would have answered never went out"
+        );
+    }
+
     /// A reply with no `access_token` is still a reply, and where Anthropic
     /// Rotated it carries the only copy of the new refresh token. The refusal is
     /// raised after the tree is wiped rather than through it, which is the one
@@ -924,7 +992,7 @@ mod tests {
         );
 
         assert_eq!(
-            renew(&host, "sk-ant-ort01-old"),
+            renew(&host, "sk-ant-ort01-old", &mut || Ok(())),
             Err(missing("access_token")),
             "a reply Perch cannot use is refused, and named"
         );
@@ -939,7 +1007,7 @@ mod tests {
             let reply =
                 format!(r#"{{"access_token":"sk-ant-oat01-new","expires_in":{expires_in}}}"#);
             host.reply(TOKEN_URL, None, 200, &reply);
-            renew(&host, "sk-ant-ort01-old").expect("the endpoint answered")
+            renew(&host, "sk-ant-ort01-old", &mut || Ok(())).expect("the endpoint answered")
         };
 
         assert_eq!(

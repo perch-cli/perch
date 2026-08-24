@@ -51,14 +51,14 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 
     // Nothing carried in: the cooldown comes off the registry inside the round, and a
     // back-off would pace a loop this process does not have.
-    let turn = match one_round(
+    let verdict = match one_round(
         host,
         Watcher::Check,
         &mut Recently::nothing(),
         &mut Backoff::none(),
         &mut watching_alone,
     ) {
-        Ok(turn) => turn,
+        Ok(verdict) => verdict,
         // Another `perch` holding the registry is ordinary, so it is a held round
         // rather than a raise, which would reach a cron mailbox by way of standard
         // error.
@@ -70,9 +70,9 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     };
     // A Check exits on a machine that is not arranged for watching, where the loop
     // holds: a scheduler has to be told.
-    let round = match turn {
-        Turn::Decided(round) => round,
-        Turn::NotArranged(why) => return Err(why),
+    let round = match verdict {
+        Verdict::Decided(round) => round,
+        Verdict::NotArranged(why) => return Err(why),
     };
     say(out, &round.line(host.now()))?;
     Ok(round.outcome.exit_code())
@@ -115,7 +115,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             &mut backoff,
             &mut watching_alone,
         ) {
-            Ok(Turn::Decided(round)) => {
+            Ok(Verdict::Decided(round)) => {
                 let waiting_for = round.waiting_for();
                 let line = round.line(host.now());
                 match round.held_because() {
@@ -128,7 +128,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             // The machine is not arranged for watching, which the loop holds on.
             // Nothing is charged to the back-off: this round asked the registry rather
             // than Anthropic.
-            Ok(Turn::NotArranged(why)) => held_before_a_round(&why.to_string(), host.now()),
+            Ok(Verdict::NotArranged(why)) => held_before_a_round(&why.to_string(), host.now()),
             // Held like any other round that could not read. Ending the watcher over a
             // contended registry would let a `perch status --refresh` stop it silently.
             Err(PerchError::Busy(why)) => held_before_a_round(&why, host.now()),
@@ -511,7 +511,7 @@ fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
     })
 }
 
-/// One turn: read, decide, and act if acting is what was decided.
+/// One round: read, decide, and act if acting is what was decided.
 ///
 /// The registry lock is taken here and given back when this returns rather than held
 /// for the life of the loop, which would shut every other `perch` out of the machine
@@ -522,14 +522,14 @@ fn one_round(
     recently: &mut Recently,
     backoff: &mut Backoff,
     watching_alone: &mut Watch<'_>,
-) -> Result<Turn> {
+) -> Result<Verdict> {
     // A machine with no Claude Code login has nothing to adopt. `Busy` is passed
     // through untouched, because both callers answer it differently from "not
     // arranged".
     let (mut perch, mut registry) = match adopt::ensure_adopted_exclusively(host) {
         Ok(both) => both,
         Err(busy @ PerchError::Busy(_)) => return Err(busy),
-        Err(not_arranged) => return Ok(Turn::NotArranged(not_arranged)),
+        Err(not_arranged) => return Ok(Verdict::NotArranged(not_arranged)),
     };
 
     // A Switch path, so it resolves a Landing first. Where it refuses, nobody is there
@@ -540,7 +540,7 @@ fn one_round(
         // before anything has been read, so there is no figure and nothing was decided,
         // which is what a hold is.
         Err(busy @ PerchError::Busy(_)) => return Err(busy),
-        Err(unsettled) => return Ok(Turn::NotArranged(unsettled)),
+        Err(unsettled) => return Ok(Verdict::NotArranged(unsettled)),
     };
 
     // Handed back rather than raised, and as the failure itself rather than as its
@@ -548,7 +548,7 @@ fn one_round(
     // Scope.
     let watching = match permitted(&registry, &settled) {
         Ok(watching) => watching,
-        Err(not_arranged) => return Ok(Turn::NotArranged(not_arranged)),
+        Err(not_arranged) => return Ok(Verdict::NotArranged(not_arranged)),
     };
     let email = watching.account.email().to_string();
 
@@ -578,7 +578,7 @@ fn one_round(
     // Before the reading is judged, because a round that stopped read nothing and a
     // hold charged for it would pace the Back-off off a question nobody was asked.
     if let Some(lost) = report.stopped {
-        return Ok(Turn::Decided(Round {
+        return Ok(Verdict::Decided(Round {
             fullest: None,
             threshold: watching.policy.threshold,
             outcome: nothing_was_switched(lost),
@@ -588,7 +588,7 @@ fn one_round(
     // A hold said against the wait it earned. `waiting_for` is passed in rather than
     // charged here, because not every hold is a question nobody answered.
     let held = |why: String, waiting_for: u64| {
-        Ok(Turn::Decided(Round {
+        Ok(Verdict::Decided(Round {
             fullest: None,
             threshold: watching.policy.threshold,
             outcome: Outcome::Held {
@@ -653,7 +653,7 @@ fn one_round(
             }
         },
     };
-    Ok(Turn::Decided(Round {
+    Ok(Verdict::Decided(Round {
         fullest: Some(fullest),
         threshold: watching.policy.threshold,
         outcome,
@@ -664,8 +664,8 @@ fn one_round(
 ///
 /// A round that *decided* something is the same for both watchers; a machine that is
 /// *not arranged for watching* is not, because the loop holds on it and a Check exits
-/// on it.
-enum Turn {
+/// on it. Not a *turn*, which is one Account's pass through the Refresh path.
+enum Verdict {
     /// The round read, and decided.
     Decided(Round),
     /// There was nothing here the watcher may act on, and this says why — something the

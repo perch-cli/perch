@@ -554,6 +554,13 @@ pub enum Lost {
     Stopped,
 }
 
+/// The question asked before every request that goes out to Anthropic.
+///
+/// A callable rather than an answer carried in, because the answer changes
+/// between two requests inside one turn; `&mut` because answering renews the
+/// hold.
+pub type StillOurs<'a> = &'a mut dyn FnMut() -> std::result::Result<(), Lost>;
+
 /// What a round decided.
 ///
 /// Six outcomes, five of which change nothing — and they are five different reasons for
@@ -670,7 +677,7 @@ pub fn refused_or_raised(not_idle: NotIdle) -> Result<Outcome> {
     }
 }
 
-/// One turn of the loop, whole: what was read, what it was read against, and what came
+/// One pass of the loop, whole: what was read, what it was read against, and what came
 /// of it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Round {
