@@ -71,6 +71,19 @@ does not take one does not compile. Each move was towards the narrowest place th
 invariant could be stated, and the two reviews in between are what stating it
 anywhere wider cost.
 
+What the third door still does not reach is the work a round does *before* its
+first ask. `one_round` adopts, resolves a Landing and probes the installed Claude
+Code, and only then reaches the ask inside `observe::refresh`; the one-shot
+`perch watcher check` has no ask in front of it at all. A seventh review left
+that open on the ground that `FakeHost` could not stall a keychain read — which
+was already untrue when it was written, the read-side stall having landed a day
+earlier.
+
+Constructed since: a check already asked to stop spends one local
+`claude --version`, no keychain read and no request. Asking earlier wants a third
+`Verdict`, for a round that never read and so has no threshold to report, and
+that is more than one local spawn is worth. The window stays, measured.
+
 So the fourth entry above is the weakest of the four and worth naming as such.
 `CARRIED_TO` is a compile-time assertion rather than a door: nothing forces a
 new shape to arrive with a step, only that the two numbers agree. The test

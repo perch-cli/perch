@@ -240,7 +240,7 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
     outcome.expect("the word was typed");
 
     let sealed = host.file(AT).expect("the Export is still there afterwards");
-    let exported = export::unseal(&sealed, PASSPHRASE).expect("it opens");
+    let (exported, _) = export::unseal(&sealed, PASSPHRASE).expect("it opens");
     assert_eq!(exported.registry.accounts.len(), 3, "{printed}");
     assert_eq!(
         exported.credentials.get(EMAIL).map(String::as_str),
@@ -279,7 +279,7 @@ fn the_export_it_offers_settles_a_landing_first() {
     outcome.expect("the word was typed");
 
     let sealed = host.file(AT).expect("the Export was written");
-    let exported = export::unseal(&sealed, PASSPHRASE).expect("it opens");
+    let (exported, _) = export::unseal(&sealed, PASSPHRASE).expect("it opens");
     assert_eq!(
         exported.credentials.get(SECOND_EMAIL).map(String::as_str),
         Some(SECOND_CREDENTIAL),
@@ -311,6 +311,7 @@ fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() 
     assert_eq!(
         export::unseal(&sealed, PASSPHRASE)
             .expect("it opens")
+            .0
             .accounts(),
         3,
         "and it is the whole Export rather than an empty file at a strange path"
@@ -774,6 +775,7 @@ fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
     assert_eq!(
         export::unseal(&host.file(AT).expect("a file was written"), PASSPHRASE)
             .expect("it opens")
+            .0
             .accounts(),
         3,
         "and it is a whole Export rather than a stub"
@@ -875,6 +877,7 @@ fn a_terminal_that_goes_away_after_the_export_lands_does_not_lose_the_file() {
     assert_eq!(
         export::unseal(&host.file(AT).expect("a file was written"), PASSPHRASE)
             .expect("it opens")
+            .0
             .accounts(),
         3,
         "and it is the whole Export, which is what makes it worth saying"

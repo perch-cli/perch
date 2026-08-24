@@ -51,7 +51,9 @@ fn a_machine_worth_backing_up() -> FakeHost {
 /// What the file at a path holds, given the passphrase it was written with.
 fn opened(host: &FakeHost, path: &str) -> export::Export {
     let sealed = host.file(path).expect("a file was written");
-    export::unseal(&sealed, PASSPHRASE).expect("it opens with the passphrase it was sealed with")
+    export::unseal(&sealed, PASSPHRASE)
+        .expect("it opens with the passphrase it was sealed with")
+        .0
 }
 
 #[test]

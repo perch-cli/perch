@@ -15,6 +15,10 @@ use crate::secret::Secret;
 pub const SECURITY_BIN: &str = "/usr/bin/security";
 
 /// `security` exit code meaning "the item is not in the keychain".
+///
+/// Reached through a lock: `security` matches an item's attributes before it
+/// needs the keychain open, so a name nothing is stored under exits 44 whether
+/// the keychain is locked or not.
 pub const EXIT_ITEM_NOT_FOUND: i32 = 44;
 
 /// The `-i` stdin buffer size. A command line at or above this is truncated

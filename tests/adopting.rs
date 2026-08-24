@@ -388,3 +388,74 @@ fn an_identity_block_that_names_no_address_is_refused_and_names_the_assumption()
         "and nothing was written on the way to finding out"
     );
 }
+
+/// An identity block naming one Account, with `organizationName` as given.
+fn machine_whose_organization_is(named: &str) -> FakeHost {
+    let host =
+        machine_with_claude_code().with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL);
+    host.set_file(
+        IDENTITY_PATH,
+        &format!(
+            r#"{{"oauthAccount":{{"accountUuid":"account-uuid-1",
+               "emailAddress":"someone@example.com",
+               "organizationUuid":"organization-uuid-1",
+               "organizationName":"{named}"}}}}"#
+        ),
+    );
+    host
+}
+
+/// The boundary refuses an organization name for what a line cannot hold, and
+/// nothing else.
+///
+/// It is Anthropic's, so a refusal here is one nobody can clear from Perch — and
+/// it takes `perch add` with it. What only fails to draw is drawn stripped.
+#[test]
+fn an_organization_name_is_refused_for_what_a_line_cannot_hold_and_nothing_else() {
+    for drawn in ["Acme \\u2600\\ufe0f", "Acme\\u202e", "Acme\\u200b"] {
+        let host = machine_whose_organization_is(drawn);
+        run_status(&host, false)
+            .0
+            .unwrap_or_else(|refused| panic!("`{drawn}` is a name Anthropic may hold: {refused}"));
+    }
+
+    for framing in ["Acme\\u0007", "Acme\\u000a"] {
+        let host = machine_whose_organization_is(framing);
+        let error = run_status(&host, false)
+            .0
+            .expect_err("a line cannot hold that");
+        assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+        assert!(error.to_string().contains("a control character"), "{error}");
+    }
+}
+
+/// An address is refused for anything a terminal will not draw as itself.
+///
+/// `registry::validate` refuses nothing about an address on the stated grounds
+/// that this does, so a character let through here is one nothing refuses — and
+/// an address is a Target somebody types, so two that draw alike have no answer.
+#[test]
+fn an_address_is_refused_for_anything_a_terminal_will_not_draw_as_itself() {
+    for hidden in ["some\\u200bone@example.com", "some\\ufe00one@example.com"] {
+        let host =
+            machine_with_claude_code().with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL);
+        host.set_file(
+            IDENTITY_PATH,
+            &format!(
+                r#"{{"oauthAccount":{{"accountUuid":"account-uuid-1",
+                   "emailAddress":"{hidden}",
+                   "organizationUuid":"organization-uuid-1",
+                   "organizationName":"Acme"}}}}"#
+            ),
+        );
+
+        let error = run_status(&host, false)
+            .0
+            .expect_err("that is not an address a Target could name");
+        assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+        assert!(
+            error.to_string().contains("the account"),
+            "and it says which value: {error}"
+        );
+    }
+}

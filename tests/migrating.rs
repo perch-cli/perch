@@ -657,8 +657,10 @@ const SPELLINGS: &[&str] = &[
 ];
 
 /// The characters every name rule so far has turned on. Three deep, which is a
-/// leading character, a body and a trailing one — enough for every rule that
-/// reads the ends of a name apart from its middle.
+/// leading character, a body and a trailing one, and enough for all of them:
+/// every rule is per-character or a whole-string `same_name` against a reserved
+/// word, and the reserved words are spelled out above rather than reached for.
+/// Driven at four, the corpus finds nothing and costs eight seconds.
 const ALPHABET: &[char] = &['a', '-', '\u{1b}', '\u{202e}', 'Σ', 'ς', '.', '0'];
 
 /// Every spelling a published Perch would have let somebody create, out of the
@@ -770,4 +772,194 @@ fn every_name_a_published_perch_accepted_comes_forward_into_one_that_loads() {
                 .expect("the registry is there");
         }
     }
+}
+
+/// The characters version 2 refused: `Cc` and the hand-picked formatting set it
+/// carried. Spelled out rather than read off this build, which is short of
+/// nothing it had — a filter asking `is_unshowable` would assert that what Perch
+/// refuses is what Perch refuses.
+fn version_2_refused(c: char) -> bool {
+    c.is_control()
+        || matches!(c,
+            '\u{00AD}' | '\u{061C}' | '\u{FEFF}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{180E}'
+            | '\u{E0000}'..='\u{E007F}')
+}
+
+/// Version 2's own name rules, as version 2 held them.
+fn a_version_2_perch_accepted(name: &str) -> bool {
+    !name.trim().is_empty()
+        && !name.chars().any(char::is_whitespace)
+        && !name.chars().any(version_2_refused)
+        && !matches!(
+            name.to_lowercase().as_str(),
+            "none" | "ungrouped" | "global"
+        )
+        && !name.contains('@')
+        && !name.starts_with('-')
+}
+
+/// The characters version 3 added to the unshowable set, beside two it already
+/// had and one ordinary letter: a name is made of what it is allowed and what it
+/// is not, and the pairs either side of a boundary are where a rule reads wrong.
+/// Three deep for the reason [`ALPHABET`] is.
+const V2_ALPHABET: &[char] = &[
+    'a', '-', '\u{FE00}', '\u{3164}', '\u{034F}', '\u{2065}', '\u{1b}', '\u{202e}',
+];
+
+/// Every spelling a version 2 Perch would have let somebody create, out of the
+/// alphabet above.
+fn every_name_a_version_2_perch_accepted() -> Vec<String> {
+    let mut names = vec![String::new()];
+    let mut wider = vec![String::new()];
+    for _ in 0..3 {
+        wider = wider
+            .iter()
+            .flat_map(|held| {
+                V2_ALPHABET.iter().map(move |c| {
+                    let mut name = held.clone();
+                    name.push(*c);
+                    name
+                })
+            })
+            .collect();
+        names.extend(wider.iter().cloned());
+    }
+    names.retain(|name| a_version_2_perch_accepted(name));
+    names
+}
+
+/// One version 2 registry, with `group` in all three places a Group name is
+/// written down and `alias` in the one place an Alias is. The shape version 3
+/// reads: only the name rules moved between them.
+fn a_v2_registry_naming(group: &str, alias: &str) -> String {
+    serde_json::json!({
+        "version": 2,
+        "active": { "settled": "one@example.com" },
+        "accounts": [
+            {
+                "identity": {
+                    "email": "one@example.com",
+                    "account_uuid": "uuid-one",
+                    "organization_name": "Acme",
+                    "organization_uuid": "org-1"
+                },
+                "plan": "max",
+                "group": group
+            },
+            {
+                "identity": {
+                    "email": "two@example.com",
+                    "account_uuid": "uuid-two",
+                    "organization_name": "Acme",
+                    "organization_uuid": "org-1"
+                }
+            }
+        ],
+        "aliases": { alias: "two@example.com" },
+        "groups": { group: { "strategy": "most-headroom", "watcher_may_act": false, "watcher_threshold_percent": 80 } },
+        "ungrouped": {
+            "interchangeable": false,
+            "settings": { "strategy": "most-headroom", "watcher_may_act": false, "watcher_threshold_percent": 80 }
+        },
+        "checks": { group: { "switched_at": "2026-08-14T10:00:00Z" } }
+    })
+    .to_string()
+}
+
+/// The corpus has to break the rules it is for, for the reason the version 1 one
+/// does.
+#[test]
+fn the_version_2_corpus_holds_names_this_build_refuses() {
+    let refused = every_name_a_version_2_perch_accepted()
+        .into_iter()
+        .filter(|name| registry::validate_name(registry::NameKind::Group, name).is_err())
+        .count();
+
+    assert!(
+        refused >= 10,
+        "a corpus of names this build already accepts asserts nothing: {refused} of them are \
+         refused"
+    );
+}
+
+/// Every version 2 registry a published Perch could have written comes forward
+/// into one this build reads.
+///
+/// The version 1 guard's twin, on the version whose rules moved under it: a rule
+/// joining `validate_name` with no step is a refusal `load` makes every command.
+#[test]
+fn every_name_a_version_2_perch_accepted_comes_forward_into_one_that_loads() {
+    for name in every_name_a_version_2_perch_accepted() {
+        for (group, alias) in [(name.as_str(), "the-alias"), ("the-group", name.as_str())] {
+            let host = machine_holding(&a_v2_registry_naming(group, alias));
+
+            perch::migration::bring_forward(&host).unwrap_or_else(|refused| {
+                panic!(
+                    "a Group `{group}` and an Alias `{alias}` are names a version 2 Perch \
+                     accepted, and the step forward refused them: {refused}"
+                )
+            });
+
+            registry::load(&host)
+                .unwrap_or_else(|refused| {
+                    panic!(
+                        "a Group `{group}` and an Alias `{alias}` came forward into a registry \
+                         no command can read: {refused}"
+                    )
+                })
+                .expect("the registry is there");
+        }
+    }
+}
+
+/// The step's business is what Perch wrote, and a hand edit is neither carried
+/// nor quietly given a different name.
+#[test]
+fn a_name_no_version_2_perch_accepted_is_named_rather_than_renamed() {
+    let host = machine_holding(&a_v2_registry_naming("global", "the-alias"));
+
+    let refused = registry::load(&host).expect_err("`global` is a name no Perch ever wrote");
+
+    let said = refused.to_string();
+    assert!(said.contains("global"), "the name is named: {said}");
+    assert!(
+        said.contains("registry.json"),
+        "and the file to edit: {said}"
+    );
+}
+
+/// The note names the character rather than the name it is in.
+///
+/// The old name is drawn through `Shown`, which takes out the very character the
+/// rename was for — so quoting it would say a Group `dev` became `dev-1` while
+/// an untouched Group of exactly that name sits beside it in the same registry.
+#[test]
+fn the_note_for_a_rename_names_the_character_that_caused_it() {
+    let document = a_v2_registry_naming("dev\u{FE00}", "the-alias");
+    let held: serde_json::Value = serde_json::from_str(&document).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    let mut groups = held["groups"].as_object().cloned().expect("groups");
+    groups.insert(
+        "dev".to_string(),
+        groups.values().next().cloned().expect("settings"),
+    );
+    held.insert("groups".to_string(), serde_json::Value::Object(groups));
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let said = host.notes().join("\n");
+    assert!(
+        said.contains("carrying a character a terminal does not draw as itself (U+FE00)"),
+        "the note names the character: {said}"
+    );
+    assert!(
+        !said.contains("a Group `dev` is now"),
+        "and never quotes the stripped name, which is a Group this registry holds: {said}"
+    );
 }

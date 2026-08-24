@@ -33,7 +33,13 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     import::refuse_a_machine_that_is_not_empty(held.as_ref())?;
 
     let passphrase = the_passphrase(host, out)?;
-    let export = export::unseal(&sealed, &passphrase)?;
+    let (export, renamed) = export::unseal(&sealed, &passphrase)?;
+    // Before anything is written, so a person who stops here has been told what
+    // the Export would arrive as. `bring_forward` says the same about this
+    // machine's own registry; an Import is the other way a registry moves.
+    if let Some(said) = crate::migration::what_was_renamed_said(&renamed) {
+        host.note(&said);
+    }
     let mut restored = import::restored(&export, &registry::registry_path(host)?)?;
 
     // Nothing above this line has written anything, and the passphrase prompt is

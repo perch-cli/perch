@@ -122,9 +122,9 @@ fn supersede(host: &dyn Host, other: &CredentialStore) {
 
 /// The same, in the direction where a copy left behind is a wrong answer.
 ///
-/// Only a store that still hands a Credential back is a failure — one that will
-/// not answer leaves a copy that cannot win, because the read that would prefer
-/// it fails the same way.
+/// A lock is for a spell, so a store that will not say whether it still holds
+/// the superseded copy is refused: whatever is behind the lock wins every read
+/// after it opens. A store holding nothing under this name says so through one.
 fn supersede_or_fail(
     host: &dyn Host,
     preferred: &CredentialStore,
@@ -133,20 +133,35 @@ fn supersede_or_fail(
     let Err(refused) = preferred.forget(host) else {
         return Ok(());
     };
-    if !matches!(preferred.read(host), Ok(Some(_))) {
-        host.note(&format!(
-            "A superseded copy of a Credential could not be removed from {}.",
-            preferred.describe()
-        ));
-        return Ok(());
+    let said = match preferred.read(host) {
+        // It says so itself, whatever it was holding before.
+        Ok(None) => None,
+        Err(_) => Some(format!(
+            "The Credential was written to {}, but {} would not say whether it \
+             still holds the one it replaces — and that is the store read first. \
+             A lock is for a spell: whatever is behind this one wins every read \
+             after it opens. Open it and run this again.",
+            written.describe(),
+            preferred.describe(),
+        )),
+        Ok(Some(_)) => Some(format!(
+            "The Credential was written to {}, but the copy it replaces is still \
+             in {} — which is the store read first, so it is the one Claude Code \
+             would go on using. Empty it and run this again.",
+            written.describe(),
+            preferred.describe(),
+        )),
+    };
+    match said {
+        Some(said) => Err(refused.with_note(&said)),
+        None => {
+            host.note(&format!(
+                "A superseded copy of a Credential could not be removed from {}.",
+                preferred.describe()
+            ));
+            Ok(())
+        }
     }
-    Err(refused.with_note(&format!(
-        "The Credential was written to {}, but the copy it replaces is still in \
-         {} — which is the store read first, so it is the one Claude Code would \
-         go on using. Empty it and run this again.",
-        written.describe(),
-        preferred.describe(),
-    )))
 }
 
 /// A write that did not end with the store holding the Credential.

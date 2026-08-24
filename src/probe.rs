@@ -710,14 +710,21 @@ pub fn read_identity(
         ));
     }
 
-    // Both refused here rather than in `registry::validate`: one met at `load`
-    // is met over a value Perch itself wrote down, and takes with it the
-    // command that would repair it (ADR a-registry-comes-forward).
-    for (what, value) in [
-        ("the account", Some(email.as_str())),
-        ("an organization", account.organization_name.as_deref()),
-    ] {
-        let Some(said) = crate::host::control_character_in(value.unwrap_or_default()) else {
+    // Refused here and not in `registry::validate`, which `load` meets over a
+    // value Perch wrote down (ADR a-registry-comes-forward). The address on the
+    // whole set, the organization on `Cc` (ADR nothing-drawn-is-obeyed).
+    let asked = [
+        (
+            "the account",
+            crate::host::unshowable_character_in(email.as_str()),
+        ),
+        (
+            "an organization",
+            crate::host::control_character_in(account.organization_name.as_deref().unwrap_or("")),
+        ),
+    ];
+    for (what, carrying) in asked {
+        let Some(said) = carrying else {
             continue;
         };
         return Err(refusal(

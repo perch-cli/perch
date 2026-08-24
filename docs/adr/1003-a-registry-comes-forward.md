@@ -1,9 +1,9 @@
 # A registry comes forward
 
-**A registry claiming version 1 is brought into the shape this build reads — in
-memory on every read, and written back once by the run that finds it. There is
-one step, from one version, and it is arithmetic over the document rather than a
-conversation with the machine.**
+**A registry claiming a version below this build's is brought into the shape it
+reads — in memory on every read, and written back once by the run that finds it.
+The steps chain from whichever version a document claims, and each is arithmetic
+over the document rather than a conversation with the machine.**
 
 ADR the-holdings-outlive-a-perch decided which answer the registry gets: it
 migrates, because a refused registry is not survivable. This is that step, and
@@ -44,6 +44,34 @@ failure ADR the-holdings-outlive-a-perch names as beyond both mechanisms. So the
 step reads what a Scope Inherited out of that document's own `global.settings`
 rather than out of this build's defaults: the value somebody set is in the file,
 and taking the default instead reverts it silently.
+
+## Version 3, and why a name rule moves the number
+
+Version 3 changed no shape. It changed which names `validate_name` accepts:
+`crate::host::is_unshowable` took Unicode's whole `Default_Ignorable_Code_Point`
+set, having been picked by hand and grown holes (ADR nothing-drawn-is-obeyed).
+
+That is still a version. The number tracks what this build can *read*, and a
+registry holding a name the rules now refuse is one `load` turns down — which is
+every command, `perch group rename` among them. A rule with nothing to carry the
+names already written down is the failure this document exists to prevent,
+reached from the other direction.
+
+So the rename pass is its own step rather than a line inside the version 1 one,
+and `forward` runs it after whichever step brought the document to this shape. A
+version 1 document meets it having already been renamed, and it does nothing.
+
+What the step carries is bounded by history: a name version 2 accepted, which is
+this build's rules with the newly-unshowable characters still drawn. A name no
+build of that version ever wrote is a hand edit — named at `load` and left, the
+same answer `acceptable` gives a version 1 name no suffix rescues.
+
+Both ways a registry arrives say what was renamed. `bring_forward` says it about
+this machine's own file, after the write; an Import says it about the Export's,
+before one. `unseal` hands the renames back beside the document rather than
+carrying them on it, `coming_forward` being a `Deserialize` with nowhere to put
+them — and what a step renamed is a fact about reading that Export on this build
+rather than a field of it.
 
 ## One version, two shapes
 

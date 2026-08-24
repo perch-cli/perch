@@ -20,7 +20,7 @@ use crate::probe::{Identity, LockSpec};
 ///
 /// A registry claiming a higher one is refused rather than silently misread, and
 /// the guard is only worth having if this moves whenever the shape does.
-pub const CURRENT_VERSION: u32 = 2;
+pub const CURRENT_VERSION: u32 = 3;
 
 /// One Quota Window's Utilization, as observed at a point in time
 /// (ADR a-figure-carries-its-age).
@@ -562,13 +562,14 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
         )));
     }
     // Whitespace is not the whole of what a terminal will not echo back: an
-    // escape is no `char::is_whitespace`, and a name holding one is written raw
-    // into every later listing, where it moves the column and colors the row.
-    if let Some(said) = crate::host::control_character_in(name) {
+    // escape is no `char::is_whitespace` and moves the column, and a character
+    // that draws as nothing makes two names one row.
+    if let Some(said) = crate::host::unshowable_character_in(name) {
         return Err(PerchError::Invalid(format!(
-            "{} carries {said}, which no line of Perch's output could show as \
-             part of a name — `perch list` writes what it holds, so a name a \
-             terminal reads as an instruction is one every later listing obeys.",
+            "{} are drawn as they are held, and this one carries {said} — so two \
+             names nothing on screen tells apart are one row in every listing, \
+             and a character a terminal acts on moves the column and colors the \
+             row.",
             kind.names()
         )));
     }
@@ -2297,13 +2298,13 @@ mod tests {
                 NameKind::Group,
                 "\u{202e}gpj.exe",
                 None,
-                Some("a formatting character (U+202E)"),
+                Some("a character a terminal does not draw as itself (U+202E)"),
             ),
             (
                 NameKind::Alias,
                 "wo\u{200b}rk",
                 None,
-                Some("a formatting character (U+200B)"),
+                Some("a character a terminal does not draw as itself (U+200B)"),
             ),
             // The word joiner and the bidi isolates, which are the same harm
             // under two more blocks of the table.
@@ -2311,13 +2312,13 @@ mod tests {
                 NameKind::Group,
                 "wo\u{2060}rk",
                 None,
-                Some("a formatting character (U+2060)"),
+                Some("a character a terminal does not draw as itself (U+2060)"),
             ),
             (
                 NameKind::Group,
                 "\u{2066}gpj.exe",
                 None,
-                Some("a formatting character (U+2066)"),
+                Some("a character a terminal does not draw as itself (U+2066)"),
             ),
         ];
 

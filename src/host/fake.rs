@@ -1306,6 +1306,24 @@ impl FakeHost {
                 detail: lock.detail.clone(),
             })
     }
+
+    /// The same, for a call naming one item: only an item that is found meets
+    /// the lock ([`crate::keychain::EXIT_ITEM_NOT_FOUND`]). A machine with no
+    /// keychain keeps the error whatever the name, having nothing to match on.
+    fn lock_error_for(&self, service: &str, account: &str) -> Option<KeychainError> {
+        let error = self.lock_error()?;
+        let there_is_a_keychain =
+            self.platform() == Platform::MacOs || *self.keys.keychain_everywhere.borrow();
+        let held = self
+            .keys
+            .keychain
+            .borrow()
+            .contains_key(&(service.to_string(), account.to_string()));
+        match there_is_a_keychain && !held {
+            true => None,
+            false => Some(error),
+        }
+    }
 }
 
 /// As much of `text` as fits in `bytes`, cut at a character boundary. One
@@ -1996,7 +2014,7 @@ impl port::Keys for FakeHost {
         // against an item this binary did not create is the classic prompt, and
         // `switch::capture` reads inside `Holds::around` for exactly that.
         self.while_the_keychain_asks();
-        if let Some(error) = self.lock_error() {
+        if let Some(error) = self.lock_error_for(service, account) {
             return Err(error);
         }
         self.keys
@@ -2047,7 +2065,7 @@ impl port::Keys for FakeHost {
             account: account.to_string(),
         });
         self.while_the_keychain_asks();
-        if let Some(error) = self.lock_error() {
+        if let Some(error) = self.lock_error_for(service, account) {
             return Err(error);
         }
         self.keys

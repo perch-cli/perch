@@ -364,7 +364,7 @@ impl std::io::Write for Wiping {
 ///
 /// Four ways it can refuse, told apart because they ask for four different next
 /// moves — see [`would_not_open`].
-pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
+pub fn unseal(sealed: &str, passphrase: &str) -> Result<(Export, Vec<crate::migration::Renamed>)> {
     let mut identity = age::scrypt::Identity::new(secret(passphrase));
 
     // Fixed rather than left to `age`, whose own bound is measured on the
@@ -382,10 +382,37 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     // say the backup is unreadable when it is perfectly well-formed.
     refuse_a_newer_perch(&plain)?;
 
-    serde_json::from_slice(&plain).map_err(|err| PerchError::Malformed {
+    let export: Export = serde_json::from_slice(&plain).map_err(|err| PerchError::Malformed {
         path: "the Export".to_string(),
         detail: err.to_string(),
-    })
+    })?;
+
+    // Asked of the plaintext rather than carried out of `coming_forward`, which
+    // is a `Deserialize` with nowhere to put it.
+    Ok((export, renamed_coming_forward(&plain)))
+}
+
+/// What bringing an Export's registry forward had to rename, for the Import to
+/// say before it writes.
+///
+/// A fact about reading *this* Export on *this* build, so it belongs to the read
+/// rather than to the document. Empty for every Export this build wrote.
+fn renamed_coming_forward(plain: &[u8]) -> Vec<crate::migration::Renamed> {
+    // The one field, so serde skips the two holding secrets rather than building
+    // a `String` per Credential that nothing wipes. `refuse_a_newer_perch` reads
+    // the versions the same way.
+    #[derive(Deserialize)]
+    struct JustTheRegistry {
+        registry: Option<serde_json::Value>,
+    }
+
+    let Ok(JustTheRegistry {
+        registry: Some(registry),
+    }) = serde_json::from_slice::<JustTheRegistry>(plain)
+    else {
+        return Vec::new();
+    };
+    crate::migration::renames(&registry.to_string())
 }
 
 /// Why `age` would not open the file, as something the reader can act on: type
@@ -639,7 +666,7 @@ mod tests {
             !sealed.contains("sk-ant-ort01-test") && !sealed.contains("someone@example.com"),
             "nothing in the file is readable without the passphrase"
         );
-        assert_eq!(unseal(&sealed, PASSPHRASE).expect("it opens"), export);
+        assert_eq!(unseal(&sealed, PASSPHRASE).expect("it opens").0, export);
     }
 
     /// An address no Profile could be named after has no store, and a Purge is
@@ -732,7 +759,9 @@ mod tests {
         none_kept.credentials = BTreeMap::new();
         let sealed = seal(&none_kept, PASSPHRASE).expect("it seals");
         assert_eq!(
-            unseal(&sealed, PASSPHRASE).expect("an Export of Quarantined Accounts opens"),
+            unseal(&sealed, PASSPHRASE)
+                .expect("an Export of Quarantined Accounts opens")
+                .0,
             none_kept
         );
     }
@@ -818,8 +847,9 @@ mod tests {
     #[test]
     fn everything_the_registry_says_about_an_account_travels_with_it() {
         let export = an_export();
-        let back =
-            unseal(&seal(&export, PASSPHRASE).expect("it seals"), PASSPHRASE).expect("it opens");
+        let back = unseal(&seal(&export, PASSPHRASE).expect("it seals"), PASSPHRASE)
+            .expect("it opens")
+            .0;
 
         let account = back
             .registry
@@ -880,7 +910,8 @@ mod tests {
         let sealed =
             age::encrypt_and_armor(&recipient(PASSPHRASE), older.as_bytes()).expect("it seals");
 
-        let opened = unseal(&sealed, PASSPHRASE).expect("an Export of a published Perch opens");
+        let (opened, _) =
+            unseal(&sealed, PASSPHRASE).expect("an Export of a published Perch opens");
 
         assert_eq!(opened.registry.version, crate::registry::CURRENT_VERSION);
         let account = opened
@@ -1018,10 +1049,9 @@ mod tests {
     /// work, and the user would find out on the day they needed it.
     #[test]
     fn a_store_that_will_not_say_what_it_holds_stops_the_whole_export() {
-        let host =
-            crate::host::FakeHost::new().with_locked_keychain("User interaction is not allowed");
+        let host = crate::host::FakeHost::new();
         let mut registry = Registry::default();
-        registry.upsert(Account {
+        let account = Account {
             identity: Identity {
                 email: "one@example.com".into(),
                 account_uuid: None,
@@ -1033,7 +1063,13 @@ mod tests {
             quarantine: None,
             group: None,
             utilization: None,
-        });
+        };
+        // Stored before the lock: the lock is reached only for an item that is
+        // found, and a name holding nothing answers "no such item" through it.
+        let store = account.store(&host).expect("the Profile can be named");
+        host.set_keychain_item(&store.keychain_service, &store.keychain_account, "held");
+        host.lock_keychain("User interaction is not allowed");
+        registry.upsert(account);
 
         let refused = gather(&host, &registry).expect_err("nothing can be read");
         assert!(refused.to_string().contains("one@example.com"), "{refused}");

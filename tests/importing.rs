@@ -63,7 +63,7 @@ fn registry_on(host: &FakeHost) -> Option<Registry> {
 /// `someone@example.com` is listed by the one and missed by the other.
 #[test]
 fn a_credential_keyed_in_another_case_is_placed_rather_than_silently_dropped() {
-    let mut export =
+    let (mut export, _) =
         perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE).expect("it opens");
     // The same Account, spelled the other way — which is what a file written by
     // something other than `gather` looks like.
@@ -679,7 +679,7 @@ fn a_registry_that_cannot_be_written_takes_every_profile_back_out_with_it() {
 
 #[test]
 fn an_export_or_a_registry_from_a_newer_perch_is_refused_rather_than_guessed_at() {
-    let opened = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE)
+    let (opened, _) = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE)
         .expect("it opens with the passphrase it was sealed with");
 
     // Stamped on a clone rather than built with `..opened`: an `Export` wipes
@@ -898,7 +898,7 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
 /// was refused, and the refusal named a Check the Import was never going to keep.
 #[test]
 fn an_export_is_judged_by_the_shape_that_will_be_written_rather_than_the_one_that_arrived() {
-    let mut export =
+    let (mut export, _) =
         perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE).expect("it opens");
     // A Check against a Group nothing declares, which is what a hand-edited
     // registry — or one whose Group was removed beside it — carries.
@@ -916,5 +916,53 @@ fn an_export_is_judged_by_the_shape_that_will_be_written_rather_than_the_one_tha
     assert!(
         registry_on(&host).is_some_and(|registry| registry.checks.is_empty()),
         "and nothing arrives having just been checked: {said}"
+    );
+}
+
+/// An Import says what the step forward renamed, before it writes.
+///
+/// `bring_forward` says the same about this machine's own registry, and an Export
+/// is the other way a registry arrives — the rename pass runs on both, so a
+/// person who restores a backup is not left to find the new name in a listing.
+#[test]
+fn an_import_says_what_bringing_the_registry_forward_renamed() {
+    let mut export = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE)
+        .expect("it opens")
+        .0;
+    // A Group name a version 2 Perch accepted, under the version that accepted
+    // it: the shape of every Export written before this build.
+    export.registry.version = 2;
+    let settings = export.registry.groups.remove("work").expect("the Group");
+    export
+        .registry
+        .groups
+        .insert("work\u{FE00}".to_string(), settings);
+    for account in &mut export.registry.accounts {
+        if account.group.is_some() {
+            account.group = Some("work\u{FE00}".to_string());
+        }
+    }
+    let sealed = perch::export::seal(&export, PASSPHRASE).expect("it seals");
+    drop(export);
+
+    let host = a_new_machine_holding(&sealed);
+    run_import(&host, AT).0.expect("the Import lands");
+
+    let said = host.notes().join("\n");
+    assert!(
+        said.contains("carrying a character a terminal does not draw as itself (U+FE00)"),
+        "the Import names the character it renamed for: {said}"
+    );
+    assert!(
+        said.contains("is now `work`"),
+        "and the name it arrived under: {said}"
+    );
+    assert_eq!(
+        registry_on(&host)
+            .expect("a registry was written")
+            .groups
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["work"]
     );
 }
