@@ -763,6 +763,43 @@ mod tests {
         );
     }
 
+    /// The step's set is the difference between two rules, so every character in
+    /// it is one this build refuses. A representative of each range, a range
+    /// written wrong being what a set stated as ranges gets wrong.
+    #[test]
+    fn every_character_the_step_carries_forward_is_one_this_build_refuses() {
+        for c in [
+            '\u{034F}',
+            '\u{2065}',
+            '\u{3164}',
+            '\u{FFA0}',
+            '\u{115F}',
+            '\u{1160}',
+            '\u{17B4}',
+            '\u{17B5}',
+            '\u{180B}',
+            '\u{180D}',
+            '\u{180F}',
+            '\u{FE00}',
+            '\u{FE0F}',
+            '\u{FFF0}',
+            '\u{FFF8}',
+            '\u{1BCA0}',
+            '\u{1BCA3}',
+            '\u{1D173}',
+            '\u{1D17A}',
+            '\u{E0080}',
+            '\u{E0FFF}',
+        ] {
+            assert!(version_2_drew(c), "U+{:04X} is in the step's set", c as u32);
+            assert!(
+                crate::host::is_unshowable(c),
+                "U+{:04X} is one version 3 refuses",
+                c as u32
+            );
+        }
+    }
+
     /// An escape is no `char::is_whitespace`, so every published Perch accepted
     /// a name holding one. A suffix rescues it no more than it rescues a leading
     /// `-`: the character has to go, or the machine has no working command.

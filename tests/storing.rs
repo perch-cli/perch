@@ -539,3 +539,37 @@ fn a_profile_the_machine_does_not_have_is_still_refused_where_the_keychain_kept_
     perch::profile::create(&host, &store.config_dir, STALE)
         .expect_err("the copy behind the lock wins every read after it opens");
 }
+
+/// A store that refuses the removal and then says it holds nothing is a remark
+/// rather than a refusal: the copy that would have won a read is not there.
+///
+/// Off macOS the file is the store read first, so it is the one a Credential in
+/// the keychain beside it has to be cleared out of.
+#[test]
+fn a_superseded_copy_that_is_already_gone_is_noted_and_not_refused() {
+    let host = logged_in_machine_off_macos().with_keychain_off_macos();
+    let store = store_of(&host, EMAIL);
+    perch::profile::make_dir(&host, &store.config_dir).expect("the Profile can be made");
+    // Never written and refusing the removal anyway, which is the state a
+    // directory somebody took the write bit off leaves.
+    let host = host
+        .with_unwritable_file(&store.credentials_file, "Permission denied (os error 13)")
+        .with_undeletable_file(&store.credentials_file, "Permission denied (os error 13)");
+
+    perch::profile::store_credential(&host, &store, CREDENTIAL)
+        .expect("the keychain took it and the file holds nothing to supersede it");
+
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .as_deref(),
+        Some(CREDENTIAL),
+        "the Credential is where the write landed"
+    );
+    assert!(
+        host.notes()
+            .iter()
+            .any(|note| note.contains("A superseded copy of a Credential could not be removed")),
+        "and the machine says the store would not give a copy up: {:?}",
+        host.notes()
+    );
+}
