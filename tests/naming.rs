@@ -551,3 +551,30 @@ fn renaming_an_account_gives_up_the_name_it_answered_to_before() {
         "and the old name is free to use again"
     );
 }
+
+/// A Group whose name draws as one already declared is refused.
+///
+/// `U+FE00` after a letter with no variant form draws as nothing, so the two
+/// names are one row in every listing and one spelling at every prompt — the
+/// harm two names differing only in case are already refused for.
+#[test]
+fn a_group_whose_name_draws_as_one_already_declared_is_refused() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "dev");
+
+    let (refused, _) = run_group(
+        &host,
+        GroupCommand::Add {
+            name: "dev\u{FE00}".to_string(),
+        },
+    );
+
+    let said = refused
+        .expect_err("that name draws as the Group already declared")
+        .to_string();
+    assert!(
+        said.contains("U+FE00"),
+        "and the refusal names the character: {said}"
+    );
+    assert_eq!(registry_of(&host).groups.len(), 1);
+}

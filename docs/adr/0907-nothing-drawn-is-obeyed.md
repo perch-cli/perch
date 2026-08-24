@@ -108,6 +108,31 @@ newline, which is Perch's own rather than something a terminal acts on — a cel
 holds one line by construction and a refusal is several, so the two constructors
 are a difference between writers rather than a question put to a caller.
 
+## The set is Unicode's rather than a list
+
+The set was picked by hand, and it grew holes. `U+FE00` after a letter that has
+no variant form draws as nothing; so do `U+3164`, `U+FFA0` and `U+034F`; and
+`U+2065` sat in the gap between `2060..2064` and `2066..206F`, two halves of one
+range written as two.
+
+Constructed: `perch group add dev`, then `perch group add dev\u{FE00}`. Both are
+accepted, `perch group list` draws two rows both reading `dev`, and Perch's own
+confirmation line says *"Declared the Group `dev`"* twice. Which one
+`perch switch dev` finds is not decided by anything — the sentence `validate`
+already uses to refuse two names that differ only in case.
+
+So the set is Unicode's `Default_Ignorable_Code_Point`, taken whole. That
+property is this question already answered, and a subset chosen for it is a
+second definition of the same rule — which is how the holes arose. The cost is
+that `perch group add \u{2764}\u{FE0F}` is now refused, naming the character;
+`\u{2764}` is not.
+
+Refusing a name this build itself accepted and wrote down is a rule joining
+`validate_name` with nothing to carry what is already on disk, which is the
+refusal `load` makes every command. The registry moves to version 3 for it, and
+the step renames — but only what version 2 accepted. A name no Perch of that
+version ever wrote is a hand edit, and is still named at `load` and left.
+
 ## What it does not buy
 
 Two organizations differing only in a formatting character draw as one name.
@@ -155,6 +180,9 @@ code in one file rather than a rule about which sink a caller reached for.
 - `validate_name` refuses, because a Group name and an Alias are chosen at a
   prompt. `probe::read_identity` refuses the address and the organization, at
   the boundary the block enters through. `registry::validate` refuses neither.
+- The unshowable set moving is a name rule moving, so it moves the registry
+  version with it and owes a step. `migration::forward` chains from whichever
+  version a document claims, and every step lands on the rename pass.
 
 ## The glossary
 

@@ -329,20 +329,25 @@ pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
 }
 
 /// Whether a terminal acts on a character rather than drawing it. `is_control`
-/// is `Cc` alone, which leaves the formatting characters out: `U+202E` reverses
-/// the rest of the line it lands in, a zero-width one hides the whole
-/// difference between two names, and the tags block spells hidden text in
-/// characters that mirror ASCII and draw as nothing.
+/// is `Cc` alone, so the rest is Unicode's `Default_Ignorable_Code_Point` — the
+/// same question already answered, and taken whole because picked by hand it
+/// grew holes: `U+FE00` after a letter with no variant form, `U+3164`, and
+/// `U+2065` in the gap between two ranges written as two.
 pub fn is_unshowable(c: char) -> bool {
     c.is_control()
         || matches!(c,
-            '\u{00AD}' | '\u{061C}' | '\u{FEFF}'
+            '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{3164}' | '\u{FEFF}' | '\u{FFA0}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
             | '\u{200B}'..='\u{200F}'
             | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206F}'
-            | '\u{180E}'
-            | '\u{E0000}'..='\u{E007F}')
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FFF0}'..='\u{FFF8}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}')
 }
 
 /// Text on its way to a terminal, with everything a terminal would act on

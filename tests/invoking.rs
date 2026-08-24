@@ -17,7 +17,7 @@ use perch::error::{
     EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_UNDERSTOOD, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
 use perch::probe::Identity;
-use perch::registry::{Account, Registry, Settings};
+use perch::registry::{Account, CURRENT_VERSION, Registry, Settings};
 
 /// The Account every scratch machine holds, and the Group declared beside it.
 const SOMEONE: &str = "someone@example.com";
@@ -648,7 +648,10 @@ fn a_registry_a_published_perch_wrote_is_read_and_written_forward() {
     );
 
     let written = machine.registry();
-    assert!(written.contains("\"version\": 2"), "{written}");
+    assert!(
+        written.contains(&format!("\"version\": {CURRENT_VERSION}")),
+        "{written}"
+    );
     assert!(!written.contains("\"global\""), "{written}");
 
     let again = perch(&machine, &["list"]);

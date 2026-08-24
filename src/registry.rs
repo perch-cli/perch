@@ -20,7 +20,7 @@ use crate::probe::{Identity, LockSpec};
 ///
 /// A registry claiming a higher one is refused rather than silently misread, and
 /// the guard is only worth having if this moves whenever the shape does.
-pub const CURRENT_VERSION: u32 = 2;
+pub const CURRENT_VERSION: u32 = 3;
 
 /// One Quota Window's Utilization, as observed at a point in time
 /// (ADR a-figure-carries-its-age).
