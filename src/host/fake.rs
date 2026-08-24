@@ -270,6 +270,9 @@ struct Waiting {
     /// How many waits go by before that is asked for. `None` is a machine
     /// nobody interrupts, which is every test but the watcher's.
     interrupt_after: RefCell<Option<u32>>,
+    /// The same, counted in requests that have gone out — for a stop that lands
+    /// inside a round rather than in the wait between two.
+    interrupt_after_requests: RefCell<Option<usize>>,
     waits: RefCell<u32>,
 }
 
@@ -314,6 +317,10 @@ struct Stall {
     /// What the rest of the machine does the first time Perch waits, and then
     /// does not do again.
     somebody_else: RefCell<Option<WhileWaiting>>,
+    /// The same, once this many requests have gone out. Counted in requests
+    /// rather than in waits because a burst takes no wait at all: what happens
+    /// between two of its reads has nowhere else to be hung.
+    somebody_else_after_requests: RefCell<Option<(usize, WhileWaiting)>>,
 }
 
 /// The pid this Perch runs under, for the tests that assert on the marker a Run
@@ -391,6 +398,7 @@ impl FakeHost {
             waiting: Waiting {
                 listening: RefCell::new(false),
                 interrupt_after: RefCell::new(None),
+                interrupt_after_requests: RefCell::new(None),
                 waits: RefCell::new(0),
             },
             terminal: Terminal {
@@ -409,6 +417,7 @@ impl FakeHost {
             stall: Stall {
                 now: RefCell::new(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()),
                 somebody_else: RefCell::new(None),
+                somebody_else_after_requests: RefCell::new(None),
             },
             effects: RefCell::new(Vec::new()),
         }
@@ -839,6 +848,14 @@ impl FakeHost {
         self
     }
 
+    /// The same person, pressing it after this many requests have gone out. A
+    /// round is bounded by the network rather than by the clock, so a stop that
+    /// lands *inside* one lands between two requests and nowhere else.
+    pub fn with_interrupt_after_requests(self, sent: usize) -> Self {
+        *self.waiting.interrupt_after_requests.borrow_mut() = Some(sent);
+        self
+    }
+
     // ---- terminal: the person Perch is talking to -------------------
 
     /// A machine with no one at the terminal: over SSH, or in CI.
@@ -945,6 +962,14 @@ impl FakeHost {
     /// `perch` arriving.
     pub fn once_while_waiting(self, happens: impl Fn(&FakeHost) + 'static) -> Self {
         *self.stall.somebody_else.borrow_mut() = Some(Box::new(happens));
+        self
+    }
+
+    /// The same, once this many requests have gone out: a second Watcher taking
+    /// the watch over between two reads of a burst, which is the one thing a
+    /// wait cannot stand in for because a burst takes none.
+    pub fn once_after_requests(self, sent: usize, happens: impl Fn(&FakeHost) + 'static) -> Self {
+        *self.stall.somebody_else_after_requests.borrow_mut() = Some((sent, Box::new(happens)));
         self
     }
 
@@ -1191,6 +1216,25 @@ impl FakeHost {
     fn somebody_else_arrives(&self) {
         let happens = self.stall.somebody_else.borrow_mut().take();
         if let Some(happens) = happens {
+            happens(self);
+        }
+    }
+
+    /// The same, for what the test hung on a count of requests rather than on a
+    /// wait. Taken out before it runs, for [`FakeHost::somebody_else_arrives`]'s
+    /// reason.
+    fn somebody_else_arrives_after_enough_requests(&self) {
+        let enough = self
+            .stall
+            .somebody_else_after_requests
+            .borrow()
+            .as_ref()
+            .is_some_and(|(after, _)| self.network.sent.borrow().len() >= *after);
+        if !enough {
+            return;
+        }
+        let happens = self.stall.somebody_else_after_requests.borrow_mut().take();
+        if let Some((_, happens)) = happens {
             happens(self);
         }
     }
@@ -2136,15 +2180,21 @@ impl port::Waiting for FakeHost {
     }
 
     /// The same question [`FakeHost::wait`] answers, without the wait: asked
-    /// once the count the test set has been reached, and never where nothing is
-    /// listening.
+    /// once either count the test set has been reached, and never where nothing
+    /// is listening.
     fn asked_to_stop(&self) -> bool {
-        match *self.waiting.interrupt_after.borrow() {
-            Some(after) => {
-                *self.waiting.listening.borrow() && *self.waiting.waits.borrow() >= after
-            }
-            None => false,
+        if !*self.waiting.listening.borrow() {
+            return false;
         }
+        let waited_enough = matches!(
+            *self.waiting.interrupt_after.borrow(),
+            Some(after) if *self.waiting.waits.borrow() >= after
+        );
+        let sent_enough = matches!(
+            *self.waiting.interrupt_after_requests.borrow(),
+            Some(after) if self.network.sent.borrow().len() >= after
+        );
+        waited_enough || sent_enough
     }
 
     /// Passes the time the same way a sleep does, and ends the way the test
@@ -2240,6 +2290,7 @@ impl port::Network for FakeHost {
         let asked = sent.url.clone();
         let bearer = sent.bearer().map(str::to_string);
         self.network.sent.borrow_mut().push(sent);
+        self.somebody_else_arrives_after_enough_requests();
 
         // Bounded as `curl` is bounded, by the request's own `max-time` or by
         // the ceiling every request without one gets: a reply arriving after
@@ -2299,6 +2350,12 @@ mod tests {
     /// carrying a newline is a request the real adapter refuses before it
     /// spawns `curl`. A fake that answered it would prove a Refresh, a Back-off
     /// and a Quarantine decision against a request no machine would make.
+    // The port method itself is what this asserts on, so it is the one call the
+    // way through would defeat.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the claim is about the port's own method rather than about a request Perch makes"
+    )]
     #[test]
     fn a_request_the_real_adapter_would_not_send_is_not_one_the_fake_answers() {
         use super::port::Network as _;

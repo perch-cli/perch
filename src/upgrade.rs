@@ -349,6 +349,13 @@ pub fn newest(host: &dyn Host, within_millis: Option<u64>) -> Result<String> {
         request = request.within(millis);
     }
 
+    // The one caller outside [`crate::anthropic`]: this asks GitHub which Release
+    // is newest, spends no Account's allowance and is reached by a command a
+    // person typed, so there is no watch to be still holding.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "not an Anthropic request, and no Watcher is running behind it"
+    )]
     let answered = host.http(&request).map_err(|err| {
         PerchError::Other(format!("could not ask which Release is newest: {err}"))
     })?;

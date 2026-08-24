@@ -40,7 +40,7 @@ Switch inside `record_the_switch`, and whether anything moved is a field *both*
 ways out carry, so the round asks one question of both rather than reading the
 answer off which way out it got.
 
-Error modes are untouched by any of this. `Turn::NotArranged` carries
+Error modes are untouched by any of this. `Verdict::NotArranged` carries
 `PerchError` whole so a Check keeps exit 18 and 14, `NotIdle::Live` is
 `Outcome::Refused`, and the other two raise with the code the failure earned.
 
@@ -76,16 +76,12 @@ ADR code-lives-where-it-reaches's.
 `Step`s — `SettleTheLanding`, `Refresh(addresses)`, `RefuseIfLive`, `SwitchTo`,
 `Done` — which `commands/watch.rs` answers with the real calls. It is the
 deepest of the three: the two yeses, the exit-code table, the coalescing and all
-six orderings sit behind two methods, and it buys one genuinely new assertion —
-drive `a_loop()` and `a_check()` over the same registry and prove the step
-sequences differ in exactly three places, which is the *three arrangements, one
-behavior* rule made checkable. It is refused because the answers are not typed
-per step: replying to `Refresh` with what `SwitchTo` expects is a panic rather
-than a compile error. A design whose purpose is eliminating runtime ordering
-failures should not introduce one, and the locality it buys is locality a single
-command already has.
-
-That refusal is reopened below, against evidence it did not have.
+six orderings sit behind two methods. It buys no assertion the code does not
+already carry, for the reason the section below gives. It is refused because the
+answers are not typed per step: replying to `Refresh` with what `SwitchTo`
+expects is a panic rather than a compile error. A design whose purpose is
+eliminating runtime ordering failures should not introduce one, and the locality
+it buys is locality a single command already has.
 
 **A typestate chain.** Seven states, each consuming the last, from `Round::opens`
 through `Moving`. It gets the same compile-time ordering as the witnesses and
@@ -95,54 +91,19 @@ arrangement — reintroducing at the Round exactly the
 protocol-assembled-differently-by-two-callers that one door removed from the
 Switch.
 
-## The step protocol is reopened
+## Where the three arrangements differ
 
-One shape has outlived every answer given to it: a Watcher that acts after it
-has lost the watch or been told to stop. ADR an-invariant-gets-a-door counts it
-in five of the six reviews it sorted, and answers it with a door,
-`commands::watch::Watch::goes_on`, which renews the hold and asks both questions
-in one call. The eighth review and the ninth found it again, on the far side of
-that door:
+*The three arrangements differ in exactly three places* is structurally true
+rather than unproved. `Watcher` is a two-variant enum, every difference between
+its variants is one of three methods — `asking_again`, `pacing`, `reason` — each
+a match on the variant, and there is one round function both variants are handed
+to. A fourth difference is a fourth method or a fourth match, and neither hides:
+the round function takes the enum, so anything that varies varies there.
 
-| what acted after the watch was gone | how it got past `goes_on` |
-|---|---|
-| the round's own Refresh | `observe::refresh` asks once per address and threw the first answer away; the round hands it one address, so the ask was never made |
-| the refresh token a turn was holding | asked once at the top of a turn, and a turn is up to six requests bounded at thirty seconds |
-
-That ADR states the limit itself: **`Watch` cannot make a step exist that
-nobody wrote.** `goes_on` is called by hand at five sites, two of them
-as a closure `observe::refresh` takes as
-`&mut dyn FnMut() -> Result<(), Lost>`, so a step can hold the door, call it and
-discard what it says. A door removes the site that forgot the rule. It does not
-decide where the rule is asked, and both findings above are about where.
-
-Putting every step through one driver is the design refused here, and the ask
-becomes the driver's job rather than each step's — a step nobody has written yet
-cannot skip an ask it never makes.
-
-**The objection, and what answers it.** The refusal above is that the answers
-are not typed per step: replying to `Refresh` with what `SwitchTo` expects is a
-panic rather than a compile error, and a design whose purpose is ending runtime
-ordering failures should not open one. That holds against a `Step` enum answered
-by a shared reply type. It does not hold against a driver stated as a trait with
-one method per step, where each answer's type is that method's return type and
-no reply can be mismatched. That shape was not among the three designed before
-this one was chosen, and it is what a reopening weighs.
-
-**What it would also settle.** The consequences below record that *the three
-arrangements differ in exactly three places* is a rule no test checks, and that
-refusing the step protocol is what left it unproved. A driver makes it
-checkable. That was the refused design's best argument and nothing has answered
-it since.
-
-**What the reopening has to decide.** Not whether the driver asks, but what it
-drives. A driver that asks once per step answers the eighth review's finding and
-not the ninth's, where the step is one Account's turn and the requests inside it
-are six. Either the unit is the request, and the driver sits below
-`observe::refresh` rather than above it, or the driver buys the ordering without
-buying the granularity and the shape has somewhere left to live. The witnesses
-are untouched either way: they rule what must come after what, and a driver
-rules what every step passes through.
+The count runs two things together. The domain has three arrangements — typed at
+a terminal, run by the machine's own service manager, one round for a scheduler
+— and the code has two, because the Service is the loop under a supervisor.
+Three places is a fact about the two.
 
 ## Consequences
 
@@ -161,10 +122,6 @@ rules what every step passes through.
   — the last thing Perch established rather than the thing that is true.
   Covered by a test, because an unasserted claim about what a command prints is
   one the next refactor is free to undo.
-- *The three arrangements differ in exactly three places* is a rule no test
-  checks. It was the step protocol's best argument, and refusing that design
-  leaves it unproved. If a fourth difference ever appears, this is the document
-  that failed to prevent it.
-- The shape the witnesses were built against is still shipping defects, now
-  through the door built beside them. Reopening the step protocol is the
-  outstanding item this document owns.
+- A fourth way the arrangements differ is a fourth method on `Watcher` or a
+  fourth match inside one, both of which are read off the enum. No test is owed
+  for it, which is what withdraws the step protocol's second argument.

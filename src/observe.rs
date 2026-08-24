@@ -23,7 +23,7 @@ use crate::lock::{self, Held};
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
-use crate::watch::Lost;
+use crate::watch::{Lost, StillOurs};
 
 /// How one Account's turn ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,7 +224,7 @@ pub fn refresh(
     registry: &mut Registry,
     emails: &[String],
     installed: &Result<Installed>,
-    still_ours: &mut dyn FnMut() -> std::result::Result<(), Lost>,
+    still_ours: StillOurs<'_>,
 ) -> Report {
     let mut report = Report::asked_for();
     let mut anything_to_keep = false;
@@ -234,9 +234,9 @@ pub fn refresh(
         // inside the turn: one Account's turn is up to six requests bounded at thirty
         // seconds, twice the ninety the registry hold goes stale in.
         perch.renew();
-        // And whatever else the caller holds. Before the first as well as between
-        // them: the round's own Refresh is one address, so an ask made only after
-        // one is an ask this reading never makes.
+        // And whatever else the caller holds. Kept here beside the ask every request
+        // makes for itself: an Account already Quarantined is answered before the
+        // first one, so a burst of them would otherwise ask nothing at all.
         if let Err(lost) = still_ours() {
             report.stopped = Some(lost);
             break;
@@ -295,7 +295,7 @@ fn observe(
     registry: &Registry,
     account: &Account,
     installed: std::result::Result<&Installed, &PerchError>,
-    still_ours: &mut dyn FnMut() -> std::result::Result<(), Lost>,
+    still_ours: StillOurs<'_>,
 ) -> Step<QuotaWindows> {
     // An Account already known to be beyond repair is not asked again: nothing would be
     // recorded against it, so the read would spend an allowance that does not refill
@@ -319,7 +319,7 @@ fn observe(
 
     let asking = usable_token(host, perch, asked, installed, still_ours)
         .map_err(theirs(Because::ItSaysItRanOut))?;
-    match read_off(host, perch, &asking.token, account) {
+    match read_off(host, perch, &asking.token, account, still_ours) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
         Err(Turned::Away) => {}
@@ -346,7 +346,7 @@ fn observe(
         still_ours,
     )
     .map_err(theirs(Because::AnthropicRefusedIt))?;
-    read_off(host, perch, &renewed.token, account).map_err(Turned::settled)
+    read_off(host, perch, &renewed.token, account, still_ours).map_err(Turned::settled)
 }
 
 /// What one attempt at a reading came to when it did not come to figures.
@@ -384,12 +384,13 @@ fn read_off(
     perch: &mut Held<'_>,
     token: &str,
     account: &Account,
+    still_ours: StillOurs<'_>,
 ) -> std::result::Result<QuotaWindows, Turned> {
-    confirm(host, token, account)?;
+    confirm(host, token, account, still_ours)?;
     // Between the two requests, because they are two: an endpoint that accepts a
     // connection and then says nothing costs thirty seconds each.
     perch.renew();
-    match anthropic::utilization(host, token) {
+    match anthropic::utilization(host, token, still_ours) {
         Ok(windows) => Ok(windows),
         Err(Refused::Rejected) => Err(Turned::Away),
         Err(why) => Err(Turned::Settled(reading_refused(why))),
@@ -594,7 +595,7 @@ fn usable_token(
     perch: &mut Held<'_>,
     asked: &Asked,
     installed: &Installed,
-    still_ours: &mut dyn FnMut() -> std::result::Result<(), Lost>,
+    still_ours: StillOurs<'_>,
 ) -> Step<Asking> {
     let credential = credential_in(host, asked, installed, Because::ItSaysItRanOut)?;
     if credential.usable_at(host.now()) {
@@ -692,7 +693,7 @@ fn renew_under_the_lock(
     asked: &Asked,
     installed: &Installed,
     because: Because,
-    still_ours: &mut dyn FnMut() -> std::result::Result<(), Lost>,
+    still_ours: StillOurs<'_>,
 ) -> Step<Asking> {
     // A shared Profile is refused here rather than at the two callers, because this is
     // the one door every Renewal goes through. For this Account alone: the others are
@@ -741,14 +742,10 @@ fn renew_under_the_lock(
                 detail: None,
             })?;
 
-        // The last question before the step nothing can undo: Anthropic retires the
-        // old refresh token as it Rotates, so a kill between the reply and
-        // `store_it` leaves the new one in freed heap and the Account bricked.
-        still_ours().map_err(Outcome::Stopped)?;
         // Renewed before the round trip: the config-file lock goes stale in ten seconds
         // and one request can take longer. Both holds, because losing Perch's throws
         // away every figure found.
-        let renewal = holds.around(|| anthropic::renew(host, &refresh_token));
+        let renewal = holds.around(|| anthropic::renew(host, &refresh_token, still_ours));
         let fresh = renewal.map_err(not_renewed)?;
 
         // Inside `around` for the network call's reason: on macOS this is three
@@ -827,8 +824,13 @@ const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
 /// Figures cached under the wrong Account would not look wrong: they would look like
 /// that Account having spent quota it never spent, which is the evidence a Cycle ranks
 /// on.
-fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Result<(), Turned> {
-    match anthropic::whose(host, token) {
+fn confirm(
+    host: &dyn Host,
+    token: &str,
+    account: &Account,
+    still_ours: StillOurs<'_>,
+) -> std::result::Result<(), Turned> {
+    match anthropic::whose(host, token, still_ours) {
         Ok(email) if !registry::same_name(&email, account.email()) => {
             Err(Turned::Settled(Outcome::Failed {
                 why: format!(
@@ -873,6 +875,9 @@ fn keep(registry: &mut Registry, email: &str, windows: QuotaWindows, at: DateTim
 fn reading_refused(why: Refused) -> Outcome {
     match why {
         Refused::Throttled => Outcome::Throttled,
+        // A request that was never sent is not a reading that failed: reported as
+        // one it would pace a Back-off off a question nobody was asked.
+        Refused::Stopped(lost) => Outcome::Stopped(lost),
         other => Outcome::Failed {
             why: other.to_string(),
             spent: true,
@@ -887,6 +892,7 @@ fn reading_refused(why: Refused) -> Outcome {
 fn getting_ready_refused(why: Refused) -> Outcome {
     let said = match why {
         Refused::Throttled => RATE_LIMITED.to_string(),
+        Refused::Stopped(lost) => return Outcome::Stopped(lost),
         other => other.to_string(),
     };
     Outcome::Failed {
@@ -1011,6 +1017,59 @@ mod tests {
         assert!(
             report.attempts.is_empty(),
             "with nothing recorded against the Account: {:?}",
+            report.attempts
+        );
+    }
+
+    /// The ask that guards work sending no request keeps its site. An Account
+    /// already Quarantined is answered before the first request, so a burst of
+    /// them reaches the caller's choice having asked nothing — and the choice is
+    /// the second Watcher's to make.
+    #[test]
+    fn a_burst_of_quarantined_accounts_still_asks_whether_it_may_go_on() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut registry = Registry::default();
+        let emails: Vec<String> = ["a@example.com", "b@example.com", "c@example.com"]
+            .iter()
+            .map(|email| {
+                registry.upsert(crate::cycle::tests::account(email, vec![]));
+                registry.quarantine(email, Quarantine::RenewalRejected);
+                (*email).to_string()
+            })
+            .collect();
+        let mut perch = registry::lock(&host).expect("nobody holds it");
+        let installed = Ok(crate::probe::Installed::unknown("2.1.221"));
+
+        let mut asked = 0;
+        let report = refresh(
+            &host,
+            &mut perch,
+            &mut registry,
+            &emails,
+            &installed,
+            &mut || {
+                asked += 1;
+                match asked {
+                    1 => Ok(()),
+                    _ => Err(Lost::Stopped),
+                }
+            },
+        );
+
+        assert!(
+            host.http_calls().is_empty(),
+            "a Quarantined Account is not asked about, which is what leaves the \
+             ask nowhere else to be made"
+        );
+        assert_eq!(
+            report.stopped,
+            Some(Lost::Stopped),
+            "so the burst ends where the stop arrived"
+        );
+        assert_eq!(
+            report.attempts.len(),
+            1,
+            "rather than walking every Quarantined address to the end: {:?}",
             report.attempts
         );
     }
