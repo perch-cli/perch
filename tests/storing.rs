@@ -10,7 +10,7 @@ mod common;
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::EXIT_KEYCHAIN_UNAVAILABLE;
-use perch::host::{FakeHost, Platform};
+use perch::host::{FakeHost, Files, Platform};
 
 /// The Credential of an Account that has since Rotated several times: what a
 /// copy left behind in the store Perch stopped writing to would be.
@@ -484,7 +484,7 @@ fn a_store_that_would_not_take_the_write_at_all_keeps_the_credential_it_had() {
 }
 
 /// A Store that will not say what it holds is refused where it may hold
-/// something, and let be where it cannot.
+/// something, and let be where it holds nothing under this name.
 ///
 /// The keychain is read first on macOS, so a Credential behind a locked one
 /// wins every read after it opens rather than none.
@@ -495,13 +495,8 @@ fn a_store_that_will_not_answer_is_refused_only_where_it_may_hold_a_credential()
     host.lock_keychain("User interaction is not allowed");
     host.forget_notes();
 
-    let refused = perch::profile::store_credential(
-        &host,
-        &store,
-        CREDENTIAL,
-        perch::profile::Beforehand::Perhaps,
-    )
-    .expect_err("a locked keychain may be holding the Credential this replaces");
+    let refused = perch::profile::store_credential(&host, &store, CREDENTIAL)
+        .expect_err("a locked keychain may be holding the Credential this replaces");
     let said = refused.to_string();
     assert!(
         said.contains("would not say whether it still holds"),
@@ -512,14 +507,35 @@ fn a_store_that_will_not_answer_is_refused_only_where_it_may_hold_a_credential()
         "and the remedy is opening it, not emptying it: {said}"
     );
 
-    // The same store and the same lock, for a Profile the machine did not have:
-    // nothing has been written under a name derived from a path that did not
-    // exist, so there is nothing behind the lock to survive it.
-    perch::profile::store_credential(
-        &host,
-        &store,
-        CREDENTIAL,
-        perch::profile::Beforehand::Nothing,
-    )
-    .expect("nothing was ever written under this name");
+    // The same lock, for a name the keychain holds nothing under: it answers
+    // "no such item" through the lock, and nothing survives the lock opening.
+    let untouched = store_of(&host, "nobody@example.com");
+    perch::profile::make_dir(&host, &untouched.config_dir).expect("the Profile can be made");
+    perch::profile::store_credential(&host, &untouched, CREDENTIAL)
+        .expect("nothing is stored under this name");
+}
+
+/// A keychain item is keyed on a Profile directory's path and outlives the
+/// directory, so a directory the machine does not have is no evidence about
+/// what the keychain holds under its name. The case: `rm -rf ~/.perch` leaves
+/// every item behind, and the Import that follows writes the same paths.
+#[test]
+fn a_profile_the_machine_does_not_have_is_still_refused_where_the_keychain_kept_one() {
+    let host = machine_with_two_accounts();
+    let store = store_of(&host, EMAIL);
+
+    // The directory goes and the keychain item stays, which is the state a hand
+    // removal leaves. Perch has never seen this Profile directory.
+    host.remove_dir_all(&store.config_dir)
+        .expect("the directory can be taken out from under it");
+    assert!(!host.path_exists(&store.config_dir));
+    assert!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .is_some()
+    );
+
+    host.lock_keychain("User interaction is not allowed");
+    host.forget_notes();
+    perch::profile::create(&host, &store.config_dir, STALE)
+        .expect_err("the copy behind the lock wins every read after it opens");
 }

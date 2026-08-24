@@ -317,12 +317,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         // `.claude.json` that names it, so the Profile is made for the file
         // alone: dropped, it is a re-Export smaller than the one that made it.
         let stored = profile::make_dir(host, &store.config_dir).and_then(|()| match credential {
-            Some(credential) => profile::store_credential(
-                host,
-                &store,
-                credential,
-                profile::Beforehand::of(placed.touched[at].was_already_there),
-            ),
+            Some(credential) => profile::store_credential(host, &store, credential),
             None => Ok(()),
         });
         // Set as each step lands rather than before the first: a write that

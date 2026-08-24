@@ -287,12 +287,16 @@ mod tests {
     fn a_locked_keychain_is_a_failure_only_when_nothing_else_holds_a_credential() {
         let host = FakeHost::new();
         let store = profile_store(&host);
+        // Stored before the lock, because the lock is only reached for an item
+        // that is found: `security` matches on attributes before it needs the
+        // keychain open, and a name holding nothing exits 44 either way.
+        host.set_keychain_item(&store.keychain_service, &store.keychain_account, CREDENTIAL);
         host.lock_keychain("User interaction is not allowed");
 
         let error = read(&host, &store).unwrap_err();
         assert!(
             matches!(error, PerchError::KeychainUnavailable(_)),
-            "with nothing anywhere, the lock is the whole story: {error}"
+            "with nothing else anywhere, the lock is the whole story: {error}"
         );
 
         host.set_file(&store.credentials_file, CREDENTIAL);

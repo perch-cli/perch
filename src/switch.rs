@@ -348,13 +348,7 @@ fn perform(
 
         holds
             .around(|| {
-                profile::store_credential(
-                    host,
-                    &prepared.store,
-                    prepared.credential.as_str(),
-                    // A Switch writes into a Profile the machine already had.
-                    profile::Beforehand::Perhaps,
-                )
+                profile::store_credential(host, &prepared.store, prepared.credential.as_str())
             })
             .map_err(|error| error.with_note(&only_captured(&captured, outgoing, incoming)))?;
         incoming_is_live = true;
@@ -443,13 +437,7 @@ pub fn make_live(
         wrote_it_down = true;
 
         holds.around(|| {
-            profile::store_credential(
-                host,
-                &prepared.store,
-                prepared.credential.as_str(),
-                // A Switch writes into a Profile the machine already had.
-                profile::Beforehand::Perhaps,
-            )
+            profile::store_credential(host, &prepared.store, prepared.credential.as_str())
         })?;
         is_live = true;
         holds.around(|| patch_identity(host, &prepared))
@@ -809,14 +797,7 @@ fn capture(
         };
     }
 
-    // A Capture writes into the outgoing Account's own Profile, which is one
-    // the machine already had.
-    profile::store_credential(
-        host,
-        &outgoing.store(host)?,
-        live.as_str(),
-        profile::Beforehand::Perhaps,
-    )?;
+    profile::store_credential(host, &outgoing.store(host)?, live.as_str())?;
 
     Ok(Captured::Copied {
         from: outgoing.email().to_string(),

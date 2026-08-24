@@ -1049,10 +1049,9 @@ mod tests {
     /// work, and the user would find out on the day they needed it.
     #[test]
     fn a_store_that_will_not_say_what_it_holds_stops_the_whole_export() {
-        let host =
-            crate::host::FakeHost::new().with_locked_keychain("User interaction is not allowed");
+        let host = crate::host::FakeHost::new();
         let mut registry = Registry::default();
-        registry.upsert(Account {
+        let account = Account {
             identity: Identity {
                 email: "one@example.com".into(),
                 account_uuid: None,
@@ -1064,7 +1063,13 @@ mod tests {
             quarantine: None,
             group: None,
             utilization: None,
-        });
+        };
+        // Stored before the lock: the lock is reached only for an item that is
+        // found, and a name holding nothing answers "no such item" through it.
+        let store = account.store(&host).expect("the Profile can be named");
+        host.set_keychain_item(&store.keychain_service, &store.keychain_account, "held");
+        host.lock_keychain("User interaction is not allowed");
+        registry.upsert(account);
 
         let refused = gather(&host, &registry).expect_err("nothing can be read");
         assert!(refused.to_string().contains("one@example.com"), "{refused}");

@@ -208,8 +208,9 @@ code in one file rather than a rule about which sink a caller reached for.
   characters, which is what a parser wants and what a terminal draws.
 - `validate_name` refuses on the whole set, because a Group name and an Alias
   are chosen at a prompt and can be chosen again. `probe::read_identity` refuses
-  the address and the organization on `Cc` alone, because neither is anybody's
-  to change. `registry::validate` refuses neither.
+  the address on the whole set, because an address is a Target, and the
+  organization on `Cc` alone, because it is drawn and never typed.
+  `registry::validate` refuses neither.
 - The unshowable set moving is a name rule moving, so it moves the registry
   version with it and owes a step. `migration::forward` chains from whichever
   version a document claims, and every step lands on the rename pass.

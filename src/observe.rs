@@ -793,7 +793,7 @@ fn rotated_away(sent: &str, handed_back: Option<&str>) -> bool {
 fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -> Step<()> {
     // A Rotation writes into a Profile the machine already had, so a store
     // that will not answer may be holding the Credential this replaces.
-    profile::store_credential(host, store, rotated, profile::Beforehand::Perhaps).map_err(|error| {
+    profile::store_credential(host, store, rotated).map_err(|error| {
         if rotated_away {
             Outcome::Quarantined {
                 why: Quarantine::RotationLost,
