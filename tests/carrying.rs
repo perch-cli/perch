@@ -537,3 +537,49 @@ fn the_keys_of_a_project_entry_that_cross_are_named_in_one_place() {
         );
     }
 }
+
+/// The Profile a Run is launching is never a source, however it is spelled.
+///
+/// `~/.claude.json` is the Default Profile's identity file wherever the config
+/// directory is, so a dotfile manager linking it at a Profile's own hands one
+/// file two names — and every Run writes this one, so it outranks every source.
+#[test]
+fn the_profile_being_launched_is_no_source_under_a_second_spelling() {
+    let host = machine_with_three_accounts().with_login(client_exiting(0));
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
+        move_to_group(&host, email, "work")
+            .0
+            .expect("the Account joins the Group");
+    }
+
+    // The person's state, in the Profile of an Account that is neither active
+    // nor the one being run: the only real source of what should cross.
+    let theirs = profile_of(&host, THIRD_EMAIL).join(".claude.json");
+    host.set_file(&theirs, &a_file_in_use(THIRD_EMAIL, 9));
+
+    // `~/.claude.json` linked at the Profile this Run is about to launch.
+    let destination = profile_of(&host, SECOND_EMAIL).join(".claude.json");
+    host.set_file(&destination, &a_file_in_use(SECOND_EMAIL, 1));
+    host.remove_file(Path::new(THE_PERSONS_FILE))
+        .expect("the person's file is there to replace");
+    host.link(
+        perch::host::Link::Symbolic,
+        &destination,
+        Path::new(THE_PERSONS_FILE),
+    )
+    .expect("the link is made");
+
+    // The destination is what every Run writes, so it is always the newest.
+    used_at(&host, &theirs, 10);
+    used_at(&host, &destination, 12);
+    host.forget_effects();
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert_eq!(
+        read(&host, SECOND_EMAIL)["tipsHistory"]["ide-hotkey"],
+        serde_json::json!(9),
+        "the one real source is the Account that is neither active nor launched"
+    );
+}

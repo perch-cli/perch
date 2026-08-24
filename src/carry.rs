@@ -195,12 +195,23 @@ fn most_recently_used(
         .account(email)
         .and_then(|account| account.group.clone());
 
+    // `~/.claude.json` is the Default Profile's identity file wherever its config
+    // directory is, so a link at a Profile's own hands one file two names — and
+    // this one is written by every Run. Settled once for the many it is asked of.
+    let launching = host::settled(host, destination);
+    // Beside the resolved question rather than instead of it: a path that will
+    // not settle is nowhere, so the spelling is what answers for a loop of links.
+    let is_the_destination = |candidate: &Candidate| {
+        candidate.identity_file == *destination
+            || host::settled(host, &candidate.identity_file).is_the_same_place_as(&launching)
+    };
+
     let mut candidates: Vec<Candidate> = registry
         .accounts
         .iter()
         .filter(|account| may_cross(account, email, group.as_deref()))
         .filter_map(|account| where_it_works(host, registry, account, default_profile))
-        .filter(|candidate| candidate.identity_file != destination)
+        .filter(|candidate| !is_the_destination(candidate))
         .collect();
 
     // Most recently written first, and the directory the person actually works
