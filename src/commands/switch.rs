@@ -45,7 +45,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     // Before anything is decided, because everything after this reads which
     // Account is active and a registry holding a Landing does not know
     // (ADR a-switch-is-written-down-first).
-    switch::resolve_a_landing(host, &mut perch, &mut registry)?;
+    crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
 
     let Decision { incoming, chosen } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();

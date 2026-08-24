@@ -213,6 +213,24 @@ pub fn refreshed(
     }
 }
 
+/// The Landing settled, for the four Switch paths somebody types.
+///
+/// Nobody takes a typed command off the person who typed it, so the ask answers
+/// `Ok`, the walk runs to an answer, and the witness is discarded: none of the
+/// four has a step left that a stop would be in front of.
+pub fn a_settled_landing(
+    host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
+    registry: &mut crate::registry::Registry,
+) -> Result<()> {
+    match crate::switch::resolve_a_landing(host, perch, registry, &mut || Ok(()))? {
+        crate::switch::Resolved::Settled(_) => Ok(()),
+        crate::switch::Resolved::Stopped(_) => {
+            unreachable!("the ask a typed command passes answers `Ok`")
+        }
+    }
+}
+
 /// The passphrase somebody typed, or `None` when they typed none. Empty and end
 /// of input are one answer, because they are one event. What it *cost* is the
 /// caller's to say: an Export that was not written and one that was not opened

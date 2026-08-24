@@ -27,6 +27,7 @@ use perch::error::{EXIT_INVALID, EXIT_NOT_INTERCHANGEABLE};
 use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::prelude::*;
+use perch::registry::Active;
 use perch::watch::REFRESH_INTERVAL_MILLIS;
 
 /// The Credential of an Account whose access token ran out twenty minutes ago, so
@@ -1183,11 +1184,15 @@ fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
 
 #[test]
 fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() {
-    let host = watching(&[99.0], 1.0);
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
-    // A Rotation after the interruption: the corner nothing on the machine can account
-    // for.
-    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let unaccountable = || {
+        let host = watching(&[99.0], 1.0);
+        a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+        // A Rotation after the interruption: the corner nothing on the machine can
+        // account for.
+        host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+        host
+    };
+    let host = unaccountable();
 
     let (result, printed) = run_watch(&host);
 
@@ -1203,8 +1208,9 @@ fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() 
     );
 
     // A scheduler has to be told, which is the one difference between the two
-    // arrangements.
-    let (once, _) = run_watch_once(&host);
+    // arrangements. On a machine of its own, because the loop above ended by being
+    // asked to stop and a Check there would answer the stop rather than the Landing.
+    let (once, _) = run_watch_once(&unaccountable());
     assert_eq!(
         once.expect_err("a Check exits on it").exit_code(),
         perch::error::EXIT_CONFLICT
@@ -2010,5 +2016,93 @@ fn a_watch_handed_over_between_two_reads_of_the_burst_switches_nothing() {
     assert!(
         printed.contains("taken over"),
         "and the round says why it decided nothing: {printed}"
+    );
+}
+
+/// Settling a Landing walks the Credential Store of every Account Perch holds, and
+/// on a Mac with a locked keychain each of those is a prompt. It is the first thing
+/// a round does, so nothing but the ask at the top of the loop stands in front of it
+/// — and a Watcher already told to stop should reach none of them.
+#[test]
+fn a_stopped_watcher_arriving_on_a_landing_reads_no_credential_store() {
+    // Nought requests have gone out and nought is what it takes: the stop is in
+    // hand before the round opens.
+    let host = watched().with_interrupt_after_requests(0);
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.forget_effects();
+
+    let (result, printed) = run_watch_once(&host);
+
+    let code = result.expect("being asked to stop is not this Watcher's failure");
+    assert_eq!(code, perch::error::EXIT_HELD, "{printed}");
+    let read = host
+        .effects()
+        .iter()
+        .filter(|effect| matches!(effect, Effect::KeychainGet { .. }))
+        .count();
+    assert_eq!(
+        read,
+        0,
+        "the walk that settles the Landing spent a prompt per Account past the \
+         stop: {:?}\n{printed}",
+        host.effects()
+    );
+    assert_eq!(
+        *registry_of(&host).active(),
+        Active::Landing {
+            leaving: Some(EMAIL.to_string()),
+            arriving: SECOND_EMAIL.to_string(),
+        },
+        "and nothing was written, so the Landing is still there for whatever \
+         settles it next: {printed}"
+    );
+    assert!(
+        printed.contains("asked to stop"),
+        "and the line says why the round decided nothing: {printed}"
+    );
+}
+
+/// The bound the walk never had. It reads one Credential Store per Account and
+/// each read is a dialog somebody may walk away from, so the news that this
+/// Watcher is no longer the one to act arrives between two of them — where a
+/// stop asked for once, at the top of the round, is too early to hear it. The
+/// loop's arrangement, because a watch is taken over from a Watcher that is running.
+#[test]
+fn a_watch_handed_over_between_two_reads_of_the_walk_settles_nothing() {
+    let lock = "/Users/someone/.config/perch/.watch.lock";
+    // A minute at the dialog, so the watch hold comes up for its once-a-minute
+    // renewal at the ask in front of the walk's first read.
+    let host = watched()
+        .with_a_keychain_that_asks_first(60_000)
+        // While the live Credential is being read, which is the read the walk
+        // over the Accounts then compares against.
+        .once_while_waiting(move |host| {
+            let _ = host.remove_dir_all(std::path::Path::new(lock));
+        });
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.forget_effects();
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a watch taken over is not this Watcher's failure");
+    assert!(
+        printed.contains("taken the watch over"),
+        "the loop leaves saying the watch is somebody else's: {printed}"
+    );
+    let read: Vec<Effect> = host
+        .effects()
+        .into_iter()
+        .filter(|effect| matches!(effect, Effect::KeychainGet { .. }))
+        .collect();
+    assert_eq!(
+        read.len(),
+        1,
+        "the live Credential was read and then every Account was walked past the \
+         takeover: {read:?}\n{printed}"
+    );
+    assert!(
+        matches!(&registry_of(&host).active(), Active::Landing { .. }),
+        "and nothing was settled, because a Watcher that stopped reading \
+         established nothing: {printed}"
     );
 }

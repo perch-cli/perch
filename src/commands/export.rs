@@ -68,7 +68,7 @@ pub fn write_the_export(
     // Before a Credential Store is read: during a Landing the live one may be
     // either Account's, so each Credential would be gathered out of its own
     // Profile — where the outgoing Account's is the copy a Rotation retired.
-    crate::switch::resolve_a_landing(host, perch, registry)?;
+    crate::commands::a_settled_landing(host, perch, registry)?;
 
     if registry.accounts.is_empty() {
         return Err(PerchError::NotFound(

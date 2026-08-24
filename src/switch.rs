@@ -20,6 +20,7 @@ use crate::lock;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, Active, Quarantine, Registry, Scope};
+use crate::watch::{Lost, StillOurs};
 
 /// What the Capture found — the part of a Switch worth saying out loud, because
 /// it is what protects the Account being left behind.
@@ -493,18 +494,39 @@ pub fn nothing_in_flight(registry: &Registry) -> Option<Settled> {
     }
 }
 
+/// A Landing settled, or the walk that settles one stopped part way.
+///
+/// A stop is its own answer (ADR an-invariant-gets-a-door): the walk's other
+/// empty answer is *nothing on the machine says whose the live Credential is*,
+/// and a stop reported that way refuses a Landing nothing is wrong with.
+pub enum Resolved {
+    /// Settled, and written down.
+    Settled(Settled),
+    /// Nothing was read past the stop and nothing was written, so the Landing is
+    /// still in flight and whatever next takes this path settles it.
+    Stopped(Lost),
+}
+
 /// Settles a registry that holds a Landing, so what follows runs against a
 /// registry that tells the truth. A step of its own, ahead of everything else a
 /// Switch path does, and cheap where there is nothing to settle: one enum arm
-/// and no I/O at all, which is every command on every ordinary machine.
+/// and no I/O, which is every command on every ordinary machine. `still_ours`
+/// is a Watcher's; every other caller's is [`crate::commands::a_settled_landing`].
 pub fn resolve_a_landing(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
-) -> Result<Settled> {
+    still_ours: StillOurs<'_>,
+) -> Result<Resolved> {
     let Active::Landing { leaving, arriving } = registry.active().clone() else {
-        return Ok(Settled(()));
+        return Ok(Resolved::Settled(Settled(())));
     };
+
+    // Ahead of Claude Code's locks rather than under them: a Watcher already
+    // told to stop takes nothing from the machine and gives nothing back.
+    if let Err(lost) = still_ours() {
+        return Ok(Resolved::Stopped(lost));
+    }
 
     let store = registry::the_default_profile(host)?;
 
@@ -517,92 +539,107 @@ pub fn resolve_a_landing(
         // A store that will not answer says nothing about what it holds, and
         // what it holds is the whole of the evidence. Refused rather than
         // guessed at.
-        let live =
-            holds
-                .around(|| credentials::read(host, &store))
-                .map_err(|would_not_answer| {
-                    would_not_answer.with_note(&format!(
-                        "A Switch to {arriving} was in flight and was not recorded, \
+        let live = match asking_first(&mut holds, still_ours, || credentials::read(host, &store)) {
+            Err(lost) => return Ok(Resolved::Stopped(lost)),
+            Ok(read) => read.map_err(|would_not_answer| {
+                would_not_answer.with_note(&format!(
+                    "A Switch to {arriving} was in flight and was not recorded, \
                      and the live Credential is the only thing that says whether \
                      it happened.\n\
                      Nothing was changed. Make that store readable and run this \
                      again."
-                    ))
-                })?;
+                ))
+            })?,
+        };
 
-        let settled_on = whose_the_live_credential_is(
+        let settled_on = match whose_the_live_credential_is(
             host,
             &mut holds,
+            still_ours,
             registry,
             leaving.as_deref(),
             &arriving,
             live.as_ref().map(|held| held.credential.as_str()),
-        )
-        .ok_or_else(|| {
-            PerchError::Conflict(the_landing_is_unaccounted_for(
-                leaving.as_deref(),
-                &arriving,
-            ))
-        })?;
+        ) {
+            Err(lost) => return Ok(Resolved::Stopped(lost)),
+            Ok(Whose::Settles(on)) => on,
+            Ok(Whose::Unaccounted) => {
+                return Err(PerchError::Conflict(the_landing_is_unaccounted_for(
+                    leaving.as_deref(),
+                    &arriving,
+                )));
+            }
+        };
 
         registry.settle(settled_on);
         holds.around_a_registry_write(|perch| registry::save(host, perch, registry))?;
-        Ok(Settled(()))
+        Ok(Resolved::Settled(Settled(())))
     })
 }
 
-/// Which Account the live Credential belongs to, or `None` where nothing on the
-/// machine says. Two layers of `None`: the outer is *nothing says whose*, the
-/// inner is *nobody's, because nothing is live*. It takes the holds rather than
-/// being wrapped in one `around`, because the fallback spends a keychain prompt
-/// per Account and the config-file lock goes stale after ten seconds.
+/// Every keychain read on this path, asked for first.
+///
+/// The one door the ask reaches this file through: on a Mac with a locked
+/// keychain each read is a prompt, the walk below makes one per Account, and a
+/// Watcher told to stop part way through makes no more of them.
+fn asking_first<T>(
+    holds: &mut lock::Holds<'_, '_, '_>,
+    still_ours: StillOurs<'_>,
+    read: impl FnOnce() -> T,
+) -> std::result::Result<T, Lost> {
+    still_ours()?;
+    Ok(holds.around(read))
+}
+
+/// What the live Credential says about who is active. A stop is not one of the
+/// answers: it is what the walk was interrupted instead of reaching, so it
+/// travels as the `Err` of the walk rather than as an arm here.
+enum Whose {
+    /// The Account to settle on. `None` is a machine on nobody, which is what
+    /// nothing live and a Switch that was leaving nobody come to.
+    Settles(Option<String>),
+    /// Nothing on the machine says.
+    Unaccounted,
+}
+
+/// Which Account the live Credential belongs to. It takes the holds rather than
+/// being wrapped in one `around`, because the walk spends a keychain prompt per
+/// Account and the config-file lock goes stale after ten seconds.
 fn whose_the_live_credential_is(
     host: &dyn Host,
     holds: &mut lock::Holds<'_, '_, '_>,
+    still_ours: StillOurs<'_>,
     registry: &Registry,
     leaving: Option<&str>,
     arriving: &str,
     live: Option<&str>,
-) -> Option<Option<String>> {
+) -> std::result::Result<Whose, Lost> {
     // Nothing live is nothing a later Capture could destroy, so this reading has
     // nothing at stake: a `claude /logout` mid-Switch is what it looks like.
     let Some(live) = live else {
-        return Some(leaving.map(str::to_string));
+        return Ok(Whose::Settles(leaving.map(str::to_string)));
     };
 
-    let holding = |holds: &mut lock::Holds<'_, '_, '_>, account: &Account| {
-        holds
-            .around(|| held_by(host, account))
-            .is_some_and(|held| *held == live)
-    };
+    // Arriving, then leaving, then everybody else. The two named by the Landing
+    // are where the answer nearly always is, and each Account past them costs a
+    // prompt.
+    let named = [Some(arriving), leaving]
+        .into_iter()
+        .flatten()
+        .filter_map(|email| registry.account(email));
+    let rest = registry.accounts.iter().filter(|account| {
+        !registry::same_name(account.email(), arriving)
+            && !leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
+    });
 
-    if registry
-        .account(arriving)
-        .is_some_and(|account| holding(holds, account))
-    {
-        return Some(Some(arriving.to_string()));
-    }
-    if let Some(leaving) = leaving
-        && registry
-            .account(leaving)
-            .is_some_and(|account| holding(holds, account))
-    {
-        return Some(Some(leaving.to_string()));
-    }
-
-    // A `for` rather than a `find`, because the predicate renews the holds and
-    // so is `FnMut` over them.
-    for account in &registry.accounts {
-        if registry::same_name(account.email(), arriving)
-            || leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
+    for account in named.chain(rest) {
+        if let Some(held) = asking_first(holds, still_ours, || held_by(host, account))?
+            && *held == live
         {
-            continue;
-        }
-        if holding(holds, account) {
-            return Some(Some(account.email().to_string()));
+            return Ok(Whose::Settles(Some(account.email().to_string())));
         }
     }
-    None
+    Ok(Whose::Unaccounted)
 }
 
 /// The corner that stays undecidable: a Landing in flight, and a live Credential
