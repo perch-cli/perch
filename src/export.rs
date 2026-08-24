@@ -398,10 +398,18 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<(Export, Vec<crate::migr
 /// A fact about reading *this* Export on *this* build, so it belongs to the read
 /// rather than to the document. Empty for every Export this build wrote.
 fn renamed_coming_forward(plain: &[u8]) -> Vec<crate::migration::Renamed> {
-    let Ok(document) = serde_json::from_slice::<serde_json::Value>(plain) else {
-        return Vec::new();
-    };
-    let Some(registry) = document.get("registry") else {
+    // The one field, so serde skips the two holding secrets rather than building
+    // a `String` per Credential that nothing wipes. `refuse_a_newer_perch` reads
+    // the versions the same way.
+    #[derive(Deserialize)]
+    struct JustTheRegistry {
+        registry: Option<serde_json::Value>,
+    }
+
+    let Ok(JustTheRegistry {
+        registry: Some(registry),
+    }) = serde_json::from_slice::<JustTheRegistry>(plain)
+    else {
         return Vec::new();
     };
     crate::migration::renames(&registry.to_string())

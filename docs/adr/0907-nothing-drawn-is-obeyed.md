@@ -146,12 +146,21 @@ first run exited `EXIT_PROBE_REFUSED` and `perch add` could not complete, over a
 value nobody can change from Perch — the failure this document exists to prevent,
 one boundary further out than where it was looked for.
 
-So the two questions are two predicates. `host::control_character_in` is `Cc`,
-and answers for framing: the two protocols Perch writes a line of, and the
-boundary a value nobody chose arrives at. `host::unshowable_character_in` is the
-whole set, and answers for drawing: `validate_name`, whose value somebody chose
-and can change. What arrives carrying only a drawing harm is drawn stripped,
-which is what the section below already says the type is for.
+So the two questions are two predicates. `host::control_character_in` is `Cc`
+and answers for framing; `host::unshowable_character_in` is the whole set and
+answers for drawing.
+
+Which one a boundary asks turns on whether the value is ever *typed*. An address
+is a Target — `perch switch someone@example.com` — so two that draw alike have
+no single answer, and the section below's argument that this harm is survivable
+rests on none of these values being a Target. `registry::validate` refuses
+neither address nor organization on the stated grounds that `probe::read_identity`
+refuses both, so an address narrowed there is one nothing refuses at all. It gets
+the whole set. An organization is drawn and never typed, and is Anthropic's to
+spell rather than anybody's to change, so it gets `Cc`.
+
+`validate_name` gets the whole set for the plainer reason: its value is chosen at
+a prompt and can be chosen again.
 
 ## What it does not buy
 
