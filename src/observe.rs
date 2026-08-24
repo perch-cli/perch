@@ -791,7 +791,9 @@ fn rotated_away(sent: &str, handed_back: Option<&str>) -> bool {
 /// Where Anthropic Rotated, the old refresh token died the moment the new one arrived,
 /// so this is not a write to try again.
 fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -> Step<()> {
-    profile::store_credential(host, store, rotated).map_err(|error| {
+    // A Rotation writes into a Profile the machine already had, so a store
+    // that will not answer may be holding the Credential this replaces.
+    profile::store_credential(host, store, rotated, profile::Beforehand::Perhaps).map_err(|error| {
         if rotated_away {
             Outcome::Quarantined {
                 why: Quarantine::RotationLost,

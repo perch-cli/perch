@@ -13,6 +13,30 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::{self, Store};
 
+/// What this Profile's Stores could have been holding before the write.
+///
+/// The one fact a Store that will not answer cannot supply about itself, and
+/// knowable only before the directory is made — so it is the caller's to carry
+/// rather than something [`store_credential`] can ask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Beforehand {
+    /// Nothing. The directory was not on the machine, so nothing has been
+    /// written under the keychain service name its path is hashed into.
+    Nothing,
+    /// Perhaps a Credential: the Profile was already here.
+    Perhaps,
+}
+
+impl Beforehand {
+    /// What a caller that asked `path_exists` before making the directory found.
+    pub fn of(was_already_there: bool) -> Beforehand {
+        match was_already_there {
+            true => Beforehand::Perhaps,
+            false => Beforehand::Nothing,
+        }
+    }
+}
+
 /// Makes a Profile's directory, if it is not already there.
 ///
 /// One copy of it, because both paths that bring a Profile into being — a login
@@ -32,7 +56,7 @@ pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
     make_dir(host, dir)?;
 
     let store = probe::store_for_profile(host, dir)?;
-    if let Err(error) = store_credential(host, &store, credential) {
+    if let Err(error) = store_credential(host, &store, credential, Beforehand::of(!made_here)) {
         // Here rather than at the callers, all three of which open their undo
         // with the Store this hands back — so this failure is outside every one
         // of them, and what it leaves nothing walks. Only a directory this made.
@@ -49,7 +73,12 @@ pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
 ///
 /// **A Live Profile is not written into**, and the caller checks that under
 /// whatever lock it writes (ADR a-profile-is-live-by-evidence).
-pub fn store_credential(host: &dyn Host, store: &Store, credential: &str) -> Result<()> {
+pub fn store_credential(
+    host: &dyn Host,
+    store: &Store,
+    credential: &str,
+    beforehand: Beforehand,
+) -> Result<()> {
     let [primary, fallback] = credentials::stores_for(host, store);
 
     match write_and_read_back(host, &primary, credential) {
@@ -67,7 +96,7 @@ pub fn store_credential(host: &dyn Host, store: &Store, credential: &str) -> Res
                 // The store that was not written is the one a reader prefers,
                 // so a copy surviving there would win over what was just
                 // written. Safe now and not before: this one has been read back.
-                supersede_or_fail(host, &primary, &fallback)?;
+                supersede_or_fail(host, &primary, &fallback, beforehand)?;
                 Ok(())
             }
             // Either store may now be sitting on a value that is neither the
@@ -122,31 +151,49 @@ fn supersede(host: &dyn Host, other: &CredentialStore) {
 
 /// The same, in the direction where a copy left behind is a wrong answer.
 ///
-/// Only a store that still hands a Credential back is a failure — one that will
-/// not answer leaves a copy that cannot win, because the read that would prefer
-/// it fails the same way.
+/// A store that will not answer is asked of `beforehand` instead: a lock is for
+/// a spell, and a copy behind one wins every read after it opens.
 fn supersede_or_fail(
     host: &dyn Host,
     preferred: &CredentialStore,
     written: &CredentialStore,
+    beforehand: Beforehand,
 ) -> Result<()> {
     let Err(refused) = preferred.forget(host) else {
         return Ok(());
     };
-    if !matches!(preferred.read(host), Ok(Some(_))) {
-        host.note(&format!(
-            "A superseded copy of a Credential could not be removed from {}.",
-            preferred.describe()
-        ));
-        return Ok(());
+    let said = match (preferred.read(host), beforehand) {
+        // It says so itself, whatever it was holding before.
+        (Ok(None), _) => None,
+        // Nothing was ever written under this store's name, so there is nothing
+        // behind the lock to survive it.
+        (Err(_), Beforehand::Nothing) => None,
+        (Err(_), Beforehand::Perhaps) => Some(format!(
+            "The Credential was written to {}, but {} would not say whether it \
+             still holds the one it replaces — and that is the store read first. \
+             A lock is for a spell: whatever is behind this one wins every read \
+             after it opens. Open it and run this again.",
+            written.describe(),
+            preferred.describe(),
+        )),
+        (Ok(Some(_)), _) => Some(format!(
+            "The Credential was written to {}, but the copy it replaces is still \
+             in {} — which is the store read first, so it is the one Claude Code \
+             would go on using. Empty it and run this again.",
+            written.describe(),
+            preferred.describe(),
+        )),
+    };
+    match said {
+        Some(said) => Err(refused.with_note(&said)),
+        None => {
+            host.note(&format!(
+                "A superseded copy of a Credential could not be removed from {}.",
+                preferred.describe()
+            ));
+            Ok(())
+        }
     }
-    Err(refused.with_note(&format!(
-        "The Credential was written to {}, but the copy it replaces is still in \
-         {} — which is the store read first, so it is the one Claude Code would \
-         go on using. Empty it and run this again.",
-        written.describe(),
-        preferred.describe(),
-    )))
 }
 
 /// A write that did not end with the store holding the Credential.

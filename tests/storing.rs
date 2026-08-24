@@ -482,3 +482,44 @@ fn a_store_that_would_not_take_the_write_at_all_keeps_the_credential_it_had() {
     );
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
+
+/// A Store that will not say what it holds is refused where it may hold
+/// something, and let be where it cannot.
+///
+/// The keychain is read first on macOS, so a Credential behind a locked one
+/// wins every read after it opens rather than none.
+#[test]
+fn a_store_that_will_not_answer_is_refused_only_where_it_may_hold_a_credential() {
+    let host = machine_with_two_accounts();
+    let store = store_of(&host, EMAIL);
+    host.lock_keychain("User interaction is not allowed");
+    host.forget_notes();
+
+    let refused = perch::profile::store_credential(
+        &host,
+        &store,
+        CREDENTIAL,
+        perch::profile::Beforehand::Perhaps,
+    )
+    .expect_err("a locked keychain may be holding the Credential this replaces");
+    let said = refused.to_string();
+    assert!(
+        said.contains("would not say whether it still holds"),
+        "the refusal says what could not be established: {said}"
+    );
+    assert!(
+        said.contains("Open it and run this again"),
+        "and the remedy is opening it, not emptying it: {said}"
+    );
+
+    // The same store and the same lock, for a Profile the machine did not have:
+    // nothing has been written under a name derived from a path that did not
+    // exist, so there is nothing behind the lock to survive it.
+    perch::profile::store_credential(
+        &host,
+        &store,
+        CREDENTIAL,
+        perch::profile::Beforehand::Nothing,
+    )
+    .expect("nothing was ever written under this name");
+}
