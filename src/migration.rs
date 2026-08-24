@@ -205,9 +205,8 @@ fn rename_what_this_build_refuses(held: &mut Map<String, Value>) {
         held.insert("accounts".to_string(), Value::Array(carried));
     }
     if let Some(Value::Object(checks)) = held.get("checks") {
-        // `ungrouped` is a legitimate key here and is no Group, and every rename
-        // lands on a name nothing else in the namespace answers to — so no two
-        // keys can arrive at one.
+        // `ungrouped` is a legitimate key here and is no Group, so it keeps its
+        // spelling rather than being looked for among the renames.
         let carried = checks
             .iter()
             .map(
@@ -495,14 +494,24 @@ fn what_was_renamed(renamed: &[Renamed]) -> String {
     }
     let said: Vec<String> = renamed
         .iter()
-        .map(|entry| {
-            format!(
-                "{} `{}` is now `{}`",
-                entry.kind.article(),
-                entry.was,
-                entry.is_now
-            )
-        })
+        .map(
+            |entry| match crate::host::unshowable_character_in(&entry.was) {
+                // The old name is drawn through `Shown`, which takes out the very
+                // character the rename was for — so `dev\u{FE00}` would be quoted
+                // as `dev`, beside a `dev` the step did not touch.
+                Some(said) => format!(
+                    "{} carrying {said} is now `{}`",
+                    entry.kind.article(),
+                    entry.is_now
+                ),
+                None => format!(
+                    "{} `{}` is now `{}`",
+                    entry.kind.article(),
+                    entry.was,
+                    entry.is_now
+                ),
+            },
+        )
         .collect();
     format!(
         "\n\nThis build refuses names it once accepted, so {} — nothing else \

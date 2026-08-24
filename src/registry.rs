@@ -564,12 +564,12 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     // Whitespace is not the whole of what a terminal will not echo back: an
     // escape is no `char::is_whitespace` and moves the column, and a character
     // that draws as nothing makes two names one row.
-    if let Some(said) = crate::host::control_character_in(name) {
+    if let Some(said) = crate::host::unshowable_character_in(name) {
         return Err(PerchError::Invalid(format!(
-            "{} are drawn as they are held, and this one carries {said} — so a \
-             character that draws as nothing makes two names one row in every \
-             listing, and one a terminal acts on moves the column and colors \
-             the row.",
+            "{} are drawn as they are held, and this one carries {said} — so two \
+             names nothing on screen tells apart are one row in every listing, \
+             and a character a terminal acts on moves the column and colors the \
+             row.",
             kind.names()
         )));
     }
@@ -2298,13 +2298,13 @@ mod tests {
                 NameKind::Group,
                 "\u{202e}gpj.exe",
                 None,
-                Some("a formatting character (U+202E)"),
+                Some("a character a terminal does not draw as itself (U+202E)"),
             ),
             (
                 NameKind::Alias,
                 "wo\u{200b}rk",
                 None,
-                Some("a formatting character (U+200B)"),
+                Some("a character a terminal does not draw as itself (U+200B)"),
             ),
             // The word joiner and the bidi isolates, which are the same harm
             // under two more blocks of the table.
@@ -2312,13 +2312,13 @@ mod tests {
                 NameKind::Group,
                 "wo\u{2060}rk",
                 None,
-                Some("a formatting character (U+2060)"),
+                Some("a character a terminal does not draw as itself (U+2060)"),
             ),
             (
                 NameKind::Group,
                 "\u{2066}gpj.exe",
                 None,
-                Some("a formatting character (U+2066)"),
+                Some("a character a terminal does not draw as itself (U+2066)"),
             ),
         ];
 

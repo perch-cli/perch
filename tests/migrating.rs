@@ -929,3 +929,34 @@ fn a_name_no_version_2_perch_accepted_is_named_rather_than_renamed() {
         "and the file to edit: {said}"
     );
 }
+
+/// The note names the character rather than the name it is in.
+///
+/// The old name is drawn through `Shown`, which takes out the very character the
+/// rename was for — so quoting it would say a Group `dev` became `dev-1` while
+/// an untouched Group of exactly that name sits beside it in the same registry.
+#[test]
+fn the_note_for_a_rename_names_the_character_that_caused_it() {
+    let document = a_v2_registry_naming("dev\u{FE00}", "the-alias");
+    let held: serde_json::Value = serde_json::from_str(&document).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    let mut groups = held["groups"].as_object().cloned().expect("groups");
+    groups.insert(
+        "dev".to_string(),
+        groups.values().next().cloned().expect("settings"),
+    );
+    held.insert("groups".to_string(), serde_json::Value::Object(groups));
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let said = host.notes().join("\n");
+    assert!(
+        said.contains("carrying a character a terminal does not draw as itself (U+FE00)"),
+        "the note names the character: {said}"
+    );
+    assert!(
+        !said.contains("a Group `dev` is now"),
+        "and never quotes the stripped name, which is a Group this registry holds: {said}"
+    );
+}
