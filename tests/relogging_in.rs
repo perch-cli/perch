@@ -710,6 +710,42 @@ fn a_repair_that_could_not_be_recorded_says_the_login_worked_and_not_to_switch()
     );
 }
 
+/// The write that records a landing as landed is the third registry write of a
+/// repair, and it is the one `make_live` makes for its callers — `perch relogin`
+/// makes none of its own. A `perch switch` that cannot make it says so, and so
+/// does a `perch remove`; this was the one door of the three that did not.
+#[test]
+fn a_repair_whose_landing_could_not_be_recorded_says_so_rather_than_claiming_it_landed() {
+    let host = logged_in_machine_off_macos().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login");
+    quarantine(&host, EMAIL);
+
+    // Two writes land — the repair, and the Landing written down before the
+    // Credential moves — and the third does not. A registry lock taken over
+    // mid-command reaches the same refusal.
+    let host = host.with_a_file_unwritable_after(REGISTRY_PATH, 2, "read-only file system");
+
+    let (result, printed) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("the landing could not be recorded");
+    let said = error.to_string();
+    assert!(
+        said.contains("fresh Credential is the live one"),
+        "the half that happened is said, so the browser round trip is not \
+         repeated for nothing: {said}"
+    );
+    assert!(
+        !printed.contains("Its fresh Credential is the live one."),
+        "and the unqualified line is not also printed: {printed}"
+    );
+    assert!(
+        matches!(*registry_of(&host).active(), Active::Landing { .. }),
+        "the registry really is left mid-Switch, which is what there was to say"
+    );
+}
+
 #[test]
 fn a_repair_that_could_not_be_made_live_still_stands_and_says_what_is_left() {
     // Off macOS, so the Default Profile's Credential is the file below and the

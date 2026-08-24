@@ -197,8 +197,8 @@ struct Environment {
     user_id: RefCell<Option<u32>>,
 }
 
-/// What is on disk, links included. Twelve fields and not split into `Files` and
-/// `Links`, because the traffic runs both ways: `files`, `modes`, `dirs`,
+/// What is on disk, links included. Fourteen fields and not split into `Files`
+/// and `Links`, because the traffic runs both ways: `files`, `modes`, `dirs`,
 /// `modified`, `unwritable` and `undeletable` are all read from the
 /// `port::Links` block, and `links` is read from the `port::Files` one.
 struct Filesystem {
@@ -212,6 +212,11 @@ struct Filesystem {
     /// Paths whose bytes are not text, which the fake cannot hold as one.
     not_text: RefCell<BTreeSet<PathBuf>>,
     unwritable: RefCell<BTreeMap<PathBuf, String>>,
+    /// Paths that take so many more writes and then refuse every one after
+    /// them. What `unwritable` cannot stand in for: a command whose first write
+    /// has to land and whose third must not has no closure a test could reach
+    /// between the two.
+    unwritable_after: RefCell<BTreeMap<PathBuf, (usize, String)>>,
     /// Paths that will not give up what they hold. Distinct from an unwritable
     /// one: a store that refuses a write is routinely one a superseded copy can
     /// still be cleared out of.
@@ -370,6 +375,7 @@ impl FakeHost {
                 unreadable: RefCell::new(BTreeMap::new()),
                 not_text: RefCell::new(BTreeSet::new()),
                 unwritable: RefCell::new(BTreeMap::new()),
+                unwritable_after: RefCell::new(BTreeMap::new()),
                 unlistable: RefCell::new(BTreeMap::new()),
                 undeletable: RefCell::new(BTreeMap::new()),
                 corrupting: RefCell::new(BTreeSet::new()),
@@ -597,6 +603,24 @@ impl FakeHost {
     /// fixture.
     pub fn writable_again(&self, path: impl AsRef<Path>) {
         self.fs.unwritable.borrow_mut().remove(path.as_ref());
+    }
+
+    /// A path that takes `writes` more writes and refuses every one after them.
+    /// The failure a command meets partway through its own write sequence — a
+    /// lock taken over, a volume remounted read-only — where
+    /// [`set_unwritable`](Self::set_unwritable) has no moment to be called at
+    /// because the command hands the test no closure between the two writes.
+    pub fn with_a_file_unwritable_after(
+        self,
+        path: impl AsRef<Path>,
+        writes: usize,
+        detail: &str,
+    ) -> Self {
+        self.fs
+            .unwritable_after
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), (writes, detail.to_string()));
+        self
     }
 
     /// A file that is there and will not go — a directory whose permissions
@@ -1442,6 +1466,14 @@ impl port::Files for FakeHost {
         let intended = self.intended(path);
         if let Some(detail) = self.fs.unwritable.borrow().get(&intended) {
             return Err(HostError::Other(detail.clone()));
+        }
+        // Counted against the file the write is *for*, so one logical write is
+        // one tick however many the `replace_via_tmp` beside it costs.
+        if let Some((left, detail)) = self.fs.unwritable_after.borrow_mut().get_mut(&intended) {
+            match *left {
+                0 => return Err(HostError::Other(detail.clone())),
+                _ => *left -= 1,
+            }
         }
         // Resolved *before* the parents are made, and made at the resolved place:
         // `resolved` looks in `dirs` before `links`, so making the addressed
