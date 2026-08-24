@@ -562,13 +562,14 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
         )));
     }
     // Whitespace is not the whole of what a terminal will not echo back: an
-    // escape is no `char::is_whitespace`, and a name holding one is written raw
-    // into every later listing, where it moves the column and colors the row.
+    // escape is no `char::is_whitespace` and moves the column, and a character
+    // that draws as nothing makes two names one row.
     if let Some(said) = crate::host::control_character_in(name) {
         return Err(PerchError::Invalid(format!(
-            "{} carries {said}, which no line of Perch's output could show as \
-             part of a name — `perch list` writes what it holds, so a name a \
-             terminal reads as an instruction is one every later listing obeys.",
+            "{} are drawn as they are held, and this one carries {said} — so a \
+             character that draws as nothing makes two names one row in every \
+             listing, and one a terminal acts on moves the column and colors \
+             the row.",
             kind.names()
         )));
     }
