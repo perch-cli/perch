@@ -66,6 +66,13 @@ this build's rules with the newly-unshowable characters still drawn. A name no
 build of that version ever wrote is a hand edit — named at `load` and left, the
 same answer `acceptable` gives a version 1 name no suffix rescues.
 
+Both ways a registry arrives say what was renamed. `bring_forward` says it about
+this machine's own file, after the write; an Import says it about the Export's,
+before one. `unseal` hands the renames back beside the document rather than
+carrying them on it, `coming_forward` being a `Deserialize` with nowhere to put
+them — and what a step renamed is a fact about reading that Export on this build
+rather than a field of it.
+
 ## One version, two shapes
 
 v0.1.0 and v0.1.1 wrote `groups` as a map of whole `GroupConfig` values, a

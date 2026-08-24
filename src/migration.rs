@@ -489,8 +489,16 @@ fn what_the_step_could_not_carry(was: u64) -> String {
 /// What the step had to rename, for the note, or nothing where it renamed
 /// nothing.
 fn what_was_renamed(renamed: &[Renamed]) -> String {
+    // Two newlines because this one is appended to a note that has already said
+    // the version moved; the Import's stands alone.
+    what_was_renamed_said(renamed).map_or_else(String::new, |said| format!("\n\n{said}"))
+}
+
+/// The same as a sentence of its own, for the other way a registry comes
+/// forward: an Import, which says it before it writes rather than after.
+pub fn what_was_renamed_said(renamed: &[Renamed]) -> Option<String> {
     if renamed.is_empty() {
-        return String::new();
+        return None;
     }
     let said: Vec<String> = renamed
         .iter()
@@ -513,15 +521,15 @@ fn what_was_renamed(renamed: &[Renamed]) -> String {
             },
         )
         .collect();
-    format!(
-        "\n\nThis build refuses names it once accepted, so {} — nothing else \
-         about {} changed.",
+    Some(format!(
+        "This build refuses names it once accepted, so {} — nothing else about \
+         {} changed.",
         said.join(", "),
         match renamed.len() {
             1 => "it",
             _ => "them",
         },
-    )
+    ))
 }
 
 /// The version on disk, where [`forward`] has a step that moves it.

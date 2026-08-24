@@ -657,8 +657,10 @@ const SPELLINGS: &[&str] = &[
 ];
 
 /// The characters every name rule so far has turned on. Three deep, which is a
-/// leading character, a body and a trailing one — enough for every rule that
-/// reads the ends of a name apart from its middle.
+/// leading character, a body and a trailing one, and enough for all of them:
+/// every rule is per-character or a whole-string `same_name` against a reserved
+/// word, and the reserved words are spelled out above rather than reached for.
+/// Driven at four, the corpus finds nothing and costs eight seconds.
 const ALPHABET: &[char] = &['a', '-', '\u{1b}', '\u{202e}', 'Σ', 'ς', '.', '0'];
 
 /// Every spelling a published Perch would have let somebody create, out of the
@@ -804,6 +806,7 @@ fn a_version_2_perch_accepted(name: &str) -> bool {
 /// The characters version 3 added to the unshowable set, beside two it already
 /// had and one ordinary letter: a name is made of what it is allowed and what it
 /// is not, and the pairs either side of a boundary are where a rule reads wrong.
+/// Three deep for the reason [`ALPHABET`] is.
 const V2_ALPHABET: &[char] = &[
     'a', '-', '\u{FE00}', '\u{3164}', '\u{034F}', '\u{2065}', '\u{1b}', '\u{202e}',
 ];
