@@ -443,15 +443,21 @@ pub fn make_live(
         holds.around(|| patch_identity(host, &prepared))
     });
 
-    // On every way out, because the two callers write the registry on different
-    // subsets of them: `perch remove` records the successor only where the
-    // Credential went live, and `perch relogin` writes nothing at all.
+    // On every way out: `perch remove` records the successor only where the
+    // Credential went live, and `perch relogin` writes nothing at all. Reported
+    // where the sequence worked, since no failure is left to carry the news.
     if wrote_it_down {
-        let settled_on = match is_live {
-            true => Some(account.email().to_string()),
-            false => leaving,
-        };
-        take_the_landing_back(host, perch, registry, settled_on);
+        match landed.is_ok() {
+            true => record_active(host, perch, registry, account.email())
+                .map_err(|error| NotLanded { error, is_live })?,
+            false => {
+                let settled_on = match is_live {
+                    true => Some(account.email().to_string()),
+                    false => leaving,
+                };
+                take_the_landing_back(host, perch, registry, settled_on);
+            }
+        }
     }
 
     landed.map_err(|error| NotLanded { error, is_live })
