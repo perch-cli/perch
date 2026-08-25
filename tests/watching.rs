@@ -1827,6 +1827,27 @@ fn a_claude_code_holding_its_own_lock_is_a_refusal_rather_than_an_unread_figure(
     );
 }
 
+/// The same lock, met inside the Switch rather than at the top of the round.
+/// `PerchError::Busy` carries `EXIT_HELD` so a scheduler can tell "come back in a
+/// minute" from "this will fail the same way for ever", and a Check that read its
+/// figure and was then turned away by a lock is the first of those.
+#[test]
+fn a_check_turned_away_by_a_lock_inside_the_switch_still_says_come_back() {
+    let host = watching(&[86.0], 5.0);
+    let holding_since = host.now();
+    let host = host.with_dir_held_since("/Users/someone/.claude.json.lock", holding_since);
+
+    let (result, printed) = run_watch_once(&host);
+
+    let code = result.expect("a lock somebody is holding is not a failed check");
+    assert_eq!(code, perch::error::EXIT_HELD, "{printed}");
+    assert!(
+        printed.contains("refused"),
+        "and the round still reads as one that decided and was turned away, \
+         rather than as one with nothing to decide on: {printed}"
+    );
+}
+
 #[test]
 fn a_check_held_settling_a_landing_says_so_on_standard_output() {
     let host = watching(&[86.0], 5.0);

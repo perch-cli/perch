@@ -868,6 +868,10 @@ fn act(
                 | PerchError::Busy(_)),
             ..
         }) => Ok(Outcome::Refused {
+            // A lock is the one of the three a scheduler should come straight back
+            // for, and the round is read as `refused` either way: it decided on a
+            // figure it had read, which is what tells it from a hold.
+            contended: matches!(error, PerchError::Busy(_)),
             why: error.to_string(),
             // Every candidate was read to get here.
             after_reading: true,

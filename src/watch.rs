@@ -599,9 +599,13 @@ pub enum Outcome {
     /// A Switch was wanted, attempted, and turned away without changing anything — most
     /// often a client running against the Profile the Capture would write into
     /// (ADR a-profile-is-live-by-evidence). Only where waiting is an answer: a failure
-    /// that does not clear itself is reported as itself instead. `after_reading` is
-    /// whether the candidates were read first, which decides how long the loop rests.
-    Refused { why: String, after_reading: bool },
+    /// that does not clear itself is reported as itself instead. `after_reading` paces
+    /// the loop's next round, and `contended` decides the exit code.
+    Refused {
+        why: String,
+        after_reading: bool,
+        contended: bool,
+    },
     /// The watch was taken over between the reading and the Switch. Its own outcome
     /// rather than a [`Outcome::Refused`], because a scheduler branching on "nothing
     /// to do" would record a round that was in fact displaced.
@@ -622,6 +626,12 @@ impl Outcome {
     pub fn exit_code(&self) -> i32 {
         match self {
             Outcome::Switched { .. } => EXIT_OK,
+            // A lock somebody else holds, whichever end of the round met it: nothing
+            // was changed and asking again is what resolves it, which is the one thing
+            // `EXIT_NOTHING_TO_DO` would not tell a scheduler.
+            Outcome::Refused {
+                contended: true, ..
+            } => EXIT_HELD,
             // Nothing to do *now*, three ways: the Account is not full enough, the
             // cooldown is not up, or a client was holding the Profile and will not be
             // holding it for long.
@@ -669,6 +679,7 @@ pub fn refused_or_raised(not_idle: NotIdle) -> Result<Outcome> {
             why: PerchError::ProfileLive(why).to_string(),
             // Asked before the burst, so nothing has been spent on it.
             after_reading: false,
+            contended: false,
         }),
         // Neither of these clears itself: a `sessions` directory nobody can read and an
         // address no Profile can be named after are both a machine somebody has to look
@@ -1163,6 +1174,7 @@ mod tests {
             Outcome::Refused {
                 why: "a client is running against that Profile.".to_string(),
                 after_reading: false,
+                contended: false,
             },
         )
         .line(now());
@@ -1206,6 +1218,7 @@ mod tests {
                 Outcome::Refused {
                     why: "a client is running against that Profile.".to_string(),
                     after_reading: false,
+                    contended: false,
                 },
             ),
             round(
@@ -1347,6 +1360,7 @@ mod tests {
             Outcome::Refused {
                 why: String::new(),
                 after_reading: false,
+                contended: false,
             },
             Outcome::HandedOver { why: String::new() },
             Outcome::Stopped { why: String::new() },
@@ -1440,6 +1454,7 @@ mod tests {
             Outcome::Refused {
                 why: String::new(),
                 after_reading: false,
+                contended: false,
             },
         ] {
             let round = round(at(86.0), outcome);
@@ -1475,6 +1490,7 @@ mod tests {
                 Outcome::Refused {
                     why: String::new(),
                     after_reading: true,
+                    contended: false,
                 }
             )
             .waiting_for(),
