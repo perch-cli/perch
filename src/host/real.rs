@@ -2217,7 +2217,7 @@ mod tests {
     }
 
     /// A request that says how long it may take gets that, and one that does not
-    /// gets the ordinary bound. The upgrade check on `perch --version` is a line
+    /// gets the ordinary bound. The upgrade check on `perch version` is a line
     /// nobody asked for, and thirty seconds of a black-holed network is a great
     /// deal to spend on one (ADR an-upgrade-asks-its-channel).
     #[test]

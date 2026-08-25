@@ -98,7 +98,7 @@ pub struct HttpRequest<'a> {
     /// How long the whole request may take, or `None` for the ordinary bound.
     /// Part of the request rather than a setting on the Host, because the two
     /// callers want different answers: a Refresh is a figure somebody asked for
-    /// and worth waiting on, and the upgrade check on `perch --version` is a
+    /// and worth waiting on, and the upgrade check on `perch version` is a
     /// line nobody asked for.
     pub within_millis: Option<u64>,
 }

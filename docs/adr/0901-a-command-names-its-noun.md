@@ -12,14 +12,15 @@ noun-then-verb throughout, with one noun so pervasive it goes unwritten.
 | | |
 | --- | --- |
 | Top level, Account elided (10) | `add` `alias` `disable` `enable` `list` `relogin` `remove` `run` `status` `switch` |
-| Top level, Perch itself (1) | `upgrade` |
+| Top level, Perch itself (2) | `upgrade` `version` |
 | `config` (2) | `set` `get` |
 | `group` (5) | `add` `remove` `rename` `move` `list` |
 | `watcher` (5) | `run` `check` `install` `uninstall` `status` |
 | `holdings` (3) | `export` `import` `purge` |
 
-**Fifteen names, twenty-six invocable forms.** The count is not the finding, and
-it is written down because a wrong number left standing is read as a right one.
+**Sixteen names, twenty-seven invocable forms.** The count is not the finding,
+and it is written down because a wrong number left standing is read as a right
+one.
 
 Depth is capped at two, hard. `perch account group move` is what a noun-first
 rule generates if nothing stops it, and depth three is where a CLI stops being
@@ -34,7 +35,7 @@ administration under its noun, the Account's included:
 > `status` `switch` `run` `list` · `account` `config` `group` `watcher`
 > `holdings`
 
-Nine top-level names against fifteen. This rule is **one** idea whose line takes
+Nine top-level names against sixteen. This rule is **one** idea whose line takes
 no judgment — does an Account name what the command is about, yes or no. The rival
 is **two** ideas, and the second has to be adjudicated per command, badly.
 `perch relogin` is the way back from a Quarantine, which bites mid-task.
@@ -119,14 +120,29 @@ Two apparent collisions are not. `perch status` is an Account's and
 `perch watcher run` starts the loop. Same verb, different noun, and the elided
 noun is precisely what tells them apart.
 
-### `upgrade` stays at the top level
+### `upgrade` and `version` stay at the top level
 
-Its noun is the Installation, which is not an Account, so the rule appears to
-demand `perch installation upgrade`. It does not, and no exception is needed:
+`upgrade`'s noun is the Installation, which is not an Account, so the rule appears
+to demand `perch installation upgrade`. It does not, and no exception is needed:
 **the noun is Perch, and you have already typed it.** `perch upgrade` reads as the
 whole sentence. `CONTEXT.md`'s Upgrade entry anticipates it by opening "Names the
 act rather than the command". `perch self upgrade` imports a concept from `rustup`
 that Perch has nowhere else.
+
+`version` is the same noun: which Perch is installed is a fact about Perch and
+about no Account. It was a `--version` flag for as long as it was, because clap
+generates one and answers it by printing and exiting, so the line underneath had
+to be written ahead of the parser. That is an implementation deciding a
+placement, which is the shape this rule exists to overturn.
+
+**The flag-or-verb test below does not reach it.** That test adjudicates a
+capability within a command's scope, and `--version` stood inside nobody's — it
+was a top-level flag, which is the one position the test has nothing to say
+about. What decides it is the noun, and the noun is Perch.
+
+`perch upgrade version` is refused for the same reason `perch self upgrade` is.
+It reads as upgrading the version, and it files under one command a question
+people ask when they are not upgrading anything.
 
 ## Flag or verb
 
@@ -283,8 +299,8 @@ command performs would be a second copy of the surface.
 
 ## Consequences
 
-Fifteen names and twenty-six forms, and a reader who learns `perch group add` can
-predict where `perch holdings export` lives. What is bought is not a smaller
+Sixteen names and twenty-seven forms, and a reader who learns `perch group add`
+can predict where `perch holdings export` lives. What is bought is not a smaller
 surface — nineteen looked-up names cost one idea if a rule places them and
 nineteen facts if nothing does.
 

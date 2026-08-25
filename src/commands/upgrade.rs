@@ -300,7 +300,7 @@ fn refuse_npm_replacing_a_running_perch(host: &dyn Host, release: &Option<String
 /// that cannot be honored.
 ///
 /// Refused rather than quietly ignored: installing the newest instead is the
-/// failure somebody finds out about by reading `perch --version` afterwards.
+/// failure somebody finds out about by reading `perch version` afterwards.
 fn refuse_a_release_homebrew_cannot_take(release: &Option<String>) -> Result<()> {
     match release {
         None => Ok(()),

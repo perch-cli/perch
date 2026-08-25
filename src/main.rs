@@ -15,6 +15,7 @@ use perch::commands::run::{self, RunArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
 use perch::commands::upgrade::{self, UpgradeArgs};
+use perch::commands::version;
 use perch::commands::watcher::{self, WatcherCommand};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
@@ -23,7 +24,6 @@ use perch::report;
 #[derive(Parser)]
 #[command(
     name = "perch",
-    version,
     about = "Run Claude Code as whichever Claude account you want"
 )]
 struct Cli {
@@ -283,6 +283,21 @@ enum Command {
         yes: bool,
     },
 
+    /// Say which Perch is installed, and whether a newer Release exists.
+    ///
+    /// The line about a newer Release appears only at a terminal, is given two
+    /// seconds, and is dropped in silence on any failure, so a machine with no
+    /// network loses a line and nothing else. `PERCH_NO_UPGRADE_CHECK` switches
+    /// the check off entirely.
+    ///
+    /// `perch upgrade --check` is the same question asked on purpose: it names
+    /// the Channel this Installation came from, waits as long as the answer
+    /// takes, and answers a script through `--json`.
+    ///
+    /// Nothing Perch holds is read or written: no registry, no Credential, no
+    /// Profile.
+    Version,
+
     /// Cycle on your behalf when the Account you are on runs low.
     ///
     /// Three arrangements and one behavior: `run` is a loop you can see and
@@ -330,13 +345,12 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
     }
 }
 
-/// Whether this command line is the bare question "what is installed?".
+/// Whether this command comes after a registry migration.
 ///
-/// Only the bare form. Anything with a subcommand in it stays clap's to answer
-/// in clap's words, because taking those over means owning a second parser
-/// beside the one Perch has.
-fn version_asked_for(typed: &[String]) -> bool {
-    matches!(typed, [only] if only == "--version" || only == "-V")
+/// `version` does not: it is what somebody runs when the machine is already
+/// misbehaving, and it read and wrote nothing when it was a flag.
+fn migrates(command: &Command) -> bool {
+    !matches!(command, Command::Version)
 }
 
 fn main() {
@@ -358,26 +372,14 @@ fn main() {
 
     let host = RealHost::new();
 
-    // Before the parser, because clap answers `--version` by printing and
-    // exiting, and the line underneath it has to come from somewhere with a
-    // Host to ask (ADR an-upgrade-asks-its-channel).
-    if version_asked_for(&typed) {
-        // Through `ended_as` like every other arm: a `perch --version > file`
-        // on a full disk that exits 0 having written nothing is a script's
-        // reading of the installed version, silently empty.
-        let written = write!(out, "{}", perch::upgrade::version_report(&host))
-            .and_then(|()| out.flush())
-            .map(|()| EXIT_OK)
-            .map_err(perch::commands::write_failed);
-        std::process::exit(ended_as(written, &mut out));
-    }
-
     let cli = Cli::parse();
 
     // Not the command's outcome, deliberately (ADR a-registry-comes-forward): an
     // older registry is read correctly either way, so a lock somebody else holds
     // costs the write-back alone and the next run takes it.
-    let _ = perch::migration::bring_forward(&host);
+    if migrates(&cli.command) {
+        let _ = perch::migration::bring_forward(&host);
+    }
 
     let outcome = match cli.command {
         Command::Add {
@@ -464,6 +466,7 @@ fn main() {
             },
             &mut out,
         ),
+        Command::Version => ok(version::run(&host, &mut out)),
         // A `check` reports what it decided, so a scheduler tells a Switch
         // from a figure it could not read without parsing the line
         // (ADR a-watcher-knob-is-arithmetic).
@@ -655,21 +658,30 @@ mod tests {
     }
 
     #[test]
-    fn only_the_bare_version_question_is_answered_here() {
-        for typed in [vec!["--version"], vec!["-V"]] {
-            let typed: Vec<String> = typed.into_iter().map(str::to_string).collect();
-            assert!(version_asked_for(&typed), "{typed:?}");
-        }
+    fn what_is_installed_is_asked_of_a_command_and_no_longer_of_a_flag() {
+        assert!(matches!(
+            Cli::try_parse_from(["perch", "version"])
+                .expect("`perch version` parses")
+                .command,
+            Command::Version
+        ));
 
-        for typed in [
-            vec!["add", "--version"],
-            vec!["--version", "extra"],
-            vec!["status"],
-            vec![],
-        ] {
-            let typed: Vec<String> = typed.into_iter().map(str::to_string).collect();
-            assert!(!version_asked_for(&typed), "{typed:?}");
+        for typed in [["perch", "--version"], ["perch", "-V"]] {
+            assert!(
+                Cli::try_parse_from(typed).is_err(),
+                "`{}` should not parse",
+                typed.join(" ")
+            );
         }
+    }
+
+    #[test]
+    fn the_version_question_is_the_one_command_that_skips_the_migration() {
+        assert!(!migrates(&Command::Version));
+        assert!(migrates(&Command::Status {
+            refresh: false,
+            json: false
+        }));
     }
 
     /// The fixtures are a Target and the three flags that would narrow an

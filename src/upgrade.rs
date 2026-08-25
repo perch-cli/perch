@@ -20,13 +20,13 @@ pub const REPO: &str = "perch-cli/perch";
 /// Release as a prerelease: doing so would empty this.
 pub const LATEST_URL: &str = "https://api.github.com/repos/perch-cli/perch/releases/latest";
 
-/// How long the check on `perch --version` may take before it is abandoned.
+/// How long the check on `perch version` may take before it is abandoned.
 ///
 /// Short because nobody asked for it: the line it prints is worth a pause
 /// somebody would not notice, not a wait they would.
 pub const CHECK_WITHIN_MILLIS: u64 = 2_000;
 
-/// The variable that switches the check on `perch --version` off.
+/// The variable that switches the check on `perch version` off.
 pub const NO_CHECK: &str = "PERCH_NO_UPGRADE_CHECK";
 
 /// What is installed, which is what the build says it is.
@@ -383,7 +383,7 @@ pub fn newest(host: &dyn Host, within_millis: Option<u64>) -> Result<String> {
     version_typed(tag)
 }
 
-/// The line `perch --version` adds when there is a newer Release, and nothing
+/// The line `perch version` adds when there is a newer Release, and nothing
 /// at all otherwise.
 ///
 /// Every reason not to ask is checked before asking, and the ask swallows
@@ -392,7 +392,7 @@ pub fn notice(host: &dyn Host) -> Option<String> {
     if host.env_var(NO_CHECK).is_some() {
         return None;
     }
-    // Not a terminal is not a person: a script parsing `perch --version` and
+    // Not a terminal is not a person: a script parsing `perch version` and
     // the Homebrew formula's test block both read this output, and neither
     // wants a second line or a network request.
     if !host.is_interactive() {
@@ -408,7 +408,7 @@ pub fn notice(host: &dyn Host) -> Option<String> {
     }
 }
 
-/// The whole of what `perch --version` says.
+/// The whole of what `perch version` says.
 ///
 /// Here rather than in `main`, the one place no test reaches: what is printed,
 /// whether the second line appears, and that the first is spelled `perch

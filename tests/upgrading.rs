@@ -899,9 +899,9 @@ fn an_upgrade_touches_nothing_perch_holds() {
     }
 }
 
-// ---- the line `perch --version` adds ------------------------------------
+// ---- the line `perch version` adds ---------------------------------------
 
-/// `perch --version` is the one place Perch says anything about its own version
+/// `perch version` is the one place Perch says anything about its own version
 /// without being asked, and everything below is the bounding of that.
 #[test]
 fn a_newer_release_is_mentioned_under_the_version() {
@@ -957,7 +957,7 @@ fn the_variable_that_switches_it_off_stops_the_request_rather_than_the_line() {
     );
 }
 
-/// A script parsing `perch --version` and the Homebrew formula's test block both
+/// A script parsing `perch version` and the Homebrew formula's test block both
 /// read this output.
 #[test]
 fn nothing_is_said_and_nothing_is_asked_when_there_is_no_terminal() {
@@ -1022,7 +1022,7 @@ fn upgrade_installed() -> &'static str {
     perch::upgrade::installed()
 }
 
-/// The check on `perch --version` is the one request that carries a bound of
+/// The check on `perch version` is the one request that carries a bound of
 /// its own, and nothing could show it bounded anything: the fake answered a
 /// stall of any length. A network slower than two seconds is a version line
 /// that does not appear rather than a pause somebody would notice.
