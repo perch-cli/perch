@@ -150,7 +150,7 @@ Homebrew is the one Channel a Release cannot be named to at all: it installs
 whatever the formula says. That is refused rather than quietly ignored, and
 refused before anybody is asked to agree to anything — silently installing the
 newest when somebody named an older one is the failure they find out about by
-reading `perch --version` afterwards, if they think to.
+reading `perch version` afterwards, if they think to.
 
 ## What an Upgrade owes a running Service
 
@@ -168,7 +168,7 @@ it was already running and then report that it did.
 
 ## Perch does not look for its own updates on a schedule
 
-`perch --version` says when a newer Release exists, and that is the whole of
+`perch version` says when a newer Release exists, and that is the whole of
 what Perch volunteers about itself. There is no schedule, no cache, no age to
 reason about and no staleness to explain — the machinery
 ADR a-figure-carries-its-age gets right for Utilization is not built a second
@@ -193,6 +193,22 @@ upgrades either. `perch upgrade --check` exists for asking on purpose, and exits
 nought whichever way the answer goes: every other non-zero code Perch has is a
 refusal, and "there is news" is not one.
 
+**`version` and `upgrade --check` both stay, and the overlap is the point.**
+`perch version` answers what is installed and volunteers the rest, so it is
+bounded like something nobody asked for: two seconds, off a pipe, silent on
+failure. `perch upgrade --check` is the question asked deliberately, so it is
+bounded like nothing — it waits as long as the answer takes, names the Channel
+this Installation came from, and answers a script through `--json`. One command
+carrying both would have to pick one set of bounds, and either choice is wrong
+for half of who is typing it. `perch version` takes no `--json` for the same
+reason: `--check` already has one, and a second document saying a subset of the
+first is a second contract that can never quietly move.
+
+`perch version` also comes before `migration::bring_forward` rather than after
+it, so asking what is installed reads and writes nothing on the machine. It is
+what somebody runs when the machine is already misbehaving, and a migration is a
+write.
+
 The check uses `curl` through the existing `Host::http`, and no HTTP client crate
 was taken for it. That was considered and deferred: `Host::http` is exactly the
 seam a crate may be taken behind, and a machine without `/usr/bin/curl` is a real
@@ -203,8 +219,8 @@ mechanisms, which is worse than either.
 
 ## What would reopen it
 
-Somebody whose `perch --version` got slower or noisier in a way that mattered,
-or a machine where the tty guard turned out not to be the right test — a CI
-system with a terminal attached, most likely. That would move the check to
-`perch upgrade --check` alone and leave `--version` as it was, which is the
-smaller half of this and separable from the rest.
+Somebody whose `perch version` got slower or noisier in a way that mattered, or
+a machine where the tty guard turned out not to be the right test — a CI system
+with a terminal attached, most likely. That would move the check to
+`perch upgrade --check` alone and leave `version` saying only what is installed,
+which is the smaller half of this and separable from the rest.

@@ -126,7 +126,7 @@ leaves a `perch.exe.old` beside it that the next upgrade clears.
 
 ### Being told about new releases
 
-`perch --version` says what is installed, and adds a line when a newer release
+`perch version` says what is installed, and adds a line when a newer release
 exists. It is the only thing in Perch that looks — `perch status` never touches
 the network, and nothing else mentions upgrades. The check happens only when
 you are at a terminal, is abandoned after two seconds, and says nothing at all

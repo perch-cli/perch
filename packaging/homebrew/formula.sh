@@ -75,7 +75,7 @@ class Perch < Formula
   end
 
   test do
-    assert_match "perch #{version}", shell_output("#{bin}/perch --version")
+    assert_match "perch #{version}", shell_output("#{bin}/perch version")
   end
 end
 FORMULA

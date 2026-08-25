@@ -141,44 +141,93 @@ impl Drop for Scratch {
 }
 
 /// Every command the binary dispatches, as `--help` lists them: the ten that
-/// elide the Account, `upgrade`, and the four nouns that are written
-/// (ADR a-command-names-its-noun).
-const COMMANDS: [&str; 15] = [
+/// elide the Account, the two that are Perch's own, and the four nouns that are
+/// written (ADR a-command-names-its-noun).
+const COMMANDS: [&str; 16] = [
     "add", "alias", "config", "disable", "enable", "group", "holdings", "list", "relogin",
-    "remove", "run", "status", "switch", "upgrade", "watcher",
+    "remove", "run", "status", "switch", "upgrade", "version", "watcher",
 ];
 
-/// Answered before the parser, and exactly as the Homebrew formula's test block
-/// asserts on it. One line and no more: the upgrade notice is for a person at a
-/// terminal, and a pipe is not one — which is what keeps a suite that answers no
-/// network from asking about a Release.
+/// Exactly as the Homebrew formula's test block asserts on it. One line and no
+/// more: the upgrade notice is for a person at a terminal, and a pipe is not one
+/// — which is what keeps a suite that answers no network from asking about a
+/// Release.
 #[test]
 fn the_version_question_is_answered_by_the_process_in_one_line() {
     let machine = Scratch::holding_an_account("version");
 
+    let ran = perch(&machine, &["version"]);
+
+    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        format!("perch {}\n", env!("CARGO_PKG_VERSION")),
+        "`perch <version>` and nothing underneath it"
+    );
+}
+
+/// The flag is gone rather than kept beside the command: two spellings of one
+/// capability are two, and neither is ever retired. clap offers no tip towards
+/// the command, its suggestions running from an unknown flag to other flags.
+#[test]
+fn the_flag_the_command_replaced_is_no_longer_a_second_spelling_of_it() {
+    let machine = Scratch::holding_an_account("version-flag");
+
     for asked in [["--version"], ["-V"]] {
         let ran = perch(&machine, &asked);
 
-        assert_eq!(ran.code, EXIT_OK, "{asked:?}");
-        assert_eq!(
-            ran.out,
-            format!("perch {}\n", env!("CARGO_PKG_VERSION")),
-            "`perch <version>` and nothing underneath it"
+        assert_ne!(ran.code, EXIT_OK, "{asked:?}");
+        assert!(ran.out.is_empty(), "{asked:?} said nothing: {}", ran.out);
+        assert!(
+            ran.err.contains("unexpected argument"),
+            "{asked:?}: {}",
+            ran.err
         );
     }
 }
 
-/// Answered before the parser and so outside the path every other command's
-/// output goes down: the write failure was thrown away and the process exited 0
-/// having written nothing. Linux alone, because `/dev/full` is the one way to
-/// fail a write without a closed pipe's timing in it.
+/// A migration is a write, and what is installed is what somebody asks when the
+/// machine is already misbehaving. The listing is the other half of the claim:
+/// the step is still owed rather than skipped.
+#[test]
+fn asking_what_is_installed_leaves_an_older_registry_where_it_was() {
+    let machine = Scratch::holding_what_v0_2_0_wrote("version-registry");
+    let before = machine.registry();
+
+    let ran = perch(&machine, &["version"]);
+
+    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
+    assert_eq!(
+        machine.registry(),
+        before,
+        "the file is the one that was there"
+    );
+    assert!(
+        ran.err.is_empty(),
+        "and nothing was said about a migration: {:?}",
+        ran.err
+    );
+
+    let listing = perch(&machine, &["list"]);
+    assert!(
+        listing.err.contains("brought forward"),
+        "which the next command pays: {:?}",
+        listing.err
+    );
+}
+
+/// The one test in the suite driving a real failing file descriptor: a `perch
+/// version > file` on a full disk that exits 0 having written nothing is a
+/// script's reading of the installed version, silently empty. Linux alone,
+/// because `/dev/full` is the one way to fail a write without a closed pipe's
+/// timing in it.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_version_that_could_not_be_written_is_a_failure_rather_than_a_silent_zero() {
     let machine = Scratch::holding_an_account("version-full");
 
     let ran = Command::new(env!("CARGO_BIN_EXE_perch"))
-        .arg("--version")
+        .arg("version")
         .env("PERCH_HOME", machine.home())
         .env("CLAUDE_CONFIG_DIR", machine.claude())
         .stdout(std::fs::File::create("/dev/full").expect("/dev/full is there"))

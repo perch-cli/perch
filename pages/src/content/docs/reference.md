@@ -27,6 +27,7 @@ sidebar:
 | `perch holdings export <path>` / `perch holdings import <path>` | write everything Perch holds to one encrypted file, and put it back |
 | `perch holdings purge [--yes]` | give the machine back the state it had before Perch |
 | `perch upgrade [--release <tag>] [--check] [--json] [--channel <name>] [--yes]` | replace this Perch with a newer Release, through the Channel that installed it |
+| `perch version` | which Perch is installed, and a line more when a newer Release exists |
 
 ## Exit codes
 
@@ -93,7 +94,7 @@ Watcher holding the lock exits 20.
 - `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch walks
   `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd` an npm
   install leaves works from every shell.
-- `$PERCH_NO_UPGRADE_CHECK` stops `perch --version` asking whether a newer
+- `$PERCH_NO_UPGRADE_CHECK` stops `perch version` asking whether a newer
   Release exists. Checked before the request, so nothing goes out. That check is
   the only place Perch looks for its own updates; `perch status` never touches
   the network.
