@@ -42,7 +42,7 @@ is written by somebody who did not read it.
 |---|---|
 | a containment guard follows every link on both sides | `host::Settled`, reached through `host::settled` and `host::is_inside`; `Path::starts_with` is a `disallowed_methods` entry in `clippy.toml` |
 | a buffer holding a secret never frees a copy of one | `secret::Secret`, whose growth wipes what it grew out of, and which `host::write_double_quoted` and `write_escaped` take instead of a `String` |
-| a Watcher acts only while it holds the watch and has not been asked to stop | `anthropic::send`, the only path from that module to the network, whose ask is a required parameter; the port's `Network::http` is a `disallowed_methods` entry in `clippy.toml` naming the three senders that reach it, and `commands::watch::Watch::goes_on` is what a Watcher answers the ask with |
+| a Watcher acts only while it holds the watch and has not been asked to stop | `anthropic::send`, the only path from that module to the network, whose ask is a required parameter, and `switch::asking_first`, the only path to a keychain read on the walk that settles a Landing; the port's `Network::http` is a `disallowed_methods` entry in `clippy.toml` naming the three senders that reach it, and `commands::watch::Watch::goes_on` is what a Watcher answers both asks with |
 | a step forward lands on the shape this build reads | `migration::CARRIED_TO`, a literal with `const _: () = assert!` against `registry::CURRENT_VERSION` |
 
 Three of the four are types, and the first is a lint beside its type because
@@ -69,20 +69,33 @@ sites are correct and not which steps ask. It is a parameter of `anthropic::send
 now — the one function every Anthropic request passes through — and a sender that
 does not take one does not compile. Each move was towards the narrowest place the
 invariant could be stated, and the two reviews in between are what stating it
-anywhere wider cost.
+anywhere wider cost. It has two doors rather than one, because a round spends two
+things and only one of them is a request.
 
-What the third door still does not reach is the work a round does *before* its
-first ask. `one_round` adopts, resolves a Landing and probes the installed Claude
-Code, and only then reaches the ask inside `observe::refresh`; the one-shot
-`perch watcher check` has no ask in front of it at all. A seventh review left
-that open on the ground that `FakeHost` could not stall a keychain read — which
-was already untrue when it was written, the read-side stall having landed a day
-earlier.
+The other thing a round spends is keychain reads, and the walk that settles a
+Landing is where it spends them without a bound. It reads the Credential Store of
+every Account Perch holds until one of them matches the live Credential, and on a
+Mac each of those is a dialog somebody may walk away from — so the ask belongs
+between two reads, where a question asked once at the top of the round cannot
+reach. `switch::resolve_a_landing` takes the ask and `switch::asking_first` is the
+one path past it to a keychain read.
 
-Constructed since: a check already asked to stop spends one local
-`claude --version`, no keychain read and no request. Asking earlier wants a third
-`Verdict`, for a round that never read and so has no threshold to report, and
-that is more than one local spawn is worth. The window stays, measured.
+What that cost is a third answer, and it is the whole of the design. The walk's
+other empty answer already means *nothing on the machine says whose the live
+Credential is*, which `resolve_a_landing` refuses by naming both readings and
+asking the user to pick between them — so a stop reported that way refuses a
+Landing nothing is wrong with, which is worse than the delay it fixes. A stop
+comes back as `switch::Resolved::Stopped` instead, and the round carries it as a
+third `Verdict`: no figure was read and no policy was reached, so there is no
+threshold to report and it is not a `Verdict::Decided` holding an
+`Outcome::Stopped`. The loop leaves on it; a Check says one line and exits `20`.
+
+What the third door still does not reach is adoption and one local
+`claude --version`. A seventh review left the whole of this open on the ground
+that `FakeHost` could not stall a keychain read — which was already untrue when it
+was written, the read-side stall having landed a day earlier, and which is what
+both tests here are built on. The window stays, measured, and it is one process
+spawn wide.
 
 So the fourth entry above is the weakest of the four and worth naming as such.
 `CARRIED_TO` is a compile-time assertion rather than a door: nothing forces a
@@ -103,6 +116,19 @@ then be load-bearing again, which is what five reviews found it cannot be:
 the last time a review read it. Growth that wipes makes the arithmetic an
 optimization, so a miscount costs a copy rather than a token.
 
+**The ask at the keychain read.** `credentials::read` is the one function every
+Credential Store read passes through, which is `anthropic::send`'s shape one
+module over, and it would reach every keychain walk rather than this one. Refused
+on three counts. None of its five callers is a command — they are `probe`,
+`export` and three sites in `switch` — so the ask does not stop there: it is
+threaded up through everything that probes a Profile, gathers an Export or
+Captures a Credential, and every command behind those ends up holding one that
+means *nobody is watching*. It removes none of the work above either — the walk
+still has to carry a stop out past the answer that means *nothing says whose*,
+which is the decision this document is about. And it states the invariant where
+there is nothing unbounded to stop: one keychain read is one dialog, and what has
+no bound is the walk that makes one per Account.
+
 **Making `Watch::goes_on` the only way to renew.** `act` renews once after the
 Switch has landed, where the answer changes nothing — there is no step left to
 stop before. That call is `Watch::kept_up`, named for the absence of the
@@ -120,6 +146,15 @@ with nothing to ask about.
 - A stopped ask travels back as `Refused::Stopped` rather than as an unreachable
   network. The two would otherwise pace a Back-off the same way, and one of them
   is a question nobody was asked.
+- A command somebody typed reaches the walk through
+  `commands::a_settled_landing`, which is where the ask that answers `Ok` lives
+  and where the arm the type has and the machine does not is discharged.
+- `switch` names `watch::Lost` and `watch::StillOurs` while `watch` names
+  `switch::NotIdle`, which ADR code-lives-where-it-reaches says Rust compiles and
+  a reason has to answer for. The reason is that these are the two halves of one
+  exchange — the Switch's refusal read by the round, the round's loss read by the
+  Switch — so neither module is under the other. `anthropic` already imports the
+  same two.
 - `observe::refresh` no longer asks the Host whether this process was asked to
   stop. Its callers answer, which is why `perch list --refresh` answers `Ok(())`
   unconditionally: it installs no handler, so the old call was always false.

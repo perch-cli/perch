@@ -67,7 +67,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // Removing the active Account lands somewhere first, which reaches
     // `make_live` — so this is a Switch path, and it resolves a Landing before
     // anything reads who is active (ADR a-switch-is-written-down-first).
-    switch::resolve_a_landing(host, &mut perch, &mut registry)?;
+    crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;

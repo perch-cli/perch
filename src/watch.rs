@@ -554,11 +554,11 @@ pub enum Lost {
     Stopped,
 }
 
-/// The question asked before every request that goes out to Anthropic.
-///
-/// A callable rather than an answer carried in, because the answer changes
-/// between two requests inside one turn; `&mut` because answering renews the
-/// hold.
+/// The question asked in front of everything a round spends: every request that
+/// goes out to Anthropic, and every keychain read on the walk that settles a
+/// Landing. A callable rather than an answer carried in, because the answer
+/// changes between two of them inside one turn; `&mut` because answering renews
+/// the hold.
 pub type StillOurs<'a> = &'a mut dyn FnMut() -> std::result::Result<(), Lost>;
 
 /// What a round decided.
@@ -845,16 +845,51 @@ fn explaining(said: &str) -> String {
 /// Said in the same shape as every other line, with the figure it does not have said as
 /// unread. `retrying_in` is [`Outcome::Held`]'s.
 pub fn held_line(why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> String {
-    // The Round it would have been, so the sentence has one spelling: a figure
-    // that was not read renders as `unread` whatever the threshold says, which
-    // is why a threshold this round never saw can be any number.
-    Round {
-        fullest: None,
-        threshold: 0,
-        outcome: Outcome::Held {
+    before_a_round(
+        Outcome::Held {
             why: why.to_string(),
             retrying_in,
         },
+        now,
+    )
+}
+
+/// The outcome for a round that stopped being the one to act while it was reading,
+/// which is the longest thing a round does.
+///
+/// One sentence for the Landing's reading, the Account's own and the candidates':
+/// what a reader needs is that nothing was switched, true of all three.
+pub fn nothing_was_switched(lost: Lost) -> Outcome {
+    match lost {
+        Lost::HandedOver => Outcome::HandedOver {
+            why: "the watch was taken over while this round was reading, so \
+                  nothing was switched: whoever holds it now is watching this \
+                  machine."
+                .to_string(),
+        },
+        Lost::Stopped => Outcome::Stopped {
+            why: "this Watcher was asked to stop while the round was reading, \
+                  so nothing was switched."
+                .to_string(),
+        },
+    }
+}
+
+/// A stop that happened before there was a [`Round`] to stop, because the walk that
+/// settles a Landing was still going.
+pub fn stopped_line(lost: Lost, now: DateTime<Utc>) -> String {
+    before_a_round(nothing_was_switched(lost), now)
+}
+
+/// The line for something that happened before a [`Round`] could be reached, as the
+/// Round it would have been — so the sentence has one spelling. A figure that was not
+/// read renders as `unread` whatever the threshold says, which is why a threshold this
+/// round never saw can be any number.
+fn before_a_round(outcome: Outcome, now: DateTime<Utc>) -> String {
+    Round {
+        fullest: None,
+        threshold: 0,
+        outcome,
     }
     .line(now)
 }

@@ -22,10 +22,10 @@ use crate::lock;
 use crate::observe::{self, Attempt};
 use crate::probe;
 use crate::registry::{self, Account, Registry, Scope, UNGROUPED};
-use crate::switch::{self, Idle, NotSwitched, Settled};
+use crate::switch::{self, Idle, NotSwitched, Resolved, Settled};
 use crate::watch::{
     self, Backoff, Considered, Cooled, Fullest, Holding, Lost, Outcome, Policy, Recently, Round,
-    Speak,
+    Speak, nothing_was_switched,
 };
 
 /// One round, for whatever scheduled it.
@@ -73,6 +73,12 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     let round = match verdict {
         Verdict::Decided(round) => round,
         Verdict::NotArranged(why) => return Err(why),
+        // Said and exited rather than raised: a Check that was interrupted read no
+        // figure, and `20` is what tells a scheduler to come back.
+        Verdict::Lost(lost) => {
+            say(out, &watch::stopped_line(lost, host.now()))?;
+            return Ok(crate::error::EXIT_HELD);
+        }
     };
     say(out, &round.line(host.now()))?;
     Ok(round.outcome.exit_code())
@@ -129,6 +135,9 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             // Nothing is charged to the back-off: this round asked the registry rather
             // than Anthropic.
             Ok(Verdict::NotArranged(why)) => held_before_a_round(&why.to_string(), host.now()),
+            // Out at once rather than round the loop to the ask at the top: this round
+            // asked it already, and the answer to a sticky question does not change.
+            Ok(Verdict::Lost(lost)) => return left(out, lost),
             // Held like any other round that could not read. Ending the watcher over a
             // contended registry would let a `perch status --refresh` stop it silently.
             Err(PerchError::Busy(why)) => held_before_a_round(&why, host.now()),
@@ -199,27 +208,6 @@ fn left(out: &mut dyn Write, lost: Lost) -> Result<()> {
     match lost {
         Lost::HandedOver => handed_over(out),
         Lost::Stopped => stopped(out),
-    }
-}
-
-/// The outcome for a round that stopped being the one to act while it was reading,
-/// which is the longest thing a round does.
-///
-/// One sentence for both readings, the Account's own and the candidates': what a
-/// reader needs is that nothing was switched, which is true of either.
-fn nothing_was_switched(lost: Lost) -> Outcome {
-    match lost {
-        Lost::HandedOver => Outcome::HandedOver {
-            why: "the watch was taken over while this round was reading, so \
-                  nothing was switched: whoever holds it now is watching this \
-                  machine."
-                .to_string(),
-        },
-        Lost::Stopped => Outcome::Stopped {
-            why: "this Watcher was asked to stop while the round was reading, \
-                  so nothing was switched."
-                .to_string(),
-        },
     }
 }
 
@@ -534,8 +522,13 @@ fn one_round(
 
     // A Switch path, so it resolves a Landing first. Where it refuses, nobody is there
     // to answer, so it travels as the same "not arranged for watching".
-    let settled = match switch::resolve_a_landing(host, &mut perch, &mut registry) {
-        Ok(settled) => settled,
+    let settled = match switch::resolve_a_landing(host, &mut perch, &mut registry, &mut || {
+        watching_alone.goes_on()
+    }) {
+        Ok(Resolved::Settled(settled)) => settled,
+        // Before a figure or a policy has been reached, so there is no Round to report
+        // this as and the loop takes it as the stop it is.
+        Ok(Resolved::Stopped(lost)) => return Ok(Verdict::Lost(lost)),
         // `Busy` passed through untouched, as at the adoption lock above. It arrives
         // before anything has been read, so there is no figure and nothing was decided,
         // which is what a hold is.
@@ -668,6 +661,12 @@ fn one_round(
 enum Verdict {
     /// The round read, and decided.
     Decided(Round),
+    /// The watch was lost before the round read anything: settling the Landing walks
+    /// the Credential Store of every Account Perch holds, and this Watcher stopped
+    /// being the one to act part way through. No figure, no threshold and nothing
+    /// decided — which is why it is not a [`Verdict::Decided`] carrying an
+    /// [`Outcome::Stopped`].
+    Lost(Lost),
     /// There was nothing here the watcher may act on, and this says why — something the
     /// machine has not been arranged for, or a Switch left in flight that nothing here
     /// can settle.

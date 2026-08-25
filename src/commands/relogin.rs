@@ -71,7 +71,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // A Switch path, so it resolves a Landing before reading which Account is
     // active. A Conflict is the one failure this command may not be stopped by:
     // `perch relogin` is what that state offers as the way out of itself.
-    if let Err(unresolved) = switch::resolve_a_landing(host, &mut perch, &mut registry)
+    if let Err(unresolved) = crate::commands::a_settled_landing(host, &mut perch, &mut registry)
         && !matches!(unresolved, PerchError::Conflict(_))
     {
         // Anything else is a store that would not answer rather than evidence
