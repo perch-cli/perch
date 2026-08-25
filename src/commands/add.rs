@@ -302,14 +302,11 @@ fn report(
     group: Option<&str>,
 ) -> Result<()> {
     let added = registry.account(email).expect("the Account was just added");
-    let mut description = email.to_string();
-    let details: Vec<String> = [added.identity.organization_name.clone(), added.plan.clone()]
-        .into_iter()
-        .flatten()
-        .collect();
-    if !details.is_empty() {
-        description.push_str(&format!(" ({})", details.join(", ")));
-    }
+    let description = crate::commands::described(
+        email,
+        added.identity.organization_name.as_deref(),
+        added.plan.as_deref(),
+    );
 
     say(out, &format!("\nAdded {description}."))?;
     if let Some(alias) = alias {

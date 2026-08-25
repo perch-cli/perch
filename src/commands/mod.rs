@@ -263,6 +263,19 @@ pub fn refuse_without_a_terminal(host: &dyn Host, command: &str) -> Result<()> {
     )))
 }
 
+/// An Account as the two lines announcing a new one name it: the address, and
+/// whatever of the organization and the plan is known, parenthesized.
+///
+/// One place, because an Adoption and an Add are the same news about the same
+/// thing and a detail added to one spelling is missing from the other.
+pub fn described(email: &str, organization: Option<&str>, plan: Option<&str>) -> String {
+    let details: Vec<&str> = [organization, plan].into_iter().flatten().collect();
+    match details.is_empty() {
+        true => email.to_string(),
+        false => format!("{email} ({})", details.join(", ")),
+    }
+}
+
 /// A count of Accounts, with the noun agreeing with it. One place, because
 /// "1 Accounts" is the kind of thing that ships and stays shipped, and seven call
 /// sites spelling their own is seven chances at it.
