@@ -330,7 +330,9 @@ fn a_path_a_shell_would_split_survives_the_unit_it_is_written_into() {
 
 #[test]
 fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
-    for hostile in ["x\" && evil.exe && set \"y=", "%APPDATA%"] {
+    // Absolute for the platform under test, so what refuses each is the quoting
+    // rather than `perch_home`'s own refusal of a path that names no one place.
+    for hostile in [r#"C:\x" && evil.exe && set "y="#, r"C:\%APPDATA%"] {
         let host = watched()
             .with_platform(Platform::Windows)
             .with_env("PERCH_HOME", hostile);
