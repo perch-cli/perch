@@ -1294,24 +1294,23 @@ pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
         .env_var("PERCH_HOME")
         .filter(|overridden| !overridden.is_empty())
     {
-        let named = PathBuf::from(overridden);
         // A relative one is the same harm the empty case is refused for, and it
         // is the one a Service carries into a unit file to resolve against a
         // working directory nobody chose.
-        if !names_one_place(host.platform(), &named) {
+        if !names_one_place(host.platform(), &overridden) {
             return Err(PerchError::Invalid(format!(
                 "PERCH_HOME is set to `{}`, which is not an absolute path — so \
                  where Perch holds the Holdings would depend on the directory \
                  each command was run from, and a second one would look like an \
                  empty machine.\n\
                  Set it to a full path, or unset it for {}.",
-                named.display(),
+                overridden,
                 home_dir(host)
                     .map(|home| home.join(".config").join("perch").display().to_string())
                     .unwrap_or_else(|_| "~/.config/perch".to_string()),
             )));
         }
-        return Ok(named);
+        return Ok(PathBuf::from(overridden));
     }
     Ok(home_dir(host)?.join(".config").join("perch"))
 }
@@ -1321,10 +1320,7 @@ pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
 /// Asked of the Host's platform rather than of `Path::is_absolute`, which is
 /// compiled for the machine running the code: a fake standing in for Windows
 /// would otherwise answer as the Linux it runs on.
-fn names_one_place(platform: crate::host::Platform, path: &Path) -> bool {
-    let Some(text) = path.to_str() else {
-        return path.is_absolute();
-    };
+fn names_one_place(platform: crate::host::Platform, text: &str) -> bool {
     match platform {
         crate::host::Platform::Windows => {
             let mut bytes = text.bytes();
