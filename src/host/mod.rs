@@ -350,8 +350,32 @@ pub fn is_unshowable(c: char) -> bool {
             | '\u{E0000}'..='\u{E0FFF}')
 }
 
-/// Text on its way to a terminal, with everything a terminal would act on
-/// rather than draw taken out ([`is_unshowable`]).
+/// Whether a character's effect is on the character beside it, composing with
+/// it into one glyph rather than rearranging, hiding or mirroring text. Kept by
+/// [`Shown`], refused by [`unshowable_character_in`] all the same. Carved out of
+/// [`is_unshowable`] by hand, as that set is.
+pub fn composes_with_its_neighbor(c: char) -> bool {
+    matches!(c,
+        // The combining grapheme joiner, and the Mongolian free variation
+        // selectors, which the vowel separator `U+180E` sits in the middle of
+        // without being one of.
+        '\u{034F}' | '\u{180B}'..='\u{180D}' | '\u{180F}'
+        // The conjoining jamo fillers, which hold an empty slot in a Hangul
+        // syllable block. `U+3164` and `U+FFA0` stand alone, and go.
+        | '\u{115F}'..='\u{1160}'
+        // The Khmer inherent vowels, drawn as part of the consonant they follow.
+        | '\u{17B4}'..='\u{17B5}'
+        // The zero width joiner, which makes one glyph of the emoji on either
+        // side of it. Its non-joiner `U+200C` breaks one apart instead.
+        | '\u{200D}'
+        // The variation selectors and their supplement: which form of the
+        // character before them a font draws.
+        | '\u{FE00}'..='\u{FE0F}'
+        | '\u{E0100}'..='\u{E01EF}')
+}
+
+/// Text on its way to a terminal, with what a terminal acts on rather than
+/// draws taken out: [`is_unshowable`], less [`composes_with_its_neighbor`].
 ///
 /// A type because the rule had six call sites and no reader: three refused
 /// their own copy of it and three drew a value (ADR nothing-drawn-is-obeyed).
@@ -375,15 +399,14 @@ impl Shown {
     }
 
     fn keeping(text: &str, kept: impl Fn(char) -> bool) -> Shown {
-        match text.chars().any(|c| is_unshowable(c) && !kept(c)) {
+        // Beside `kept` rather than inside it: `kept` is what one writer holds
+        // on to, and this is true of every writer.
+        let goes = |c: char| is_unshowable(c) && !composes_with_its_neighbor(c) && !kept(c);
+        match text.chars().any(goes) {
             // Filtering unconditionally would walk and rebuild every cell of
             // every table, and nearly none of them holds one of these.
             false => Shown(text.to_string()),
-            true => Shown(
-                text.chars()
-                    .filter(|c| !is_unshowable(*c) || kept(*c))
-                    .collect(),
-            ),
+            true => Shown(text.chars().filter(|c| !goes(*c)).collect()),
         }
     }
 
@@ -974,6 +997,74 @@ mod tests {
             "and everything else a terminal acts on goes from either"
         );
     }
+
+    /// The strip and the refusal ask one set two questions, and this is the
+    /// half where the answers differ: a character deciding how its neighbor
+    /// draws is not one a terminal obeys.
+    #[test]
+    fn what_composes_with_the_character_beside_it_survives_the_strip() {
+        for whole in [
+            // In order: a presentation selector, a ZWJ sequence, a jungseong
+            // filler holding an empty slot, an ideographic variation selector,
+            // a Khmer inherent vowel, a Mongolian one, a grapheme joiner.
+            "Acme \u{2600}\u{FE0F}",
+            "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+            "\u{1100}\u{1160}\u{11A8}",
+            "\u{845B}\u{E0100}",
+            "\u{17A2}\u{17B4}",
+            "\u{1820}\u{180B}",
+            "\u{0915}\u{034F}\u{0916}",
+        ] {
+            assert_eq!(Shown::of(whole).as_str(), whole);
+            assert_eq!(Shown::in_prose(whole).as_str(), whole);
+        }
+    }
+
+    /// `U+202E` is the test this rule has to survive: its effect is on the
+    /// characters beside it too, and reversing a line is control rather than
+    /// composition.
+    #[test]
+    fn what_rearranges_or_hides_text_goes_even_where_it_acts_on_its_neighbor() {
+        for held in [
+            "Acme\u{202E}",
+            "Acme\u{200B}",
+            "Acme\u{200C}",
+            "Acme\u{FEFF}",
+            "Acme\u{2060}",
+            "Acme\u{180E}",
+            "Acme\u{3164}",
+            "Acme\u{FFA0}",
+            "Acme\u{E0041}",
+            "Acme\u{7}",
+        ] {
+            assert_eq!(Shown::of(held).as_str(), "Acme");
+            assert_eq!(Shown::in_prose(held).as_str(), "Acme");
+        }
+    }
+
+    /// The two questions part company at the carve-out and nowhere else: a
+    /// character the strip keeps is one no Group name and no Alias may carry,
+    /// and every character the carve-out names is one of the set's.
+    #[test]
+    fn a_name_is_still_refused_for_a_character_a_value_is_drawn_with() {
+        for composing in ['\u{FE0F}', '\u{200D}', '\u{1160}', '\u{E0100}'] {
+            assert_eq!(
+                unshowable_character_in(&format!("dev{composing}")),
+                Some(format!(
+                    "a character a terminal does not draw as itself (U+{:04X})",
+                    composing as u32
+                ))
+            );
+        }
+        for c in ('\0'..=char::MAX).filter(|c| composes_with_its_neighbor(*c)) {
+            assert!(
+                is_unshowable(c),
+                "U+{:04X} is carved out of a set it is not in",
+                c as u32
+            );
+        }
+    }
+
     /// Following every link on a path, which is the question "is this inside
     /// that directory?" needs and [`through_any_link`] does not answer: the
     /// link that makes two spellings of one place is usually a directory

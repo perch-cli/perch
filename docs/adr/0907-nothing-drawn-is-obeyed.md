@@ -171,6 +171,37 @@ them is a Target anybody types. Where a name is an identifier it is still
 refused at the moment it is chosen, and that is the half of the rule this does
 not replace.
 
+## What the strip takes, once the set is Unicode's
+
+The set answers *may this name be chosen*. It does not answer *what does a
+terminal draw*, and `Shown` was given it only because the two questions shared a
+predicate. Some of its members have no effect on themselves at all: a variation
+selector, the zero width joiner, a conjoining jamo filler and a Khmer inherent
+vowel each decide how the character beside them is drawn.
+
+The section above is the same argument arriving at the writer. `U+FE0F` is a
+name Anthropic may hold, and `perch status` drew `Acme \u2600\ufe0f` as
+`Acme \u2600`. A ZWJ family sequence drew as three people, and `cells` measured
+the six columns of the stripped form where a terminal draws two. Drawing a value
+as something its owner does not spell is the harm `Shown` exists to prevent,
+reached from the other side.
+
+So `host::composes_with_its_neighbor` is a third predicate carved out of
+`is_unshowable`, and `Shown` keeps what it names: the variation selectors and
+their supplement, the zero width joiner, `U+034F`, the Mongolian free variation
+selectors, the Khmer inherent vowels and the two conjoining jamo fillers.
+
+`U+202E` is the case the rule has to survive. Its effect is on the characters
+beside it too, and it is the harm this document opens with. The line is
+composition rather than proximity: `U+202E` rearranges what is beside it and
+`U+200C` breaks a ligature apart, while a variation selector composes into one
+glyph. The standalone Hangul fillers `U+3164` and `U+FFA0` are letters with no
+glyph rather than slots in a syllable block, and go with them.
+
+The strip moving is not a name rule moving. Nothing on disk is keyed on what a
+terminal draws, `validate_name` and `probe::read_identity` still ask the whole
+set, and no registry version moves.
+
 ## What is rejected
 
 **A checked `Deserialize`, so nothing unshowable enters the registry.** It is a
@@ -185,6 +216,13 @@ a reader.
 be a decision at every site — *is this authored?* — which is the reader's
 judgment a door exists to remove. One constructor has nothing to get wrong, and
 is a no-op on everything Perch writes itself.
+
+**Reading the composing set out of a crate's Unicode tables.**
+`Variation_Selector`, `Grapheme_Extend` and a `Hangul_Syllable_Type` of
+`Leading_Jamo` or `Vowel_Jamo` name most of it, and none of them names the
+zero width joiner. The set it is
+carved out of is hand-written, so a second data source is a second definition
+that drifts from the first, which is how the last set grew holes.
 
 **Escaping rather than stripping, as `\u{202E}`.** More honest, and it widens a
 column by six cells per character to say something about a value nobody can
@@ -204,6 +242,9 @@ code in one file rather than a rule about which sink a caller reached for.
   A new *writer* is the thing to watch, and there are three.
 - `window_width_across` measures the stripped form, so a name's width and the
   bytes written for it cannot disagree.
+- The strip and the refusal part company at the carve-out and nowhere else:
+  `perch group add` refuses a name carrying `U+FE0F`, and `perch status` draws
+  an organization carrying one whole.
 - `--json` is untouched: `serde_json` escapes a control character as six literal
   characters, which is what a parser wants and what a terminal draws.
 - `validate_name` refuses on the whole set, because a Group name and an Alias

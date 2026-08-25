@@ -504,9 +504,9 @@ pub fn what_was_renamed_said(renamed: &[Renamed]) -> Option<String> {
         .iter()
         .map(
             |entry| match crate::host::unshowable_character_in(&entry.was) {
-                // The old name is drawn through `Shown`, which takes out the very
-                // character the rename was for — so `dev\u{FE00}` would be quoted
-                // as `dev`, beside a `dev` the step did not touch.
+                // A name refused for a character that draws as nothing draws
+                // as one the registry may also hold: quoting `dev\u{FE00}` puts
+                // a second `dev` beside the one the step did not touch.
                 Some(said) => format!(
                     "{} carrying {said} is now `{}`",
                     entry.kind.article(),
