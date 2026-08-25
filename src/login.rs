@@ -49,12 +49,13 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // Perch's own pid: Perch waits on this login as a Run waits on its client,
     // and a `claude` on an OAuth prompt has no session of its own to mark
     // (ADR a-run-is-one-shot). `profile::discard` takes it with the directory.
-    let _live = probe::claim(host, &dir).ok();
+    let live = probe::claim(host, &dir);
 
     // Every way out from here takes the directory back out again, which a `?`
     // in the middle would quietly stop doing: one left by a failure is one
     // `reap_abandoned` will not tidy for thirty minutes.
-    let produced = run_the_login(host, out, purpose, &claude, &store, &installed);
+    let produced =
+        live.and_then(|_live| run_the_login(host, out, purpose, &claude, &store, &installed));
     profile::discard(host, &store);
     produced
 }
