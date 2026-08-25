@@ -406,17 +406,33 @@ fn machine_whose_organization_is(named: &str) -> FakeHost {
 }
 
 /// The boundary refuses an organization name for what a line cannot hold, and
-/// nothing else.
-///
-/// It is Anthropic's, so a refusal here is one nobody can clear from Perch — and
-/// it takes `perch add` with it. What only fails to draw is drawn stripped.
+/// `perch status` draws the rest. It is Anthropic's, so a refusal here is one
+/// nobody can clear from Perch, and it takes `perch add` with it. What a
+/// terminal would obey is drawn without it; what composes with the character
+/// beside it is drawn whole.
 #[test]
-fn an_organization_name_is_refused_for_what_a_line_cannot_hold_and_nothing_else() {
-    for drawn in ["Acme \\u2600\\ufe0f", "Acme\\u202e", "Acme\\u200b"] {
-        let host = machine_whose_organization_is(drawn);
-        run_status(&host, false)
-            .0
-            .unwrap_or_else(|refused| panic!("`{drawn}` is a name Anthropic may hold: {refused}"));
+fn an_organization_name_is_refused_for_what_a_line_cannot_hold_and_otherwise_drawn() {
+    for (held, drawn) in [
+        ("Acme \\u2600\\ufe0f", "Acme \u{2600}\u{FE0F}"),
+        ("Acme\\u202e", "Acme"),
+        ("Acme\\u200b", "Acme"),
+    ] {
+        let host = machine_whose_organization_is(held);
+
+        let (result, printed) = run_status(&host, false);
+
+        result.unwrap_or_else(|refused| panic!("`{held}` is a name Anthropic may hold: {refused}"));
+        let row = printed
+            .lines()
+            .find(|line| line.starts_with("Organization"))
+            .unwrap_or_else(|| panic!("`perch status` says which organization: {printed}"));
+        assert_eq!(
+            row.strip_prefix("Organization")
+                .expect("the row opens with its label")
+                .trim_start(),
+            drawn,
+            "`{held}` is drawn as its owner spells it, less what a terminal obeys"
+        );
     }
 
     for framing in ["Acme\\u0007", "Acme\\u000a"] {

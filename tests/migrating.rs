@@ -929,9 +929,9 @@ fn a_name_no_version_2_perch_accepted_is_named_rather_than_renamed() {
 
 /// The note names the character rather than the name it is in.
 ///
-/// The old name is drawn through `Shown`, which takes out the very character the
-/// rename was for — so quoting it would say a Group `dev` became `dev-1` while
-/// an untouched Group of exactly that name sits beside it in the same registry.
+/// A name refused for a character that draws as nothing reaches a terminal as
+/// one the registry may also hold, so quoting it would say a Group `dev` became
+/// `dev-1` beside an untouched Group of exactly that name.
 #[test]
 fn the_note_for_a_rename_names_the_character_that_caused_it() {
     let document = a_v2_registry_naming("dev\u{FE00}", "the-alias");

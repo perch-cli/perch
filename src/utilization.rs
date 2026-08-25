@@ -318,6 +318,12 @@ mod tests {
             "and a column is measured on what will be drawn: the character a \
              terminal would act on is gone by the time this is asked"
         );
+        assert_eq!(
+            cells(&Shown::of("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}")),
+            2,
+            "while what a terminal draws as one glyph is still one glyph here: \
+             the joiners survive the strip, so this is not three emoji wide"
+        );
     }
 
     #[test]
