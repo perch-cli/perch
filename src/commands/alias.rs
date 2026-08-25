@@ -14,7 +14,7 @@ use std::io::Write;
 use crate::commands::only_the_registry;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{self, NameKind, Registry};
+use crate::registry::Registry;
 use crate::target::{self, AccountTarget};
 
 /// What was asked of `perch alias`.
@@ -29,7 +29,9 @@ pub enum AliasCommand {
 pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Result<()> {
     only_the_registry(host, out, |registry| match command {
         AliasCommand::Set { target, name } => {
-            registry::validate_name(NameKind::Alias, &name)?;
+            // The Target first, as every other command taking one resolves it
+            // first: `name_account` refuses the name's shape either way, and
+            // asked ahead of the Target it answers about the wrong argument.
             let account = target::resolve_account(registry, &target)?;
             let named = set(registry, &name, &account)?;
             Ok(vec![account.matched, named])
