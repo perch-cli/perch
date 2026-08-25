@@ -1980,9 +1980,13 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
     // cloning the Holdings to set one `u32` is a deep copy of every Account and
     // its figures per write, which a Watcher pays every round.
     registry.version = CURRENT_VERSION;
-    let body = serde_json::to_string_pretty(&*registry)
+    // Pushed rather than `format!`ed onto, for the reason the line above is in
+    // place: a second full copy of the Holdings is a copy a Watcher pays for
+    // every round.
+    let mut body = serde_json::to_string_pretty(&*registry)
         .map_err(|err| PerchError::Other(format!("could not serialize the registry: {err}")))?;
-    write(host, &path, &format!("{body}\n"))
+    body.push('\n');
+    write(host, &path, &body)
 }
 
 /// Replaces the registry in one step, or not at all, and for its owner alone.
