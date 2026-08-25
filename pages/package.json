@@ -10,9 +10,9 @@
     "check": "astro sync && tsc --noEmit && oxlint && oxfmt --check"
   },
   "dependencies": {
-    "@astrojs/markdown-satteri": "^0.3.6",
+    "@astrojs/markdown-satteri": "^0.3.7",
     "@astrojs/starlight": "^0.41.7",
-    "astro": "^7.2.3"
+    "astro": "^7.2.4"
   },
   "devDependencies": {
     "oxfmt": "^0.64.0",
