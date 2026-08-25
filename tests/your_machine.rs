@@ -13,10 +13,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use perch::error::PerchError;
+#[cfg(target_os = "macos")]
+use perch::host::Execution;
 use perch::host::RealHost;
 use perch::host::prelude::*;
 #[cfg(target_os = "macos")]
-use perch::keychain::KeychainError;
+use perch::keychain::{EXIT_ITEM_NOT_FOUND, KeychainError, SECURITY_BIN, classify};
 use perch::probe;
 #[cfg(target_os = "macos")]
 use perch::probe::Verdict;
@@ -260,6 +262,215 @@ fn a_missing_item_is_not_found_rather_than_an_error() {
             service,
             account: "nobody".to_string(),
         })
+    );
+}
+
+/// Set to any value to run the case that asks a locked keychain for an item it
+/// holds. Unset it is skipped: where `security` can raise an unlock dialog it
+/// raises one there rather than failing, and nothing here could answer it.
+#[cfg(target_os = "macos")]
+const MAY_PROMPT: &str = "PERCH_LOCKED_KEYCHAIN_MAY_PROMPT";
+
+/// A keychain of this test's own, so a lock is not put on the developer's. It
+/// is named positionally in every command below rather than added to the
+/// search list, which is state the machine owns and `list-keychains -s` would
+/// move.
+#[cfg(target_os = "macos")]
+struct OwnKeychain {
+    path: PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+impl OwnKeychain {
+    /// The keychain is made here, locked here and deleted here, and holds
+    /// nothing that is worth anything to anybody.
+    const PASSWORD: &'static str = "perch-test";
+
+    /// Named after the case and the process, so neither two runs nor the two
+    /// cases below collide, and made under `TMPDIR` rather than in
+    /// `Library/Keychains`. The `-db` suffix is written out because it is the
+    /// one macOS appends to a name without it, and this reads the path back off
+    /// disk.
+    fn new(case: &str) -> OwnKeychain {
+        let made = OwnKeychain {
+            path: std::env::temp_dir().join(format!(
+                "perch-test-{case}-{}.keychain-db",
+                std::process::id()
+            )),
+        };
+        let created = made.run(&["create-keychain", "-p", OwnKeychain::PASSWORD]);
+        assert_eq!(
+            created.status,
+            0,
+            "no keychain to ask: {}",
+            created.stderr.trim()
+        );
+        assert!(
+            made.path.exists(),
+            "`security` made a keychain somewhere other than {}, so `-db` is no \
+             longer the suffix it appends",
+            made.path.display()
+        );
+        made
+    }
+
+    /// `security`, with this keychain named after whatever is asked of it.
+    /// Every sub-command here takes it last. Spelled here rather than taken
+    /// from `keychain`: the read that module builds names no keychain and
+    /// searches the default list, which is the production contract.
+    fn run(&self, args: &[&str]) -> Execution {
+        Execution::from(
+            Command::new(SECURITY_BIN)
+                .args(args)
+                .arg(&self.path)
+                .output()
+                .expect("/usr/bin/security is on every Mac"),
+        )
+    }
+
+    /// The read [`perch::host::Keys::keychain_get`] makes.
+    fn find(&self, service: &str, account: &str) -> Execution {
+        self.run(&["find-generic-password", "-s", service, "-a", account, "-w"])
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for OwnKeychain {
+    fn drop(&mut self) {
+        let _ = self.run(&["delete-keychain"]);
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// The keychains `security` searches when it is given none, which nothing here
+/// may move.
+#[cfg(target_os = "macos")]
+fn search_list() -> String {
+    let listed = Execution::from(
+        Command::new(SECURITY_BIN)
+            .args(["list-keychains", "-d", "user"])
+            .output()
+            .expect("/usr/bin/security is on every Mac"),
+    );
+    assert_eq!(
+        listed.status,
+        0,
+        "the search list could not be read, so comparing it proves nothing: {}",
+        listed.stderr.trim()
+    );
+    listed.stdout
+}
+
+/// [`EXIT_ITEM_NOT_FOUND`]'s second paragraph, asked of a machine.
+/// `profile::supersede_or_fail` refuses a store that will not say whether it
+/// still holds the Credential a write has replaced, and a Profile this machine
+/// is making for the first time escapes that refusal on this answer alone.
+#[test]
+#[cfg(target_os = "macos")]
+fn a_name_a_locked_keychain_holds_nothing_under_is_not_found() {
+    let list = search_list();
+    let keychain = OwnKeychain::new("locked");
+    let service = test_service("locked");
+    let account = "nobody";
+
+    let open = keychain.find(&service, account);
+    let locking = keychain.run(&["lock-keychain"]);
+    let locked = keychain.find(&service, account);
+    drop(keychain);
+
+    let absent = KeychainError::NotFound {
+        service: service.clone(),
+        account: account.to_string(),
+    };
+    assert_eq!(
+        classify(&open, &service, account),
+        absent,
+        "an unlocked keychain of our own: exit {}: {}",
+        open.status,
+        open.stderr.trim()
+    );
+    assert_eq!(
+        locking.status,
+        0,
+        "the keychain did not lock, so nothing below was asked through one: {}",
+        locking.stderr.trim()
+    );
+    assert_eq!(
+        classify(&locked, &service, account),
+        absent,
+        "a locked keychain answered exit {} for a name it holds nothing under, \
+         not {EXIT_ITEM_NOT_FOUND}: {}",
+        locked.status,
+        locked.stderr.trim()
+    );
+    assert_eq!(
+        search_list(),
+        list,
+        "the keychain search list is not this test's to move"
+    );
+}
+
+/// The other half of the same belief: an item the keychain does hold meets the
+/// lock. That is the answer `supersede_or_fail`'s refusal fires on, so a build
+/// where both halves came back the same would have no refusal at all.
+#[test]
+#[cfg(target_os = "macos")]
+fn an_item_a_locked_keychain_holds_is_unavailable_rather_than_absent() {
+    if std::env::var_os(MAY_PROMPT).is_none() {
+        eprintln!(
+            "skipping: set {MAY_PROMPT} where `security` cannot raise an unlock \
+             dialog, or where there is somebody at the machine to dismiss one"
+        );
+        return;
+    }
+    let list = search_list();
+    let keychain = OwnKeychain::new("held");
+    let service = test_service("held");
+    let account = "somebody";
+
+    let stored = keychain.run(&[
+        "add-generic-password",
+        "-s",
+        &service,
+        "-a",
+        account,
+        "-w",
+        NOT_A_CREDENTIAL,
+    ]);
+    let locking = keychain.run(&["lock-keychain"]);
+    let held = keychain.find(&service, account);
+    drop(keychain);
+
+    assert_eq!(
+        stored.status,
+        0,
+        "nothing was stored to ask about: {}",
+        stored.stderr.trim()
+    );
+    assert_eq!(
+        locking.status,
+        0,
+        "the keychain did not lock: {}",
+        locking.stderr.trim()
+    );
+    assert_ne!(
+        held.status, 0,
+        "a locked keychain answered with the item it holds, so the lock was \
+         opened rather than met"
+    );
+    assert!(
+        matches!(
+            classify(&held, &service, account),
+            KeychainError::Unavailable { .. }
+        ),
+        "an item a locked keychain holds read as absent: exit {}: {}",
+        held.status,
+        held.stderr.trim()
+    );
+    assert_eq!(
+        search_list(),
+        list,
+        "the keychain search list is not this test's to move"
     );
 }
 
