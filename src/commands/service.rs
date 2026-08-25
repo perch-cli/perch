@@ -281,7 +281,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
     // Asked rather than assumed, because every step of `stopping` may fail and this
     // caller judges by what is still running — the watcher lock first, because a unit
     // reads `inactive` while the process it started winds down mid-Switch.
-    if watcher_is_running(host) || is_running(host) {
+    if watcher_is_running(host) || still_held_by_the_service_manager(host) {
         return Err(PerchError::Busy(format!(
             "The Service is still running, so nothing was purged.\n\
              It would go on Switching Credentials into Profiles this command is \
@@ -408,7 +408,7 @@ fn describe(host: &dyn Host) -> Result<Unit> {
 fn is_installed(host: &dyn Host, at: Option<&std::path::Path>) -> Result<bool> {
     match at {
         Some(at) => Ok(host.path_exists(at)),
-        None => Ok(host.platform() == Platform::Windows && is_running(host)),
+        None => Ok(host.platform() == Platform::Windows && still_held_by_the_service_manager(host)),
     }
 }
 
@@ -429,15 +429,27 @@ fn located(host: &dyn Host, program: &str) -> String {
     }
 }
 
+/// What the service manager answers when asked about the Service, or `None`
+/// where it would not run at all.
+fn asked_of_the_service_manager(host: &dyn Host) -> Option<crate::host::Execution> {
+    let asking = service::asking(host.platform(), host.user_id())?;
+    let args: Vec<&str> = asking.args.iter().map(String::as_str).collect();
+    host.exec(&located(host, &asking.program), &args).ok()
+}
+
 /// Whether the service manager says it is running right now.
 fn is_running(host: &dyn Host) -> bool {
-    let Some(asking) = service::asking(host.platform(), host.user_id()) else {
-        return false;
-    };
-    let args: Vec<&str> = asking.args.iter().map(String::as_str).collect();
-    host.exec(&located(host, &asking.program), &args)
-        .map(|ran| ran.succeeded())
-        .unwrap_or(false)
+    asked_of_the_service_manager(host)
+        .is_some_and(|ran| service::says_it_is_running(host.platform(), &ran))
+}
+
+/// Whether the service manager still holds the Service at all — throttled, waiting
+/// to restart, or merely registered.
+///
+/// The question a Purge has, and the one Windows keeps a Service in: something that
+/// can come back and write a Credential is a hazard whether or not it is up now.
+fn still_held_by_the_service_manager(host: &dyn Host) -> bool {
+    asked_of_the_service_manager(host).is_some_and(|ran| ran.succeeded())
 }
 
 /// Whether *a Watcher* is running, which is a different question from whether the

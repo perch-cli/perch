@@ -1201,6 +1201,46 @@ fn status_answers_on_a_machine_perch_holds_nothing_on() {
     );
 }
 
+/// `launchctl print` exits 0 for any label launchd has bootstrapped, so its status
+/// says the Service is installed and says nothing about whether it is up. A job
+/// launchd is throttling — the case a moved binary produces — is the one where the
+/// two answers come apart.
+#[test]
+fn a_launch_agent_launchd_is_only_holding_is_not_reported_as_running() {
+    let loaded_but_down = Execution {
+        status: 0,
+        stdout: "cli.perch.watch = {\n\tstate = not running\n\tlast exit code = 78\n}".to_string(),
+        stderr: String::new(),
+    };
+    let host = mac().with_exec(
+        "launchctl",
+        &["print", "gui/501/cli.perch.watch"],
+        loaded_but_down,
+    );
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: false });
+
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    assert!(
+        !said.contains("and is running"),
+        "launchd is holding the label rather than running the job: {said}"
+    );
+
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: true });
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    assert!(
+        said.contains(r#""running": false"#),
+        "and a script reads the same answer: {said}"
+    );
+    assert!(
+        said.contains(r#""installed": true"#),
+        "which is a different fact from the Service being there: {said}"
+    );
+}
+
 #[test]
 fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
     // A binary that is actually there, so this exercises the arm that names it rather
