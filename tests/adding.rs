@@ -257,7 +257,7 @@ fn a_group_name_perch_cannot_accept_is_asked_about_again_rather_than_losing_the_
 
     assert!(result.is_ok(), "{:?}", result.err());
     assert!(
-        printed.contains("email address"),
+        printed.contains("carries `@` (U+0040)"),
         "the user should be told why the first answer was no good:\n{printed}"
     );
     assert_eq!(

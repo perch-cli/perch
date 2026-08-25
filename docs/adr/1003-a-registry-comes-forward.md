@@ -45,11 +45,13 @@ step reads what a Scope Inherited out of that document's own `global.settings`
 rather than out of this build's defaults: the value somebody set is in the file,
 and taking the default instead reverts it silently.
 
-## Version 3, and why a name rule moves the number
+## Version 3 and version 4, and why a name rule moves the number
 
-Version 3 changed no shape. It changed which names `validate_name` accepts:
-`crate::host::is_unshowable` took Unicode's whole `Default_Ignorable_Code_Point`
-set, having been picked by hand and grown holes (ADR nothing-drawn-is-obeyed).
+Neither changed a shape. Both changed which names `validate_name` accepts.
+Version 3 took Unicode's whole `Default_Ignorable_Code_Point` set for
+`crate::host::is_unshowable`, the hand-picked one having grown holes
+(ADR nothing-drawn-is-obeyed). Version 4 replaced the deny-list around it with an
+allow-list of identifier characters (ADR a-target-has-to-be-typeable).
 
 That is still a version. The number tracks what this build can *read*, and a
 registry holding a name the rules now refuse is one `load` turns down — which is
@@ -61,10 +63,13 @@ So the rename pass is its own step rather than a line inside the version 1 one,
 and `forward` runs it after whichever step brought the document to this shape. A
 version 1 document meets it having already been renamed, and it does nothing.
 
-What the step carries is bounded by history: a name version 2 accepted, which is
-this build's rules with the newly-unshowable characters still drawn. A name no
-build of that version ever wrote is a hand edit — named at `load` and left, the
-same answer `acceptable` gives a version 1 name no suffix rescues.
+What the pass carries is bounded by history: the rules the version on the
+document actually shipped, one predicate per version. Each writes out the clauses
+that have moved since and asks this build for the clauses that have not, a rule
+moving one of the latter being a rule that owes a version of its own. A name no
+build of that version ever wrote is a hand edit, named at `load` and left. The
+bound is owed for version 1 as much as for the two after it: almost nothing was
+refused, and *almost* is where a hand-edited `a@b` sits.
 
 Both ways a registry arrives say what was renamed. `bring_forward` says it about
 this machine's own file, after the write; an Import says it about the Export's,

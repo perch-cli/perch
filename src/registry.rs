@@ -20,7 +20,7 @@ use crate::probe::{Identity, LockSpec};
 ///
 /// A registry claiming a higher one is refused rather than silently misread, and
 /// the guard is only worth having if this moves whenever the shape does.
-pub const CURRENT_VERSION: u32 = 3;
+pub const CURRENT_VERSION: u32 = 4;
 
 /// One Quota Window's Utilization, as observed at a point in time
 /// (ADR a-figure-carries-its-age).
@@ -537,11 +537,11 @@ pub fn offerable_name(from: &str) -> Option<String> {
     Some(joined)
 }
 
-/// Refuses a name that could not be told from something else.
+/// Refuses a name that could not be typed, or could not be told from something
+/// else (ADR a-target-has-to-be-typeable).
 ///
-/// Aliases and Group names share one namespace and are both valid Targets, so a
-/// name has to be distinguishable from the other things a Target can be: an
-/// email address, and the words that already address something.
+/// An allow-list of characters, then the words that already address something.
+/// No `@` is an identifier character, so an address stays tellable from a name.
 pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     if name.trim().is_empty() {
         return Err(PerchError::Invalid(format!(
@@ -549,27 +549,38 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.names()
         )));
     }
-    // Any whitespace, not only at the ends. `perch config get` prints each
-    // setting as the `perch config set` that would restore it, read back by
-    // counting words, so a name with a space in it breaks that round trip.
-    if name.chars().any(char::is_whitespace) {
-        return Err(PerchError::Invalid(format!(
-            "`{name}` has a space in it. {} are read back a word at a time — \
-             `perch config get` prints settings as the `perch config set` that \
-             would restore them — so a name with a space in it is one no line \
-             of that output could name.",
-            kind.names()
-        )));
-    }
-    // Whitespace is not the whole of what a terminal will not echo back: an
-    // escape is no `char::is_whitespace` and moves the column, and a character
-    // that draws as nothing makes two names one row.
+    // Ahead of the allow-list, which lets `dev\u{FE00}` and `dev\u{3164}`
+    // through: both are well-formed identifiers and both draw as `dev`.
     if let Some(said) = crate::host::unshowable_character_in(name) {
         return Err(PerchError::Invalid(format!(
             "{} are drawn as they are held, and this one carries {said} — so two \
              names nothing on screen tells apart are one row in every listing, \
              and a character a terminal acts on moves the column and colors the \
              row.",
+            kind.names()
+        )));
+    }
+    if let Some(carried) = name.chars().find(|c| !a_name_may_carry(*c)) {
+        return Err(PerchError::Invalid(format!(
+            "`{name}` carries {}, and {} are made of letters, digits, `_` and \
+             `-`. Every alphabet: `café` and `日本` are names. A Target is typed \
+             at a shell prompt, often on a machine other than the one that \
+             named it, so a name of symbols is one somebody has to produce from \
+             a keyboard to reach it.",
+            said_as(carried),
+            kind.names()
+        )));
+    }
+    // Asked second, so a character wrong wherever it sits is named as that
+    // rather than as a bad opening.
+    if let Some(opened) = name.chars().next().filter(|c| !a_name_may_open_with(*c)) {
+        return Err(PerchError::Invalid(format!(
+            "`{name}` opens with {}, and {} open with a letter, a digit or `_`. \
+             A name opening with `-` is a Target `perch run` could never be \
+             given, its program going after the `--` that would rescue one \
+             anywhere else, and a name opening with a mark draws onto whatever \
+             was already on the line.",
+            said_as(opened),
             kind.names()
         )));
     }
@@ -594,24 +605,30 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.article()
         )));
     }
-    if name.contains('@') {
-        return Err(PerchError::Invalid(format!(
-            "`{name}` looks like an email address. {} have to be tellable from one, because a Target that could be either has no single answer.",
-            kind.names()
-        )));
-    }
-    // Nothing beginning with `-` can name a program, and `perch run` is where
-    // that matters: its `command` is `last = true`, so the `--` that rescues
-    // such a Target everywhere else is already spoken for.
-    if name.starts_with('-') {
-        return Err(PerchError::Invalid(format!(
-            "`{name}` begins with `-`, and {} are typed where a flag could go. \
-             `perch run` takes the program to launch after `--`, so a Target \
-             spelled like a flag is one that command could never be given.",
-            kind.names()
-        )));
-    }
     Ok(())
+}
+
+/// Whether a character may open a name.
+///
+/// Unicode's `XID_Start`, `_`, and an ASCII digit, which `XID_Start` does not
+/// carry and `2fa` needs.
+pub(crate) fn a_name_may_open_with(c: char) -> bool {
+    unicode_ident::is_xid_start(c) || c == '_' || c.is_ascii_digit()
+}
+
+/// Whether a character may sit later in a name.
+///
+/// Unicode's `XID_Continue`, and `-`, which is the separator chosen names
+/// already use and the one [`offerable_name`] writes.
+pub(crate) fn a_name_may_carry(c: char) -> bool {
+    unicode_ident::is_xid_continue(c) || c == '-'
+}
+
+/// One character, named as it draws and as it is spelled. Both, because a space
+/// quoted alone says nothing and the punctuation that draws alike is many
+/// characters.
+fn said_as(c: char) -> String {
+    format!("`{c}` {}", crate::host::code_point_of(c))
 }
 
 /// Which Account is active — and, while a Switch is under way, that Perch cannot
@@ -1657,8 +1674,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
     }
 
     // The third member of the namespace. `validate_name` keeps an Alias and a
-    // Group name tellable from an address by refusing an `@`; the mirror rule,
-    // that an address looks like one, is this.
+    // Group name tellable from an address, no `@` being an identifier
+    // character; the mirror rule, that an address looks like one, is this.
     for account in &registry.accounts {
         if !account.email().contains('@') {
             return Err(PerchError::Invalid(format!(
@@ -2269,7 +2286,7 @@ mod tests {
                 NameKind::Alias,
                 "has a space",
                 None,
-                Some("has a space in it"),
+                Some("carries ` ` (U+0020)"),
             ),
             (
                 NameKind::Group,
@@ -3054,6 +3071,62 @@ mod tests {
         }
     }
 
+    /// The allow-list, on both halves of the namespace, and the refusal naming
+    /// the character it turned on rather than the rule in the abstract.
+    #[test]
+    fn a_name_is_made_of_identifier_characters_in_whatever_alphabet() {
+        for kind in [NameKind::Alias, NameKind::Group] {
+            for name in [
+                "dev",
+                "my-group",
+                "my_group",
+                "_dev",
+                "v2",
+                // A digit opens a name, which `XID_Start` alone would refuse.
+                "2fa",
+                // Every alphabet, which is the whole of what XID buys over
+                // ASCII: the person naming a Group is naming it for themselves.
+                "café",
+                "日本",
+                "дом",
+                "한국",
+                "العربية",
+                "日本-dev",
+            ] {
+                assert!(
+                    validate_name(kind, name).is_ok(),
+                    "`{name}` should be usable as {} name",
+                    kind.article()
+                );
+            }
+
+            for (name, said) in [
+                ("🚀", "U+1F680"),
+                ("dev★", "U+2605"),
+                ("dev.ops", "U+002E"),
+                ("dev+1", "U+002B"),
+                ("dev/qa", "U+002F"),
+                ("-dev", "U+002D"),
+                ("dev ops", "U+0020"),
+                ("dev@x", "U+0040"),
+                // A combining mark may follow a letter and may not open a name:
+                // there would be nothing for it to combine with but the prompt.
+                ("\u{301}dev", "U+0301"),
+                // The two XID does not answer. Both are well-formed identifiers
+                // and both draw as `dev`, which is the other rule's to refuse.
+                ("dev\u{FE00}", "U+FE00"),
+                ("dev\u{3164}", "U+3164"),
+            ] {
+                let refused = validate_name(kind, name)
+                    .expect_err(&format!("`{name}` should not be usable as a {kind:?} name"));
+                assert!(
+                    refused.to_string().contains(said),
+                    "a {kind:?} refused `{name}` without naming {said}: {refused}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn naming_an_account_that_is_already_named_replaces_the_name() {
         let mut registry = Registry::default();
@@ -3346,7 +3419,7 @@ mod tests {
     fn a_claim_declare_group_would_have_refused_is_named_rather_than_declared() {
         let claims = [
             (r#""none""#, "{}", "addresses the Accounts in no Group"),
-            (r#""my work""#, "{}", "has a space in it"),
+            (r#""my work""#, "{}", "carries ` ` (U+0020)"),
             (r#""overflow""#, r#"{}"#, "already an Alias"),
         ];
 
@@ -3382,14 +3455,14 @@ mod tests {
     #[test]
     fn a_declared_group_or_an_alias_nothing_would_have_accepted_is_named_too() {
         let holdings = [
-            (r#""groups":{"my work":{}}"#, "has a space in it"),
+            (r#""groups":{"my work":{}}"#, "carries ` ` (U+0020)"),
             (
                 r#""groups":{"none":{}}"#,
                 "addresses the Accounts in no Group",
             ),
             (
                 r#""aliases":{"someone@example.com":"other@example.com"}"#,
-                "looks like an email address",
+                "carries `@` (U+0040)",
             ),
             (
                 r#""groups":{"work":{}},"aliases":{"work":"someone@example.com"}"#,

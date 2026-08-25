@@ -65,6 +65,13 @@ columns. The width of a string is a pure function and sits on no seam. A
 hand-rolled table of East Asian widths is the same data, kept by hand, going
 wrong quietly.
 
+**Identifier characters**, from `unicode-ident`, for what a Group name and an
+Alias may be made of (ADR a-target-has-to-be-typeable). The same argument as
+string width, and cheaper: `XID_Start` and `XID_Continue` are pure functions
+over Unicode's own properties, on no seam, and the crate is already compiled on
+every build through `clap_derive` and depends on nothing. Hand-rolling it means
+carrying Unicode's category tables, which is the case above with more data.
+
 ## Not taken, and why
 
 **`keyring`** — the one thing here that cannot be substituted. macOS anchors a

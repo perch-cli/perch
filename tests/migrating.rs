@@ -17,7 +17,9 @@ use common::*;
 use perch::commands::config::ConfigCommand;
 use perch::host::FakeHost;
 use perch::host::prelude::*;
-use perch::registry::{self, CURRENT_VERSION, DEFAULT_WATCHER_THRESHOLD_PERCENT, Strategy};
+use perch::registry::{
+    self, CURRENT_VERSION, DEFAULT_WATCHER_THRESHOLD_PERCENT, Settings, Strategy,
+};
 
 /// A registry v0.2.0 wrote: `active` a bare address, `groups` a map of partial
 /// Overrides, an `ungrouped` beside a `global`, and one Account kept out of
@@ -656,23 +658,22 @@ const SPELLINGS: &[&str] = &[
     "\u{feff}soft",
 ];
 
-/// The characters every name rule so far has turned on. Three deep, which is a
-/// leading character, a body and a trailing one, and enough for all of them:
-/// every rule is per-character or a whole-string `same_name` against a reserved
-/// word, and the reserved words are spelled out above rather than reached for.
-/// Driven at four, the corpus finds nothing and costs eight seconds.
+/// The characters every name rule so far has turned on.
 const ALPHABET: &[char] = &['a', '-', '\u{1b}', '\u{202e}', 'Σ', 'ς', '.', '0'];
 
-/// Every spelling a published Perch would have let somebody create, out of the
-/// words above and the alphabet under them.
-fn every_name_a_published_perch_accepted() -> Vec<String> {
-    let mut names: Vec<String> = SPELLINGS.iter().map(|held| (*held).to_string()).collect();
+/// Every spelling up to three characters long over one alphabet.
+///
+/// Three deep, which is a leading character, a body and a trailing one: every
+/// rule is per character or a whole-string `same_name` against a word
+/// [`SPELLINGS`] holds. At four the corpus finds nothing and costs eight seconds.
+fn every_spelling_over(alphabet: &[char]) -> Vec<String> {
+    let mut names = Vec::new();
     let mut wider = vec![String::new()];
     for _ in 0..3 {
         wider = wider
             .iter()
             .flat_map(|held| {
-                ALPHABET.iter().map(move |c| {
+                alphabet.iter().map(move |c| {
                     let mut name = held.clone();
                     name.push(*c);
                     name
@@ -681,6 +682,14 @@ fn every_name_a_published_perch_accepted() -> Vec<String> {
             .collect();
         names.extend(wider.iter().cloned());
     }
+    names
+}
+
+/// Every spelling a published Perch would have let somebody create, out of the
+/// words above and the alphabet under them.
+fn every_name_a_published_perch_accepted() -> Vec<String> {
+    let mut names: Vec<String> = SPELLINGS.iter().map(|held| (*held).to_string()).collect();
+    names.extend(every_spelling_over(ALPHABET));
     names.retain(|name| a_published_perch_accepted(name));
     names
 }
@@ -806,7 +815,6 @@ fn a_version_2_perch_accepted(name: &str) -> bool {
 /// The characters version 3 added to the unshowable set, beside two it already
 /// had and one ordinary letter: a name is made of what it is allowed and what it
 /// is not, and the pairs either side of a boundary are where a rule reads wrong.
-/// Three deep for the reason [`ALPHABET`] is.
 const V2_ALPHABET: &[char] = &[
     'a', '-', '\u{FE00}', '\u{3164}', '\u{034F}', '\u{2065}', '\u{1b}', '\u{202e}',
 ];
@@ -814,21 +822,7 @@ const V2_ALPHABET: &[char] = &[
 /// Every spelling a version 2 Perch would have let somebody create, out of the
 /// alphabet above.
 fn every_name_a_version_2_perch_accepted() -> Vec<String> {
-    let mut names = vec![String::new()];
-    let mut wider = vec![String::new()];
-    for _ in 0..3 {
-        wider = wider
-            .iter()
-            .flat_map(|held| {
-                V2_ALPHABET.iter().map(move |c| {
-                    let mut name = held.clone();
-                    name.push(*c);
-                    name
-                })
-            })
-            .collect();
-        names.extend(wider.iter().cloned());
-    }
+    let mut names = every_spelling_over(V2_ALPHABET);
     names.retain(|name| a_version_2_perch_accepted(name));
     names
 }
@@ -961,5 +955,197 @@ fn the_note_for_a_rename_names_the_character_that_caused_it() {
     assert!(
         !said.contains("a Group `dev` is now"),
         "and never quotes the stripped name, which is a Group this registry holds: {said}"
+    );
+}
+
+// ————— every version 3 registry, and not only the ones on disk —————
+
+/// One version 3 registry. Version 3 changed no shape, so it is the version 2
+/// document under the later number.
+fn a_v3_registry_naming(group: &str, alias: &str) -> String {
+    let mut held: serde_json::Value =
+        serde_json::from_str(&a_v2_registry_naming(group, alias)).expect("a document");
+    held["version"] = serde_json::json!(3);
+    held.to_string()
+}
+
+/// Version 3's own name rules, as version 3 held them.
+///
+/// The unshowable set is read off this build rather than spelled out, unlike
+/// version 2's: version 4 left that set alone. What moved is the clauses around
+/// it, and those are written here.
+fn a_version_3_perch_accepted(name: &str) -> bool {
+    !name.trim().is_empty()
+        && !name.chars().any(char::is_whitespace)
+        && !name.chars().any(perch::host::is_unshowable)
+        && !matches!(
+            name.to_lowercase().as_str(),
+            "none" | "ungrouped" | "global"
+        )
+        && !name.contains('@')
+        && !name.starts_with('-')
+}
+
+/// The characters the allow-list turns on, against the four it carries: a
+/// symbol, a punctuation mark, an emoji and a combining mark, beside a letter, a
+/// digit, `_` and `-`.
+const V3_ALPHABET: &[char] = &['a', '2', '-', '_', '★', '.', '\u{301}', '🚀'];
+
+/// Every spelling a version 3 Perch would have let somebody create, out of the
+/// alphabet above.
+fn every_name_a_version_3_perch_accepted() -> Vec<String> {
+    let mut names = every_spelling_over(V3_ALPHABET);
+    names.retain(|name| a_version_3_perch_accepted(name));
+    names
+}
+
+/// The corpus has to break the rules it is for, for the reason the version 1 one
+/// does.
+#[test]
+fn the_version_3_corpus_holds_names_this_build_refuses() {
+    let refused = every_name_a_version_3_perch_accepted()
+        .into_iter()
+        .filter(|name| registry::validate_name(registry::NameKind::Group, name).is_err())
+        .count();
+
+    assert!(
+        refused >= 10,
+        "a corpus of names this build already accepts asserts nothing: {refused} of them are \
+         refused"
+    );
+}
+
+/// Every version 3 registry a Perch could have written comes forward into one
+/// this build reads.
+///
+/// The third of these. `validate_name` went from a deny-list to an allow-list,
+/// so a name the step cannot repair is a refusal `load` makes every command.
+#[test]
+fn every_name_a_version_3_perch_accepted_comes_forward_into_one_that_loads() {
+    for name in every_name_a_version_3_perch_accepted() {
+        for (group, alias) in [(name.as_str(), "the-alias"), ("the-group", name.as_str())] {
+            let host = machine_holding(&a_v3_registry_naming(group, alias));
+
+            perch::migration::bring_forward(&host).unwrap_or_else(|refused| {
+                panic!(
+                    "a Group `{group}` and an Alias `{alias}` are names a version 3 Perch \
+                     accepted, and the step forward refused them: {refused}"
+                )
+            });
+
+            registry::load(&host)
+                .unwrap_or_else(|refused| {
+                    panic!(
+                        "a Group `{group}` and an Alias `{alias}` came forward into a registry \
+                         no command can read: {refused}"
+                    )
+                })
+                .expect("the registry is there");
+        }
+    }
+}
+
+/// A name of nothing the allow-list carries leaves no base to repair, so the
+/// kind supplies one — and the note says which name it was, since an emoji is
+/// drawn.
+#[test]
+fn a_version_3_name_of_symbols_comes_forward_named_for_its_kind() {
+    let host = machine_holding(&a_v3_registry_naming("🚀", "the-alias"));
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let said = host.notes().join("\n");
+    assert!(
+        said.contains("a Group `🚀` is now `group`"),
+        "the note says what it renamed and to what: {said:?}"
+    );
+    let written: serde_json::Value =
+        serde_json::from_str(&on_disk(&host)).expect("a document came back");
+    assert!(
+        written["groups"].get("group").is_some(),
+        "and the file holds the new name: {written}"
+    );
+    assert_eq!(
+        written["accounts"][0]["group"], "group",
+        "with the Account claiming it: {written}"
+    );
+
+    // The whole point: every command works afterwards.
+    let (outcome, printed) = run_list(&host, false);
+    outcome.expect("a name the step forward moved is one `load` accepts");
+    assert!(printed.contains("group"), "{printed}");
+}
+
+/// The repair takes out the characters rather than the name, so what a person
+/// meant by it survives.
+#[test]
+fn a_version_3_name_of_a_word_and_a_symbol_keeps_the_word() {
+    let host = machine_holding(&a_v3_registry_naming("dev★", "the-alias"));
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let written: serde_json::Value =
+        serde_json::from_str(&on_disk(&host)).expect("a document came back");
+    assert!(
+        written["groups"].get("dev").is_some(),
+        "`dev★` is `dev`, not `group`: {written}"
+    );
+}
+
+/// Renaming onto a name something already answers to would be no rename at all,
+/// and the repair puts two version 3 names on one base every time.
+#[test]
+fn a_version_3_rename_that_would_collide_takes_the_suffix() {
+    let mut held: serde_json::Value =
+        serde_json::from_str(&a_v3_registry_naming("dev★", "the-alias")).expect("a document");
+    let settings = held["groups"]
+        .as_object()
+        .and_then(|groups| groups.values().next().cloned())
+        .expect("the Settings the fixture declares");
+    held["groups"]["dev"] = settings;
+    let host = machine_holding(&held.to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let written: serde_json::Value =
+        serde_json::from_str(&on_disk(&host)).expect("a document came back");
+    assert!(
+        written["groups"].get("dev-1").is_some(),
+        "`dev` is taken, so the repair takes the suffix: {written}"
+    );
+    assert!(
+        written["groups"].get("dev").is_some(),
+        "and the Group that was already called `dev` keeps its name: {written}"
+    );
+}
+
+/// `load` is every command, so a name this build refuses is a machine with no
+/// working `perch` on it — including `perch remove`, the one command that gives
+/// an Account up, and the one somebody reaches for when nothing else works.
+#[test]
+fn a_registry_holding_a_name_this_build_refuses_still_has_a_perch_remove() {
+    let host = machine_with_two_accounts();
+    let mut registry = registry_of(&host);
+    registry.version = 3;
+    registry
+        .groups
+        .insert("🚀".to_string(), Settings::default());
+    registry
+        .accounts
+        .iter_mut()
+        .find(|account| account.email() == SECOND_EMAIL)
+        .expect("the second Account")
+        .group = Some("🚀".to_string());
+    host.set_file(
+        Path::new(REGISTRY_PATH),
+        &serde_json::to_string(&registry).expect("a document"),
+    );
+
+    let (outcome, printed) = run_remove(&host, SECOND_EMAIL);
+
+    outcome.expect("a command that reads a registry it can repair is a command that runs");
+    assert!(
+        registry_of(&host).account(SECOND_EMAIL).is_none(),
+        "and the Account is gone: {printed}"
     );
 }
