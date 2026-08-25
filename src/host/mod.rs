@@ -421,6 +421,13 @@ impl std::fmt::Display for Shown {
     }
 }
 
+/// A character's code point, parenthesized, as every refusal naming one spells
+/// it. One copy: three callers name a character to a person, and two spellings
+/// of a code point is two answers to one question.
+pub fn code_point_of(c: char) -> String {
+    format!("(U+{:04X})", c as u32)
+}
+
 /// The first character in a value that a line cannot hold, named the way a
 /// refusal names one.
 ///
@@ -430,7 +437,7 @@ pub fn control_character_in(value: &str) -> Option<String> {
     value
         .chars()
         .find(|c| c.is_control())
-        .map(|found| format!("a control character (U+{:04X})", found as u32))
+        .map(|found| format!("a control character {}", code_point_of(found)))
 }
 
 /// The first character in a value that a terminal will not draw as itself,
@@ -447,7 +454,7 @@ pub fn unshowable_character_in(value: &str) -> Option<String> {
             // both have is that the terminal does not draw them as themselves.
             false => "a character a terminal does not draw as itself",
         };
-        format!("{kind} (U+{:04X})", found as u32)
+        format!("{kind} {}", code_point_of(found))
     })
 }
 

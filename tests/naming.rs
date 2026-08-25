@@ -172,6 +172,57 @@ fn an_alias_that_would_be_ambiguous_is_refused_with_its_own_code() {
     assert!(registry_of(&host).aliases.is_empty());
 }
 
+/// Every alphabet, end to end: what a name is made of is Unicode's answer about
+/// identifiers rather than an ASCII rule (ADR a-target-has-to-be-typeable).
+#[test]
+fn a_name_in_any_alphabet_is_declared_and_then_reached_by_it() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "日本-dev");
+    set_alias(&host, "café", SECOND_EMAIL)
+        .0
+        .expect("an Alias is a name in whatever alphabet its owner uses");
+
+    let registry = registry_of(&host);
+    assert_eq!(
+        target::resolve(&registry, "日本-dev").unwrap(),
+        Target::Group {
+            name: "日本-dev".into(),
+        }
+    );
+    assert_eq!(
+        target::resolve(&registry, "café").unwrap(),
+        Target::Alias {
+            name: "café".into(),
+            email: SECOND_EMAIL.into(),
+        }
+    );
+}
+
+/// A name of symbols is one somebody has to produce from a keyboard before any
+/// command reaches it, and the refusal names the character that stopped it.
+#[test]
+fn a_group_name_of_symbols_is_refused_naming_the_character() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = run_group(
+        &host,
+        GroupCommand::Add {
+            name: "dev★".to_string(),
+        },
+    );
+
+    let error = result.expect_err("`★` is no identifier character");
+    assert_eq!(error.exit_code(), EXIT_INVALID);
+    assert!(
+        error.to_string().contains("U+2605"),
+        "the character is named as it draws and as it is spelled:\n{error}"
+    );
+    assert!(
+        registry_of(&host).groups.is_empty(),
+        "and no Group was declared"
+    );
+}
+
 #[test]
 fn a_target_resolves_as_an_alias_then_an_account_then_a_group() {
     let host = machine_with_a_named_second_account();

@@ -73,6 +73,13 @@ serde_json = "1"
 sha2 = "0.11"
 thiserror = "2"
 
+# Whether a character may open an identifier or continue one, which is the rule
+# a Group name and an Alias are held to (ADR a-target-has-to-be-typeable). On
+# neither seam: `XID_Start` and `XID_Continue` are Unicode's own properties, and
+# a table of them kept by hand is the same data going wrong quietly. Already
+# compiled on every build through `clap_derive`, and it depends on nothing.
+unicode-ident = "1.0.24"
+
 # How wide a string is drawn, for the listing that lays itself out in columns.
 # It survives the actual test rather than the free-rider one: the width of a
 # string is a pure function and sits on no seam. A hand-rolled table of East

@@ -556,7 +556,7 @@ mod tests {
         let refused = restored(&named_badly, std::path::Path::new(REGISTRY))
             .expect_err("no later command could read that");
         assert!(
-            refused.to_string().contains("has a space in it"),
+            refused.to_string().contains("carries ` ` (U+0020)"),
             "{refused}"
         );
 
@@ -568,7 +568,7 @@ mod tests {
         let refused = restored(&aliased_badly, std::path::Path::new(REGISTRY))
             .expect_err("an Alias cannot be an email address");
         assert!(
-            refused.to_string().contains("looks like an email address"),
+            refused.to_string().contains("carries `@` (U+0040)"),
             "{refused}"
         );
     }

@@ -52,8 +52,7 @@ pub fn forward(document: &str) -> Result<Option<String>> {
     // The version off a shape that is only the version, before the whole tree is
     // built: every command reaches this against a registry already current, and
     // a `Value` of every cached Utilization is a costly way to say "nothing".
-    let carried = u64::from(EARLIEST_VERSION)..u64::from(CARRIED_TO);
-    let Some(claimed) = crate::error::claimed_version(document).filter(|at| carried.contains(at))
+    let Some(claimed) = crate::error::claimed_version(document).filter(|at| a_step_moves_it(*at))
     else {
         return Ok(None);
     };
@@ -68,7 +67,7 @@ pub fn forward(document: &str) -> Result<Option<String>> {
     // Every step lands here rather than only the first: a name rule that gains
     // a member with nothing to carry the names already written down is the
     // refusal `load` turns into every command.
-    rename_what_this_build_refuses(&mut moved);
+    rename_what_this_build_refuses(&mut moved, written_by_perch(claimed));
     moved.insert("version".to_string(), Value::from(CARRIED_TO));
 
     serde_json::to_string(&Value::Object(moved))
@@ -87,7 +86,7 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
     // Before any of the Scopes below are read out, so a Group renamed here is
     // renamed everywhere one is named: what it declares, what an Account claims,
     // and what a Check is keyed on.
-    let renamed = renames_in(held, everything_version_1_accepted);
+    let renamed = renames_in(held, a_version_1_perch_accepted);
 
     // Read before Global goes, since both of the Scopes below are made out of it.
     let global = object("global", held.get("global"))?;
@@ -177,8 +176,8 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
 ///
 /// On the current shape rather than version 1's, so a rule arriving after a
 /// shape has shipped gets a step rather than an edit to the one below.
-fn rename_what_this_build_refuses(held: &mut Map<String, Value>) {
-    let renamed = renames_in(held, a_version_2_perch_accepted);
+fn rename_what_this_build_refuses(held: &mut Map<String, Value>, written_by_perch: WrittenByPerch) {
+    let renamed = renames_in(held, written_by_perch);
     if renamed.is_empty() {
         return;
     }
@@ -247,8 +246,7 @@ fn claiming(mut account: Value, renamed: &[Renamed]) -> Value {
 /// A name a published Perch accepted that this build's rules refuse, said as it
 /// was and as it is now.
 ///
-/// Version 1's rules were short of `global`, `ungrouped` and the leading `-`;
-/// version 2's drew the characters [`a_version_2_perch_accepted`] names.
+/// One predicate per version, each version having shipped its own rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Renamed {
     pub kind: NameKind,
@@ -262,14 +260,25 @@ pub struct Renamed {
 /// Renamed rather than refused: `validate` is reached from `load`, so that
 /// refusal takes every command with it — `perch group rename` among them.
 pub fn renames(document: &str) -> Vec<Renamed> {
-    let carried = match crate::error::claimed_version(document) {
-        Some(claimed) if claimed == u64::from(EARLIEST_VERSION) => everything_version_1_accepted,
-        _ => a_version_2_perch_accepted,
+    // Nothing about a document no step moves, or this reports a rename [`forward`]
+    // will never make: an Import says what was renamed before it writes.
+    let Some(claimed) = crate::error::claimed_version(document).filter(|at| a_step_moves_it(*at))
+    else {
+        return Vec::new();
     };
+    let carried = written_by_perch(claimed);
     serde_json::from_str::<Value>(document)
         .ok()
         .and_then(|held| held.as_object().map(|held| renames_in(held, carried)))
         .unwrap_or_default()
+}
+
+/// Whether [`forward`] has a step that moves a document claiming this version.
+///
+/// One answer, because [`renames`] says what that step will rename: two ranges
+/// would be two answers to whether a document moves at all.
+fn a_step_moves_it(claimed: u64) -> bool {
+    (u64::from(EARLIEST_VERSION)..u64::from(CARRIED_TO)).contains(&claimed)
 }
 
 /// Whether a name in a document of this version is one Perch wrote rather than
@@ -277,19 +286,38 @@ pub fn renames(document: &str) -> Vec<Renamed> {
 ///
 /// A name Perch never accepted is named at `load` and left ([`acceptable`]);
 /// one it did accept is carried, or every command goes with it.
-type WrittenByPerch = fn(NameKind, &str) -> bool;
+type WrittenByPerch = fn(&str) -> bool;
 
-/// Version 1 refused almost nothing, so every name in one is Perch's to carry.
-fn everything_version_1_accepted(_: NameKind, _: &str) -> bool {
-    true
+/// Which build's rules bound what the rename pass may carry. A name is Perch's
+/// to rename only where a Perch of the version on the document accepted it; a
+/// number no step below recognizes gets the newest rules, which are the
+/// narrowest.
+fn written_by_perch(claimed: u64) -> WrittenByPerch {
+    match claimed {
+        claimed if claimed == u64::from(EARLIEST_VERSION) => a_version_1_perch_accepted,
+        2 => a_version_2_perch_accepted,
+        _ => a_version_3_perch_accepted,
+    }
 }
 
-/// Version 2's rules are this build's, with the characters version 3 added to
+/// Version 1's rules, at the loosest of the three builds that stamped it.
+///
+/// History rather than a rule, as the two below are. Almost nothing was refused,
+/// and `almost` is what this says: a name outside even these is a hand edit,
+/// named at `load` rather than quietly given a different one.
+fn a_version_1_perch_accepted(name: &str) -> bool {
+    !name.trim().is_empty()
+        && !name.chars().any(char::is_whitespace)
+        && name.to_lowercase() != crate::registry::NO_GROUP
+        && !name.contains('@')
+}
+
+/// Version 2's rules are version 3's, with the characters version 3 added to
 /// [`crate::host::is_unshowable`] still drawn rather than refused.
 ///
 /// Stood in for rather than stripped, so a name of nothing else stays one: `x`
 /// breaks no other rule, so what is left is whether another rule was broken.
-fn a_version_2_perch_accepted(kind: NameKind, name: &str) -> bool {
+fn a_version_2_perch_accepted(name: &str) -> bool {
     let stood_in: String = name
         .chars()
         .map(|c| match version_2_drew(c) {
@@ -297,7 +325,19 @@ fn a_version_2_perch_accepted(kind: NameKind, name: &str) -> bool {
             false => c,
         })
         .collect();
-    crate::registry::validate_name(kind, &stood_in).is_ok()
+    a_version_3_perch_accepted(&stood_in)
+}
+
+/// Version 3's rules, written out rather than read off `validate_name`, which
+/// version 4 replaced with an allow-list.
+fn a_version_3_perch_accepted(name: &str) -> bool {
+    !name.trim().is_empty()
+        && !name.chars().any(char::is_whitespace)
+        && crate::host::unshowable_character_in(name).is_none()
+        && !crate::registry::means_the_ungrouped_scope(name)
+        && !crate::registry::means_global(name)
+        && !name.contains('@')
+        && !name.starts_with('-')
 }
 
 /// The characters version 2 drew and version 3 refuses: everything Unicode calls
@@ -352,7 +392,7 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
             }
             // A name no Perch of this version ever accepted is a hand edit, and
             // is named at `load` rather than quietly given a different one.
-            if !written_by_perch(kind, &was) {
+            if !written_by_perch(&was) {
                 continue;
             }
             let Some(is_now) = acceptable(kind, &was, &taken) else {
@@ -399,20 +439,22 @@ fn claimed_groups(held: &Map<String, Value>) -> Vec<String> {
 /// `None` leaves the name as it is, for the refusal at `load` to describe: a
 /// name no published Perch accepted either is a hand edit.
 fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
-    // A leading `-` and a control character are the two rules no suffix
-    // rescues, so a name breaking either loses the character rather than
+    // The allow-list and the unshowable set are per character, and no suffix
+    // rescues either, so a name breaking one loses the character rather than
     // gaining a number; `global` and `ungrouped` are whole words and take one.
-    let without_controls: String = name
+    let kept: String = name
         .chars()
-        .filter(|c| !crate::host::is_unshowable(*c))
+        .filter(|c| crate::registry::a_name_may_carry(*c) && !crate::host::is_unshowable(*c))
         .collect();
-    let trimmed = without_controls.trim_start_matches('-').trim();
-    let base = match trimmed.is_empty() {
+    // What is left may still open with something that may only follow: a `-`,
+    // a combining mark, a digit of another script.
+    let opened = kept.trim_start_matches(|c| !crate::registry::a_name_may_open_with(c));
+    let base = match opened.is_empty() {
         true => match kind {
             NameKind::Group => "group",
             NameKind::Alias => "alias",
         },
-        false => trimmed,
+        false => opened,
     };
     (0..ENOUGH_SUFFIXES)
         .map(|at| match at {
@@ -548,7 +590,7 @@ fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
 /// Written down rather than read off `CURRENT_VERSION`: a step that named the
 /// current version would land on it whatever it became, so a shape moving with
 /// no step to carry it would compile.
-const CARRIED_TO: u32 = 3;
+const CARRIED_TO: u32 = 4;
 
 // Short of the shape this build reads, `load` deserializes what the step left
 // behind as a shape it is not. Reading `CURRENT_VERSION` above would make this
@@ -693,6 +735,26 @@ mod tests {
         }
     }
 
+    /// `renames` says what the step will rename, and an Import prints that
+    /// sentence before it writes — so a document no step moves has nothing to
+    /// say, or the sentence describes a rename `forward` never makes.
+    #[test]
+    fn a_document_no_step_moves_names_no_rename() {
+        let current = serde_json::json!({
+            "version": crate::registry::CURRENT_VERSION,
+            "accounts": [],
+            "groups": { "dev★": {} },
+        })
+        .to_string();
+
+        assert_eq!(forward(&current).expect("it is read"), None);
+        assert_eq!(
+            renames(&current),
+            vec![],
+            "a hand edit this build refuses is `load`'s to name, not the step's"
+        );
+    }
+
     #[test]
     fn a_document_this_build_already_reads_is_left_alone() {
         let current = format!(
@@ -808,7 +870,7 @@ mod tests {
         let renamed = renames(
             &serde_json::json!({
                 "version": 1,
-                "groups": { "\u{1b}[31mred": {}, "one\ttwo": {} },
+                "groups": { "\u{1b}[31mred": {}, "one\u{7}two": {} },
                 "aliases": { "\u{7}w": "work@example.com", "wo\u{200b}rk": "spare@example.com" },
             })
             .to_string(),
@@ -817,7 +879,7 @@ mod tests {
         let now: Vec<&str> = renamed.iter().map(|it| it.is_now.as_str()).collect();
         assert_eq!(
             now,
-            ["[31mred", "onetwo", "w", "work"],
+            ["31mred", "onetwo", "w", "work"],
             "the character goes and what a person meant by the name stays"
         );
         for name in now {

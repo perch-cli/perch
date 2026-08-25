@@ -773,7 +773,7 @@ fn a_group_name_with_a_space_in_it_is_refused_rather_than_breaking_the_round_tri
     let refusal = result.expect_err("a name no line of `config get` could name");
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     assert!(
-        refusal.to_string().contains("has a space in it"),
+        refusal.to_string().contains("carries ` ` (U+0020)"),
         "{refusal}"
     );
     assert!(
