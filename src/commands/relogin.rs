@@ -113,7 +113,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // it twice is how the Profile that gets written comes to be one that was
     // never checked.
     if !landing_in_the_default_profile {
-        return said;
+        return said.map_err(the_repair_stands);
     }
     let landed = switch::make_live(
         host,
@@ -129,7 +129,9 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     match landed {
         // The held failure first: a stdout that will not take the line above
         // will not take this one either.
-        Ok(()) => said.and_then(|()| say(out, "Its fresh Credential is the live one.")),
+        Ok(()) => said
+            .and_then(|()| say(out, "Its fresh Credential is the live one."))
+            .map_err(the_repair_stands),
         Err(stopped) if stopped.is_live => Err(stopped.error.with_note(&format!(
             "The repair stands and {} is working again: its fresh Credential is \
              the live one. What is behind is Claude Code's own record of which \
@@ -146,6 +148,15 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
             not_made_live(&account, stopped.error),
         )),
     }
+}
+
+/// The note for a repair that landed and could not be reported, which is the
+/// whole of what a non-zero exit would otherwise say.
+fn the_repair_stands(error: PerchError) -> PerchError {
+    error.with_note(
+        "The repair itself finished: the Account has a working Credential in \
+         its own Profile again, and only the report could not be printed.",
+    )
 }
 
 /// The Profiles this repair writes into, refused while a client is holding one.

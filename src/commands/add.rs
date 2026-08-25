@@ -102,6 +102,8 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         )));
     }
 
+    // On disk by here, so an unnoted failure sends a script back to log in
+    // again as an Account Perch already holds.
     report(
         out,
         &registry,
@@ -109,6 +111,12 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         args.alias.as_deref(),
         group.as_deref(),
     )
+    .map_err(|error| {
+        error.with_note(&format!(
+            "The Account was added: {email} has a Profile of its own and Perch \
+             holds its Credential. Only the report could not be printed.",
+        ))
+    })
 }
 
 /// Gives the Account a Profile of its own and returns the entry that records it,
