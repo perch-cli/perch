@@ -589,6 +589,170 @@ mod tests {
         }
     }
 
+    /// The three flags an Add takes, and the pair that cannot be typed together:
+    /// `--no-group` says put it nowhere, and a Group to put it in contradicts
+    /// that rather than narrowing it.
+    #[test]
+    fn an_add_takes_a_group_or_no_group_and_never_both() {
+        for line in [
+            &["perch", "add"][..],
+            &["perch", "add", "--group", "work"],
+            &["perch", "add", "--no-group"],
+            &["perch", "add", "--alias", "dev"],
+            &["perch", "add", "--no-group", "--alias", "dev"],
+        ] {
+            assert!(
+                Cli::try_parse_from(line).is_ok(),
+                "`{}` should parse",
+                line.join(" ")
+            );
+        }
+
+        for narrowed in [
+            &["perch", "add", "--group", "work", "--no-group"][..],
+            &["perch", "add", "someone@example.com"],
+            &["perch", "add", "--group"],
+            &["perch", "add", "--alias"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
+    }
+
+    /// A listing is the one command that takes a Scope as a bare word, and the
+    /// fixtures are the three breadths it has: every Account, a Group, and the
+    /// Accounts in none. Two Scopes is not a wider listing, it is two questions.
+    #[test]
+    fn a_listing_takes_one_scope_and_the_two_flags() {
+        for line in [
+            &["perch", "list"][..],
+            &["perch", "list", "work"],
+            &["perch", "list", "ungrouped"],
+            &["perch", "list", "--refresh"],
+            &["perch", "list", "--json"],
+            &["perch", "list", "work", "--refresh", "--json"],
+        ] {
+            assert!(
+                Cli::try_parse_from(line).is_ok(),
+                "`{}` should parse",
+                line.join(" ")
+            );
+        }
+
+        for narrowed in [
+            &["perch", "list", "work", "ungrouped"][..],
+            &["perch", "list", "--group", "work"],
+            &["perch", "list", "--scope", "work"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
+    }
+
+    /// A status is about the active Account, so naming one is not a narrowing
+    /// but a different question — `perch list <scope>` is where a set is asked
+    /// for. The two flags are the whole of its surface.
+    #[test]
+    fn a_status_takes_no_target_and_the_two_flags() {
+        for line in [
+            &["perch", "status"][..],
+            &["perch", "status", "--refresh"],
+            &["perch", "status", "--json"],
+            &["perch", "status", "--refresh", "--json"],
+        ] {
+            assert!(
+                Cli::try_parse_from(line).is_ok(),
+                "`{}` should parse",
+                line.join(" ")
+            );
+        }
+
+        for narrowed in [
+            &["perch", "status", "someone@example.com"][..],
+            &["perch", "status", "work"],
+            &["perch", "status", "--group", "work"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
+    }
+
+    /// The three commands a Target is the whole of. A Switch's is optional
+    /// because Perch picks when it is left out; the other two have nothing to
+    /// pick from, so an absent Target is a line that does not parse.
+    #[test]
+    fn the_target_commands_take_one_and_only_a_switch_may_omit_it() {
+        for line in [
+            &["perch", "switch"][..],
+            &["perch", "switch", "work"],
+            &["perch", "relogin", "someone@example.com"],
+            &["perch", "disable", "dev"],
+            &["perch", "enable", "dev"],
+            &["perch", "remove", "dev"],
+            &["perch", "remove", "dev", "--yes"],
+        ] {
+            assert!(
+                Cli::try_parse_from(line).is_ok(),
+                "`{}` should parse",
+                line.join(" ")
+            );
+        }
+
+        for narrowed in [
+            &["perch", "relogin"][..],
+            &["perch", "disable"],
+            &["perch", "enable"],
+            &["perch", "remove"],
+            &["perch", "switch", "work", "other"],
+            &["perch", "remove", "dev", "other"],
+            &["perch", "relogin", "dev", "--yes"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
+    }
+
+    /// The absence of a name *is* `--unset`, which is why the dispatch arm reads
+    /// neither the flag nor both together: clap requires a name unless the flag
+    /// was passed, and refuses the two of them at once.
+    #[test]
+    fn an_alias_takes_a_name_or_unset_and_never_neither_or_both() {
+        for line in [
+            &["perch", "alias", "someone@example.com", "dev"][..],
+            &["perch", "alias", "dev", "--unset"],
+        ] {
+            assert!(
+                Cli::try_parse_from(line).is_ok(),
+                "`{}` should parse",
+                line.join(" ")
+            );
+        }
+
+        for narrowed in [
+            &["perch", "alias", "someone@example.com"][..],
+            &["perch", "alias", "someone@example.com", "dev", "--unset"],
+            &["perch", "alias", "--unset"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
+    }
+
     /// The half of *one capability, one name, one place* no other test can
     /// make: that the spelling a name moved off is **gone**
     /// (ADR a-command-names-its-noun). Nothing is aliased.
