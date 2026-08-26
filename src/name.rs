@@ -33,8 +33,10 @@ pub fn means_global(name: &str) -> bool {
 /// this, because then one of the two meanings would be unreachable.
 pub const NO_GROUP: &str = "none";
 
-/// Whether a name is the one that means no Group at all.
-pub fn means_no_group(name: &str) -> bool {
+/// Whether a name is the one that means no Group at all. Not on its own outside
+/// this module: [`means_the_ungrouped_scope`] is the question every command has,
+/// and half of it is what refused one spelling while naming the other.
+fn means_no_group(name: &str) -> bool {
     same_name(name, NO_GROUP)
 }
 
