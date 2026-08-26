@@ -148,6 +148,39 @@ impl Rule {
         }
     }
 
+    /// Whether the rule lets a character sit inside a name. `None` where it is
+    /// about the whole name rather than any one character. No catch-all arm, so
+    /// a rule joining the enum has to answer here before it builds.
+    fn keeps(self, c: char) -> Option<bool> {
+        match self {
+            Rule::Unshowable(set) => Some(!crate::host::within(set, c)),
+            Rule::NotAnIdentifier => Some(a_name_may_carry(c)),
+            Rule::Whitespace => Some(!c.is_whitespace()),
+            Rule::LikeAnAddress => Some(c != '@'),
+            Rule::Empty
+            | Rule::OpensWrong
+            | Rule::LeadingDash
+            | Rule::AddressesTheUngrouped(_)
+            | Rule::MeansEveryScope(_) => None,
+        }
+    }
+
+    /// Whether the rule lets a character open a name. `None` where it says
+    /// nothing about the first character in particular.
+    fn opens(self, c: char) -> Option<bool> {
+        match self {
+            Rule::OpensWrong => Some(a_name_may_open_with(c)),
+            Rule::LeadingDash => Some(c != '-'),
+            Rule::Empty
+            | Rule::Unshowable(_)
+            | Rule::NotAnIdentifier
+            | Rule::Whitespace
+            | Rule::LikeAnAddress
+            | Rule::AddressesTheUngrouped(_)
+            | Rule::MeansEveryScope(_) => None,
+        }
+    }
+
     /// Whether this name breaks the rule, folded as the version folds.
     fn broken_by(self, name: &str, fold: Fold) -> bool {
         match self {
@@ -428,12 +461,59 @@ impl Rules {
     pub fn one_name(&self, one: &str, other: &str) -> bool {
         self.fold.one_name(one, other)
     }
+
+    /// Whether every rule that has a view lets the character sit in a name.
+    fn keeps(&self, c: char) -> bool {
+        self.rules.iter().all(|rule| rule.keeps(c).unwrap_or(true))
+    }
+
+    /// The same, of the first character.
+    fn opens(&self, c: char) -> bool {
+        self.rules.iter().all(|rule| rule.opens(c).unwrap_or(true))
+    }
 }
 
 /// Refuses a name this build could not hold, through the current row.
 pub fn validate(kind: NameKind, name: &str) -> Result<()> {
     current().validate(kind, name)
 }
+
+/// The nearest name to this one that this build accepts and nothing else in the
+/// namespace answers to. `None` leaves the name as it is, for the refusal at
+/// `load` to describe. Here rather than in the migration that asks for it: what
+/// a name may be is this module's, and `taken` is all the caller brings.
+pub fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
+    let row = current();
+    // The per-character rules are per character, and no suffix rescues one, so a
+    // name breaking one loses the character rather than gaining a number; the
+    // reserved words are whole words and take one.
+    let kept: String = name.chars().filter(|c| row.keeps(*c)).collect();
+    // What is left may still open with something that may only follow: a `-`, a
+    // combining mark, a digit of another script.
+    let opened = kept.trim_start_matches(|c| !row.opens(c));
+    let base = match opened.is_empty() {
+        true => match kind {
+            NameKind::Group => "group",
+            NameKind::Alias => "alias",
+        },
+        false => opened,
+    };
+    (0..ENOUGH_SUFFIXES)
+        .map(|at| match at {
+            0 => base.to_string(),
+            _ => format!("{base}-{at}"),
+        })
+        .find(|candidate| {
+            validate(kind, candidate).is_ok()
+                && !taken.iter().any(|held| same_name(held, candidate))
+        })
+}
+
+/// How many spellings of a name are tried before the rename gives up.
+///
+/// Bounded rather than open, so a name no suffix rescues is a refusal at `load`
+/// rather than a command that never returns.
+const ENOUGH_SUFFIXES: u32 = 100;
 
 /// Whether a character may open a name.
 ///
