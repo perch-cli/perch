@@ -197,6 +197,13 @@ fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         let Ok(Some(points_at)) = host.link_target(&at) else {
             continue;
         };
+        // Wherever it points, and asked before the target is: a Profile's
+        // Credential Store is derived from its directory, so a link at one of
+        // these names is an Account holding a Credential that is not its own.
+        if held_back(&at) {
+            unlink(host, &at)?;
+            continue;
+        }
         // The target as it was recorded, unresolved: this asks what the link
         // says rather than where it lands, and a target that is gone — which is
         // the case this sweep is for — resolves to nothing at all.
@@ -205,13 +212,7 @@ fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
             reason = "what a link records, which is text and not a place"
         )]
         let into_the_shared_state = plain(&points_at).starts_with(plain(shared));
-        if !into_the_shared_state {
-            continue;
-        }
-        // A link at a held-back name goes whether or not its target is there:
-        // the denylist is enforced where links are made, so nothing else would
-        // ever look at one and it would stay for good.
-        if held_back(&at) || !host.path_exists(&at) {
+        if into_the_shared_state && !host.path_exists(&at) {
             unlink(host, &at)?;
         }
     }
