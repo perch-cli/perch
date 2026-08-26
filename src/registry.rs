@@ -1431,23 +1431,42 @@ pub fn sharing_a_profile_with<'a>(
     registry: &'a Registry,
     account: &Account,
 ) -> Option<&'a Account> {
-    // Slugged once rather than once per comparison. `is_a_candidate` asks this
-    // of every Account, and every Account asks `is_a_candidate`, so a `perch
-    // list` over n Accounts pays for it n² times.
+    // Slugged once rather than once per comparison, and the other side into a
+    // buffer this scan keeps: `is_a_candidate` asks this of every Account and
+    // is itself asked of every one, so an allocation here is paid n² times.
     let mine = slug(account.email());
-    registry
-        .accounts
-        .iter()
-        .find(|held| !same_name(held.email(), account.email()) && slug(held.email()) == mine)
+    let mut theirs = String::with_capacity(mine.len());
+    registry.accounts.iter().find(|held| {
+        !same_name(held.email(), account.email()) && {
+            slug_into(&mut theirs, held.email());
+            theirs == mine
+        }
+    })
 }
 
 pub fn slug(email: &str) -> String {
-    let slugged: String = email
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    slugged.trim_matches('-').to_string()
+    let mut slugged = String::with_capacity(email.len());
+    slug_into(&mut slugged, email);
+    slugged
+}
+
+/// The same, into a buffer the caller keeps, so a scan comparing slugs
+/// allocates once rather than once per candidate. Lowercased character by
+/// character rather than through `str::to_lowercase`, which would allocate a
+/// second string: the one mapping the two disagree on is Greek's final sigma,
+/// and `ς` and `σ` are both written `-` here.
+fn slug_into(slugged: &mut String, email: &str) {
+    slugged.clear();
+    slugged.extend(
+        email
+            .chars()
+            .flat_map(char::to_lowercase)
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }),
+    );
+    let end = slugged.trim_end_matches('-').len();
+    slugged.truncate(end);
+    let start = slugged.len() - slugged.trim_start_matches('-').len();
+    slugged.drain(..start);
 }
 
 /// How long a Perch that died holding the registry lock keeps it.
@@ -2004,6 +2023,33 @@ mod tests {
     #[test]
     fn an_email_slugs_to_a_stable_directory_name() {
         assert_eq!(slug("Someone@Example.com"), "someone-example-com");
+    }
+
+    /// The mapping `str::to_lowercase` and `char::to_lowercase` disagree on, and
+    /// the reason a slug may be taken character by character. A registry v0.2.0
+    /// wrote came back refused over the same rule read the other way.
+    #[test]
+    fn an_address_ending_in_a_greek_sigma_slugs_the_same_whichever_case_it_carries() {
+        assert_eq!(
+            slug("XPONO\u{3a3}@example.com"),
+            slug("xpono\u{3c2}@example.com")
+        );
+        assert_eq!(
+            slug("XPONO\u{3a3}@example.com"),
+            slug("xpono\u{3c3}@example.com")
+        );
+        assert_eq!(slug("\u{3a3}\u{3a3}"), "");
+    }
+
+    /// A slug is trimmed at both ends, and the trim is what a buffer reused
+    /// across a scan has to leave behind along with the rest of the last one.
+    #[test]
+    fn a_scan_comparing_slugs_leaves_nothing_of_the_last_one_in_its_buffer() {
+        let mut buffer = String::new();
+        slug_into(&mut buffer, "a-much-longer-address@example.com");
+        slug_into(&mut buffer, "@ab@");
+
+        assert_eq!(buffer, "ab");
     }
 
     #[test]
