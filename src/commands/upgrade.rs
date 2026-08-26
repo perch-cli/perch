@@ -16,17 +16,34 @@ use crate::error::{PerchError, Result};
 use crate::host::{Host, Platform};
 use crate::upgrade::{self, Channel};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, clap::Args)]
 pub struct UpgradeArgs {
-    /// The Release to install. Without it, the newest.
+    /// The Release to install, with or without its leading `v`. Without
+    /// this, the newest.
+    ///
+    /// Not with `--check`, which asks what the newest Release is and has no
+    /// use for a named one. Refused rather than ignored, because a named
+    /// Release that is quietly thrown away is one nobody is told about.
+    #[arg(long, value_name = "TAG", conflicts_with = "check")]
     pub release: Option<String>,
-    /// Say what is installed and what is newest, and do nothing.
+
+    /// Say what is installed and what is newest, and install nothing.
+    #[arg(long)]
     pub check: bool,
-    /// That answer as a document, for something parsing it.
+
+    /// That answer as a document.
+    #[arg(long, requires = "check")]
     pub json: bool,
-    /// The Channel this Installation came from, for when the path does not say.
+
+    /// Which Channel installed this Perch, for when its path does not say.
+    #[arg(long, value_name = "NAME")]
     pub channel: Option<String>,
-    /// Agreement given ahead of time to a Release older than the one installed.
+
+    /// Agree ahead of time to a Release older than the one installed.
+    ///
+    /// Nothing is installed by a check, so there is nothing for it to agree
+    /// to.
+    #[arg(long, conflicts_with = "check")]
     pub yes: bool,
 }
 

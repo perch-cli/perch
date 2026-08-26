@@ -25,17 +25,29 @@ use crate::observe::Report;
 use crate::registry::{self, Account, Registry};
 use crate::utilization;
 
-#[derive(Debug, Default, Clone)]
+/// What a listing was asked for. `scope` is the word as it was typed rather than
+/// a resolved [`crate::registry::Scope`], because a name nothing was declared
+/// under is answered with what *was* declared.
+#[derive(Debug, Default, Clone, clap::Args)]
 pub struct ListArgs {
-    /// Which Accounts to show: a Group by name, or `ungrouped`. `None` is every
-    /// Account Perch holds.
-    ///
-    /// The word as typed rather than a resolved [`Scope`], because a name
-    /// nothing was declared under is answered with what *was* declared.
+    /// Which Accounts to show: a Group by name, or `ungrouped` for the
+    /// Accounts in no Group. Without one, every Account Perch holds.
+    #[arg(value_name = "SCOPE")]
     pub scope: Option<String>,
-    /// Read current Utilization before showing it, rather than showing what was
-    /// last observed.
+
+    /// Read current Utilization from Anthropic first.
+    ///
+    /// Exactly the Accounts about to be shown and no others, so narrowing
+    /// the listing narrows the reads with it. Roughly 28-30 reads an hour
+    /// are allowed per Account and the allowance does not refill early, so
+    /// a figure that cannot be read falls back to the cached one rather
+    /// than failing.
+    #[arg(long)]
     pub refresh: bool,
+
+    /// Emit machine-readable output, with an observation time on every
+    /// Utilization figure.
+    #[arg(long)]
     pub json: bool,
 }
 

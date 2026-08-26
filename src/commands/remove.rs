@@ -32,11 +32,13 @@ use crate::target;
 const WHY_THE_DEFAULT_PROFILE: &str = "the Default Profile, which is where the Account Perch would land on has to \
      be written";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, clap::Args)]
 pub struct RemoveArgs {
-    /// The Account to give up: its Alias, or its email address.
+    /// The Account: its Alias, or its email address.
     pub target: String,
-    /// Answer the confirmation yes, for the removals that would ask.
+
+    /// Remove it without being asked to confirm.
+    #[arg(long)]
     pub yes: bool,
 }
 
