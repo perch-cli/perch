@@ -17,8 +17,9 @@ use perch::error::PerchError;
 use perch::host::Execution;
 use perch::host::RealHost;
 use perch::host::prelude::*;
-#[cfg(target_os = "macos")]
 use perch::keychain::{EXIT_ITEM_NOT_FOUND, KeychainError, SECURITY_BIN, classify};
+#[cfg(target_os = "macos")]
+use perch::live;
 use perch::probe;
 #[cfg(target_os = "macos")]
 use perch::probe::Verdict;
@@ -510,7 +511,7 @@ fn every_session_marker_claude_code_has_left_names_a_process() {
         markers.len()
     );
 
-    for pid in probe::live_clients(
+    for pid in live::live_clients(
         &host,
         &store.config_dir,
         &probe::Installed::unknown("whatever is installed here"),
@@ -541,7 +542,7 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
         return;
     };
 
-    let corroborated = probe::live_clients(
+    let corroborated = live::live_clients(
         &host,
         &store.config_dir,
         &probe::Installed::unknown("whatever is installed here"),

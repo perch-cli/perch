@@ -16,6 +16,7 @@ use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::host::Host;
+use crate::live;
 use crate::login;
 use crate::name;
 use crate::probe::{self, Store};
@@ -305,7 +306,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // itself. Asked over every placement before the first of them is written.
     let live: Vec<String> = placements
         .iter()
-        .filter(|(_, store, _, _)| probe::anything_running(host, &store.config_dir))
+        .filter(|(_, store, _, _)| live::anything_running(host, &store.config_dir))
         .map(|(email, store, _, _)| format!("{email} ({})", store.config_dir.display()))
         .collect();
     if !live.is_empty() {

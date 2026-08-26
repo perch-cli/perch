@@ -19,6 +19,7 @@ use crate::anthropic::{self, QuotaWindows, Refused};
 use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock::{self, Held};
 use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
@@ -636,7 +637,7 @@ fn refuse_if_live(
     // to guess which to quit.
     let mut running = Vec::new();
     for config_dir in &asked.in_use_from {
-        for pid in probe::live_clients(host, config_dir, installed)? {
+        for pid in live::live_clients(host, config_dir, installed)? {
             running.push(format!("pid {pid} in {}", config_dir.display()));
         }
     }

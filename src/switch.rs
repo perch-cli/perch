@@ -8,14 +8,13 @@
 //! the Run path. [`switch_to`] is the way in and the only one, so `perch switch`
 //! and the Watcher differ by a [`Reason`] and by nothing else.
 
-use std::path::Path;
-
 use chrono::{DateTime, Utc};
 use zeroize::Zeroizing;
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host};
+use crate::live;
 use crate::lock;
 use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
@@ -429,7 +428,7 @@ pub fn make_live(
         // alone — the Account's own Profile is only read here.
         let mut holds = lock::Holds::of(held, perch);
 
-        holds.around(|| refuse_if_live_in(host, &store.config_dir, whose, installed))?;
+        holds.around(|| live::refuse_if_live_in(host, &store.config_dir, whose, installed))?;
 
         let prepared = holds.around(|| prepare(host, account, None, installed.clone(), store))?;
 
@@ -730,7 +729,7 @@ fn prepare(
     // incoming Account's is only ever read from, and reading takes nothing away
     // from the session using it.
     if let Some(outgoing) = outgoing {
-        refuse_if_live(host, outgoing, &installed)?;
+        live::refuse_if_live(host, outgoing, &installed)?;
     }
 
     // From whichever of the Profile's two Credential Stores holds one: an
@@ -975,112 +974,6 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
         .and_then(|contents| probe::oauth_account_block(&contents).map(str::to_string));
 
     Ok(held.unwrap_or_else(|| incoming.identity.oauth_account_block()))
-}
-
-/// The Profile that was asked about is not a Live Profile: nothing is running
-/// against the Credential a write would go under.
-///
-/// A witness on the terms [`Settled`] sets out — the negative of a **Live
-/// Profile**, constructible only by [`refuse_if_live`].
-pub struct Idle(());
-
-/// Every way the liveness ask can fail, by name.
-///
-/// Named one at a time rather than collapsed into a [`PerchError`] because two
-/// of the three are not refusals at all, and a caller deciding what to do next
-/// has to tell them apart. No catch-all arm, so a fourth breaks the build.
-pub enum NotIdle {
-    /// A client is running against the Profile, and this is the sentence saying
-    /// which. The one that resolves itself: the client exits, and the Credential
-    /// stops being its.
-    Live(String),
-    /// The `sessions` directory is there and would not be read — the root-owned
-    /// one a `sudo claude` leaves. Nothing about the Profile was established,
-    /// which is not the same as nothing running against it.
-    SessionsUnreadable(PerchError),
-    /// The Account is recorded under an address no Profile directory can be
-    /// named after, so there is nowhere to ask about.
-    Unnameable(PerchError),
-}
-
-/// For the callers that have nothing to decide off which way it failed, and only
-/// want to hand it on — the shape `?` gives them for free.
-impl From<NotIdle> for PerchError {
-    fn from(not_idle: NotIdle) -> PerchError {
-        match not_idle {
-            NotIdle::Live(why) => PerchError::ProfileLive(why),
-            NotIdle::SessionsUnreadable(error) | NotIdle::Unnameable(error) => error,
-        }
-    }
-}
-
-/// Refuses to touch a Profile something else is holding
-/// (ADR a-profile-is-live-by-evidence). Public because two callers ask it
-/// *before* they spend something rather than after: `perch relogin` before a
-/// browser round trip, and `perch watcher run` before it reads every
-/// candidate's Utilization.
-pub fn refuse_if_live(
-    host: &dyn Host,
-    account: &Account,
-    installed: &Installed,
-) -> std::result::Result<Idle, NotIdle> {
-    let profile_dir = account.profile_dir(host).map_err(NotIdle::Unnameable)?;
-    refuse_if_live_in(
-        host,
-        &profile_dir,
-        &format!("{}'s Profile", account.email()),
-        installed,
-    )
-}
-
-/// The same, of a config directory named rather than derived — the Default
-/// Profile, which belongs to no one Account and is where a repair of the Account
-/// you are on has to land.
-fn refuse_if_live_in(
-    host: &dyn Host,
-    config_dir: &Path,
-    whose: &str,
-    installed: &Installed,
-) -> std::result::Result<Idle, NotIdle> {
-    let running =
-        probe::live_clients(host, config_dir, installed).map_err(NotIdle::SessionsUnreadable)?;
-    if running.is_empty() {
-        return Ok(Idle(()));
-    }
-
-    let pids: Vec<String> = running.iter().map(u32::to_string).collect();
-    Err(NotIdle::Live(format!(
-        "A client is running against {whose} (pid {}).\n\
-         Nothing was changed. That Credential belongs to it until it exits — \
-         quit it, or switch to a different Account.",
-        pids.join(", ")
-    )))
-}
-
-/// Both Profiles a command may write into, refused while a client is holding
-/// either. One place, because every command that needs this asks it twice —
-/// before an unbounded wait and after — and two spellings of one pair of checks
-/// is how the second ask comes to be weaker than the first. The sentence is the
-/// caller's: what makes the Default Profile wrong differs for repair and removal.
-pub fn refuse_if_live_anywhere(
-    host: &dyn Host,
-    account: &Account,
-    the_default_profile_too: Option<&str>,
-    installed: &Installed,
-) -> Result<()> {
-    refuse_if_live(host, account, installed)?;
-
-    if let Some(whose) = the_default_profile_too {
-        // Its Credential is the one a running client is holding, and this would
-        // replace it rather than renew it.
-        refuse_if_live_in(
-            host,
-            &registry::the_default_profile(host)?.config_dir,
-            whose,
-            installed,
-        )?;
-    }
-    Ok(())
 }
 
 fn nothing_happened(outgoing: Option<&Account>) -> String {
@@ -1413,41 +1306,6 @@ mod tests {
         assert!(
             !stopped.is_live,
             "and it is refused before anything is written"
-        );
-    }
-
-    #[test]
-    fn an_address_no_profile_can_be_named_after_is_unnameable_rather_than_idle() {
-        let host = FakeHost::new();
-        let nameless = Account {
-            identity: Identity {
-                // Nothing a directory can be named after survives the slug.
-                email: "@".to_string(),
-                account_uuid: None,
-                organization_name: None,
-                organization_uuid: None,
-            },
-            plan: None,
-            disabled: false,
-            quarantine: None,
-            group: None,
-            utilization: None,
-        };
-
-        let not_idle = refuse_if_live(&host, &nameless, &Installed::unknown("2.1.221"))
-            .err()
-            .expect("there is nowhere to ask about");
-
-        assert!(
-            matches!(not_idle, NotIdle::Unnameable(_)),
-            "not a Live Profile and not a refusal: nothing about that Profile \
-             was ever established"
-        );
-        assert_eq!(
-            PerchError::from(not_idle).exit_code(),
-            crate::error::EXIT_INVALID,
-            "and it keeps the code the failure earned, rather than being folded \
-             into the refusal's",
         );
     }
 

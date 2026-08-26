@@ -11,6 +11,7 @@
 
 use perch::host::RealHost;
 use perch::host::prelude::*;
+use perch::live;
 use perch::probe;
 
 #[test]
@@ -64,10 +65,10 @@ fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
     host.create_file_with_mode(&marker, &probe::session_marker(me, host.now()), 0o600)
         .expect("the marker is written");
 
-    let live = probe::live_clients(&host, &dir, &probe::Installed::unknown("this machine"))
+    let running = live::live_clients(&host, &dir, &probe::Installed::unknown("this machine"))
         .expect("the marker names this very process, which is plainly alive");
     assert_eq!(
-        live,
+        running,
         vec![me],
         "a Run's own marker has to read as a Live Profile, or nothing is \
          protecting the session it launched"
@@ -75,7 +76,7 @@ fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
 
     host.remove_file(&marker).expect("the marker is taken away");
     assert!(
-        probe::live_clients(&host, &dir, &probe::Installed::unknown("this machine"))
+        live::live_clients(&host, &dir, &probe::Installed::unknown("this machine"))
             .expect("an empty directory is no evidence")
             .is_empty(),
         "and the Profile stops being Live when the Run ends"

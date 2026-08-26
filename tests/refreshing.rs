@@ -361,7 +361,7 @@ fn utilization_for_a_live_account_is_read_without_a_renewal() {
     // and a fixture that quietly stopped being Live would let all of it pass while
     // proving nothing.
     assert_eq!(
-        perch::probe::live_clients(
+        perch::live::live_clients(
             &host,
             &perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known"),
             &perch::probe::Installed::unknown(CLAUDE_VERSION),

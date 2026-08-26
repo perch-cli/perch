@@ -11,8 +11,8 @@
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
+use crate::live::NotIdle;
 use crate::registry::{Account, Checked, Settings};
-use crate::switch::NotIdle;
 
 /// How long the watcher waits between Refreshing the Account it is on.
 ///

@@ -936,160 +936,11 @@ struct SessionMarker {
     started_at: Option<i64>,
 }
 
-/// The processes running against a config directory right now. A marker is
-/// evidence only when it is corroborated, and one that cannot be read or
-/// understood is no evidence at all: a Profile is Live when something says so.
-/// One situation is neither belief nor dismissal — a running process whose start
-/// the operating system will not say — and that is a refusal.
-pub fn live_clients(host: &dyn Host, config_dir: &Path, installed: &Installed) -> Result<Vec<u32>> {
-    clients_in(host, config_dir).map_err(|unsure| {
-        refusal(
-            assumption::SESSION_MARKER,
-            &unsure.detail(),
-            installed.version(),
-        )
-    })
-}
-
-/// Why whether anything is running went unanswered. Both are doubt rather than
-/// an answer, and neither is decided here: a caller that must not write under a
-/// client reads either as one, and the caller that can name a Claude Code
-/// version turns either into a refusal that says which it met.
-enum Unsure {
-    /// A marker naming a running process whose start the operating system will
-    /// not say, so it can be neither corroborated nor dismissed.
-    WhenItBegan(PathBuf),
-    /// A marker naming a running process that Perch could not read at all —
-    /// root-owned after a `sudo claude`, most often. Its own variant rather than
-    /// the one above, because they are told apart by what the reader has to do:
-    /// one is a file whose permissions are wrong, and the other is an operating
-    /// system that would not answer.
-    Unreadable(PathBuf),
-    /// The sessions directory is there and would not be read. Told apart from
-    /// an absent one, which is the ordinary "nothing is running" and the whole
-    /// reason [`Files::list_dir`] reports the two differently.
-    Unlistable { dir: PathBuf, why: HostError },
-}
-
-impl Unsure {
-    fn detail(&self) -> String {
-        match self {
-            Unsure::WhenItBegan(marker) => format!(
-                "{} names a running process, but when that process began could \
-                 not be read, so the marker can be neither corroborated nor \
-                 dismissed. If that session is dead, delete the file",
-                marker.display()
-            ),
-            Unsure::Unreadable(marker) => format!(
-                "{} names a running process and could not be read, so the \
-                 marker can be neither corroborated nor dismissed. Make that \
-                 file readable, or delete it if that session is dead",
-                marker.display()
-            ),
-            Unsure::Unlistable { dir, why } => format!(
-                "{} could not be read ({why}), so whether a client is running \
-                 against this Profile is not a question that got an answer. \
-                 Nothing is assumed either way — make that directory readable, \
-                 or delete it if no client is running",
-                dir.display()
-            ),
-        }
-    }
-}
-
-/// Whether anything may be running against a config directory, where a marker
-/// that can be neither corroborated nor dismissed counts as one. The question
-/// [`live_clients`] answers, for the caller with no Claude Code version to name
-/// an assumption against: the Carry writes into a Profile only when it is quiet,
-/// and doubt is the same answer as a client for that purpose.
-pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
-    anything_running_but(host, config_dir, None)
-}
-
-/// The same, discounting one process — which is only ever the caller's own. A Run
-/// claims its Profile before it reconciles and Carries, and that claim is a
-/// Marker, so the Carry that follows would find it and decline to write.
-/// Discounting rather than skipping the question: any *other* client is still a
-/// client, and doubt still resolves towards Live.
-pub fn anything_running_but(host: &dyn Host, config_dir: &Path, mine: Option<u32>) -> bool {
-    match clients_in(host, config_dir) {
-        Ok(running) => running.iter().any(|pid| Some(*pid) != mine),
-        Err(_) => true,
-    }
-}
-
-/// The processes running against a config directory, or the marker that could
-/// be neither corroborated nor dismissed. Both callers phrase that doubt in
-/// their own terms, and neither decides it.
-fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32>, Unsure> {
-    let dir = sessions_dir(config_dir);
-    let markers = match host.list_dir(&dir) {
-        Ok(markers) => markers,
-        // Never having run a client is the *only* case that means nothing is
-        // running. A directory that is there and will not be read is doubt, and
-        // every doubt in this function resolves towards Live.
-        Err(HostError::NotFound { .. }) => return Ok(Vec::new()),
-        Err(why) => return Err(Unsure::Unlistable { dir, why }),
-    };
-
-    let mut running = Vec::new();
-    for marker in markers {
-        let pid: u32 = match marker
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.strip_suffix(".json"))
-            .and_then(|name| name.parse().ok())
-        {
-            Some(pid) => pid,
-            None => continue,
-        };
-        let session_began = match session_start_in(host, &marker) {
-            Marker::Began(at) => at,
-            // Either way it does not say what a marker has to say, which is a
-            // judgment about the *content* of a file Perch can see all of: a
-            // Profile is Live when something says so.
-            Marker::SaysNothing => continue,
-            // Nothing has been established, so it resolves towards Live — and
-            // only for a pid that is running, since litter must not refuse every
-            // Switch for ever. One halfway written is `SaysNothing` above.
-            Marker::Unreadable if host.process_alive(pid) => {
-                return Err(Unsure::Unreadable(marker));
-            }
-            Marker::Unreadable => continue,
-        };
-
-        match host.process_started_at(pid) {
-            Some(process_began) => {
-                // Saturating, for the reason `usable` is: `startedAt` comes out
-                // of a file Perch does not own, and an `i64::MAX` in it would
-                // wrap a Live Profile into "nothing running" in a release build.
-                if process_began.timestamp_millis()
-                    <= session_began.saturating_add(CLOCK_STEP_MARGIN_MILLIS)
-                {
-                    running.push(pid);
-                }
-            }
-            // No start to compare. The process being gone is the ordinary way
-            // that happens — a marker left behind by a client that died.
-            None if !host.process_alive(pid) => {}
-            None => return Err(Unsure::WhenItBegan(marker)),
-        }
-    }
-    Ok(running)
-}
-
-/// How far a process may appear to have begun *after* the session it is named by
-/// and still be taken as the one that wrote the Marker. Linux recomputes a
-/// process's start from a `btime` the kernel derives as realtime minus uptime,
-/// so an NTP correction makes a live process look younger than the session it
-/// just recorded.
-const CLOCK_STEP_MARGIN_MILLIS: i64 = 5_000;
-
 /// What a session marker turned out to be. Three answers rather than an
 /// `Option`, because the two ways of having no timestamp resolve in opposite
 /// directions: one is a judgment about content, and the other is a file nothing
 /// has been established about.
-enum Marker {
+pub enum Marker {
     /// It says when its session began.
     Began(i64),
     /// Perch read the whole file and it is not a marker, or is one that does
@@ -1101,7 +952,7 @@ enum Marker {
 }
 
 /// The marker's own record of when its session began.
-fn session_start_in(host: &dyn Host, marker: &Path) -> Marker {
+pub fn session_start_in(host: &dyn Host, marker: &Path) -> Marker {
     // A marker that has gone between the listing and the read is one the client
     // took with it on its way out, which is the ordinary end of a session
     // rather than a doubt about one.
@@ -1234,7 +1085,7 @@ fn where_it_is_wrong(err: &serde_json::Error) -> String {
     format!("{what}, at line {} column {}", err.line(), err.column())
 }
 
-fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
+pub(crate) fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
     PerchError::ProbeRefused {
         assumption: assumption.to_string(),
         detail: detail.to_string(),
@@ -1295,31 +1146,6 @@ mod tests {
                 .map(|lock| lock.dir.clone())
                 .collect::<Vec<_>>(),
             "and the locks are the ones a running Claude Code takes"
-        );
-    }
-
-    /// Asserted through `anything_running` rather than by reaching for the marker
-    /// path, because a check on the path is a check past the interface. The fake
-    /// reports its own process as running, which is the situation being modeled:
-    /// Perch waits for what it started, so the pid a claim names is alive for
-    /// precisely as long as the Run or the login.
-    #[test]
-    fn a_claim_makes_a_directory_live_and_letting_it_go_stops_it() {
-        let dir = Path::new("/Users/someone/.perch/profiles/someone-example-com");
-        let host = FakeHost::new();
-
-        assert!(!anything_running(&host, dir), "nothing has claimed it yet");
-
-        let claimed = claim(&host, dir).expect("the marker is written");
-        assert!(
-            anything_running(&host, dir),
-            "a Run or a login holding this is a Live Profile"
-        );
-
-        drop(claimed);
-        assert!(
-            !anything_running(&host, dir),
-            "and it stops being Live when the thing holding it lets go"
         );
     }
 
@@ -1807,50 +1633,6 @@ mod tests {
             PathBuf::from("/tmp/profile/sessions/4242.json"),
             "the marker is named after the process, where the corroboration \
              reads the pid back out of the name"
-        );
-    }
-
-    /// `startedAt` is a number out of a file Perch does not own, so the margin
-    /// added to it is arithmetic on a stranger's input.
-    #[test]
-    fn a_marker_claiming_the_end_of_time_still_reads_as_a_live_client() {
-        let host = FakeHost::new()
-            .with_file(
-                "/tmp/profile/sessions/4242.json",
-                &format!(r#"{{"startedAt":{}}}"#, i64::MAX),
-            )
-            .with_live_process_started_at(
-                4242,
-                DateTime::from_timestamp_millis(NOON).expect("a time"),
-            );
-
-        assert_eq!(
-            clients_in(&host, Path::new("/tmp/profile")).ok(),
-            Some(vec![4242]),
-            "a process that began long before the marker claims is running against \
-             the Profile, whatever the claim adds up to"
-        );
-    }
-
-    /// The pid is read back out of a filename, so any file in the directory
-    /// names one — and `0` is a process group to `kill` and the kernel to
-    /// macOS's `proc_pidinfo`, which answers a start time at boot that is
-    /// older than every session a marker could record.
-    #[test]
-    fn a_marker_named_after_a_number_that_is_no_process_makes_nothing_live() {
-        let host = FakeHost::new()
-            .with_file(
-                "/tmp/profile/sessions/0.json",
-                &format!(r#"{{"startedAt":{NOON}}}"#),
-            )
-            .with_live_process_started_at(0, DateTime::<Utc>::MIN_UTC);
-
-        assert_eq!(
-            clients_in(&host, Path::new("/tmp/profile")).ok(),
-            Some(vec![]),
-            "a start time believed here would refuse every Switch, Capture and \
-             Renewal against the Profile for ever, and no client could be quit \
-             to clear it"
         );
     }
 

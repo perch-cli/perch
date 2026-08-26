@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use crate::credentials::{self, Forgotten};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock;
 use crate::probe;
 use crate::registry::{self, Account, Registry};
@@ -53,7 +54,7 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
         .filter(|account| {
             account
                 .profile_dir(host)
-                .is_ok_and(|dir| probe::anything_running(host, &dir))
+                .is_ok_and(|dir| live::anything_running(host, &dir))
         })
         .map(|account| format!("the Profile of {}", account.email()))
         .collect();
@@ -64,7 +65,7 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
     running.extend(
         what_the_registry_does_not_name(host, registry)?
             .into_iter()
-            .filter(|dir| probe::anything_running(host, dir))
+            .filter(|dir| live::anything_running(host, dir))
             .map(|dir| format!("{}, which no Account of Perch's names", dir.display())),
     );
 

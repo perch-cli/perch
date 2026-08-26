@@ -17,6 +17,7 @@ use crate::credentials;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock::Held;
 use crate::name;
 use crate::probe::Installed;
@@ -150,7 +151,7 @@ fn refuse_while_anything_is_running(
     consequence: &Consequence,
     installed: &Installed,
 ) -> Result<()> {
-    switch::refuse_if_live_anywhere(
+    live::refuse_if_live_anywhere(
         host,
         account,
         consequence
