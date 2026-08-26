@@ -70,17 +70,17 @@ pub fn carry(
     if settled.is_none() {
         return;
     }
-    let destination = probe::identity_file_in(into);
-    let Some(mine) = read(host, &destination) else {
-        return;
-    };
-
     // Discounting this process: the Run has already claimed the Profile by the
     // time it Carries, and read as an ordinary client that claim would decline
     // every Carry there is.
     if probe::anything_running_but(host, into, Some(host.process_id())) {
         return;
     }
+
+    let destination = probe::identity_file_in(into);
+    let Some(mine) = read(host, &destination) else {
+        return;
+    };
 
     let Some(source) = most_recently_used(host, registry, email, default_profile, &destination)
     else {
