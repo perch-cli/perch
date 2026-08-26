@@ -11,6 +11,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use common::*;
@@ -780,6 +781,233 @@ fn every_name_a_published_perch_accepted_comes_forward_into_one_that_loads() {
                 })
                 .expect("the registry is there");
         }
+    }
+}
+
+// ————— every pair of names, and not only every name on its own —————
+
+/// Whether the three published version 1 builds held these as two names.
+///
+/// All three compared with `to_lowercase`, and all three refused a pair it
+/// called one — in either half of the namespace and across the two. So a pair
+/// this refuses is in no registry a published Perch wrote.
+fn a_published_perch_held_them_as_two(one: &str, other: &str) -> bool {
+    one.to_lowercase() != other.to_lowercase()
+}
+
+/// Every pair out of the corpus a published Perch held as two names and this
+/// build folds into one.
+///
+/// The corpus walks names one at a time and a fold is about a pair: `ΟΔΟΣ`
+/// beside `οδος` is a registry v0.2.0 wrote and this build reads as one Group.
+fn every_pair_this_build_folds_together() -> Vec<(String, String)> {
+    let names = every_name_a_published_perch_accepted();
+    let mut pairs = Vec::new();
+    for (at, one) in names.iter().enumerate() {
+        for other in &names[at + 1..] {
+            if registry::same_name(one, other) && a_published_perch_held_them_as_two(one, other) {
+                pairs.push((one.clone(), other.clone()));
+            }
+        }
+    }
+    pairs
+}
+
+/// Every pair of a name this build refuses and the spelling the rename pass
+/// gives it.
+///
+/// What the pass may rename onto is what nothing else in the registry answers
+/// to, and a registry holding one name is one where every spelling is free.
+fn every_pair_of_a_rename_and_where_it_lands() -> Vec<(String, String)> {
+    every_name_a_published_perch_accepted()
+        .into_iter()
+        .filter_map(|name| {
+            let is_now = perch::migration::renames(&a_v1_registry_naming(&name, "the-alias"))
+                .into_iter()
+                .find(|entry| entry.was == name)?
+                .is_now;
+            (is_now != name).then_some((name, is_now))
+        })
+        .collect()
+}
+
+/// Every pair of names the rename pass would put in one place.
+///
+/// Two refused names wanting one spelling is the case a registry holding a
+/// single refused name cannot pose. Four per landing: the fifth asks what the
+/// fourth asked, and the corpus offers up to forty-four.
+fn every_pair_wanting_one_landing() -> Vec<(String, String)> {
+    let mut wanting: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (was, is_now) in every_pair_of_a_rename_and_where_it_lands() {
+        wanting.entry(is_now).or_default().push(was);
+    }
+    let mut pairs = Vec::new();
+    for mut names in wanting.into_values() {
+        // The corpus spells `-` both as a word and out of the alphabet, and one
+        // JSON object holds one key: two of a spelling is no registry.
+        names.sort();
+        names.dedup();
+        let names = &names[..names.len().min(4)];
+        for (at, one) in names.iter().enumerate() {
+            for other in &names[at + 1..] {
+                pairs.push((one.clone(), other.clone()));
+            }
+        }
+    }
+    pairs
+}
+
+/// One version 1 registry naming two Groups and two Aliases, each Group with
+/// Settings, an Account and a Check of its own.
+///
+/// Two of everything, because what a rename loses is not a name: it is one
+/// Group's Settings folded into the other's, or an Account's place.
+fn a_v1_registry_naming_two(groups: (&str, &str), aliases: (&str, &str)) -> String {
+    let (first_group, second_group) = groups;
+    let (first_alias, second_alias) = aliases;
+    serde_json::json!({
+        "version": 1,
+        "active": "one@example.com",
+        "accounts": [
+            {
+                "identity": {
+                    "email": "one@example.com",
+                    "account_uuid": "uuid-one",
+                    "organization_name": "Acme",
+                    "organization_uuid": "org-1"
+                },
+                "plan": "max",
+                "enabled": true,
+                "group": first_group
+            },
+            {
+                "identity": {
+                    "email": "two@example.com",
+                    "account_uuid": "uuid-two",
+                    "organization_name": "Acme",
+                    "organization_uuid": "org-1"
+                },
+                "enabled": true,
+                "group": second_group
+            }
+        ],
+        "aliases": { first_alias: "one@example.com", second_alias: "two@example.com" },
+        "groups": {
+            first_group: { "watcher_threshold_percent": 70 },
+            second_group: { "watcher_threshold_percent": 80 }
+        },
+        "ungrouped": { "strategy": "soonest-reset" },
+        "global": { "cycle_ungrouped": true, "settings": { "strategy": "most-headroom" } },
+        "checks": {
+            first_group: { "switched_at": "2026-08-14T10:00:00Z" },
+            second_group: { "switched_at": "2026-08-15T10:00:00Z" }
+        }
+    })
+    .to_string()
+}
+
+/// The two names still two, each carrying what it carried.
+///
+/// `load` answering is not the claim. A rename that folds one Group into the
+/// other comes forward into a registry every command reads happily, short one
+/// Group, one set of Settings and one Account's place.
+fn they_come_forward_as_two(groups: (&str, &str), aliases: (&str, &str)) {
+    let host = machine_holding(&a_v1_registry_naming_two(groups, aliases));
+    let said = format!(
+        "Groups `{}` and `{}`, Aliases `{}` and `{}`",
+        groups.0, groups.1, aliases.0, aliases.1
+    );
+
+    perch::migration::bring_forward(&host).unwrap_or_else(|refused| {
+        panic!("{said}: a published Perch wrote them, and the step forward refused them: {refused}")
+    });
+
+    let registry = registry::load(&host)
+        .unwrap_or_else(|refused| {
+            panic!("{said}: they came forward into a registry no command can read: {refused}")
+        })
+        .expect("the registry is there");
+
+    let claims = |email: &str| -> String {
+        registry
+            .account(email)
+            .unwrap_or_else(|| panic!("{said}: {email} is not in the registry any more"))
+            .group
+            .clone()
+            .unwrap_or_else(|| panic!("{said}: {email} came forward claiming no Group"))
+    };
+    let (first, second) = (claims("one@example.com"), claims("two@example.com"));
+
+    assert_ne!(
+        first, second,
+        "{said}: two Accounts in two Groups came forward in one"
+    );
+    assert_eq!(
+        registry.groups.len(),
+        2,
+        "{said}: two declared Groups came forward as {:?}",
+        registry.groups.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        registry
+            .groups
+            .get(&first)
+            .map(|held| held.watcher_threshold_percent),
+        Some(70),
+        "{said}: the Group `{first}` came forward holding Settings that are not its own"
+    );
+    assert_eq!(
+        registry
+            .groups
+            .get(&second)
+            .map(|held| held.watcher_threshold_percent),
+        Some(80),
+        "{said}: the Group `{second}` came forward holding Settings that are not its own"
+    );
+    assert_eq!(
+        registry.aliases.len(),
+        2,
+        "{said}: two Aliases came forward as {:?}",
+        registry.aliases.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        registry
+            .aliases
+            .values()
+            .filter(|named| *named == "one@example.com")
+            .count(),
+        1,
+        "{said}: one Account answers to {} of the two Aliases",
+        registry
+            .aliases
+            .values()
+            .filter(|named| *named == "one@example.com")
+            .count()
+    );
+    assert_eq!(
+        registry.checks.len(),
+        2,
+        "{said}: two Checks came forward as {:?}",
+        registry.checks.keys().collect::<Vec<_>>()
+    );
+}
+
+/// Every pair of names one version 1 registry could hold comes forward as two
+/// names, each still carrying what it carried.
+///
+/// Over the pair space rather than the name space: the guard above puts one
+/// corpus name in a registry at a time, and a fold decides about two.
+#[test]
+fn every_pair_a_published_perch_held_as_two_comes_forward_as_two() {
+    let mut pairs = every_pair_this_build_folds_together();
+    pairs.extend(every_pair_of_a_rename_and_where_it_lands());
+    pairs.extend(every_pair_wanting_one_landing());
+
+    for (one, other) in pairs {
+        // All three arrangements of one namespace: both halves, and across.
+        they_come_forward_as_two((&one, &other), ("the-alias", "the-other-alias"));
+        they_come_forward_as_two(("the-group", "the-other-group"), (&one, &other));
+        they_come_forward_as_two((&one, "the-group"), (&other, "the-alias"));
     }
 }
 
