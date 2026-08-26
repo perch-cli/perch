@@ -115,9 +115,9 @@ pub fn carry(
 
 /// `mine` with every key that crosses taken from `theirs`, and every other byte
 /// of it as it was — or nothing where no key crossed. Each key is a bounded read
-/// and a bounded write of its own ([`crate::json`]), and `Option` rather than a
-/// `String` that may equal what went in, so a source holding none of these keys
-/// costs no copy at all.
+/// and a bounded write of its own ([`crate::json`]), asked through
+/// [`json::changed_value_at`], so a Profile already holding what would cross
+/// costs no copy of the document at all.
 fn crossed(host: &dyn Host, theirs: &str, mine: &str) -> Option<Secret> {
     let mut patched: Option<Secret> = None;
     for key in PERSON_KEYS {
@@ -125,7 +125,7 @@ fn crossed(host: &dyn Host, theirs: &str, mine: &str) -> Option<Secret> {
             continue;
         };
         let against = patched.as_deref().unwrap_or(mine);
-        if let Some(written) = json::set_value_at(against, key, value) {
+        if let Some(written) = json::changed_value_at(against, key, value) {
             patched = Some(written);
         }
     }
@@ -164,7 +164,7 @@ fn project_entry(
             continue;
         };
         let into = entry.as_deref().unwrap_or(&mine_here);
-        if let Some(written) = json::set_value_at(into, key, value) {
+        if let Some(written) = json::changed_value_at(into, key, value) {
             entry = Some(written);
         }
     }
@@ -174,10 +174,10 @@ fn project_entry(
         return patched;
     };
 
-    let Some(projects) = json::set_value_at(held, &here, &entry) else {
+    let Some(projects) = json::changed_value_at(held, &here, &entry) else {
         return patched;
     };
-    json::set_value_at(against, PROJECTS, &projects).or(patched)
+    json::changed_value_at(against, PROJECTS, &projects).or(patched)
 }
 
 /// The identity file a Run copies from: the most recently used one holding

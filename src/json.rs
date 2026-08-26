@@ -72,11 +72,37 @@ pub fn object_at<'a>(contents: &'a str, key: &str) -> Option<&'a str> {
 /// of the key that introduces it, so a block copied between two files does not
 /// step further right each time.
 pub fn set_value_at(contents: &str, key: &str, value: &str) -> Option<Secret> {
-    let Some((start, end)) = span_of(contents, key) else {
+    let Some((span, indented)) = replacement(contents, key, value) else {
         return insert(contents, key, value);
     };
-    let indented = indent_to_match(value, indentation_of_the_line(contents, start));
-    Some(spliced(&[&contents[..start], &indented, &contents[end..]]))
+    Some(spliced(&[
+        &contents[..span.0],
+        &indented,
+        &contents[span.1..],
+    ]))
+}
+
+/// The same, and nothing at all where the document already holds what the splice
+/// would write. The splice copies the whole document and `.claude.json` grows
+/// with the person's history, so the caller that may have nothing to do asks
+/// this one — both of whose `None`s say the same thing to it: keep what you have.
+pub fn changed_value_at(contents: &str, key: &str, value: &str) -> Option<Secret> {
+    let Some((span, indented)) = replacement(contents, key, value) else {
+        return insert(contents, key, value);
+    };
+    (contents[span.0..span.1] != *indented.as_str())
+        .then(|| spliced(&[&contents[..span.0], &indented, &contents[span.1..]]))
+}
+
+/// The span a splice of `key` replaces and the text it writes there, or nothing
+/// where the document holds no such key. Split from the join so the comparison
+/// above can be made against a value rather than against a whole document.
+fn replacement(contents: &str, key: &str, value: &str) -> Option<((usize, usize), Secret)> {
+    let (start, end) = span_of(contents, key)?;
+    Some((
+        (start, end),
+        indent_to_match(value, indentation_of_the_line(contents, start)),
+    ))
 }
 
 /// The pieces of a document, joined in a buffer wiped on drop and reserved at
@@ -369,6 +395,36 @@ mod tests {
                 "`{key}` was written into a buffer that grew"
             );
         }
+    }
+
+    /// The steady state of a Run: every key that crosses is already in the
+    /// Profile, and `.claude.json` is the largest file Perch touches.
+    #[test]
+    fn a_key_already_holding_what_would_be_written_is_no_change_and_no_copy() {
+        assert!(changed_value_at(DOCUMENT, "numStartups", "41").is_none());
+        assert!(
+            changed_value_at(
+                DOCUMENT,
+                "block",
+                "{\n    \"name\": \"someone\",\n    \"role\": \"admin\"\n  }"
+            )
+            .is_none()
+        );
+        assert_eq!(
+            changed_value_at(DOCUMENT, "numStartups", "42")
+                .map(|written| written.as_str().to_string()),
+            text_at(DOCUMENT, "numStartups", "42"),
+            "and a value that differs is spliced exactly as it always was"
+        );
+    }
+
+    /// A block written at one indentation and read into a document expecting
+    /// another is a change, however equal the two texts look.
+    #[test]
+    fn a_value_differing_only_in_indentation_is_still_a_change() {
+        let outdented = "{\n\"name\": \"someone\",\n\"role\": \"admin\"\n}";
+
+        assert!(changed_value_at(DOCUMENT, "block", outdented).is_some());
     }
 
     /// This runs after the incoming Credential is already live, where a panic
