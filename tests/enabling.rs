@@ -15,12 +15,7 @@ use perch::host::FakeHost;
 /// machine on which leaving the Cycling pool means anything.
 fn two_accounts_in_one_group() -> FakeHost {
     let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     host
 }
 

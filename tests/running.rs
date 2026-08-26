@@ -333,10 +333,7 @@ fn a_quarantined_account_is_refused_and_nothing_is_launched() {
 #[test]
 fn a_group_target_is_refused_as_naming_no_one_account() {
     let host = machine();
-    declare_group(&host, "work");
-    move_to_group(&host, SECOND_EMAIL, "work")
-        .0
-        .expect("the Account joins the Group");
+    a_group_of(&host, "work", &[SECOND_EMAIL]);
 
     let refusal = run_run(&host, "work")
         .0
@@ -720,20 +717,13 @@ fn a_killed_runs_marker_does_not_come_back_to_life_with_a_recycled_pid() {
 fn a_run_answers_for_its_own_profile_and_for_nobody_elses() {
     let elsewhere = Rc::new(RefCell::new(Vec::new()));
     let recorded = Rc::clone(&elsewhere);
-    let host = machine_with_shared_state()
-        // An ordinary `claude` in another terminal, against the Default Profile.
-        .with_file(shared("sessions/33.json"), &{
-            let now = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
-            format!(
-                r#"{{"pid":33,"cwd":"/Users/someone/work","startedAt":{}}}"#,
-                now.timestamp_millis()
-            )
-        })
-        .with_live_process(33)
-        .with_login(move |host: &FakeHost, _dir: &_| {
-            *recorded.borrow_mut() = live_against(host, EMAIL);
-            0
-        });
+    let host = machine_with_shared_state();
+    // An ordinary `claude` in another terminal, against the Default Profile.
+    a_client_running_against(&host, SHARED, 33);
+    let host = host.with_login(move |host: &FakeHost, _dir: &_| {
+        *recorded.borrow_mut() = live_against(host, EMAIL);
+        0
+    });
     host.forget_effects();
 
     run_run(&host, SECOND_EMAIL).0.expect("the client ran");

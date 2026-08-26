@@ -80,12 +80,7 @@ fn ready() -> FakeHost {
 /// Two Accounts declared interchangeable, so `--group` reads both of them.
 fn two_accounts_in_a_group() -> FakeHost {
     let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     host
 }
 
@@ -279,8 +274,8 @@ fn the_rotation_is_written_back_inside_claude_codes_locks() {
 fn a_credential_a_client_is_holding_is_never_renewed() {
     let host = machine_with_two_accounts();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
-    let host = client_running_against(host, "/Users/someone/.claude", 4242)
-        .with_reply(TOKEN_URL, 200, RENEWED);
+    let host = host.with_reply(TOKEN_URL, 200, RENEWED);
+    a_client_running_against(&host, "/Users/someone/.claude", 4242);
     host.forget_effects();
 
     let (result, printed) = run_status_refresh(&host, false);
@@ -437,9 +432,7 @@ fn a_throttle_is_named_as_one_in_json() {
 #[test]
 fn a_refresh_that_fails_for_one_account_still_reads_the_others() {
     let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-    move_to_group(&host, EMAIL, "work").0.expect("moved");
-    move_to_group(&host, SECOND_EMAIL, "work").0.expect("moved");
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
     let host = host
@@ -510,9 +503,7 @@ fn a_credential_that_will_not_say_when_it_expires_is_renewed_once_anthropic_refu
 #[test]
 fn a_refresh_reads_only_the_accounts_it_is_about_to_show() {
     let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-    move_to_group(&host, EMAIL, "work").0.expect("moved");
-    move_to_group(&host, SECOND_EMAIL, "work").0.expect("moved");
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
     let host = host
@@ -926,8 +917,8 @@ fn a_renewal_mid_landing_is_refused_for_a_client_running_against_the_default_pro
         a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
         // Spent in its own Profile, so a reading of it wants a Renewal.
         host.set_keychain_item(&store_of(&host, email).keychain_service, LOGIN_NAME, SPENT);
-        let host = client_running_against(host, "/Users/someone/.claude", 4242)
-            .with_reply(TOKEN_URL, 200, RENEWED);
+        let host = host.with_reply(TOKEN_URL, 200, RENEWED);
+        a_client_running_against(&host, "/Users/someone/.claude", 4242);
         host.forget_effects();
 
         let (result, printed) = run_status_refresh(&host, false);

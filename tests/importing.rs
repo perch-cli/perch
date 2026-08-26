@@ -22,12 +22,7 @@ const AT: &str = "/Users/someone/perch-backup.age";
 /// Quarantined.
 fn an_export_of_a_whole_machine() -> String {
     let host = machine_with_three_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     set_alias(&host, "overflow", SECOND_EMAIL)
         .0
         .expect("the name is free");
@@ -277,8 +272,7 @@ fn nothing_is_made_active_by_an_import() {
 fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_taken() {
     // A machine whose scheduled check Switched a moment ago, exported.
     let host = machine_with_three_accounts();
-    declare_group(&host, "work");
-    move_to_group(&host, EMAIL, "work").0.expect("it joins");
+    a_group_of(&host, "work", &[EMAIL]);
     let mut registry = registry_of(&host);
     registry.checks.insert(
         "work".to_string(),
@@ -795,10 +789,7 @@ fn nothing_the_export_holds_reaches_standard_output() {
 #[test]
 fn what_an_export_wrote_is_what_an_import_reads_back() {
     let from = machine_with_three_accounts();
-    declare_group(&from, "work");
-    move_to_group(&from, EMAIL, "work")
-        .0
-        .expect("the Account joins the Group");
+    a_group_of(&from, "work", &[EMAIL]);
     let exported = {
         let host = from.with_secrets(&[PASSPHRASE, PASSPHRASE]);
         run_export(&host, AT).0.expect("the export is written");
@@ -873,7 +864,7 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
     // What a Purge that could not finish leaves: a Profile directory with a
     // client in it and no registry naming it.
     let profile = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
-    let host = client_running_against(host, &profile.to_string_lossy(), 4242);
+    a_client_running_against(&host, &profile, 4242);
 
     let (outcome, _) = run_import(&host, AT);
 
