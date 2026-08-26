@@ -722,3 +722,43 @@ fn a_terminal_that_goes_away_reporting_still_says_the_export_was_written() {
     );
     assert!(host.path_exists(std::path::Path::new(AT)), "which it is");
 }
+
+/// FNV-1a over the envelope's own field names, as `tests/migrating.rs` digests
+/// the name-rule table. The names alone: what each field *holds* is the
+/// registry's question and is answered by the registry's own version.
+fn what_the_envelope_holds() -> u64 {
+    let envelope = export::Export {
+        version: export::CURRENT_VERSION,
+        registry: perch::registry::Registry::default(),
+        credentials: std::collections::BTreeMap::new(),
+        identity_files: std::collections::BTreeMap::new(),
+    };
+    let document = serde_json::to_value(&envelope).expect("an Export serializes");
+    let named: Vec<&str> = document
+        .as_object()
+        .expect("an Export is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in named.join(",").bytes() {
+        digest = (digest ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    digest
+}
+
+/// A shape that moves takes the Export version with it — the failure neither
+/// mechanism catches, an Export being refused rather than migrated and a refusal
+/// firing only on a version this build does not know. Two halves: the literal
+/// above breaks the build on a field arriving or leaving, and the digest sees
+/// what a literal cannot, a `rename` moving the key an older Perch reads.
+#[test]
+fn a_shape_that_moves_takes_the_export_version_with_it() {
+    assert_eq!(
+        (export::CURRENT_VERSION, what_the_envelope_holds()),
+        (1, 0xd8fd_6deb_9587_1cec),
+        "the envelope's shape and its version have to move together: bump \
+         `export::CURRENT_VERSION` and record the new number here"
+    );
+}
