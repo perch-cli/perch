@@ -438,14 +438,13 @@ impl Rules {
     /// The first rule broken by precedence, so which sentence a name gets does
     /// not depend on the order its row happens to be written in.
     pub fn validate(&self, kind: NameKind, name: &str) -> Result<()> {
-        let mut broken: Vec<Rule> = self
+        match self
             .rules
             .iter()
             .copied()
             .filter(|rule| rule.broken_by(name, self.fold))
-            .collect();
-        broken.sort_by_key(|rule| rule.precedence());
-        match broken.first() {
+            .min_by_key(|rule| rule.precedence())
+        {
             Some(rule) => Err(rule.refusal(kind, name)),
             None => Ok(()),
         }
@@ -507,8 +506,7 @@ pub fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String
             _ => format!("{base}-{at}"),
         })
         .find(|candidate| {
-            validate(kind, candidate).is_ok()
-                && !taken.iter().any(|held| same_name(held, candidate))
+            current().accepts(candidate) && !taken.iter().any(|held| same_name(held, candidate))
         })
 }
 
