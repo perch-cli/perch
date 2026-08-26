@@ -651,6 +651,57 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a link under a linked directory is taken away, narrowed and refused where it lands",
+        asserts: |host, root, adapter, _now| {
+            let real = root.join("the-real-directory");
+            host.create_dir_all(&real).expect("it is made");
+            let target = root.join("a-target");
+            host.create_file_with_mode(&target, "what it points at", PRIVATE_FILE_MODE)
+                .expect("the file is written");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            let linked = root.join("the-linked-directory");
+            host.link(Link::Symbolic, &real, &linked)
+                .expect("the directory is linked");
+            host.link(Link::Symbolic, &target, &linked.join("named"))
+                .expect("the link is made through it");
+
+            // `mkdir` does not follow the last component, so a link standing
+            // where the directory would go is `EEXIST` whatever it points at.
+            assert!(
+                matches!(
+                    host.create_dir_exclusive(&linked.join("named")),
+                    Err(HostError::AlreadyExists { .. })
+                ),
+                "{adapter}: a link reached through a linked directory is in the way"
+            );
+
+            // `O_NOFOLLOW` then `fchmod`, so narrowing a link fails rather than
+            // sending the mode wherever it points.
+            assert!(
+                host.make_private(&linked.join("named")).is_err(),
+                "{adapter}: and narrowing one is refused rather than followed"
+            );
+
+            host.remove_link(&linked.join("named"))
+                .expect("the link is taken away");
+
+            assert!(
+                matches!(
+                    host.link_target(&real.join("named")),
+                    Err(HostError::NotFound { .. })
+                ),
+                "{adapter}: and it is gone from the directory it was made in"
+            );
+            assert_eq!(
+                host.read_file(&target).ok().as_deref(),
+                Some("what it points at"),
+                "{adapter}: while what it pointed at is untouched"
+            );
+        },
+    },
+    Case {
         named: "a rename onto a directory fails and moves nothing",
         asserts: |host, root, adapter, _now| {
             let from = root.join("would-move");

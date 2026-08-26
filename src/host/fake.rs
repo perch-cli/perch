@@ -1497,7 +1497,7 @@ impl port::Files for FakeHost {
         // Whatever else was at the path is taken away first, a link included,
         // because the real one leads with `remove_file` and then `create_new`.
         // Left behind, one path would be both a regular file and a symbolic link.
-        self.fs.links.borrow_mut().remove(path);
+        self.fs.links.borrow_mut().remove(&lands_at);
         // A disk that fills partway leaves what fitted behind and then fails,
         // which is the order the real host does it in: open, `write_all`,
         // `sync_all`.
@@ -1575,7 +1575,9 @@ impl port::Files for FakeHost {
     /// so this gates on the runtime Platform as `file_mode` does.
     fn make_private(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::MadePrivate(path.to_path_buf()));
-        if self.platform() != Platform::Windows && self.fs.links.borrow().contains_key(path) {
+        if self.platform() != Platform::Windows
+            && self.fs.links.borrow().contains_key(&self.lands_at(path))
+        {
             return Err(HostError::Io(std::io::Error::other(format!(
                 "{} is a symbolic link, and narrowing one would set the mode of \
                  whatever it points at",
@@ -1699,7 +1701,7 @@ impl port::Files for FakeHost {
         // A link in the way counts, whether or not it still resolves: `mkdir`
         // does not follow the last component, so it fails `EEXIST` at a symlink
         // whatever it points at. `path_exists` answers the Reconcile's question.
-        if self.fs.links.borrow().contains_key(path) || self.path_exists(path) {
+        if self.fs.links.borrow().contains_key(&self.lands_at(path)) || self.path_exists(path) {
             return Err(HostError::AlreadyExists {
                 path: path.to_path_buf(),
             });
@@ -2021,6 +2023,10 @@ impl port::Links for FakeHost {
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        // Where the link lands rather than where it was addressed, as `link`
+        // keyed it and `link_target` reads it back: a Profile a Reconcile has
+        // been over has a linked directory in front of every name after it.
+        let path = &self.lands_at(path);
         // A hard link is another name for the file and says nothing about
         // itself, so neither real adapter can recognize one: unix asks
         // `is_symlink` and Windows asks for a reparse point, and both refuse.
