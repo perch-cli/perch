@@ -319,6 +319,14 @@ fn indentation_of_the_line(contents: &str, at: usize) -> usize {
         .count()
 }
 
+/// Where a line's own indentation ends, in bytes, given its width in characters
+/// — or the line's end, for one narrower than the block's narrowest.
+fn own_ends_at(line: &str, width: usize) -> usize {
+    line.char_indices()
+        .nth(width)
+        .map_or(line.len(), |(offset, _)| offset)
+}
+
 /// Rewrites a block at a given indentation, whatever it was written at before.
 ///
 /// Counted in characters, as [`indentation_of_the_line`] counts what it is being
@@ -345,7 +353,10 @@ fn indent_to_match(block: &str, indentation: usize) -> Secret {
         }
         match index {
             0 => written.push_str(line),
-            _ => line.chars().skip(own).for_each(|c| written.push(c)),
+            // Resolved to a byte offset once and copied in one go. A `projects`
+            // block runs to megabytes, and a byte at a time is the difference
+            // between a `memcpy` and a bounds check per character.
+            _ => written.push_str(&line[own_ends_at(line, own)..]),
         }
     }
     written
@@ -440,6 +451,17 @@ mod tests {
             "{\n  \"a\": 1,\n  \"b\": 2\n  }",
             "two characters of indentation are two characters, not four bytes"
         );
+    }
+
+    /// A blank line is left out of the narrowest-indentation reckoning, so it
+    /// is the one line the cut can be asked for past its own end.
+    #[test]
+    fn a_line_narrower_than_the_block_it_sits_in_is_cut_at_its_end() {
+        // The blank line is one character wide where the block's own
+        // indentation is two, and is left out of the reckoning that says so.
+        let block = "{\n    \"a\": 1,\n \n    \"b\": 2\n  }";
+
+        assert_eq!(indented_to(block, 0), "{\n  \"a\": 1,\n\n  \"b\": 2\n}");
     }
 
     /// The case that used to panic outright: the narrowest line's indentation,
