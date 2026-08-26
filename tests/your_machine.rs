@@ -17,8 +17,8 @@ use perch::error::PerchError;
 use perch::host::Execution;
 use perch::host::RealHost;
 use perch::host::prelude::*;
-use perch::keychain::{EXIT_ITEM_NOT_FOUND, KeychainError, SECURITY_BIN, classify};
 #[cfg(target_os = "macos")]
+use perch::keychain::{EXIT_ITEM_NOT_FOUND, KeychainError, SECURITY_BIN, classify};
 use perch::live;
 use perch::probe;
 #[cfg(target_os = "macos")]
