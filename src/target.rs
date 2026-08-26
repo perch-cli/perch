@@ -10,7 +10,6 @@
 //! collisions existing stops being true the day a migration lets one through.
 
 use crate::error::{PerchError, Result};
-use crate::name;
 use crate::registry::Registry;
 
 /// What a Target turned out to name, and how it matched.
@@ -94,14 +93,7 @@ fn matched(registry: &Registry, target: &str) -> Option<Target> {
             email: email.to_string(),
         });
     }
-    // The comparison a Profile is derived under, over the whole of Unicode:
-    // `CAFÉ@example.com` and `café@example.com` share one Profile and `perch
-    // add` refuses the second, so asking in ASCII here would disagree.
-    if let Some(account) = registry
-        .accounts
-        .iter()
-        .find(|held| name::same_name(held.email(), target))
-    {
+    if let Some(account) = registry.account(target) {
         return Some(Target::Account {
             email: account.email().to_string(),
         });
