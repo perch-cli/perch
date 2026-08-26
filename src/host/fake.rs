@@ -209,6 +209,11 @@ struct Filesystem {
     dirs: RefCell<BTreeSet<PathBuf>>,
     modified: RefCell<BTreeMap<PathBuf, DateTime<Utc>>>,
     unreadable: RefCell<BTreeMap<PathBuf, String>>,
+    /// Paths that say when they were written and will not hand over their
+    /// contents. A file's own mode refuses the `open` while its directory
+    /// answers the `stat`, so `unreadable` — which refuses both — cannot stand
+    /// in for the root-owned file a `sudo claude` leaves.
+    unopenable: RefCell<BTreeMap<PathBuf, String>>,
     /// Paths whose bytes are not text, which the fake cannot hold as one.
     not_text: RefCell<BTreeSet<PathBuf>>,
     unwritable: RefCell<BTreeMap<PathBuf, String>>,
@@ -373,6 +378,7 @@ impl FakeHost {
                 dirs: RefCell::new(BTreeSet::new()),
                 modified: RefCell::new(BTreeMap::new()),
                 unreadable: RefCell::new(BTreeMap::new()),
+                unopenable: RefCell::new(BTreeMap::new()),
                 not_text: RefCell::new(BTreeSet::new()),
                 unwritable: RefCell::new(BTreeMap::new()),
                 unwritable_after: RefCell::new(BTreeMap::new()),
@@ -541,6 +547,15 @@ impl FakeHost {
 
     /// A file that is there but cannot be read — the wrong permissions, most
     /// often. Distinct from a file that is simply absent.
+    /// A file that says when it was written and will not be opened.
+    pub fn with_a_file_that_will_not_open(self, path: impl AsRef<Path>, detail: &str) -> Self {
+        self.fs
+            .unopenable
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        self
+    }
+
     pub fn with_unreadable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
         self.fs
             .unreadable
@@ -1422,6 +1437,13 @@ impl port::Files for FakeHost {
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         self.record(Effect::ReadFile(path.to_path_buf()));
         let at = self.through_links(path)?;
+        // Its own mode refuses the open where the directory answered the stat,
+        // so this is a file `modified_at` still dates.
+        for named in [path, at.as_path()] {
+            if let Some(detail) = self.fs.unopenable.borrow().get(named) {
+                return Err(HostError::Other(detail.clone()));
+            }
+        }
         // The real read is `read_to_string`, so bytes that are not UTF-8 come
         // back as `InvalidData` rather than as contents. The fake holds files
         // as `String` and could not otherwise reach that answer at all.

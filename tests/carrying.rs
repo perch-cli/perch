@@ -291,6 +291,32 @@ fn a_profile_used_after_the_default_one_is_what_is_copied() {
     );
 }
 
+/// A `sudo claude` leaves a root-owned `.claude.json` that is newest by mtime.
+/// Giving up on the best source rather than falling to the next one costs the
+/// onboarding and trust dialogs on every Run for ever, and Carry is deliberately
+/// quiet, so nothing says why.
+#[test]
+fn a_source_that_will_not_be_read_falls_to_the_next_rather_than_ending_the_carry() {
+    let host = machine_with_three_accounts().with_login(client_exiting(0));
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
+    let theirs = profile_of(&host, THIRD_EMAIL).join(".claude.json");
+    host.set_file(THE_PERSONS_FILE, &a_file_in_use(EMAIL, 5));
+    host.set_file(&theirs, &a_file_in_use(THIRD_EMAIL, 9));
+
+    // The newest, and the one that will not be read.
+    used_at(&host, THE_PERSONS_FILE, 13);
+    used_at(&host, &theirs, 14);
+    let host = host.with_a_file_that_will_not_open(&theirs, "Permission denied");
+    host.forget_effects();
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert_eq!(
+        read(&host, SECOND_EMAIL)["tipsHistory"]["ide-hotkey"],
+        serde_json::json!(5),
+        "the next candidate down served, and its state crossed"
+    );
+}
+
 /// A client rewrites this file wholesale on its way out, so anything Perch
 /// spliced into it while one was running would be thrown away — or worse,
 /// written over what the client had.
