@@ -328,26 +328,42 @@ pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
     Ok(())
 }
 
-/// Whether a terminal acts on a character rather than drawing it. `is_control`
-/// is `Cc` alone, so the rest is Unicode's `Default_Ignorable_Code_Point` — the
-/// same question already answered, and taken whole because picked by hand it
-/// grew holes: `U+FE00` after a letter with no variant form, `U+3164`, and
-/// `U+2065` in the gap between two ranges written as two.
+/// Which characters a terminal acts on rather than draws. `Cc` is the first two
+/// ranges; the rest is Unicode's `Default_Ignorable_Code_Point`, taken whole
+/// because picked by hand it grew holes: `U+FE00` after a letter with no variant
+/// form, `U+3164`, and `U+2065` in the gap between two ranges written as two.
+/// Data, so a past version of the name rules can hold the set it enforced.
+pub const UNSHOWABLE: &[(char, char)] = &[
+    ('\u{0000}', '\u{001F}'),
+    ('\u{007F}', '\u{009F}'),
+    ('\u{00AD}', '\u{00AD}'),
+    ('\u{034F}', '\u{034F}'),
+    ('\u{061C}', '\u{061C}'),
+    ('\u{115F}', '\u{1160}'),
+    ('\u{17B4}', '\u{17B5}'),
+    ('\u{180B}', '\u{180F}'),
+    ('\u{200B}', '\u{200F}'),
+    ('\u{202A}', '\u{202E}'),
+    ('\u{2060}', '\u{206F}'),
+    ('\u{3164}', '\u{3164}'),
+    ('\u{FE00}', '\u{FE0F}'),
+    ('\u{FEFF}', '\u{FEFF}'),
+    ('\u{FFA0}', '\u{FFA0}'),
+    ('\u{FFF0}', '\u{FFF8}'),
+    ('\u{1BCA0}', '\u{1BCA3}'),
+    ('\u{1D173}', '\u{1D17A}'),
+    ('\u{E0000}', '\u{E0FFF}'),
+];
+
+/// Whether a character is in a set of ranges. Public because a set older than
+/// this one is asked the same question, from `name`.
+pub fn within(set: &[(char, char)], c: char) -> bool {
+    set.iter().any(|(from, to)| c >= *from && c <= *to)
+}
+
+/// Whether a terminal acts on this character rather than drawing it.
 pub fn is_unshowable(c: char) -> bool {
-    c.is_control()
-        || matches!(c,
-            '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{3164}' | '\u{FEFF}' | '\u{FFA0}'
-            | '\u{115F}'..='\u{1160}'
-            | '\u{17B4}'..='\u{17B5}'
-            | '\u{180B}'..='\u{180F}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{206F}'
-            | '\u{FE00}'..='\u{FE0F}'
-            | '\u{FFF0}'..='\u{FFF8}'
-            | '\u{1BCA0}'..='\u{1BCA3}'
-            | '\u{1D173}'..='\u{1D17A}'
-            | '\u{E0000}'..='\u{E0FFF}')
+    within(UNSHOWABLE, c)
 }
 
 /// Whether a character's effect is on the character beside it, composing with

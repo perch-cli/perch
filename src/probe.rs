@@ -695,7 +695,7 @@ pub fn read_identity(
         ));
     }
 
-    // And an address is also a Target, which is why `registry::validate_name`
+    // And an address is also a Target, which is why `name::validate`
     // refuses an `@` in an Alias or a Group name — a rule that only holds if
     // this half does.
     if !email.contains('@') {
@@ -1741,7 +1741,7 @@ mod tests {
     /// Both halves of what makes an address usable, in one place: nothing
     /// nameable in it and there is no Profile to put it in, and no `@` in it and
     /// it is a Target an Alias or a Group name could not be told from — which is
-    /// what `registry::validate_name` refuses those two for.
+    /// what `name::validate` refuses those two for.
     #[test]
     fn an_address_perch_could_not_key_anything_on_is_refused_where_it_enters() {
         for (email, expected) in [

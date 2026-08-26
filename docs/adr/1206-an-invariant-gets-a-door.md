@@ -36,7 +36,7 @@ standard, and it is what these six reviews found insufficient. A comment is
 addressed to somebody adding the eleventh call site, and the eleventh call site
 is written by somebody who did not read it.
 
-## The four doors
+## The five doors
 
 | invariant | door |
 |---|---|
@@ -44,8 +44,9 @@ is written by somebody who did not read it.
 | a buffer holding a secret never frees a copy of one | `secret::Secret`, whose growth wipes what it grew out of, and which `host::write_double_quoted` and `write_escaped` take instead of a `String` |
 | a Watcher acts only while it holds the watch and has not been asked to stop | `anthropic::send`, the only path from that module to the network, whose ask is a required parameter, and `switch::asking_first`, the only path to a keychain read on the walk that settles a Landing; the port's `Network::http` is a `disallowed_methods` entry in `clippy.toml` naming the three senders that reach it, and `commands::watch::Watch::goes_on` is what a Watcher answers both asks with |
 | a step forward lands on the shape this build reads | `migration::CARRIED_TO`, a literal with `const _: () = assert!` against `registry::CURRENT_VERSION` |
+| a name rule and the registry version move together | `name::ROWS`, one row per registry version holding the rules that version enforced, with `const _: () = assert!` in `registry.rs` that the count is `CURRENT_VERSION`; a rule is a `name::Rule` variant, so one joining the build is one every `match` over the enum reports |
 
-Three of the four are types, and the first is a lint beside its type because
+Four of the five are types, and the first is a lint beside its type because
 there is no type for "a path somebody resolved" that `std` will not also hand out
 unresolved. The third is a lint beside its type for a narrower reason: the
 signature stops a *sender* from reaching the network unasked, and the lint stops
@@ -97,11 +98,45 @@ was written, the read-side stall having landed a day earlier, and which is what
 both tests here are built on. The window stays, measured, and it is one process
 spawn wide.
 
-So the fourth entry above is the weakest of the four and worth naming as such.
+So the fourth entry above is the weakest of the five and worth naming as such.
 `CARRIED_TO` is a compile-time assertion rather than a door: nothing forces a
 new shape to arrive with a step, only that the two numbers agree. The test
 `every_version_short_of_the_current_one_is_carried_forward` is the other half,
 and it is a test rather than a type because a version range is a runtime fact.
+
+## The fifth door, and why it was last
+
+The top row of the findings table is the only one found in all six reviews and
+was the last to get a door — which is worth stating, because the reason is not
+that it was hard. It had an answer that looked like one: a recorded digest of
+what `validate_name` said over a fixed corpus, asserted beside `CURRENT_VERSION`.
+That is neither a type nor a lint, and it is bounded by its corpus in a way its
+own comment declared. It went in four days before #318 and could not have caught
+the failure it was written for had the character been one the corpus did not
+hold.
+
+The rules are data now: `name::Rule` is one variant per refusal, and a version is
+a row of them. Three things follow, and only the first is the door.
+
+**A row cannot read live code.** `a_version_2_perch_accepted` and
+`a_version_3_perch_accepted` called `means_global`, `means_the_ungrouped_scope`
+and `unshowable_character_in`, so what a published Perch accepted moved whenever
+this build's rules did. A row below the newest now holds frozen sets — including
+one byte-identical to the live one, which is deliberate and commented as such,
+because the live set grows and a set growing under a version that does not is the
+next #317.
+
+**Order stops being load-bearing.** `Rule::precedence` decides which sentence a
+name gets, so a row is a set. Under the old shape a historical row's order meant
+nothing while the current row's meant which of six refusals a user read, with
+nothing marking the difference.
+
+**The corpus digest stays, beside a digest of the table.** Not belt and braces:
+each sees what the other cannot, and mutation testing is how that is known. A row
+gaining a rule for a character no spelling in the corpus carries moves the table
+digest alone; `a_name_may_carry` refusing one more character moves the corpus
+digest alone, a variant's body not being the table. Whether a row arrives or
+leaves is neither — that is the `const` assertion.
 
 ## What is rejected
 
@@ -161,3 +196,9 @@ with nothing to ask about.
 - Adding a tenth trait to the port, or a method to one of the nine, is a failing
   conformance test until the table asks it or `UNASKED` says why it cannot
   (ADR a-class-not-its-instances).
+- A name rule joining `name::validate` without `CURRENT_VERSION` moving does not
+  build, and neither does the reverse: the row count is the version. What the
+  rule *means* is still a reader's, and the corpus digest is what asks about it.
+- A registry version below the current one is a `name::Rules` row rather than a
+  predicate, and the row names nothing this build can change. What a published
+  Perch accepted therefore stops moving when this build's rules do.

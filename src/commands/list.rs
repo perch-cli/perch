@@ -19,8 +19,10 @@ use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Shown};
 use crate::listing::{self, Section};
+use crate::name;
+use crate::name::UNGROUPED;
 use crate::observe::Report;
-use crate::registry::{self, Account, Registry, UNGROUPED};
+use crate::registry::{self, Account, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone)]
@@ -141,13 +143,13 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
 /// not — the same way `perch config` answers one. A Target names one Account,
 /// and a listing of one row is what `perch status` answers better.
 fn narrowed(registry: &Registry, name: &str) -> Result<Scope> {
-    if registry::means_the_ungrouped_scope(name) {
+    if name::means_the_ungrouped_scope(name) {
         return Ok(Scope::Ungrouped);
     }
     // Answered here rather than left to fall through, because fallen through it
     // offers "Declare it with `perch group add global`" — which `validate_name`
     // then refuses. A listing has the happier answer.
-    if registry::means_global(name) {
+    if name::means_global(name) {
         return Err(PerchError::NotFound(format!(
             "There is no Scope called `{name}` — it is how people say every \
              Scope at once, and every Scope at once is what a bare `perch list` \
@@ -211,7 +213,7 @@ fn columns(registry: &Registry, account: &Account) -> [Shown; COLUMNS] {
     [
         Shown::of(account.email()),
         Shown::of(registry.alias_of(account.email()).unwrap_or(NOTHING_TO_SAY)),
-        Shown::of(account.group.as_deref().unwrap_or(registry::NO_GROUP)),
+        Shown::of(account.group.as_deref().unwrap_or(name::NO_GROUP)),
         Shown::of(&state_of(account)),
         Shown::of(&cycle::headroom_phrase(account)),
     ]

@@ -19,9 +19,11 @@ use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::lock;
+use crate::name;
+use crate::name::UNGROUPED;
 use crate::observe::{self, Attempt};
 use crate::probe;
-use crate::registry::{self, Account, Registry, Scope, UNGROUPED};
+use crate::registry::{self, Account, Registry, Scope};
 use crate::switch::{self, Idle, NotSwitched, Resolved, Settled};
 use crate::watch::{
     self, Backoff, Considered, Cooled, Fullest, Holding, Lost, Outcome, Policy, Recently, Round,
@@ -898,7 +900,7 @@ fn considered(
         .filter(|account| {
             // Through the registry's own answer rather than `!=`, which would be
             // correct only by two facts that are true two modules away.
-            !registry::same_name(account.email(), watching.account.email())
+            !name::same_name(account.email(), watching.account.email())
                 && cycle::is_a_candidate(registry, account)
         })
         .map(|account| Considered {

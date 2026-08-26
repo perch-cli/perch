@@ -27,6 +27,18 @@ Aliases and Group names share one namespace, so neither can shadow the other.
 An Account answers to one Alias at a time.
 _Avoid_: nickname, label, tag
 
+**Name**:
+The namespace an Alias and a Group name are drawn from, and the one thing both
+are. One namespace rather than two, so a Target has exactly one meaning and
+neither half can shadow the other — and a word already addressing something, like
+`ungrouped` or `global`, is in it too and so may be neither. What a Name may be
+is what somebody can type at a shell prompt on a second machine months later:
+identifier characters in any alphabet, which is a rule rather than an alphabet.
+Recorded per registry version, because a rule that joined later is one the
+registry written before it did not have, and a migration that forgets that is a
+machine with no working command.
+_Avoid_: identifier, key, string, label
+
 **Adoption**:
 The Claude Code login already on the machine becoming the first Account Perch
 holds, on whichever command is run first — bar an Import and a Purge, which

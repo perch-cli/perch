@@ -16,6 +16,7 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::name;
 use crate::registry::{self, Account, Registry};
 
 /// The version this build writes, and the only one there has ever been.
@@ -214,7 +215,7 @@ fn the_live_store(
     // arriving one's — one token under two addresses, and a Renewal kills one.
     if !matches!(
         registry.active(),
-        registry::Active::Settled(active) if registry::same_name(active, account.email())
+        registry::Active::Settled(active) if name::same_name(active, account.email())
     ) {
         return Ok(None);
     }
@@ -227,7 +228,7 @@ fn the_live_store(
     // against — only one naming somebody else is.
     let somebody_else = matches!(
         crate::probe::read_identity(host, &live, &installed),
-        Ok(Some(identity)) if !registry::same_name(&identity.email, account.email())
+        Ok(Some(identity)) if !name::same_name(&identity.email, account.email())
     );
     Ok((!somebody_else).then_some(live))
 }
@@ -263,7 +264,7 @@ impl Export {
 
     /// The Credential this Export carries for one Account, if it carries one.
     ///
-    /// Keyed by `registry::same_name`, which folds case, rather than by the
+    /// Keyed by `name::same_name`, which folds case, rather than by the
     /// `BTreeMap` lookup the key type offers: an Export may be written by hand
     /// with `age -a -p`, and placement and the report have to agree.
     pub fn credential_for(&self, email: &str) -> Option<&String> {
@@ -292,7 +293,7 @@ impl Export {
 /// What one Account's entry is in a map an Export keys by address.
 fn by_name<'a>(held: &'a BTreeMap<String, String>, email: &str) -> Option<&'a String> {
     held.iter()
-        .find(|(key, _)| registry::same_name(key, email))
+        .find(|(key, _)| name::same_name(key, email))
         .map(|(_, value)| value)
 }
 
