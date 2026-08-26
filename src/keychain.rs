@@ -333,4 +333,12 @@ mod tests {
     fn hex_output_is_decoded() {
         assert_eq!(decode_password_output("7B2261223A317D\n"), "{\"a\":1}");
     }
+
+    /// Hex that decodes to bytes that are not text: the reply is handed back as
+    /// it came, and the decoded copy is wiped rather than dropped, being the
+    /// Credential in the one branch that holds it after the `String` refused it.
+    #[test]
+    fn hex_that_is_not_text_is_returned_as_it_came() {
+        assert_eq!(decode_password_output("FFFE\n"), "FFFE");
+    }
 }
