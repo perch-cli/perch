@@ -533,6 +533,55 @@ fn the_status_arm_answers_about_one_account_and_takes_no_scope() {
     assert_eq!(document["active"]["email"], SOMEONE, "{}", ran.out);
 }
 
+/// The remove arm, told apart by the one thing only it does: it asks. Stopped at
+/// the question rather than driven through it, so the case writes nothing — what
+/// is asserted is which arm the line reached.
+#[test]
+fn the_remove_arm_names_what_it_would_do_and_has_no_terminal_to_ask_on() {
+    let machine = Scratch::holding_an_account("remove");
+
+    let ran = perch(&machine, &["remove", SOMEONE]);
+
+    assert_eq!(ran.code, EXIT_INVALID, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err.contains("no terminal to confirm on"),
+        "only a removal has a question to put here:\n{}",
+        ran.err
+    );
+    assert!(
+        ran.err.contains("`--yes`"),
+        "and it says how a script answers it:\n{}",
+        ran.err
+    );
+    assert!(
+        machine.registry().contains(SOMEONE),
+        "and nothing was removed on the way to saying so"
+    );
+}
+
+/// The upgrade arm, which needs no network to be reached: the binary this suite
+/// runs is the one the build produced, so no Channel claims its path and Perch
+/// refuses to write over a file it did not put there — before it asks anybody
+/// what the newest Release is.
+#[test]
+fn the_upgrade_arm_refuses_a_binary_no_channel_put_where_it_is() {
+    let machine = Scratch::holding_an_account("upgrade");
+
+    let ran = perch(&machine, &["upgrade"]);
+
+    assert_eq!(ran.code, EXIT_INVALID, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err.contains("which Channel put it there"),
+        "{}",
+        ran.err
+    );
+    assert!(
+        ran.err.contains("--channel"),
+        "and it says how to answer that:\n{}",
+        ran.err
+    );
+}
+
 /// Told apart by what they do to a Scope: a `set` that reached `get` would change
 /// nothing, and a `get` that reached `set` would report a value nobody asked for.
 #[test]
