@@ -309,6 +309,33 @@ fn nothing_is_written_while_a_client_is_running_against_that_profile() {
     );
 }
 
+/// Doubt is the same answer as a client here, and silently: a `sessions`
+/// directory that will not be read establishes nothing, and a Carry that wrote
+/// under that doubt would be writing under a client it could not see. Nothing on
+/// the Carry path may refuse a Run, so it declines rather than failing.
+#[test]
+fn nothing_is_written_while_whether_a_client_is_running_has_no_answer() {
+    let host = machine();
+    let profile = profile_of(&host, SECOND_EMAIL);
+    let sessions = profile.join("sessions");
+    host.create_dir_all(&sessions)
+        .expect("the Profile is there");
+    let host = host.with_unlistable_dir(&sessions, "permission denied");
+    let before = identity_of(&host, SECOND_EMAIL);
+
+    let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert_eq!(
+        identity_of(&host, SECOND_EMAIL),
+        before,
+        "a directory nobody can read is not a Profile anything writes into"
+    );
+    assert_eq!(
+        outcome, 0,
+        "and the Run still launched: what is lost is an onboarding question"
+    );
+}
+
 /// The same precondition from the other end: a Run makes the Profile it launches
 /// Live (ADR a-run-is-one-shot) *before* it Carries, because until the Marker
 /// exists nothing on the machine knows the Run is happening — so the Carry has

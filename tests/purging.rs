@@ -13,7 +13,7 @@ mod common;
 use std::path::Path;
 
 use common::*;
-use perch::error::{EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE};
+use perch::error::{EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE};
 use perch::export;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
@@ -672,6 +672,11 @@ fn a_client_running_against_a_profile_stops_the_purge() {
     let refused = outcome.expect_err("something is holding that Profile");
     assert_eq!(refused.exit_code(), EXIT_PROFILE_LIVE, "{refused}");
     assert!(refused.to_string().contains(SECOND_EMAIL), "{refused}");
+    assert!(
+        refused.to_string().contains("pid "),
+        "and which client to quit, since that is the whole of what the reader \
+         has to do: {refused}"
+    );
     assert_eq!(
         registry_on(&host).map(|registry| registry.accounts.len()),
         Some(3),
@@ -1438,5 +1443,42 @@ fn a_registry_that_will_not_parse_does_not_stop_the_purge_that_does_not_read_one
     assert!(
         printed.contains("Purged 3 Profiles Perch could not name, 3 Credentials"),
         "and the report counted what it took:\n{printed}"
+    );
+}
+
+/// Doubt is not an answer. A `sessions` directory that is there and will not be
+/// read — the root-owned one a `sudo claude` leaves — establishes nothing, and a
+/// Purge that read it as "a client is running" would send somebody looking for a
+/// client to quit that may not exist.
+#[test]
+fn a_sessions_directory_that_will_not_be_read_stops_the_purge_and_says_so() {
+    let host = a_machine_to_give_back();
+    let profile = perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
+    let sessions = perch::probe::sessions_dir(&profile);
+    host.create_dir_all(&sessions)
+        .expect("a client has run here before");
+    let host = host.with_unlistable_dir(&sessions, "permission denied");
+
+    let (outcome, _printed) = run_purge(&host);
+
+    let refused = outcome.expect_err("whether a client is running got no answer");
+    assert_eq!(
+        refused.exit_code(),
+        EXIT_PROBE_REFUSED,
+        "nothing was established, which is not a Live Profile: {refused}"
+    );
+    assert!(
+        refused.to_string().contains("make that directory readable"),
+        "and it says what to do about the directory rather than naming a client \
+         to quit: {refused}"
+    );
+    assert!(
+        refused.to_string().contains("Nothing was purged"),
+        "{refused}"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "and nothing was purged"
     );
 }

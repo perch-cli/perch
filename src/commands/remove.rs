@@ -17,6 +17,7 @@ use crate::credentials;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock::Held;
 use crate::name;
 use crate::probe::Installed;
@@ -150,15 +151,18 @@ fn refuse_while_anything_is_running(
     consequence: &Consequence,
     installed: &Installed,
 ) -> Result<()> {
-    switch::refuse_if_live_anywhere(
-        host,
-        account,
-        consequence
-            .successor
-            .is_some()
-            .then_some(WHY_THE_DEFAULT_PROFILE),
-        installed,
-    )
+    let mut places = vec![live::Place::of_the_profile(host, account)?];
+    if consequence.successor.is_some() {
+        // Its Credential is the one a running client is holding, and this would
+        // replace it rather than renew it.
+        places.push(live::Place::new(
+            WHY_THE_DEFAULT_PROFILE,
+            registry::the_default_profile(host)?.config_dir,
+        ));
+    }
+
+    live::ask(host, &places).idle_or(installed, &live::NOTHING_WAS_CHANGED)?;
+    Ok(())
 }
 
 fn consequence_of(registry: &Registry, account: &Account) -> Consequence {

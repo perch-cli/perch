@@ -15,6 +15,7 @@ use crate::adopt;
 use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock::Held;
 use crate::login::{self, Produced};
 use crate::name;
@@ -171,12 +172,18 @@ fn refuse_while_anything_is_running(
     landing_in_the_default_profile: bool,
     installed: &Installed,
 ) -> Result<()> {
-    switch::refuse_if_live_anywhere(
-        host,
-        account,
-        landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
-        installed,
-    )
+    let mut places = vec![live::Place::of_the_profile(host, account)?];
+    if landing_in_the_default_profile {
+        // Its Credential is the one a running client is holding, and this would
+        // replace it rather than renew it.
+        places.push(live::Place::new(
+            WHY_THE_DEFAULT_PROFILE,
+            registry::the_default_profile(host)?.config_dir,
+        ));
+    }
+
+    live::ask(host, &places).idle_or(installed, &live::NOTHING_WAS_CHANGED)?;
+    Ok(())
 }
 
 /// Refuses a login that authenticated somebody else.

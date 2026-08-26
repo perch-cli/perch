@@ -360,14 +360,18 @@ fn utilization_for_a_live_account_is_read_without_a_renewal() {
     // Stated rather than assumed. Everything below is about an Account that is Live,
     // and a fixture that quietly stopped being Live would let all of it pass while
     // proving nothing.
-    assert_eq!(
-        perch::probe::live_clients(
-            &host,
-            &perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known"),
-            &perch::probe::Installed::unknown(CLAUDE_VERSION),
-        )
-        .expect("the marker corroborates"),
-        vec![THIS_PROCESS],
+    let asked = perch::live::ask(
+        &host,
+        &[perch::live::Place::at(
+            perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known"),
+        )],
+    );
+    assert!(
+        matches!(
+            &asked,
+            perch::live::Answer::NotIdle(perch::live::NotIdle::Live(clients))
+                if clients.iter().map(|client| client.pid).eq([THIS_PROCESS])
+        ),
         "the Account this is about has a Run against it"
     );
 

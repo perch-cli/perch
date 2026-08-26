@@ -16,9 +16,10 @@ use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::host::Host;
+use crate::live;
 use crate::login;
 use crate::name;
-use crate::probe::{self, Store};
+use crate::probe::{self, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Registry};
 
@@ -176,12 +177,20 @@ fn every_map(export: &Export) -> [(&'static str, &BTreeMap<String, String>); 2] 
     ]
 }
 
+/// What an Import leaves behind when it will not write: nothing at all, an
+/// Import being whole or not having happened.
+const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
+    nothing_happened: "Nothing was imported.",
+    quit_it: "That Credential would be replaced underneath the session holding \
+              it — close it and run this again.",
+};
+
 /// Puts every Credential the Export holds into the Profile of the Account it
 /// belongs to, wherever this machine keeps one, through
 /// [`profile::store_credential`] so an Import gets the read-back guard. An
 /// Account the Export carries neither a Credential nor a `.claude.json` for gets
 /// no Profile, is restored anyway, and is not Quarantined here for it.
-pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
+pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<Placed> {
     // Every Credential in the file belongs to an Account the file lists, or this
     // is not the whole restore it claims to be. `gather` cannot write such an
     // Export, so this is about a file written by something else.
@@ -303,18 +312,17 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // A Profile something is running against is one nothing writes into, which
     // `profile::store_credential` names as the obligation it cannot check for
     // itself. Asked over every placement before the first of them is written.
-    let live: Vec<String> = placements
+    let places: Vec<live::Place> = placements
         .iter()
-        .filter(|(_, store, _, _)| probe::anything_running(host, &store.config_dir))
-        .map(|(email, store, _, _)| format!("{email} ({})", store.config_dir.display()))
+        .map(|(email, store, _, _)| {
+            live::Place::new(
+                format!("{email}'s Profile at {}", store.config_dir.display()),
+                &store.config_dir,
+            )
+        })
         .collect();
-    if !live.is_empty() {
-        return Err(PerchError::ProfileLive(format!(
-            "a client is running against a Profile this Import would write into, \
-             so its Credential would be replaced underneath that session: {}.\n\
-             Nothing was imported. Close it and run this again.",
-            live.join(", "),
-        )));
+    if let live::Answer::NotIdle(not_idle) = live::ask(host, &places) {
+        return Err(not_idle.refusal(installed, &NOTHING_WAS_IMPORTED));
     }
 
     let mut placed = Placed::default();
@@ -460,7 +468,7 @@ mod tests {
             .store(&host)
             .unwrap();
 
-        place(&host, &export).expect("the Profiles can be made");
+        place(&host, &export, &Installed::unknown("2.1.221")).expect("the Profiles can be made");
 
         assert_eq!(
             host.read_file(&store.identity_file).ok().as_deref(),
@@ -608,7 +616,8 @@ mod tests {
                 .store(&host)
                 .unwrap();
 
-            place(&host, &export).expect("the one Profile can be made");
+            place(&host, &export, &Installed::unknown("2.1.221"))
+                .expect("the one Profile can be made");
 
             assert!(
                 host.path_exists(&store.config_dir),
@@ -642,7 +651,8 @@ mod tests {
             .credentials
             .insert("two@example.com".to_string(), "also held".to_string());
 
-        let refused = place(&host, &export).expect_err("the second store will not take it");
+        let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+            .expect_err("the second store will not take it");
 
         assert!(refused.to_string().contains("partial restore"), "{refused}");
         let first = registry::profile_dir_for(&host, "one@example.com").unwrap();
@@ -661,7 +671,8 @@ mod tests {
         let mut export = an_export();
         export.registry.upsert(account("@"));
 
-        let refused = place(&host, &export).expect_err("`@` names no directory");
+        let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+            .expect_err("`@` names no directory");
 
         let said = refused.to_string();
         assert!(said.contains('@'), "{said}");
@@ -695,7 +706,8 @@ mod tests {
             };
             map.insert("nobody@example.com".to_string(), "held".to_string());
 
-            let refused = place(&host, &export).expect_err("that file belongs to nothing");
+            let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+                .expect_err("that file belongs to nothing");
 
             let said = refused.to_string();
             assert!(
@@ -728,7 +740,8 @@ mod tests {
             map.insert("one@example.com".to_string(), "held".to_string());
             map.insert("ONE@example.com".to_string(), "also held".to_string());
 
-            let refused = place(&host, &export).expect_err("only one of the two would land");
+            let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+                .expect_err("only one of the two would land");
 
             let said = refused.to_string();
             assert!(
@@ -764,7 +777,8 @@ mod tests {
             );
         }
 
-        let refused = place(&host, &export).expect_err("both would land in one Profile");
+        let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+            .expect_err("both would land in one Profile");
 
         assert!(
             refused.to_string().contains("user+work@example.com")

@@ -22,6 +22,7 @@ pub mod import;
 pub mod json;
 pub mod keychain;
 pub mod listing;
+pub mod live;
 pub mod lock;
 pub mod login;
 pub mod migration;

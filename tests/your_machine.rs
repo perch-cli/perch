@@ -19,6 +19,7 @@ use perch::host::RealHost;
 use perch::host::prelude::*;
 #[cfg(target_os = "macos")]
 use perch::keychain::{EXIT_ITEM_NOT_FOUND, KeychainError, SECURITY_BIN, classify};
+use perch::live;
 use perch::probe;
 #[cfg(target_os = "macos")]
 use perch::probe::Verdict;
@@ -510,13 +511,7 @@ fn every_session_marker_claude_code_has_left_names_a_process() {
         markers.len()
     );
 
-    for pid in probe::live_clients(
-        &host,
-        &store.config_dir,
-        &probe::Installed::unknown("whatever is installed here"),
-    )
-    .expect("every marker here can be corroborated or dismissed")
-    {
+    for pid in corroborated_pids(&host, &store.config_dir) {
         assert!(
             host.process_alive(pid),
             "a Live Profile is one with a process still behind it"
@@ -541,12 +536,7 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
         return;
     };
 
-    let corroborated = probe::live_clients(
-        &host,
-        &store.config_dir,
-        &probe::Installed::unknown("whatever is installed here"),
-    )
-    .expect("every marker here can be corroborated or dismissed");
+    let corroborated = corroborated_pids(&host, &store.config_dir);
 
     let mut live = 0;
     for marker in &markers {
@@ -593,7 +583,7 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
         );
         assert!(
             corroborated.contains(&pid),
-            "{} is corroborated, so live_clients must report it",
+            "{} is corroborated, so the ask must report it",
             marker.display()
         );
     }
@@ -682,5 +672,21 @@ fn installed_claude_code() -> Option<PathBuf> {
         Some(found)
     } else {
         std::fs::canonicalize(found).ok()
+    }
+}
+
+/// The pids the ask corroborated against this machine's own `sessions`. A doubt
+/// is a marker this developer's machine cannot answer for, which is a refusal
+/// rather than a reading.
+fn corroborated_pids(host: &RealHost, config_dir: &std::path::Path) -> Vec<u32> {
+    match live::ask(host, &[live::Place::at(config_dir)]) {
+        live::Answer::Idle(_) => Vec::new(),
+        live::Answer::NotIdle(live::NotIdle::Live(clients)) => {
+            clients.iter().map(|client| client.pid).collect()
+        }
+        live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => panic!(
+            "every marker here can be corroborated or dismissed: {}",
+            unsure.refusal(&probe::Installed::unknown("whatever is installed here"))
+        ),
     }
 }

@@ -19,6 +19,7 @@ use crate::anthropic::{self, QuotaWindows, Refused};
 use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock::{self, Held};
 use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
@@ -634,22 +635,31 @@ fn refuse_if_live(
     // Which directory each client is in, and not only that there is one: `in_use_from`
     // holds two for the active Account, and a refusal naming neither leaves the reader
     // to guess which to quit.
-    let mut running = Vec::new();
-    for config_dir in &asked.in_use_from {
-        for pid in probe::live_clients(host, config_dir, installed)? {
-            running.push(format!("pid {pid} in {}", config_dir.display()));
+    let places: Vec<live::Place> = asked.in_use_from.iter().map(live::Place::at).collect();
+    let running = match live::ask(host, &places) {
+        live::Answer::Idle(_) => return Ok(()),
+        // Its own `spent`, rather than the `false` a `PerchError` folds to: a
+        // doubt met after a request went out is a round that spent one, and the
+        // Back-off paces on that.
+        live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => {
+            return Err(Outcome::Failed {
+                why: unsure.refusal(installed).to_string(),
+                spent: because.spent(),
+            });
         }
-    }
-    if running.is_empty() {
-        return Ok(());
-    }
+        live::Answer::NotIdle(live::NotIdle::Live(clients)) => clients,
+    };
 
     Err(Outcome::Failed {
         why: format!(
             "{} and a client is running against it ({}), so renewing it would \
              log that session out. The cached figure is what you see.",
             because.clause(),
-            running.join(", ")
+            running
+                .iter()
+                .map(|client| format!("pid {} in {}", client.pid, client.whose))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         spent: because.spent(),
     })
@@ -920,12 +930,48 @@ fn not_renewed(why: Refused) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::FakeHost;
+    use crate::host::prelude::*;
 
     fn attempt(email: &str, outcome: Outcome) -> Attempt {
         Attempt {
             email: email.to_string(),
             named: email.to_string(),
             outcome,
+        }
+    }
+
+    /// A refusal made before the first request is one a Back-off must not pace,
+    /// and one made after a rejection is one it must — for both ways the ask can
+    /// come back, not only for the one that names a client.
+    #[test]
+    fn a_doubt_paces_the_back_off_by_what_the_round_had_already_spent() {
+        let dir = std::path::PathBuf::from("/Users/someone/.claude");
+        let host = FakeHost::new()
+            .with_env("USER", "someone")
+            .with_unlistable_dir(crate::probe::sessions_dir(&dir), "permission denied");
+        host.create_dir_all(&crate::probe::sessions_dir(&dir))
+            .expect("the directory is there and will not be read");
+        let asked = Asked {
+            store: crate::probe::store_for_profile(&host, &dir).expect("USER is set"),
+            its_own_profile: true,
+            arriving_in_a_landing: false,
+            in_use_from: vec![dir],
+            shares_its_profile_with: None,
+        };
+        let installed = Installed::unknown("2.1.221");
+
+        for (because, paced) in [
+            (Because::ItSaysItRanOut, false),
+            (Because::AnthropicRefusedIt, true),
+        ] {
+            let refused = refuse_if_live(&host, &asked, &installed, because)
+                .expect_err("whether a client is running got no answer");
+            assert!(
+                matches!(refused, Outcome::Failed { spent, .. } if spent == paced),
+                "\"{}\" spends {paced}: {refused:?}",
+                because.clause()
+            );
         }
     }
 
