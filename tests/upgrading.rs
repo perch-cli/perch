@@ -819,13 +819,16 @@ fn the_agreement_takes_both_spellings_of_yes_and_nothing_else() {
     }
 }
 
+/// Exit 0, as declining `perch remove`'s question and `perch holdings purge`'s
+/// both do. `EXIT_NOTHING_TO_DO` is for a request that was already true, which
+/// an install somebody turned down is not.
 #[test]
-fn an_older_release_declined_installs_nothing() {
+fn an_older_release_declined_installs_nothing_and_says_so() {
     let host = machine()
         .with_answers(&["n"])
         .installed_at("/Users/someone/.local/bin/perch");
 
-    let (outcome, _) = upgrading(
+    let (outcome, printed) = upgrading(
         &host,
         UpgradeArgs {
             release: Some(OLDER.to_string()),
@@ -833,7 +836,14 @@ fn an_older_release_declined_installs_nothing() {
         },
     );
 
-    outcome.expect_err("they declined");
+    assert_eq!(
+        outcome.expect("declining is an answer rather than a failure"),
+        perch::error::EXIT_OK
+    );
+    assert!(
+        printed.contains("Nothing was installed."),
+        "and it says what did not happen: {printed}"
+    );
     assert!(ran(&host).is_empty());
 }
 
