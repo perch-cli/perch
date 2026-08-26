@@ -6,8 +6,8 @@
 //! Nothing here reaches the filesystem: what a Service *does* is
 //! [`crate::commands::service`]'s.
 //!
-//! [`Platform::Other`] is read as Linux throughout, because two of Perch's five Targets
-//! are `-unknown-linux-musl` (ADR a-linux-build-is-static).
+//! Every answer is [`Manager`]'s, grouped by the question rather than by the
+//! arrangement, so the three arms of each can be read against each other.
 
 use std::path::{Path, PathBuf};
 
@@ -69,39 +69,298 @@ const _: () = assert!(
 /// secret the installing shell held into a file on disk.
 pub const CARRIED: [&str; 2] = ["PERCH_HOME", "CLAUDE_CONFIG_DIR"];
 
-/// Where the decision log goes on a platform whose service manager will not keep one.
+/// Which arrangement is running the Watcher: launchd's, systemd's, or the Task
+/// Scheduler's.
 ///
-/// Inside Perch's home, which is what makes it Perch's to remove. Linux has none:
-/// systemd captures standard output into the journal.
-pub fn log_path(host: &dyn Host) -> Result<Option<PathBuf>> {
-    match host.platform() {
-        Platform::Other => Ok(None),
-        _ => Ok(Some(crate::registry::perch_home(host)?.join("watch.log"))),
+/// Named for the arrangement rather than for the operating system, because that is
+/// what every answer below turns on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Manager {
+    LaunchAgent,
+    Systemd,
+    ScheduledTask,
+}
+
+/// Everything Perch is not macOS or Windows is a systemd machine: two of Perch's five
+/// Targets are `-unknown-linux-musl` (ADR a-linux-build-is-static). Stated here and
+/// nowhere else, so a fourth arrangement arrives as a variant rather than as an arm in
+/// eleven matches.
+impl From<Platform> for Manager {
+    fn from(platform: Platform) -> Manager {
+        match platform {
+            Platform::MacOs => Manager::LaunchAgent,
+            Platform::Windows => Manager::ScheduledTask,
+            Platform::Other => Manager::Systemd,
+        }
     }
 }
 
-/// Where the unit file lives.
-pub fn unit_path(host: &dyn Host) -> Result<Option<PathBuf>> {
-    let home = host
-        .home_dir()
-        .map_err(|err| PerchError::Other(format!("could not find your home directory: {err}")))?;
-    Ok(match host.platform() {
-        Platform::MacOs => Some(
-            home.join("Library")
-                .join("LaunchAgents")
-                .join(format!("{LABEL}.plist")),
-        ),
-        Platform::Other => Some(
-            home.join(".config")
-                .join("systemd")
-                .join("user")
-                .join(UNIT_NAME),
-        ),
-        // A Scheduled Task is registered rather than written: it lives in Windows' own
-        // store, so there is no file for Perch to put anywhere and every caller has to
-        // answer `None` rather than assuming a path.
-        Platform::Windows => None,
-    })
+impl Manager {
+    /// The one this machine has.
+    pub fn of(host: &dyn Host) -> Manager {
+        Manager::from(host.platform())
+    }
+
+    /// Whether the arrangement is written down as a file Perch puts somewhere.
+    ///
+    /// False exactly where [`Manager::unit_path`] answers `None`: a Scheduled Task is
+    /// registered through `schtasks` and lives in Windows' own store, so there is
+    /// nothing for a caller to look for on disk.
+    pub fn keeps_a_unit_file(self) -> bool {
+        self != Manager::ScheduledTask
+    }
+
+    /// Whether asking it is worth anything.
+    ///
+    /// `schtasks /Query` answers whether the task *exists*, which is the same question
+    /// as whether it is installed — so on Windows the only evidence that the Watcher is
+    /// running is the watcher lock, and [`Manager::says_it_is_running`] is never reached.
+    pub fn keeps_its_own_answer(self) -> bool {
+        self != Manager::ScheduledTask
+    }
+
+    /// Where the decision log goes on a platform whose service manager will not keep one.
+    ///
+    /// Inside Perch's home, which is what makes it Perch's to remove. Linux has none:
+    /// systemd captures standard output into the journal.
+    pub fn log_path(self, host: &dyn Host) -> Result<Option<PathBuf>> {
+        match self {
+            Manager::Systemd => Ok(None),
+            _ => Ok(Some(crate::registry::perch_home(host)?.join("watch.log"))),
+        }
+    }
+
+    /// Where the unit file lives.
+    pub fn unit_path(self, host: &dyn Host) -> Result<Option<PathBuf>> {
+        let home = host.home_dir().map_err(|err| {
+            PerchError::Other(format!("could not find your home directory: {err}"))
+        })?;
+        Ok(match self {
+            Manager::LaunchAgent => Some(
+                home.join("Library")
+                    .join("LaunchAgents")
+                    .join(format!("{LABEL}.plist")),
+            ),
+            Manager::Systemd => Some(
+                home.join(".config")
+                    .join("systemd")
+                    .join("user")
+                    .join(UNIT_NAME),
+            ),
+            // A Scheduled Task is registered rather than written: it lives in Windows' own
+            // store, so there is no file for Perch to put anywhere and every caller has to
+            // answer `None` rather than assuming a path.
+            Manager::ScheduledTask => None,
+        })
+    }
+
+    /// What has to be run to start the Service, after the unit is in place.
+    pub fn starting(self, unit: &Unit, at: Option<&Path>) -> Vec<Driven> {
+        match self {
+            // Bootstrapped into the logged-in session rather than `load`ed, the deprecated
+            // spelling since 10.10. `bootout` first, because bootstrapping over something
+            // loaded fails — and allowed to fail on a first install.
+            Manager::LaunchAgent => {
+                let domain = format!("gui/{}", unit.user_id.unwrap_or_default());
+                let path = at
+                    .map(|at| at.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                vec![
+                    Driven::may_fail("launchctl", &["bootout", &format!("{domain}/{LABEL}")]),
+                    Driven::must("launchctl", &["bootstrap", &domain, &path]),
+                ]
+            }
+            // `daemon-reload` because systemd has not read a unit that was not there;
+            // `--now` makes an install something that happened; `restart` because
+            // `enable --now` leaves a running unit on the binary it already had.
+            Manager::Systemd => vec![
+                Driven::must("systemctl", &["--user", "daemon-reload"]),
+                Driven::must("systemctl", &["--user", "enable", "--now", UNIT_NAME]),
+                Driven::must("systemctl", &["--user", "restart", UNIT_NAME]),
+            ],
+            // `/NP` keeps a console window off the desktop by registering the task without
+            // a stored password, `/RU` names the user whose home the Profiles are under,
+            // and `/F` makes a re-install a replacement.
+            Manager::ScheduledTask => {
+                let command = unit.windows_command();
+                let mut args = vec!["/Create", "/TN", TASK_NAME, "/SC", "ONLOGON"];
+                if let Some(user) = &unit.user_name {
+                    args.extend(["/RU", user, "/NP"]);
+                }
+                args.extend(["/TR", &command, "/F"]);
+                // And run it, because `/Create /SC ONLOGON` starts nothing, so nothing
+                // would hold the watcher lock `status` asks until the next logon. `/End`
+                // first, as macOS `bootout`s before it bootstraps.
+                vec![
+                    Driven::must("schtasks", &args),
+                    Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
+                    Driven::may_fail("schtasks", &["/Run", "/TN", TASK_NAME]),
+                ]
+            }
+        }
+    }
+
+    /// What has to be run to stop the Service and take it back.
+    ///
+    /// Every step may fail, because each one is "make sure this is not running". What
+    /// decides whether an `uninstall` succeeded is whether the unit is gone afterwards,
+    /// which the caller asks separately.
+    pub fn stopping(self, user_id: Option<u32>) -> Vec<Driven> {
+        match self {
+            Manager::LaunchAgent => vec![Driven::may_fail(
+                "launchctl",
+                &[
+                    "bootout",
+                    &format!("gui/{}/{LABEL}", user_id.unwrap_or_default()),
+                ],
+            )],
+            Manager::Systemd => vec![Driven::may_fail(
+                "systemctl",
+                &["--user", "disable", "--now", UNIT_NAME],
+            )],
+            // `/End` before `/Delete`, which unregisters the task without terminating the
+            // instance the scheduler started — and makes `schtasks /Query` answer "no such
+            // task", which is how the callers ask whether it worked.
+            Manager::ScheduledTask => vec![
+                Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
+                Driven::may_fail("schtasks", &["/Delete", "/TN", TASK_NAME, "/F"]),
+            ],
+        }
+    }
+
+    /// What has to be run once the unit file is gone, so the service manager stops
+    /// holding a unit that no longer exists. Apart from [`stopping`] because of
+    /// where it sits: a `daemon-reload` driven before the file is deleted re-reads
+    /// the unit still on disk, and `systemctl --user list-units` goes on showing it.
+    pub fn forgetting(self) -> Vec<Driven> {
+        match self {
+            Manager::Systemd => vec![Driven::may_fail("systemctl", &["--user", "daemon-reload"])],
+            Manager::LaunchAgent | Manager::ScheduledTask => Vec::new(),
+        }
+    }
+
+    /// What has to be run to ask whether the Service is running right now.
+    ///
+    /// `None` where the question is answered by the unit file being there, which is every
+    /// platform Perch does not support a service manager on.
+    pub fn asking(self, user_id: Option<u32>) -> Option<Driven> {
+        // Every platform has one, so this is `Option` for the caller's sake rather than for
+        // a platform's: `status` asks before it knows whether anything is installed.
+        match self {
+            Manager::LaunchAgent => Some(Driven::may_fail(
+                "launchctl",
+                &[
+                    "print",
+                    &format!("gui/{}/{LABEL}", user_id.unwrap_or_default()),
+                ],
+            )),
+            Manager::Systemd => Some(Driven::may_fail(
+                "systemctl",
+                &["--user", "is-active", UNIT_NAME],
+            )),
+            Manager::ScheduledTask => {
+                Some(Driven::may_fail("schtasks", &["/Query", "/TN", TASK_NAME]))
+            }
+        }
+    }
+
+    /// Whether that answer says it is running, rather than merely that it is there.
+    ///
+    /// `launchctl print` succeeds for any label launchd has bootstrapped, throttled
+    /// and waiting-to-restart included, so macOS reads the state out of the answer.
+    /// `systemctl is-active` is the question, so its status is the whole of it.
+    pub fn says_it_is_running(self, ran: &crate::host::Execution) -> bool {
+        match self {
+            Manager::LaunchAgent => ran.succeeded() && ran.stdout.contains("state = running"),
+            Manager::Systemd | Manager::ScheduledTask => ran.succeeded(),
+        }
+    }
+
+    /// What to call the arrangement when saying it out loud, in the platform's own word.
+    ///
+    /// Service is the domain term, and the sentence telling somebody where to look has to
+    /// use the word their machine uses.
+    pub fn described(self) -> &'static str {
+        match self {
+            Manager::LaunchAgent => "a LaunchAgent",
+            Manager::Systemd => "a systemd user unit",
+            Manager::ScheduledTask => "a Scheduled Task that runs at logon",
+        }
+    }
+
+    /// The same arrangement as a word a script branches on rather than reads.
+    ///
+    /// Names the arrangement and not the operating system: what a caller does with
+    /// this answer turns on which thing is running the Watcher, and `Manager::Systemd`
+    /// says nothing (ADR a-command-names-its-noun).
+    pub fn arrangement(self) -> &'static str {
+        match self {
+            Manager::LaunchAgent => "launchagent",
+            Manager::Systemd => "systemd",
+            Manager::ScheduledTask => "scheduled-task",
+        }
+    }
+
+    /// Where somebody reads the decision log on this platform, as the line that tells them.
+    pub fn log_is_at(self, log: Option<&Path>) -> String {
+        match (self, log) {
+            (Manager::Systemd, _) => "journalctl --user -u perch-watch -f".to_string(),
+            (_, Some(path)) => format!("{}", path.display()),
+            (_, None) => "nowhere — nothing names a log file".to_string(),
+        }
+    }
+
+    /// The binary a unit names, read back out of the text of one.
+    ///
+    /// Beside the functions that wrote it, because the reader is the only thing that can
+    /// establish the writer was right. `None` for a unit Perch does not recognize, and
+    /// always for Windows, which keeps no file.
+    pub fn binary_in(self, unit: &str) -> Option<PathBuf> {
+        match self {
+            Manager::Systemd => unit
+                .lines()
+                .find_map(|line| line.strip_prefix("ExecStart="))
+                .and_then(|line| line.strip_suffix(" watcher run"))
+                .and_then(systemd_unquoted)
+                .map(PathBuf::from),
+            // The first `<string>` inside `ProgramArguments` is the program, and the two
+            // after it are required as the systemd arm requires its ` watcher run`. Bounded
+            // by `</array>`, so a later key is never read.
+            Manager::LaunchAgent => {
+                let array = unit.split("<key>ProgramArguments</key>").nth(1)?;
+                let array = array.split("</array>").next()?;
+                let mut arguments = array
+                    .split("<string>")
+                    .skip(1)
+                    .map(|rest| rest.split("</string>").next());
+                let binary = arguments.next()??;
+                if arguments.next()?? != "watcher" || arguments.next()?? != "run" {
+                    return None;
+                }
+                Some(PathBuf::from(unescaped(binary)))
+            }
+            Manager::ScheduledTask => None,
+        }
+    }
+
+    /// Where a unit actually sends the decision log, read out of the text of one.
+    ///
+    /// Beside [`binary_in`] and for its reason: [`log_path`] derives its answer from
+    /// `PERCH_HOME` as it stands now, so a `status` run under another would name a file
+    /// nothing writes to. `None` for Windows, Linux, and a unit naming none.
+    pub fn log_in(self, unit: &str) -> Option<PathBuf> {
+        match self {
+            Manager::LaunchAgent => {
+                // Bounded by the next `<key>`, so a `StandardOutPath` somebody deleted the
+                // value of never reads the following key's string as the log's path.
+                let value = unit.split("<key>StandardOutPath</key>").nth(1)?;
+                let value = value.split("<key>").next()?;
+                let path = value.split("<string>").nth(1)?.split("</string>").next()?;
+                Some(PathBuf::from(unescaped(path)))
+            }
+            Manager::Systemd | Manager::ScheduledTask => None,
+        }
+    }
 }
 
 /// The binary a unit should name, which is not always the running one.
@@ -143,11 +402,11 @@ impl Unit {
     ///
     /// `None` on Windows, where there is no file: a Scheduled Task is registered
     /// through `schtasks` and Windows keeps it.
-    pub fn rendered(&self, platform: Platform) -> Option<String> {
-        match platform {
-            Platform::MacOs => Some(self.plist()),
-            Platform::Other => Some(self.systemd_unit()),
-            Platform::Windows => None,
+    pub fn rendered(&self, manager: Manager) -> Option<String> {
+        match manager {
+            Manager::LaunchAgent => Some(self.plist()),
+            Manager::Systemd => Some(self.systemd_unit()),
+            Manager::ScheduledTask => None,
         }
     }
 
@@ -218,7 +477,7 @@ impl Unit {
     /// Each of these formats is line-oriented or shell-parsed, so a `PERCH_HOME` with a
     /// newline in it would write further directives into a file systemd loads at every
     /// login. Windows is refused more widely.
-    pub fn refuse_what_the_format_cannot_hold(&self, platform: Platform) -> Result<()> {
+    pub fn refuse_what_the_format_cannot_hold(&self, manager: Manager) -> Result<()> {
         let mut values: Vec<(String, String)> = vec![(
             "Perch's own path".to_string(),
             self.binary.to_string_lossy().to_string(),
@@ -239,7 +498,7 @@ impl Unit {
                     "{err}, so the Service cannot be described.\nNothing was installed."
                 ))
             })?;
-            if platform == Platform::Windows
+            if manager == Manager::ScheduledTask
                 && let Some(character) = value.chars().find(|c| *c == '"' || *c == '%')
             {
                 return Err(PerchError::Invalid(format!(
@@ -362,160 +621,6 @@ impl Driven {
     }
 }
 
-/// What has to be run to start the Service, after the unit is in place.
-pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Driven> {
-    match platform {
-        // Bootstrapped into the logged-in session rather than `load`ed, the deprecated
-        // spelling since 10.10. `bootout` first, because bootstrapping over something
-        // loaded fails — and allowed to fail on a first install.
-        Platform::MacOs => {
-            let domain = format!("gui/{}", unit.user_id.unwrap_or_default());
-            let path = at
-                .map(|at| at.to_string_lossy().to_string())
-                .unwrap_or_default();
-            vec![
-                Driven::may_fail("launchctl", &["bootout", &format!("{domain}/{LABEL}")]),
-                Driven::must("launchctl", &["bootstrap", &domain, &path]),
-            ]
-        }
-        // `daemon-reload` because systemd has not read a unit that was not there;
-        // `--now` makes an install something that happened; `restart` because
-        // `enable --now` leaves a running unit on the binary it already had.
-        Platform::Other => vec![
-            Driven::must("systemctl", &["--user", "daemon-reload"]),
-            Driven::must("systemctl", &["--user", "enable", "--now", UNIT_NAME]),
-            Driven::must("systemctl", &["--user", "restart", UNIT_NAME]),
-        ],
-        // `/NP` keeps a console window off the desktop by registering the task without
-        // a stored password, `/RU` names the user whose home the Profiles are under,
-        // and `/F` makes a re-install a replacement.
-        Platform::Windows => {
-            let command = unit.windows_command();
-            let mut args = vec!["/Create", "/TN", TASK_NAME, "/SC", "ONLOGON"];
-            if let Some(user) = &unit.user_name {
-                args.extend(["/RU", user, "/NP"]);
-            }
-            args.extend(["/TR", &command, "/F"]);
-            // And run it, because `/Create /SC ONLOGON` starts nothing, so nothing
-            // would hold the watcher lock `status` asks until the next logon. `/End`
-            // first, as macOS `bootout`s before it bootstraps.
-            vec![
-                Driven::must("schtasks", &args),
-                Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
-                Driven::may_fail("schtasks", &["/Run", "/TN", TASK_NAME]),
-            ]
-        }
-    }
-}
-
-/// What has to be run to stop the Service and take it back.
-///
-/// Every step may fail, because each one is "make sure this is not running". What
-/// decides whether an `uninstall` succeeded is whether the unit is gone afterwards,
-/// which the caller asks separately.
-pub fn stopping(platform: Platform, user_id: Option<u32>) -> Vec<Driven> {
-    match platform {
-        Platform::MacOs => vec![Driven::may_fail(
-            "launchctl",
-            &[
-                "bootout",
-                &format!("gui/{}/{LABEL}", user_id.unwrap_or_default()),
-            ],
-        )],
-        Platform::Other => vec![Driven::may_fail(
-            "systemctl",
-            &["--user", "disable", "--now", UNIT_NAME],
-        )],
-        // `/End` before `/Delete`, which unregisters the task without terminating the
-        // instance the scheduler started — and makes `schtasks /Query` answer "no such
-        // task", which is how the callers ask whether it worked.
-        Platform::Windows => vec![
-            Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
-            Driven::may_fail("schtasks", &["/Delete", "/TN", TASK_NAME, "/F"]),
-        ],
-    }
-}
-
-/// What has to be run once the unit file is gone, so the service manager stops
-/// holding a unit that no longer exists. Apart from [`stopping`] because of
-/// where it sits: a `daemon-reload` driven before the file is deleted re-reads
-/// the unit still on disk, and `systemctl --user list-units` goes on showing it.
-pub fn forgetting(platform: Platform) -> Vec<Driven> {
-    match platform {
-        Platform::Other => vec![Driven::may_fail("systemctl", &["--user", "daemon-reload"])],
-        Platform::MacOs | Platform::Windows => Vec::new(),
-    }
-}
-
-/// What has to be run to ask whether the Service is running right now.
-///
-/// `None` where the question is answered by the unit file being there, which is every
-/// platform Perch does not support a service manager on.
-pub fn asking(platform: Platform, user_id: Option<u32>) -> Option<Driven> {
-    // Every platform has one, so this is `Option` for the caller's sake rather than for
-    // a platform's: `status` asks before it knows whether anything is installed.
-    match platform {
-        Platform::MacOs => Some(Driven::may_fail(
-            "launchctl",
-            &[
-                "print",
-                &format!("gui/{}/{LABEL}", user_id.unwrap_or_default()),
-            ],
-        )),
-        Platform::Other => Some(Driven::may_fail(
-            "systemctl",
-            &["--user", "is-active", UNIT_NAME],
-        )),
-        Platform::Windows => Some(Driven::may_fail("schtasks", &["/Query", "/TN", TASK_NAME])),
-    }
-}
-
-/// Whether that answer says it is running, rather than merely that it is there.
-///
-/// `launchctl print` succeeds for any label launchd has bootstrapped, throttled
-/// and waiting-to-restart included, so macOS reads the state out of the answer.
-/// `systemctl is-active` is the question, so its status is the whole of it.
-pub fn says_it_is_running(platform: Platform, ran: &crate::host::Execution) -> bool {
-    match platform {
-        Platform::MacOs => ran.succeeded() && ran.stdout.contains("state = running"),
-        Platform::Other | Platform::Windows => ran.succeeded(),
-    }
-}
-
-/// What to call the arrangement when saying it out loud, in the platform's own word.
-///
-/// Service is the domain term, and the sentence telling somebody where to look has to
-/// use the word their machine uses.
-pub fn described(platform: Platform) -> &'static str {
-    match platform {
-        Platform::MacOs => "a LaunchAgent",
-        Platform::Other => "a systemd user unit",
-        Platform::Windows => "a Scheduled Task that runs at logon",
-    }
-}
-
-/// The same arrangement as a word a script branches on rather than reads.
-///
-/// Names the arrangement and not the operating system: what a caller does with
-/// this answer turns on which thing is running the Watcher, and `Platform::Other`
-/// says nothing (ADR a-command-names-its-noun).
-pub fn arrangement(platform: Platform) -> &'static str {
-    match platform {
-        Platform::MacOs => "launchagent",
-        Platform::Other => "systemd",
-        Platform::Windows => "scheduled-task",
-    }
-}
-
-/// Where somebody reads the decision log on this platform, as the line that tells them.
-pub fn log_is_at(platform: Platform, log: Option<&Path>) -> String {
-    match (platform, log) {
-        (Platform::Other, _) => "journalctl --user -u perch-watch -f".to_string(),
-        (_, Some(path)) => format!("{}", path.display()),
-        (_, None) => "nowhere — nothing names a log file".to_string(),
-    }
-}
-
 /// The five characters a property list cannot carry raw.
 ///
 /// A plist is XML, and a home directory really can hold an `&`. Escaped rather than
@@ -527,58 +632,6 @@ fn xml_escaped(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
-}
-
-/// The binary a unit names, read back out of the text of one.
-///
-/// Beside the functions that wrote it, because the reader is the only thing that can
-/// establish the writer was right. `None` for a unit Perch does not recognize, and
-/// always for Windows, which keeps no file.
-pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
-    match platform {
-        Platform::Other => unit
-            .lines()
-            .find_map(|line| line.strip_prefix("ExecStart="))
-            .and_then(|line| line.strip_suffix(" watcher run"))
-            .and_then(systemd_unquoted)
-            .map(PathBuf::from),
-        // The first `<string>` inside `ProgramArguments` is the program, and the two
-        // after it are required as the systemd arm requires its ` watcher run`. Bounded
-        // by `</array>`, so a later key is never read.
-        Platform::MacOs => {
-            let array = unit.split("<key>ProgramArguments</key>").nth(1)?;
-            let array = array.split("</array>").next()?;
-            let mut arguments = array
-                .split("<string>")
-                .skip(1)
-                .map(|rest| rest.split("</string>").next());
-            let binary = arguments.next()??;
-            if arguments.next()?? != "watcher" || arguments.next()?? != "run" {
-                return None;
-            }
-            Some(PathBuf::from(unescaped(binary)))
-        }
-        Platform::Windows => None,
-    }
-}
-
-/// Where a unit actually sends the decision log, read out of the text of one.
-///
-/// Beside [`binary_in`] and for its reason: [`log_path`] derives its answer from
-/// `PERCH_HOME` as it stands now, so a `status` run under another would name a file
-/// nothing writes to. `None` for Windows, Linux, and a unit naming none.
-pub fn log_in(platform: Platform, unit: &str) -> Option<PathBuf> {
-    match platform {
-        Platform::MacOs => {
-            // Bounded by the next `<key>`, so a `StandardOutPath` somebody deleted the
-            // value of never reads the following key's string as the log's path.
-            let value = unit.split("<key>StandardOutPath</key>").nth(1)?;
-            let value = value.split("<key>").next()?;
-            let path = value.split("<string>").nth(1)?.split("</string>").next()?;
-            Some(PathBuf::from(unescaped(path)))
-        }
-        Platform::Other | Platform::Windows => None,
-    }
 }
 
 /// A value as a systemd unit can hold one, which is quoted.
@@ -638,6 +691,7 @@ fn unescaped(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::FakeHost;
 
     fn a_unit() -> Unit {
         Unit {
@@ -646,6 +700,28 @@ mod tests {
             log: None,
             user_id: Some(501),
             user_name: Some("someone".to_string()),
+        }
+    }
+
+    /// The same fact twice, and the reason `keeps_a_unit_file` exists at all: a caller
+    /// asking whether there is a file to look for must not need a home directory to
+    /// find out, and must not disagree with the answer it would get if it had one.
+    #[test]
+    fn what_keeps_a_unit_file_is_what_names_a_path_to_keep_it_at() {
+        let host = FakeHost::new();
+        for manager in [
+            Manager::LaunchAgent,
+            Manager::Systemd,
+            Manager::ScheduledTask,
+        ] {
+            assert_eq!(
+                manager.keeps_a_unit_file(),
+                manager
+                    .unit_path(&host)
+                    .expect("a home directory the fake always has")
+                    .is_some(),
+                "{manager:?}"
+            );
         }
     }
 
@@ -659,18 +735,18 @@ mod tests {
             // as the five characters they typed rather than as the one it names.
             "/Users/someone/&amp;lt;/perch",
         ] {
-            for platform in [Platform::MacOs, Platform::Other] {
+            for manager in [Manager::LaunchAgent, Manager::Systemd] {
                 let unit = Unit {
                     binary: PathBuf::from(path),
                     ..a_unit()
                 };
                 let written = unit
-                    .rendered(platform)
+                    .rendered(manager)
                     .expect("both of these platforms keep a file");
                 assert_eq!(
-                    binary_in(platform, &written),
+                    manager.binary_in(&written),
                     Some(PathBuf::from(path)),
-                    "{platform:?} did not read back the path it wrote: {written}"
+                    "{manager:?} did not read back the path it wrote: {written}"
                 );
             }
         }
@@ -678,16 +754,15 @@ mod tests {
 
     #[test]
     fn a_unit_perch_does_not_recognize_is_not_guessed_at() {
-        assert_eq!(binary_in(Platform::MacOs, "<plist></plist>"), None);
-        assert_eq!(binary_in(Platform::Other, "[Service]\nExecStart=\n"), None);
+        assert_eq!(Manager::LaunchAgent.binary_in("<plist></plist>"), None);
+        assert_eq!(Manager::Systemd.binary_in("[Service]\nExecStart=\n"), None);
         assert_eq!(
-            binary_in(Platform::Other, "[Service]\nExecStart=/bin/perch serve\n"),
+            Manager::Systemd.binary_in("[Service]\nExecStart=/bin/perch serve\n"),
             None,
             "a unit running something other than the Watcher loop names no Perch",
         );
         assert_eq!(
-            binary_in(
-                Platform::MacOs,
+            Manager::LaunchAgent.binary_in(
                 "<key>ProgramArguments</key>\n<array>\n<string>/bin/perch</string>\n\
                  <string>list</string>\n</array>\n",
             ),
@@ -695,8 +770,7 @@ mod tests {
             "and a plist running something else names no Perch either",
         );
         assert_eq!(
-            binary_in(
-                Platform::MacOs,
+            Manager::LaunchAgent.binary_in(
                 "<key>ProgramArguments</key>\n<array>\n<string>/bin/perch</string>\n\
                  </array>\n<key>StandardOutPath</key>\n<string>watcher</string>\n",
             ),
@@ -704,7 +778,7 @@ mod tests {
             "and a `<string>` belonging to a later key is not read as an argument",
         );
         assert_eq!(
-            binary_in(Platform::Windows, &a_unit().plist()),
+            Manager::ScheduledTask.binary_in(&a_unit().plist()),
             None,
             "Windows keeps no file, so there is nothing to have read",
         );
@@ -748,8 +822,12 @@ mod tests {
     #[test]
     fn both_unit_formats_pin_the_same_stop_grace_rather_than_inheriting_one() {
         let unit = a_unit();
-        let plist = unit.rendered(Platform::MacOs).expect("macOS writes a file");
-        let systemd = unit.rendered(Platform::Other).expect("Linux writes a file");
+        let plist = unit
+            .rendered(Manager::LaunchAgent)
+            .expect("macOS writes a file");
+        let systemd = unit
+            .rendered(Manager::Systemd)
+            .expect("Linux writes a file");
 
         assert!(
             plist.contains("<key>ExitTimeOut</key>\n\t<integer>30</integer>"),
@@ -764,7 +842,7 @@ mod tests {
     #[test]
     fn a_systemd_unit_gives_up_rather_than_restarting_into_a_failure_for_ever() {
         let systemd = a_unit()
-            .rendered(Platform::Other)
+            .rendered(Manager::Systemd)
             .expect("Linux writes a file");
 
         assert!(systemd.contains("StartLimitBurst=5"), "{systemd}");
@@ -778,13 +856,17 @@ mod tests {
             ..a_unit()
         };
 
-        let systemd = unit.rendered(Platform::Other).expect("Linux writes a file");
+        let systemd = unit
+            .rendered(Manager::Systemd)
+            .expect("Linux writes a file");
         assert!(
             systemd.contains(r#"Environment="PERCH_HOME=/home/someone/work""#),
             "{systemd}"
         );
 
-        let plist = unit.rendered(Platform::MacOs).expect("macOS writes a file");
+        let plist = unit
+            .rendered(Manager::LaunchAgent)
+            .expect("macOS writes a file");
         assert!(plist.contains("<key>PERCH_HOME</key>"), "{plist}");
         assert!(
             plist.contains("<string>/home/someone/work</string>"),
@@ -797,13 +879,13 @@ mod tests {
         let unit = a_unit();
         assert!(
             !unit
-                .rendered(Platform::MacOs)
+                .rendered(Manager::LaunchAgent)
                 .expect("macOS writes a file")
                 .contains("EnvironmentVariables"),
         );
         assert!(
             !unit
-                .rendered(Platform::Other)
+                .rendered(Manager::Systemd)
                 .expect("Linux writes a file")
                 .contains("Environment="),
         );
@@ -815,7 +897,9 @@ mod tests {
             binary: PathBuf::from("/Users/some & one/bin/perch"),
             ..a_unit()
         };
-        let plist = unit.rendered(Platform::MacOs).expect("macOS writes a file");
+        let plist = unit
+            .rendered(Manager::LaunchAgent)
+            .expect("macOS writes a file");
 
         assert!(plist.contains("/Users/some &amp; one/bin/perch"), "{plist}");
         assert!(
@@ -828,12 +912,12 @@ mod tests {
     fn linux_keeps_no_logfile_because_the_journal_already_does() {
         assert!(
             !a_unit()
-                .rendered(Platform::Other)
+                .rendered(Manager::Systemd)
                 .expect("Linux writes a file")
                 .contains("StandardOutput"),
         );
         assert_eq!(
-            log_is_at(Platform::Other, None),
+            Manager::Systemd.log_is_at(None),
             "journalctl --user -u perch-watch -f"
         );
     }
@@ -844,7 +928,9 @@ mod tests {
             log: Some(PathBuf::from("/Users/someone/.config/perch/watch.log")),
             ..a_unit()
         };
-        let plist = unit.rendered(Platform::MacOs).expect("macOS writes a file");
+        let plist = unit
+            .rendered(Manager::LaunchAgent)
+            .expect("macOS writes a file");
 
         assert!(plist.contains("<key>StandardOutPath</key>"), "{plist}");
         assert!(plist.contains("<key>StandardErrorPath</key>"), "{plist}");
@@ -864,9 +950,11 @@ mod tests {
             log: Some(at.clone()),
             ..a_unit()
         };
-        let plist = unit.rendered(Platform::MacOs).expect("macOS writes a file");
+        let plist = unit
+            .rendered(Manager::LaunchAgent)
+            .expect("macOS writes a file");
 
-        assert_eq!(log_in(Platform::MacOs, &plist), Some(at));
+        assert_eq!(Manager::LaunchAgent.log_in(&plist), Some(at));
     }
 
     #[test]
@@ -874,21 +962,25 @@ mod tests {
         let emptied = "<key>StandardOutPath</key>\n\t<key>Program</key>\n\t\
              <string>/usr/local/bin/perch</string>";
 
-        assert_eq!(log_in(Platform::MacOs, emptied), None);
-        assert_eq!(log_in(Platform::MacOs, "<dict></dict>"), None);
+        assert_eq!(Manager::LaunchAgent.log_in(emptied), None);
+        assert_eq!(Manager::LaunchAgent.log_in("<dict></dict>"), None);
     }
 
     #[test]
     fn every_unit_format_runs_the_watcher_loop_by_the_name_the_binary_answers_to() {
         let unit = a_unit();
 
-        let plist = unit.rendered(Platform::MacOs).expect("macOS writes a file");
+        let plist = unit
+            .rendered(Manager::LaunchAgent)
+            .expect("macOS writes a file");
         assert!(
             plist.contains("<string>watcher</string>\n\t\t<string>run</string>"),
             "the two words are two arguments, which is what a plist array is: {plist}"
         );
 
-        let systemd = unit.rendered(Platform::Other).expect("Linux writes a file");
+        let systemd = unit
+            .rendered(Manager::Systemd)
+            .expect("Linux writes a file");
         assert!(
             systemd
                 .lines()
@@ -905,7 +997,7 @@ mod tests {
 
     #[test]
     fn a_windows_task_is_registered_to_run_without_a_console() {
-        let driven = starting(Platform::Windows, &a_unit(), None);
+        let driven = Manager::ScheduledTask.starting(&a_unit(), None);
         let line = driven[0].as_typed();
 
         assert!(line.contains("/SC ONLOGON"), "{line}");
@@ -935,7 +1027,7 @@ mod tests {
             ..a_unit()
         };
 
-        let line = starting(Platform::Windows, &unit, None)[0].as_typed();
+        let line = Manager::ScheduledTask.starting(&unit, None)[0].as_typed();
 
         assert!(line.contains("/SC ONLOGON"), "{line}");
         assert!(!line.contains("/RU"), "{line}");
@@ -1002,7 +1094,7 @@ mod tests {
     #[test]
     fn a_launchagent_goes_into_the_logged_in_session_and_boots_out_of_it_first() {
         let unit = a_unit();
-        let driven = starting(Platform::MacOs, &unit, Some(Path::new("/tmp/x.plist")));
+        let driven = Manager::LaunchAgent.starting(&unit, Some(Path::new("/tmp/x.plist")));
 
         assert_eq!(
             driven[0].as_typed(),
@@ -1021,12 +1113,17 @@ mod tests {
 
     #[test]
     fn nothing_an_uninstall_runs_is_required_to_succeed() {
-        for platform in [Platform::MacOs, Platform::Other, Platform::Windows] {
+        for manager in [
+            Manager::LaunchAgent,
+            Manager::Systemd,
+            Manager::ScheduledTask,
+        ] {
             assert!(
-                stopping(platform, Some(501))
+                manager
+                    .stopping(Some(501))
                     .iter()
                     .all(|step| !step.required),
-                "{platform:?} has a step that would fail an uninstall of \
+                "{manager:?} has a step that would fail an uninstall of \
                  something already uninstalled"
             );
         }
@@ -1034,7 +1131,7 @@ mod tests {
 
     #[test]
     fn systemd_is_reloaded_before_it_is_asked_about_a_unit_that_is_new() {
-        let driven = starting(Platform::Other, &a_unit(), None);
+        let driven = Manager::Systemd.starting(&a_unit(), None);
 
         assert_eq!(driven[0].as_typed(), "systemctl --user daemon-reload");
         assert_eq!(
@@ -1049,15 +1146,20 @@ mod tests {
 
     #[test]
     fn nothing_is_ever_installed_outside_the_users_own_session() {
-        for platform in [Platform::MacOs, Platform::Other, Platform::Windows] {
-            for step in starting(platform, &a_unit(), Some(Path::new("/tmp/x")))
+        for manager in [
+            Manager::LaunchAgent,
+            Manager::Systemd,
+            Manager::ScheduledTask,
+        ] {
+            for step in manager
+                .starting(&a_unit(), Some(Path::new("/tmp/x")))
                 .into_iter()
-                .chain(stopping(platform, Some(501)))
+                .chain(manager.stopping(Some(501)))
             {
                 let line = step.as_typed();
                 assert!(
                     !line.contains("--system") && !line.contains("system/"),
-                    "{platform:?} reaches outside the user's session: {line}"
+                    "{manager:?} reaches outside the user's session: {line}"
                 );
             }
         }

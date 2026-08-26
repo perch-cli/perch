@@ -28,7 +28,8 @@ const UNIT: &str = "/Users/someone/.config/systemd/user/perch-watch.service";
 /// matches the *file* — `FakeHost` normalizes what it stores — but not the **argument**
 /// `launchctl` is handed, which is compared as a string.
 fn unit_at(host: &FakeHost) -> std::path::PathBuf {
-    perch::service::unit_path(host)
+    perch::service::Manager::of(host)
+        .unit_path(host)
         .expect("home is known")
         .expect("this platform keeps a unit file")
 }
@@ -317,11 +318,11 @@ fn a_path_a_shell_would_split_survives_the_unit_it_is_written_into() {
             user_name: None,
         };
         let text = unit
-            .rendered(Platform::Other)
+            .rendered(perch::service::Manager::Systemd)
             .expect("Linux keeps a unit file");
 
         assert_eq!(
-            perch::service::binary_in(Platform::Other, &text).as_deref(),
+            perch::service::Manager::Systemd.binary_in(&text).as_deref(),
             Some(std::path::Path::new(awkward)),
             "the path written is the path read back: {text}"
         );
@@ -397,7 +398,7 @@ fn a_unit_in_a_shape_perch_does_not_write_names_no_binary() {
         "[Service]\nExecStart=\"/usr/local/bin/perch watcher run\n",
     ] {
         assert_eq!(
-            perch::service::binary_in(Platform::Other, foreign),
+            perch::service::Manager::Systemd.binary_in(foreign),
             None,
             "not a unit this writer produced: {foreign}"
         );
@@ -912,7 +913,8 @@ fn a_purge_refuses_while_a_watcher_still_holds_the_watch() {
 
 #[test]
 fn stopping_a_windows_task_ends_the_running_instance_before_unregistering_it() {
-    let driven: Vec<String> = perch::service::stopping(Platform::Windows, None)
+    let driven: Vec<String> = perch::service::Manager::ScheduledTask
+        .stopping(None)
         .iter()
         .map(|step| format!("{} {}", step.program, step.args.join(" ")))
         .collect();
@@ -1315,7 +1317,8 @@ fn installing_on_a_machine_perch_has_never_run_on_makes_room_for_the_log() {
         &["bootstrap", "gui/501", &plist.to_string_lossy()],
         worked(),
     );
-    let log = perch::service::log_path(&host)
+    let log = perch::service::Manager::of(&host)
+        .log_path(&host)
         .expect("home is known")
         .expect("this platform keeps its own log");
     assert!(
