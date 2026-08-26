@@ -333,10 +333,7 @@ fn a_quarantined_account_is_refused_and_nothing_is_launched() {
 #[test]
 fn a_group_target_is_refused_as_naming_no_one_account() {
     let host = machine();
-    declare_group(&host, "work");
-    move_to_group(&host, SECOND_EMAIL, "work")
-        .0
-        .expect("the Account joins the Group");
+    a_group_of(&host, "work", &[SECOND_EMAIL]);
 
     let refusal = run_run(&host, "work")
         .0

@@ -184,10 +184,7 @@ fn removing_an_account_leaves_every_other_account_and_the_live_credential_alone(
 #[test]
 fn the_group_a_removed_account_was_in_stays_declared() {
     let host = machine_with_two_accounts();
-    declare_group(&host, "retiring");
-    move_to_group(&host, SECOND_EMAIL, "retiring")
-        .0
-        .expect("the Account joins the Group");
+    a_group_of(&host, "retiring", &[SECOND_EMAIL]);
 
     run_remove(&host, SECOND_EMAIL).0.expect("removed");
 
@@ -304,12 +301,7 @@ fn declining_removes_nothing_at_all() {
 #[test]
 fn the_account_left_active_is_one_the_user_declared_interchangeable() {
     let host = machine_with_three_accounts().with_answers(&["y"]);
-    declare_group(&host, "work");
-    for email in [EMAIL, THIRD_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, THIRD_EMAIL]);
 
     let (result, printed) = run_remove(&host, EMAIL);
 

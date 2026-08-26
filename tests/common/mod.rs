@@ -344,12 +344,7 @@ pub fn machine_with_three_accounts() -> FakeHost {
 /// declared interchangeable, one of them running dry.
 pub fn three_accounts_in_one_group() -> FakeHost {
     let host = machine_with_three_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
     host
 }
 
@@ -414,6 +409,18 @@ pub fn declare_group(host: &FakeHost, name: &str) {
     )
     .0
     .unwrap_or_else(|err| panic!("could not declare `{name}`: {err}"));
+}
+
+/// A Group with these Accounts in it: the result, rather than the two commands
+/// that produce it. Panics naming the Account that would not join, a failure
+/// inside the loop being otherwise a message about no Account in particular.
+pub fn a_group_of(host: &FakeHost, name: &str, accounts: &[&str]) {
+    declare_group(host, name);
+    for account in accounts {
+        move_to_group(host, account, name)
+            .0
+            .unwrap_or_else(|err| panic!("`{account}` could not join `{name}`: {err}"));
+    }
 }
 
 pub fn move_to_group(host: &FakeHost, target: &str, group: &str) -> (perch::Result<()>, String) {
@@ -503,12 +510,7 @@ pub fn watched() -> FakeHost {
     .0
     .expect("the second Account is added");
 
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     config_set(&host, &["work", "watcher-may-act", "true"])
         .0
         .expect("the Group says the watcher may act");

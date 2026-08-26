@@ -29,10 +29,7 @@ const REPAIRED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-repaired
 /// every setting a repair has to leave where it found it.
 fn broken_second_account() -> FakeHost {
     let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work").0.expect("joined");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     set_alias(&host, "overflow", SECOND_EMAIL).0.expect("named");
     quarantine(&host, SECOND_EMAIL);
     host.with_login(login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE))
