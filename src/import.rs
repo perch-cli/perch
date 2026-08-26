@@ -345,10 +345,11 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
             Some(credential) => profile::store_credential(host, &store, credential),
             None => Ok(()),
         });
-        // Set as each step lands rather than before the first: a write that
-        // failed left whatever the store held, which is the best Credential
-        // there is, and taking it back out takes back one this never wrote.
-        placed.touched[at].wrote_a_credential = stored.is_ok() && a_credential_traveled;
+        // Asked rather than inferred from the `Ok`: `store_credential` refuses
+        // when the store read first will not give up the copy it replaces, and
+        // the Credential is in the other one by then.
+        placed.touched[at].wrote_a_credential = a_credential_traveled
+            && (stored.is_ok() || credential.is_some_and(|carried| landed(host, &store, carried)));
         let landed = stored.and_then(|()| login::carry_identity_file(host, &identity_file, &store));
         placed.touched[at].wrote_the_identity_file = landed.is_ok();
         if let Err(error) = landed {
@@ -365,6 +366,17 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
         }
     }
     Ok(placed)
+}
+
+/// Whether a store holds the Credential this Import was writing into it.
+///
+/// A store that will not answer says nothing, and the undo leaves it: what it
+/// might hold is a Credential this Import did not put there.
+fn landed(host: &dyn Host, store: &Store, carried: &str) -> bool {
+    credentials::read(host, store)
+        .ok()
+        .flatten()
+        .is_some_and(|held| *held.credential == *carried)
 }
 
 #[cfg(test)]

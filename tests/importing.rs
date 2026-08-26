@@ -569,6 +569,40 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
     );
 }
 
+/// `store_credential` refuses when the store read first will not give up the
+/// copy it replaces — and by then the Credential is in the other one. Inferred
+/// from the `Err`, the undo left it: a working refresh token out of the Export,
+/// in a Profile nothing names, under a command that said nothing was imported.
+#[test]
+fn a_rollback_takes_back_a_credential_the_write_left_behind_as_it_refused() {
+    let sealed = an_export_of_a_whole_machine();
+    // A Mac, so the keychain is the store read first and the file is the other
+    // one. The directory a `perch add` that died at the browser step leaves, so
+    // the undo cannot simply discard the whole Profile.
+    let host = a_new_machine_holding(&sealed);
+    let orphan = store_of(&host, EMAIL);
+    perch::profile::make_dir(&host, &orphan.config_dir).expect("the Profile can be made");
+    // With an item in the keychain under its name, so the lock is met by a store
+    // that may be holding something rather than by one that answers "no such
+    // item" through it.
+    host.set_keychain_item(&orphan.keychain_service, LOGIN_NAME, THIRD_CREDENTIAL);
+    host.lock_keychain("User interaction is not allowed");
+
+    let (outcome, _printed) = run_import(&host, AT);
+
+    outcome.expect_err("the keychain will not say what it holds");
+    assert!(
+        host.path_exists(&orphan.config_dir),
+        "the directory this Import did not make is still there"
+    );
+    assert_eq!(
+        host.file(&orphan.credentials_file),
+        None,
+        "and the Credential the refused write had already landed in the other \
+         store came back out with it"
+    );
+}
+
 /// The undo took a Profile's Credential and its `.claude.json` back out on the
 /// strength of what the Import *meant* to write there. The Account it stops on
 /// is the last one recorded and wrote neither, so what it took was whatever the
