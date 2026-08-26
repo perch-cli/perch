@@ -15,7 +15,7 @@ use crate::commands::{say, say_json};
 use crate::cycle;
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::host::{Host, Platform};
-use crate::service::{self, Driven, Unit};
+use crate::service::{self, Driven, Manager, Unit};
 use crate::{registry, upgrade};
 
 /// Writes the unit, starts it, and says what it did.
@@ -30,8 +30,8 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // Before the machine is asked anything and before anything is written: a value no
     // format can hold is a refusal about the Unit rather than a half-finished install,
     // and `is_installed` below runs `schtasks` on Windows.
-    unit.refuse_what_the_format_cannot_hold(host.platform())?;
-    let at = service::unit_path(host)?;
+    unit.refuse_what_the_format_cannot_hold(Manager::of(host))?;
+    let at = Manager::of(host).unit_path(host)?;
     // Asked the way `status` asks it rather than of the file alone, because Windows
     // keeps no unit file and a re-install over a working task is not an install that
     // made something.
@@ -55,9 +55,9 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             // In `uninstall`'s order, for the reason `service::forgetting` gives:
             // `enable --now` makes the wants-symlink and *then* starts, so the
             // disable has to reach a unit systemd can still resolve.
-            let _ = drive(host, service::stopping(host.platform(), host.user_id()));
+            let _ = drive(host, Manager::of(host).stopping(host.user_id()));
             let _ = host.remove_file(at);
-            let _ = drive(host, service::forgetting(host.platform()));
+            let _ = drive(host, Manager::of(host).forgetting());
         }
         return Err(failed.with_note(&format!(
             "Nothing was installed{}. Perch is unchanged, and `perch watcher \
@@ -81,14 +81,14 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
                 false => "Installed the Service. It runs",
             },
             unit.binary.display(),
-            service::described(host.platform()),
+            Manager::of(host).described(),
         ),
     )?;
     say(
         out,
         &format!(
             "Its decisions go to {}.",
-            service::log_is_at(host.platform(), unit.log.as_deref()),
+            Manager::of(host).log_is_at(unit.log.as_deref()),
         ),
     )?;
 
@@ -103,12 +103,12 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 
 /// Stops the Service and takes the unit back.
 pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
-    let at = service::unit_path(host)?;
+    let at = Manager::of(host).unit_path(host)?;
     let installed = is_installed(host, at.as_deref())?;
 
     // Every step is allowed to fail, because every one is "make sure this is not
     // running", so this drives them all and then judges by what is left.
-    let _ = drive(host, service::stopping(host.platform(), host.user_id()));
+    let _ = drive(host, Manager::of(host).stopping(host.user_id()));
 
     take_the_unit_back(host, at.as_deref())?;
 
@@ -119,7 +119,7 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         return Err(PerchError::Busy(format!(
             "The Service is still installed, so it was not taken back.\n\
              It is {} and something is refusing to unregister it.",
-            service::described(host.platform()),
+            Manager::of(host).described(),
         )));
     }
 
@@ -148,7 +148,7 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 /// a-crate-must-not-cost-a-seam).
 pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
     let platform = host.platform();
-    let at = service::unit_path(host)?;
+    let at = Manager::of(host).unit_path(host)?;
     let installed = is_installed(host, at.as_deref())?;
     let watching = watcher_is_running(host);
     // Windows is asked differently, because `schtasks /Query` answers whether the task
@@ -174,7 +174,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
                 "installed": installed,
                 "running": running,
                 "watching": watching,
-                "platform": service::arrangement(platform),
+                "platform": Manager::from(platform).arrangement(),
                 "unit": at.as_ref().map(|at| at.to_string_lossy()),
                 "binary": recorded.as_ref().map(|at| at.to_string_lossy()),
                 "binary_exists": binary_is_there,
@@ -182,7 +182,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
                 // on systemd there never is. The sentence a person reads is
                 // beside it rather than in its place.
                 "log": log.as_ref().map(|at| at.to_string_lossy()),
-                "log_said": service::log_is_at(platform, log.as_deref()),
+                "log_said": Manager::from(platform).log_is_at(log.as_deref()),
             }),
         )
         .map(|()| EXIT_OK);
@@ -195,7 +195,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
                 "No Service is installed. `perch watcher install` has this \
                  machine run the Watcher for you as {}, starting when you log \
                  in.",
-                service::described(platform),
+                Manager::from(platform).described(),
             ),
         )?;
     } else {
@@ -203,7 +203,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
             out,
             &format!(
                 "A Service is installed as {}, and is {}.",
-                service::described(platform),
+                Manager::from(platform).described(),
                 match running {
                     true => "running",
                     false => "not running",
@@ -230,7 +230,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
             out,
             &format!(
                 "Its decisions go to {}.",
-                service::log_is_at(platform, log.as_deref()),
+                Manager::from(platform).log_is_at(log.as_deref()),
             ),
         )?;
     }
@@ -258,7 +258,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
 /// continuing** where the Service will not stop: a Watcher racing a Purge writes a
 /// captured Credential into a Profile directory another process is deleting.
 pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
-    let at = service::unit_path(host)?;
+    let at = Manager::of(host).unit_path(host)?;
 
     // Asked before the Service question rather than after it: a Watcher somebody typed
     // holds the same lock and is the same hazard, on a machine where no Service was
@@ -276,7 +276,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
         return Ok(false);
     }
 
-    let _ = drive(host, service::stopping(host.platform(), host.user_id()));
+    let _ = drive(host, Manager::of(host).stopping(host.user_id()));
 
     // Asked rather than assumed, because every step of `stopping` may fail and this
     // caller judges by what is still running — the watcher lock first, because a unit
@@ -287,7 +287,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
              It would go on Switching Credentials into Profiles this command is \
              deleting. Stop it with `perch watcher uninstall` and run this \
              again — it is {} and something is refusing to stop it.",
-            service::described(host.platform()),
+            Manager::of(host).described(),
         )));
     }
 
@@ -307,7 +307,7 @@ fn take_the_unit_back(host: &dyn Host, at: Option<&Path>) -> Result<()> {
         host.remove_file(at)
             .map_err(|err| PerchError::file_write(at, err))?;
     }
-    let _ = drive(host, service::forgetting(host.platform()));
+    let _ = drive(host, Manager::of(host).forgetting());
     Ok(())
 }
 
@@ -317,7 +317,8 @@ const TAKEN_BACK: &str = "The Service is stopped and its unit is gone.";
 /// Whether a Service is installed at all, for the commands that have to mention one
 /// without managing it.
 pub fn is_there(host: &dyn Host) -> bool {
-    service::unit_path(host)
+    Manager::of(host)
+        .unit_path(host)
         .and_then(|at| is_installed(host, at.as_deref()))
         .unwrap_or(false)
 }
@@ -328,7 +329,7 @@ pub fn is_there(host: &dyn Host) -> bool {
 /// One function because there are two doors to it, and both read `PERCH_HOME` off their
 /// own environment, so both owe [`Unit::refuse_what_the_format_cannot_hold`].
 fn write_and_start(host: &dyn Host, unit: &Unit, at: Option<&std::path::Path>) -> Result<()> {
-    unit.refuse_what_the_format_cannot_hold(host.platform())?;
+    unit.refuse_what_the_format_cannot_hold(Manager::of(host))?;
 
     // The directory the decision log goes in, before anything is told to write there:
     // Perch's home is made on the way to the first lock, and neither door here takes
@@ -339,7 +340,7 @@ fn write_and_start(host: &dyn Host, unit: &Unit, at: Option<&std::path::Path>) -
         })?;
     }
 
-    if let (Some(at), Some(rendered)) = (at, unit.rendered(host.platform())) {
+    if let (Some(at), Some(rendered)) = (at, unit.rendered(Manager::of(host))) {
         if let Some(parent) = at.parent() {
             host.create_dir_all(parent).map_err(|err| {
                 PerchError::file_write(parent, format!("could not make room for the unit: {err}"))
@@ -349,7 +350,7 @@ fn write_and_start(host: &dyn Host, unit: &Unit, at: Option<&std::path::Path>) -
             .map_err(|err| PerchError::file_write(at, err))?;
     }
 
-    drive(host, service::starting(host.platform(), unit, at))
+    drive(host, Manager::of(host).starting(unit, at))
 }
 
 /// Writes the unit again against the binary that is there now, after an Upgrade has
@@ -363,7 +364,7 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
     }
 
     let refreshed = describe(host).and_then(|unit| {
-        let at = service::unit_path(host)?;
+        let at = Manager::of(host).unit_path(host)?;
         write_and_start(host, &unit, at.as_deref())?;
         Ok(unit.binary)
     });
@@ -395,7 +396,7 @@ fn describe(host: &dyn Host) -> Result<Unit> {
             .iter()
             .filter_map(|key| host.env_var(key).map(|value| (key.to_string(), value)))
             .collect(),
-        log: service::log_path(host)?,
+        log: Manager::of(host).log_path(host)?,
         user_id: host.user_id(),
         // Off the machine, because `schtasks` has no notation for "whoever is running
         // this": `%USERNAME%` is `cmd.exe`'s, expanded by a shell that is not there.
@@ -432,15 +433,14 @@ fn located(host: &dyn Host, program: &str) -> String {
 /// What the service manager answers when asked about the Service, or `None`
 /// where it would not run at all.
 fn asked_of_the_service_manager(host: &dyn Host) -> Option<crate::host::Execution> {
-    let asking = service::asking(host.platform(), host.user_id())?;
+    let asking = Manager::of(host).asking(host.user_id())?;
     let args: Vec<&str> = asking.args.iter().map(String::as_str).collect();
     host.exec(&located(host, &asking.program), &args).ok()
 }
 
 /// Whether the service manager says it is running right now.
 fn is_running(host: &dyn Host) -> bool {
-    asked_of_the_service_manager(host)
-        .is_some_and(|ran| service::says_it_is_running(host.platform(), &ran))
+    asked_of_the_service_manager(host).is_some_and(|ran| Manager::of(host).says_it_is_running(&ran))
 }
 
 /// Whether the service manager still holds the Service at all — throttled, waiting
@@ -473,7 +473,7 @@ fn watcher_is_running(host: &dyn Host) -> bool {
 /// is left here is the one effect.
 fn recorded_binary(host: &dyn Host, at: Option<&std::path::Path>) -> Option<PathBuf> {
     let text = host.read_file(at?).ok()?;
-    service::binary_in(host.platform(), &text)
+    Manager::of(host).binary_in(&text)
 }
 
 /// Where the decision log goes, asked of the unit that is installed.
@@ -492,11 +492,11 @@ fn recorded_log(
         return Ok(None);
     }
     if host.platform() == Platform::Windows {
-        return service::log_path(host);
+        return Manager::of(host).log_path(host);
     }
     Ok(at
         .and_then(|at| host.read_file(at).ok())
-        .and_then(|text| service::log_in(host.platform(), &text)))
+        .and_then(|text| Manager::of(host).log_in(&text)))
 }
 
 /// The line saying a Service will hold because no Scope has granted anything, or `None`
