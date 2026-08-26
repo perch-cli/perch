@@ -184,10 +184,7 @@ fn removing_an_account_leaves_every_other_account_and_the_live_credential_alone(
 #[test]
 fn the_group_a_removed_account_was_in_stays_declared() {
     let host = machine_with_two_accounts();
-    declare_group(&host, "retiring");
-    move_to_group(&host, SECOND_EMAIL, "retiring")
-        .0
-        .expect("the Account joins the Group");
+    a_group_of(&host, "retiring", &[SECOND_EMAIL]);
 
     run_remove(&host, SECOND_EMAIL).0.expect("removed");
 
@@ -304,12 +301,7 @@ fn declining_removes_nothing_at_all() {
 #[test]
 fn the_account_left_active_is_one_the_user_declared_interchangeable() {
     let host = machine_with_three_accounts().with_answers(&["y"]);
-    declare_group(&host, "work");
-    for email in [EMAIL, THIRD_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, THIRD_EMAIL]);
 
     let (result, printed) = run_remove(&host, EMAIL);
 
@@ -401,7 +393,8 @@ fn without_a_terminal_the_active_account_goes_only_when_asked_for_outright() {
 
 #[test]
 fn removal_is_refused_while_the_accounts_profile_is_live() {
-    let host = client_running_against(machine_with_two_accounts(), SECOND_PROFILE, 4242);
+    let host = machine_with_two_accounts();
+    a_client_running_against(&host, SECOND_PROFILE, 4242);
 
     let (result, _) = run_remove(&host, SECOND_EMAIL);
 
@@ -417,8 +410,8 @@ fn removing_the_active_account_is_refused_while_a_client_is_running_against_the_
     // The Account's own Profile is quiet; it is the Default Profile that a
     // client is holding, and that is where the Account Perch lands on has to be
     // written (ADR a-profile-is-live-by-evidence).
-    let host = client_running_against(machine_with_two_accounts(), DEFAULT_PROFILE, 5150)
-        .with_answers(&["y"]);
+    let host = machine_with_two_accounts().with_answers(&["y"]);
+    a_client_running_against(&host, DEFAULT_PROFILE, 5150);
 
     let (result, _) = run_remove(&host, EMAIL);
 

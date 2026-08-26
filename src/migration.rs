@@ -13,7 +13,8 @@ use serde_json::{Map, Value};
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{NameKind, Settings, UngroupedConfig};
+use crate::name::{self, NameKind};
+use crate::registry::{Settings, UngroupedConfig};
 
 /// The oldest version any published Perch stamped, and so the oldest shape this
 /// has. Below it is a number no Perch wrote.
@@ -67,7 +68,7 @@ pub fn forward(document: &str) -> Result<Option<String>> {
     // Every step lands here rather than only the first: a name rule that gains
     // a member with nothing to carry the names already written down is the
     // refusal `load` turns into every command.
-    rename_what_this_build_refuses(&mut moved, written_by_perch(claimed));
+    rename_what_this_build_refuses(&mut moved, name::rules_for(claimed));
     moved.insert("version".to_string(), Value::from(CARRIED_TO));
 
     serde_json::to_string(&Value::Object(moved))
@@ -86,7 +87,7 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
     // Before any of the Scopes below are read out, so a Group renamed here is
     // renamed everywhere one is named: what it declares, what an Account claims,
     // and what a Check is keyed on.
-    let renamed = renames_in(held, a_version_1_perch_accepted);
+    let renamed = renames_in(held, name::rules_for(u64::from(EARLIEST_VERSION)));
 
     // Read before Global goes, since both of the Scopes below are made out of it.
     let global = object("global", held.get("global"))?;
@@ -148,11 +149,11 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
         // `ungrouped` is a legitimate key here and is not a Group, so a v1
         // registry that declared a Group by that name must not have the
         // Ungrouped Scope's Cooldown re-keyed onto the renamed Group.
-        let under = match crate::registry::means_ungrouped(&group) {
+        let under = match crate::name::means_ungrouped(&group) {
             // The constant rather than the spelling found: `record_check` only
             // ever writes that one, so a key that folds to it under any other
             // capitalization becomes a second key `validate` refuses.
-            true => crate::registry::UNGROUPED.to_string(),
+            true => crate::name::UNGROUPED.to_string(),
             false => now_called(NameKind::Group, &group, &renamed),
         };
         // Two v1 keys can land on one — a Group called `Ungrouped` beside the
@@ -176,8 +177,8 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
 ///
 /// On the current shape rather than version 1's, so a rule arriving after a
 /// shape has shipped gets a step rather than an edit to the one below.
-fn rename_what_this_build_refuses(held: &mut Map<String, Value>, written_by_perch: WrittenByPerch) {
-    let renamed = renames_in(held, written_by_perch);
+fn rename_what_this_build_refuses(held: &mut Map<String, Value>, wrote_it: &name::Rules) {
+    let renamed = renames_in(held, wrote_it);
     if renamed.is_empty() {
         return;
     }
@@ -208,12 +209,10 @@ fn rename_what_this_build_refuses(held: &mut Map<String, Value>, written_by_perc
         // spelling rather than being looked for among the renames.
         let carried = checks
             .iter()
-            .map(
-                |(group, check)| match crate::registry::means_ungrouped(group) {
-                    true => (group.clone(), check.clone()),
-                    false => (now_called(NameKind::Group, group, &renamed), check.clone()),
-                },
-            )
+            .map(|(group, check)| match crate::name::means_ungrouped(group) {
+                true => (group.clone(), check.clone()),
+                false => (now_called(NameKind::Group, group, &renamed), check.clone()),
+            })
             .collect();
         held.insert("checks".to_string(), Value::Object(carried));
     }
@@ -228,7 +227,7 @@ fn now_called(kind: NameKind, name: &str, renamed: &[Renamed]) -> String {
     let of_the_kind = || renamed.iter().filter(|entry| entry.kind == kind);
     of_the_kind()
         .find(|entry| entry.was == name)
-        .or_else(|| of_the_kind().find(|entry| crate::registry::same_name(&entry.was, name)))
+        .or_else(|| of_the_kind().find(|entry| crate::name::same_name(&entry.was, name)))
         .map_or_else(|| name.to_string(), |entry| entry.is_now.clone())
 }
 
@@ -266,7 +265,7 @@ pub fn renames(document: &str) -> Vec<Renamed> {
     else {
         return Vec::new();
     };
-    let carried = written_by_perch(claimed);
+    let carried = name::rules_for(claimed);
     serde_json::from_str::<Value>(document)
         .ok()
         .and_then(|held| held.as_object().map(|held| renames_in(held, carried)))
@@ -286,64 +285,7 @@ fn a_step_moves_it(claimed: u64) -> bool {
     (u64::from(EARLIEST_VERSION)..u64::from(CARRIED_TO)).contains(&claimed)
 }
 
-/// Whether a name in a document of this version is one Perch wrote rather than
-/// one somebody typed in.
-///
-/// A name Perch never accepted is named at `load` and left ([`acceptable`]);
-/// one it did accept is carried, or every command goes with it.
-type WrittenByPerch = fn(&str) -> bool;
-
-/// Which build's rules bound what the rename pass may carry. A name is Perch's
-/// to rename only where a Perch of the version on the document accepted it; a
-/// number no step below recognizes gets the newest rules, which are the
-/// narrowest.
-fn written_by_perch(claimed: u64) -> WrittenByPerch {
-    match claimed {
-        claimed if claimed == u64::from(EARLIEST_VERSION) => a_version_1_perch_accepted,
-        2 => a_version_2_perch_accepted,
-        _ => a_version_3_perch_accepted,
-    }
-}
-
-/// Version 1's rules, at the loosest of the three published builds.
-///
-/// History rather than a rule, as the two below are. Unreleased builds stamped
-/// version 1 too and refused less; a name only those accepted predates the
-/// first release, and is named at `load` rather than renamed.
-fn a_version_1_perch_accepted(name: &str) -> bool {
-    !name.trim().is_empty()
-        && !name.chars().any(char::is_whitespace)
-        && name.to_lowercase() != crate::registry::NO_GROUP
-        && !name.contains('@')
-}
-
-/// Version 2's rules, at the loosest of the builds that stamped it.
-///
-/// A character rule joined `validate_name` part way through version 2 and the
-/// version did not move with it, so version 2 is two shapes: this is the
-/// earlier, which refused no character at all.
-fn a_version_2_perch_accepted(name: &str) -> bool {
-    !name.trim().is_empty()
-        && !name.chars().any(char::is_whitespace)
-        && !crate::registry::means_the_ungrouped_scope(name)
-        && !crate::registry::means_global(name)
-        && !name.contains('@')
-        && !name.starts_with('-')
-}
-
-/// Version 3's rules, written out rather than read off `validate_name`, which
-/// version 4 replaced with an allow-list.
-fn a_version_3_perch_accepted(name: &str) -> bool {
-    !name.trim().is_empty()
-        && !name.chars().any(char::is_whitespace)
-        && crate::host::unshowable_character_in(name).is_none()
-        && !crate::registry::means_the_ungrouped_scope(name)
-        && !crate::registry::means_global(name)
-        && !name.contains('@')
-        && !name.starts_with('-')
-}
-
-fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Vec<Renamed> {
+fn renames_in(held: &Map<String, Value>, wrote_it: &name::Rules) -> Vec<Renamed> {
     let names = |key: &str| -> Vec<String> {
         held.get(key)
             .and_then(Value::as_object)
@@ -360,7 +302,7 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
         // second name.
         if !groups
             .iter()
-            .any(|held| crate::registry::same_name(held, &claimed))
+            .any(|held| crate::name::same_name(held, &claimed))
         {
             groups.push(claimed);
         }
@@ -379,17 +321,17 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
         for was in held {
             let beside = standing
                 .iter()
-                .any(|(_, held)| a_published_perch_told_them_apart(held, &was));
-            if crate::registry::validate_name(kind, &was).is_ok() && !beside {
+                .any(|(_, held)| told_them_apart(wrote_it, held, &was));
+            if crate::name::validate(kind, &was).is_ok() && !beside {
                 standing.push((kind, was));
                 continue;
             }
             // A name no Perch of this version ever accepted is a hand edit, and
             // is named at `load` rather than quietly given a different one.
-            if !written_by_perch(&was) {
+            if !wrote_it.accepts(&was) {
                 continue;
             }
-            let Some(is_now) = acceptable(kind, &was, &taken) else {
+            let Some(is_now) = name::acceptable(kind, &was, &taken) else {
                 continue;
             };
             taken.push(is_now.clone());
@@ -403,11 +345,9 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
 
 /// Whether two names one published Perch held as two are one to this build.
 ///
-/// Every version this pass sees compared by `to_lowercase`, which applies Greek's
-/// final-sigma rule; this build folds `ς` and `σ` together. Two the older fold
-/// also held as one are a hand edit, which `load` names.
-fn a_published_perch_told_them_apart(one: &str, other: &str) -> bool {
-    crate::registry::same_name(one, other) && one.to_lowercase() != other.to_lowercase()
+/// Two the older fold also held as one are a hand edit, which `load` names.
+fn told_them_apart(wrote_it: &name::Rules, one: &str, other: &str) -> bool {
+    name::same_name(one, other) && !wrote_it.one_name(one, other)
 }
 
 /// A name left standing said as a rename to itself, where one that folds
@@ -422,7 +362,7 @@ fn kept_from_the_fold(standing: &[(NameKind, String)], renamed: &[Renamed]) -> V
             renamed.iter().any(|entry| {
                 entry.kind == *kind
                     && entry.was != *name
-                    && crate::registry::same_name(&entry.was, name)
+                    && crate::name::same_name(&entry.was, name)
             })
         })
         .map(|(kind, name)| Renamed {
@@ -460,48 +400,6 @@ fn claimed_groups(held: &Map<String, Value>) -> Vec<String> {
         })
         .unwrap_or_default()
 }
-
-/// The nearest name to this one that this build accepts and nothing else in the
-/// namespace answers to.
-///
-/// `None` leaves the name as it is, for the refusal at `load` to describe: a
-/// name no published Perch accepted either is a hand edit.
-fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
-    // The allow-list and the unshowable set are per character, and no suffix
-    // rescues either, so a name breaking one loses the character rather than
-    // gaining a number; `global` and `ungrouped` are whole words and take one.
-    let kept: String = name
-        .chars()
-        .filter(|c| crate::registry::a_name_may_carry(*c) && !crate::host::is_unshowable(*c))
-        .collect();
-    // What is left may still open with something that may only follow: a `-`,
-    // a combining mark, a digit of another script.
-    let opened = kept.trim_start_matches(|c| !crate::registry::a_name_may_open_with(c));
-    let base = match opened.is_empty() {
-        true => match kind {
-            NameKind::Group => "group",
-            NameKind::Alias => "alias",
-        },
-        false => opened,
-    };
-    (0..ENOUGH_SUFFIXES)
-        .map(|at| match at {
-            0 => base.to_string(),
-            _ => format!("{base}-{at}"),
-        })
-        .find(|candidate| {
-            crate::registry::validate_name(kind, candidate).is_ok()
-                && !taken
-                    .iter()
-                    .any(|held| crate::registry::same_name(held, candidate))
-        })
-}
-
-/// How many spellings of a name are tried before the rename gives up.
-///
-/// Bounded rather than open, so a name no suffix rescues is a refusal at `load`
-/// rather than a command that never returns.
-const ENOUGH_SUFFIXES: u32 = 100;
 
 /// Brings the registry on this machine forward, once, before anything reads it.
 ///
@@ -875,7 +773,7 @@ mod tests {
         );
         for name in now {
             assert!(
-                crate::registry::validate_name(NameKind::Group, name).is_ok(),
+                crate::name::validate(NameKind::Group, name).is_ok(),
                 "`{name}` is a name this build accepts"
             );
         }
@@ -976,8 +874,8 @@ mod tests {
         let upper = "\u{3a7}\u{3a1}\u{39f}\u{39d}\u{39f}\u{3a3}";
         let lower = "\u{3c7}\u{3c1}\u{3bf}\u{3bd}\u{3bf}\u{3c3}";
         assert!(
-            crate::registry::validate_name(NameKind::Group, upper).is_ok()
-                && crate::registry::validate_name(NameKind::Group, lower).is_ok(),
+            crate::name::validate(NameKind::Group, upper).is_ok()
+                && crate::name::validate(NameKind::Group, lower).is_ok(),
             "neither name is refused for itself, which is what hid this"
         );
 

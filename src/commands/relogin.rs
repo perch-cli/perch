@@ -17,6 +17,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::Held;
 use crate::login::{self, Produced};
+use crate::name;
 use crate::probe::{Identity, Installed};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
@@ -191,7 +192,7 @@ fn refuse_a_different_account(
     // Over the whole of Unicode, as `add` and `target` both ask it. An ASCII
     // fold here would refuse the very repair `add` sends people to, after the
     // browser round trip had been spent.
-    if registry::same_name(&logged_in.email, account.email()) {
+    if name::same_name(&logged_in.email, account.email()) {
         return Ok(());
     }
     Err(PerchError::Conflict(format!(

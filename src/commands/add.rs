@@ -15,9 +15,11 @@ use crate::commands::{ask, say};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::login::{self, Produced};
+use crate::name;
+use crate::name::{NO_GROUP, NameKind};
 use crate::probe::{Identity, Store};
 use crate::profile;
-use crate::registry::{self, Account, NO_GROUP, NameKind, Registry};
+use crate::registry::{self, Account, Registry};
 
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct AddArgs {
@@ -49,7 +51,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // one, and `ensure_group` declares it if nobody has. The half of the check
     // that still applies — that it is not an Alias — is the pair check below.
     if let Some(group) = &args.group {
-        registry::validate_name(NameKind::Group, group)?;
+        name::validate(NameKind::Group, group)?;
     }
     // And the pair against each other, which no check of one name can see: a
     // command setting both at once could otherwise plant the collision.
@@ -179,7 +181,7 @@ fn refuse_an_account_perch_already_holds(
     // Over the whole of Unicode, because the collision that got here was:
     // `same_profile` compares slugs and `slug` lowercases first, so an ASCII
     // comparison would make one Profile look like two Accounts.
-    let same_account = registry::same_name(existing.email(), &identity.email);
+    let same_account = name::same_name(existing.email(), &identity.email);
     let why = if same_account {
         "two Profiles for one Account would fight over it".to_string()
     } else {
@@ -238,7 +240,7 @@ fn resolve_group(
     let offered = identity
         .organization_name
         .as_deref()
-        .and_then(registry::offerable_name)
+        .and_then(name::offerable_name)
         .filter(|name| {
             registry
                 .refuse_taken_names(args.alias.as_deref(), Some(name))
@@ -268,13 +270,13 @@ fn resolve_group(
 
         let chosen = match answer.as_str() {
             "" => offered.clone(),
-            named if registry::means_no_group(named) => None,
+            named if name::means_no_group(named) => None,
             named => Some(named.to_string()),
         };
 
         match &chosen {
             None => return Ok(None),
-            Some(name) => match registry::validate_name(NameKind::Group, name)
+            Some(name) => match name::validate(NameKind::Group, name)
                 .and_then(|()| registry.refuse_taken_names(args.alias.as_deref(), Some(name)))
             {
                 Ok(()) => return Ok(chosen),
@@ -318,7 +320,7 @@ fn report(
     if let Some(alias) = alias {
         say(out, &format!("Alias:  {alias}"))?;
     }
-    let group = group.unwrap_or(registry::NO_GROUP);
+    let group = group.unwrap_or(name::NO_GROUP);
     say(out, &format!("Group:  {group}"))?;
     // What the Scope this Account landed in still cannot do. An Add is what
     // makes a Scope a set of two or more, which is when the two defaults gating

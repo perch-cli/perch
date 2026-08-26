@@ -518,7 +518,7 @@ fn a_live_profiles_token_is_never_renewed_to_get_a_figure() {
     // The Account you are on, with an access token that has run out and a client
     // holding it.
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
-    let host = client_running_against(host, DEFAULT_CONFIG_DIR, 4242);
+    a_client_running_against(&host, DEFAULT_CONFIG_DIR, 4242);
     observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
 
     let (result, printed) = run_watch(&host);
@@ -543,7 +543,7 @@ fn a_hold_that_asked_anthropic_nothing_does_not_pace_the_loop_down() {
         .with_reply_to(PROFILE_URL, ACTIVE_TOKEN, 200, &profile_of(EMAIL))
         .with_interrupt_after(4);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
-    let host = client_running_against(host, DEFAULT_CONFIG_DIR, 4242);
+    a_client_running_against(&host, DEFAULT_CONFIG_DIR, 4242);
     observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
 
     let (result, printed) = run_watch(&host);
@@ -651,7 +651,7 @@ fn a_hold_after_anthropic_refused_a_live_token_paces_the_loop_down() {
             &[(401, r#"{"error":"unauthorized"}"#)],
         );
     let host = answering(host, SPARE_TOKEN, SECOND_EMAIL, &[5.0]).with_interrupt_after(4);
-    let host = client_running_against(host, DEFAULT_CONFIG_DIR, 4242);
+    a_client_running_against(&host, DEFAULT_CONFIG_DIR, 4242);
     host.forget_effects();
 
     let (result, printed) = run_watch(&host);

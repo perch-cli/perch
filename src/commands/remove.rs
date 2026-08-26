@@ -18,6 +18,7 @@ use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::Held;
+use crate::name;
 use crate::probe::Installed;
 use crate::registry::{self, Account, Registry};
 use crate::switch;
@@ -182,7 +183,7 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
 fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Account> {
     let candidates = || {
         registry.accounts.iter().filter(|held| {
-            !registry::same_name(held.email(), leaving.email())
+            !name::same_name(held.email(), leaving.email())
                 // A sharer is not a candidate, so landing nowhere is what a
                 // Remove does with one: the removal still goes through.
                 && cycle::is_a_candidate(registry, held)

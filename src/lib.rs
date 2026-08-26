@@ -25,6 +25,7 @@ pub mod listing;
 pub mod lock;
 pub mod login;
 pub mod migration;
+pub mod name;
 pub mod observe;
 pub mod probe;
 pub mod profile;

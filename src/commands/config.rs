@@ -16,7 +16,9 @@ use crate::commands::{group, only_the_registry, say};
 use crate::config::{SETTINGS, Setting};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{self, Registry, Scope, UNGROUPED};
+use crate::name;
+use crate::name::UNGROUPED;
+use crate::registry::{Registry, Scope};
 
 /// What was asked of `perch config`, as the words that were typed — carried
 /// rather than resolved, because telling somebody which form they seem to have
@@ -177,13 +179,13 @@ fn changed(subject: &str, was: &str, now: &str) -> String {
 /// The Scope a word addresses: the Accounts in no Group, or a Group as it was
 /// declared.
 fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
-    if registry::means_the_ungrouped_scope(name) {
+    if name::means_the_ungrouped_scope(name) {
         return Ok(Scope::Ungrouped);
     }
     // Answered here rather than left to fall through, which would offer
     // "Declare it with `perch group add global`" — advice the registry refuses,
     // and which would be worse if it did not.
-    if registry::means_global(name) {
+    if name::means_global(name) {
         return Err(PerchError::NotFound(format!(
             "There is no Scope every other one falls back to, so there is no \
              `{name}` to name: every Setting is said about the Scope it governs. \

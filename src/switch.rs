@@ -17,6 +17,7 @@ use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host};
 use crate::lock;
+use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, Active, Quarantine, Registry, Scope};
@@ -628,8 +629,8 @@ fn whose_the_live_credential_is(
         .flatten()
         .filter_map(|email| registry.account(email));
     let rest = registry.accounts.iter().filter(|account| {
-        !registry::same_name(account.email(), arriving)
-            && !leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
+        !name::same_name(account.email(), arriving)
+            && !leaving.is_some_and(|leaving| name::same_name(account.email(), leaving))
     });
 
     for account in named.chain(rest) {
@@ -686,7 +687,7 @@ pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account)
     let named = probe::read_identity(host, &store, installed)
         .ok()
         .flatten()
-        .is_some_and(|identity| registry::same_name(&identity.email, account.email()));
+        .is_some_and(|identity| name::same_name(&identity.email, account.email()));
 
     // A live store holding bytes that are not a Credential has landed nowhere,
     // and the Switch this would turn away is the one that writes a good
@@ -813,7 +814,7 @@ fn capture(
     // The repair for a Switch that stopped between steps two and three, and the
     // check above has taken the case with nothing to do. What is left has two
     // readings and nothing tells them apart, so neither is acted on.
-    if registry::same_name(incoming.email(), outgoing.email()) {
+    if name::same_name(incoming.email(), outgoing.email()) {
         return Err(PerchError::Conflict(
             the_live_credential_is_unaccounted_for(incoming),
         ));
@@ -823,7 +824,7 @@ fn capture(
     // `.claude.json` is Claude Code's file and nothing makes it agree with the
     // registry about the case of a letter outside ASCII.
     if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.installed)
-        && !registry::same_name(&identity.email, outgoing.email())
+        && !name::same_name(&identity.email, outgoing.email())
     {
         // The Identity is decisive only where something else agrees with it: it
         // is the one piece of evidence here Perch does not write, and it goes

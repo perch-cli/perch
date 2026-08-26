@@ -20,6 +20,7 @@ use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::{self, Held};
+use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
@@ -462,7 +463,7 @@ fn names(host: &dyn Host, store: &Store, account: &Account, installed: &Installe
     probe::read_identity(host, store, installed)
         .ok()
         .flatten()
-        .is_some_and(|identity| registry::same_name(&identity.email, account.email()))
+        .is_some_and(|identity| name::same_name(&identity.email, account.email()))
 }
 
 /// The store an Account is asked about with, and whose it is.
@@ -502,7 +503,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
         registry::sharing_a_profile_with(registry, account).map(|held| held.email().to_string());
     let settled_on_it = matches!(
         registry.active(),
-        registry::Active::Settled(active) if registry::same_name(active, account.email())
+        registry::Active::Settled(active) if name::same_name(active, account.email())
     );
     if settled_on_it {
         let store = registry::the_default_profile(host)?;
@@ -533,7 +534,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
             arriving_in_a_landing: matches!(
                 registry.active(),
                 registry::Active::Landing { arriving, .. }
-                    if registry::same_name(arriving, account.email())
+                    if name::same_name(arriving, account.email())
             ),
             shares_its_profile_with,
         })
@@ -833,7 +834,7 @@ fn confirm(
     still_ours: StillOurs<'_>,
 ) -> std::result::Result<(), Turned> {
     match anthropic::whose(host, token, still_ours) {
-        Ok(email) if !registry::same_name(&email, account.email()) => {
+        Ok(email) if !name::same_name(&email, account.email()) => {
             Err(Turned::Settled(Outcome::Failed {
                 why: format!(
                     "the Credential Perch would ask with belongs to {email} \

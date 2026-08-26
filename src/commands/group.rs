@@ -14,7 +14,9 @@ use crate::adopt;
 use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, only_the_registry, say};
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Shown};
-use crate::registry::{self, NO_GROUP, Registry, Scope};
+use crate::name;
+use crate::name::NO_GROUP;
+use crate::registry::{Registry, Scope};
 use crate::target::{self, AccountTarget};
 
 /// What was asked of `perch group`. The help each of these is described by
@@ -151,7 +153,7 @@ fn rename(registry: &mut Registry, from: &str, to: &str) -> Result<String> {
 /// re-adding a bad way to do this.
 fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) -> Result<String> {
     let email = target.email.clone();
-    let destination = if registry::means_the_ungrouped_scope(group) {
+    let destination = if name::means_the_ungrouped_scope(group) {
         None
     } else if let Some(declared) = registry.declared_group(group) {
         Some(declared.to_string())
@@ -195,7 +197,7 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
     // A word that could never be a Group is told so rather than offered a
     // `perch group add` the next command refuses — `global` above all. Asked
     // here rather than at each caller, in `validate_name`'s own words.
-    if let Err(why) = registry::validate_name(registry::NameKind::Group, name) {
+    if let Err(why) = name::validate(name::NameKind::Group, name) {
         return PerchError::NotFound(format!("No Group called `{name}`. {why}"));
     }
     // The other name a `perch group add` would be refused for. Aliases and Group

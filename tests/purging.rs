@@ -29,12 +29,7 @@ const PASSPHRASE: &str = "correct horse battery staple";
 /// somebody declines the Export and types the word.
 fn a_machine_to_give_back() -> FakeHost {
     let host = machine_with_three_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     set_alias(&host, "overflow", SECOND_EMAIL)
         .0
         .expect("the name is free");

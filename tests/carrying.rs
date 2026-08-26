@@ -90,12 +90,7 @@ fn a_file_in_use(email: &str, tips: u32) -> String {
 /// the problem: a long job on one Account and a quick question on the other.
 fn machine() -> FakeHost {
     let host = machine_with_two_accounts().with_login(client_exiting(0));
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     host.set_file(THE_PERSONS_FILE, &a_file_in_use(EMAIL, 5));
     host.forget_effects();
     host
@@ -260,12 +255,7 @@ fn the_active_accounts_own_state_crosses_to_its_own_profile() {
 #[test]
 fn the_most_recently_used_profile_in_the_group_is_the_one_copied() {
     let host = machine_with_three_accounts().with_login(client_exiting(0));
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
     let theirs = profile_of(&host, THIRD_EMAIL).join(".claude.json");
     host.set_file(THE_PERSONS_FILE, &a_file_in_use(EMAIL, 5));
     host.set_file(&theirs, &a_file_in_use(THIRD_EMAIL, 9));
@@ -285,12 +275,7 @@ fn the_most_recently_used_profile_in_the_group_is_the_one_copied() {
 #[test]
 fn a_profile_used_after_the_default_one_is_what_is_copied() {
     let host = machine_with_three_accounts().with_login(client_exiting(0));
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
     let theirs = profile_of(&host, THIRD_EMAIL).join(".claude.json");
     host.set_file(THE_PERSONS_FILE, &a_file_in_use(EMAIL, 5));
     host.set_file(&theirs, &a_file_in_use(THIRD_EMAIL, 9));
@@ -312,15 +297,7 @@ fn a_profile_used_after_the_default_one_is_what_is_copied() {
 #[test]
 fn nothing_is_written_while_a_client_is_running_against_that_profile() {
     let host = machine();
-    let profile = profile_of(&host, SECOND_EMAIL);
-    host.set_file(
-        profile.join("sessions/4242.json"),
-        &format!(
-            r#"{{"pid":4242,"cwd":"{HERE}","startedAt":{}}}"#,
-            host.now().timestamp_millis()
-        ),
-    );
-    let host = host.with_live_process(4242);
+    a_client_running_against(&host, profile_of(&host, SECOND_EMAIL), 4242);
     let before = identity_of(&host, SECOND_EMAIL);
 
     let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");
@@ -546,12 +523,7 @@ fn the_keys_of_a_project_entry_that_cross_are_named_in_one_place() {
 #[test]
 fn the_profile_being_launched_is_no_source_under_a_second_spelling() {
     let host = machine_with_three_accounts().with_login(client_exiting(0));
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
 
     // The person's state, in the Profile of an Account that is neither active
     // nor the one being run: the only real source of what should cross.

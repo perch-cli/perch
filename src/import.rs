@@ -17,6 +17,7 @@ use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::host::Host;
 use crate::login;
+use crate::name;
 use crate::probe::{self, Store};
 use crate::profile;
 use crate::registry::{self, Registry};
@@ -212,7 +213,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         for (at, key) in held.iter().enumerate() {
             if let Some(clash) = held[..at]
                 .iter()
-                .find(|earlier| registry::same_name(earlier, key))
+                .find(|earlier| name::same_name(earlier, key))
             {
                 return Err(PerchError::Malformed {
                     path: "the Export".to_string(),

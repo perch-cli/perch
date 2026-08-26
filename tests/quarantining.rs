@@ -172,10 +172,7 @@ fn a_credential_with_nothing_left_to_renew_with_quarantines() {
 #[test]
 fn a_profile_that_holds_no_credential_at_all_quarantines_its_account() {
     let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work").0.expect("joined");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     // The second Account's Profile is empty — a Rotation that went missing
     // between two writes, or a store somebody cleared out.
@@ -235,10 +232,7 @@ fn a_refusal_that_might_pass_is_not_a_quarantine() {
 #[test]
 fn a_renewal_refused_over_something_other_than_the_token_quarantines_nobody() {
     let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work").0.expect("joined");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     // Both Accounts have to renew, and the endpoint turns both down without
     // ever saying the tokens are the problem.
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
@@ -368,10 +362,7 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
     // The Account with all the room is the one about to be found broken, so
     // before the refresh it is exactly where a Cycle would land.
     let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work").0.expect("joined");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     observed(&host, EMAIL, vec![window("5-hour", 99.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 1.0)]);
     // The Account being worked in answers for itself; the other one has to renew

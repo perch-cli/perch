@@ -534,7 +534,8 @@ fn a_profile_that_never_ran_a_client_has_no_sessions_directory_and_switches() {
 
 #[test]
 fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
-    let host = client_running_against(machine_with_two_accounts(), FIRST_PROFILE, 77);
+    let host = machine_with_two_accounts();
+    a_client_running_against(&host, FIRST_PROFILE, 77);
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -645,7 +646,8 @@ fn a_live_store_that_answers_with_rubbish_is_still_switched_over() {
 
 #[test]
 fn switching_onto_a_profile_a_client_is_running_against_lands() {
-    let host = client_running_against(machine_with_two_accounts(), SECOND_PROFILE, 4242);
+    let host = machine_with_two_accounts();
+    a_client_running_against(&host, SECOND_PROFILE, 4242);
 
     run_switch(&host, SECOND_EMAIL)
         .0
@@ -692,7 +694,8 @@ fn a_switch_on_a_machine_whose_identity_file_is_a_managed_link_writes_through_it
 
 #[test]
 fn a_profile_whose_sessions_is_a_link_reads_the_clients_at_the_other_end() {
-    let host = client_running_against(machine_with_two_accounts(), "/Users/someone/.claude", 4242);
+    let host = machine_with_two_accounts();
+    a_client_running_against(&host, "/Users/someone/.claude", 4242);
     let host = host.with_link(
         perch::host::Link::Symbolic,
         "/Users/someone/.claude/sessions",

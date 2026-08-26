@@ -568,14 +568,11 @@ fn a_cycle_lands_on_a_live_account_like_any_other() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
-    let profile = "/Users/someone/.config/perch/profiles/overflow-example-com";
-    let marker = format!(
-        r#"{{"pid":4242,"cwd":"/Users/someone/work","startedAt":{}}}"#,
-        host.now().timestamp_millis()
+    a_client_running_against(
+        &host,
+        "/Users/someone/.config/perch/profiles/overflow-example-com",
+        4242,
     );
-    let host = host
-        .with_file(format!("{profile}/sessions/4242.json"), &marker)
-        .with_live_process(4242);
 
     run_cycle(&host).0.expect("a Run does not close an Account");
 
@@ -591,14 +588,11 @@ fn a_cycle_away_from_a_live_profile_is_refused() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
-    let profile = "/Users/someone/.config/perch/profiles/someone-example-com";
-    let marker = format!(
-        r#"{{"pid":4242,"cwd":"/Users/someone/work","startedAt":{}}}"#,
-        host.now().timestamp_millis()
+    a_client_running_against(
+        &host,
+        "/Users/someone/.config/perch/profiles/someone-example-com",
+        4242,
     );
-    let host = host
-        .with_file(format!("{profile}/sessions/4242.json"), &marker)
-        .with_live_process(4242);
 
     let (result, _) = run_cycle(&host);
 
