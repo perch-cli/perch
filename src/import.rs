@@ -306,7 +306,9 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // itself. Asked over every placement before the first of them is written.
     let live: Vec<String> = placements
         .iter()
-        .filter(|(_, store, _, _)| live::anything_running(host, &store.config_dir))
+        .filter(|(_, store, _, _)| {
+            live::ask(host, &[live::Place::at(&store.config_dir)]).counts_as_live()
+        })
         .map(|(email, store, _, _)| format!("{email} ({})", store.config_dir.display()))
         .collect();
     if !live.is_empty() {

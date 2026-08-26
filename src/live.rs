@@ -157,11 +157,7 @@ impl NotIdle {
                 "A client is running against {}.\n{nothing_happened}",
                 clause(&clients)
             )),
-            NotIdle::Unsure(unsure) => probe::refusal(
-                probe::assumption::SESSION_MARKER,
-                &unsure.detail(),
-                installed.version(),
-            ),
+            NotIdle::Unsure(unsure) => unsure.refusal(installed),
         }
     }
 }
@@ -191,33 +187,6 @@ pub fn clause(clients: &[Client]) -> String {
         .join(", ")
 }
 
-/// The processes running against a config directory right now, as
-/// [`live_clients`] reported them before the ask had one answer.
-pub fn live_clients(host: &dyn Host, config_dir: &Path, installed: &Installed) -> Result<Vec<u32>> {
-    match ask(host, &[Place::at(config_dir)]) {
-        Answer::Idle(_) => Ok(Vec::new()),
-        Answer::NotIdle(NotIdle::Live(clients)) => {
-            Ok(clients.iter().map(|client| client.pid).collect())
-        }
-        Answer::NotIdle(NotIdle::Unsure(unsure)) => Err(probe::refusal(
-            probe::assumption::SESSION_MARKER,
-            &unsure.detail(),
-            installed.version(),
-        )),
-    }
-}
-
-/// Whether anything may be running against a config directory, where a marker
-/// that can be neither corroborated nor dismissed counts as one.
-pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
-    anything_running_but(host, config_dir, None)
-}
-
-/// The same, discounting one process — which is only ever the caller's own.
-pub fn anything_running_but(host: &dyn Host, config_dir: &Path, mine: Option<u32>) -> bool {
-    ask(host, &[Place::at(config_dir)]).counts_as_live_but(mine)
-}
-
 /// Why whether anything is running went unanswered. Both are doubt rather than
 /// an answer, and neither is decided here: a caller that must not write under a
 /// client reads either as one, and the caller that can name a Claude Code
@@ -239,7 +208,17 @@ pub enum Unsure {
 }
 
 impl Unsure {
-    pub(crate) fn detail(&self) -> String {
+    /// The refusal a doubt makes: the assumption it broke, what it met, and the
+    /// Claude Code that was installed when it did.
+    pub fn refusal(&self, installed: &Installed) -> PerchError {
+        probe::refusal(
+            probe::assumption::SESSION_MARKER,
+            &self.detail(),
+            installed.version(),
+        )
+    }
+
+    fn detail(&self) -> String {
         match self {
             Unsure::WhenItBegan(marker) => format!(
                 "{} names a running process, but when that process began could \
@@ -342,8 +321,12 @@ mod tests {
     /// Midday on an ordinary day, as the epoch milliseconds a Marker records.
     const NOON: i64 = 1_754_308_800_000;
 
-    /// Asserted through `anything_running` rather than by reaching for the marker
-    /// path, because a check on the path is a check past the interface. The fake
+    fn live(host: &dyn Host, dir: &Path) -> bool {
+        ask(host, &[Place::at(dir)]).counts_as_live()
+    }
+
+    /// Asserted through the ask rather than by reaching for the marker path,
+    /// because a check on the path is a check past the interface. The fake
     /// reports its own process as running, which is the situation being modeled:
     /// Perch waits for what it started, so the pid a claim names is alive for
     /// precisely as long as the Run or the login.
@@ -352,17 +335,17 @@ mod tests {
         let dir = Path::new("/Users/someone/.perch/profiles/someone-example-com");
         let host = FakeHost::new();
 
-        assert!(!anything_running(&host, dir), "nothing has claimed it yet");
+        assert!(!live(&host, dir), "nothing has claimed it yet");
 
         let claimed = probe::claim(&host, dir).expect("the marker is written");
         assert!(
-            anything_running(&host, dir),
+            live(&host, dir),
             "a Run or a login holding this is a Live Profile"
         );
 
         drop(claimed);
         assert!(
-            !anything_running(&host, dir),
+            !live(&host, dir),
             "and it stops being Live when the thing holding it lets go"
         );
     }

@@ -176,7 +176,7 @@ pub fn reap_abandoned(host: &dyn Host) {
         // Age is evidence and not proof, so the same evidence every other write
         // asks for (ADR a-profile-is-live-by-evidence): a login somebody is in
         // the middle of is a Live Profile, and nothing reaps one however old.
-        if live::anything_running(host, &dir) {
+        if live::ask(host, &[live::Place::at(&dir)]).counts_as_live() {
             continue;
         }
         if let Ok(store) = probe::store_for_profile(host, &dir) {

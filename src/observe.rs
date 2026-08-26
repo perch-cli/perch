@@ -635,22 +635,25 @@ fn refuse_if_live(
     // Which directory each client is in, and not only that there is one: `in_use_from`
     // holds two for the active Account, and a refusal naming neither leaves the reader
     // to guess which to quit.
-    let mut running = Vec::new();
-    for config_dir in &asked.in_use_from {
-        for pid in live::live_clients(host, config_dir, installed)? {
-            running.push(format!("pid {pid} in {}", config_dir.display()));
+    let places: Vec<live::Place> = asked.in_use_from.iter().map(live::Place::at).collect();
+    let running = match live::ask(host, &places) {
+        live::Answer::Idle(_) => return Ok(()),
+        live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => {
+            return Err(unsure.refusal(installed).into());
         }
-    }
-    if running.is_empty() {
-        return Ok(());
-    }
+        live::Answer::NotIdle(live::NotIdle::Live(clients)) => clients,
+    };
 
     Err(Outcome::Failed {
         why: format!(
             "{} and a client is running against it ({}), so renewing it would \
              log that session out. The cached figure is what you see.",
             because.clause(),
-            running.join(", ")
+            running
+                .iter()
+                .map(|client| format!("pid {} in {}", client.pid, client.whose))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         spent: because.spent(),
     })

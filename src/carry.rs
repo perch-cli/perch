@@ -74,7 +74,7 @@ pub fn carry(
     // Discounting this process: the Run has already claimed the Profile by the
     // time it Carries, and read as an ordinary client that claim would decline
     // every Carry there is.
-    if live::anything_running_but(host, into, Some(host.process_id())) {
+    if live::ask(host, &[live::Place::at(into)]).counts_as_live_but(Some(host.process_id())) {
         return;
     }
 

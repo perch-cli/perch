@@ -54,7 +54,7 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
         .filter(|account| {
             account
                 .profile_dir(host)
-                .is_ok_and(|dir| live::anything_running(host, &dir))
+                .is_ok_and(|dir| live::ask(host, &[live::Place::at(&dir)]).counts_as_live())
         })
         .map(|account| format!("the Profile of {}", account.email()))
         .collect();
@@ -65,7 +65,7 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
     running.extend(
         what_the_registry_does_not_name(host, registry)?
             .into_iter()
-            .filter(|dir| live::anything_running(host, dir))
+            .filter(|dir| live::ask(host, &[live::Place::at(dir)]).counts_as_live())
             .map(|dir| format!("{}, which no Account of Perch's names", dir.display())),
     );
 

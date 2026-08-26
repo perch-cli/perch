@@ -65,8 +65,7 @@ fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
     host.create_file_with_mode(&marker, &probe::session_marker(me, host.now()), 0o600)
         .expect("the marker is written");
 
-    let running = live::live_clients(&host, &dir, &probe::Installed::unknown("this machine"))
-        .expect("the marker names this very process, which is plainly alive");
+    let running = pids(live::ask(&host, &[live::Place::at(&dir)]));
     assert_eq!(
         running,
         vec![me],
@@ -76,10 +75,25 @@ fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
 
     host.remove_file(&marker).expect("the marker is taken away");
     assert!(
-        live::live_clients(&host, &dir, &probe::Installed::unknown("this machine"))
-            .expect("an empty directory is no evidence")
-            .is_empty(),
+        pids(live::ask(&host, &[live::Place::at(&dir)])).is_empty(),
         "and the Profile stops being Live when the Run ends"
     );
     let _ = host.remove_dir_all(&dir);
+}
+
+/// The corroborated pids, where the ask came back Idle or Live. A doubt is a
+/// failure of this suite's own fixture rather than an answer about it.
+fn pids(answer: live::Answer) -> Vec<u32> {
+    match answer {
+        live::Answer::Idle(_) => Vec::new(),
+        live::Answer::NotIdle(live::NotIdle::Live(clients)) => {
+            clients.iter().map(|client| client.pid).collect()
+        }
+        live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => {
+            panic!(
+                "{}",
+                unsure.refusal(&probe::Installed::unknown("this machine"))
+            )
+        }
+    }
 }

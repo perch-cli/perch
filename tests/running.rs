@@ -587,12 +587,16 @@ fn a_quarantined_account_is_refused_whatever_is_being_launched() {
 
 /// The processes Perch would say are running against a Profile right now.
 fn live_against(host: &FakeHost, email: &str) -> Vec<u32> {
-    perch::live::live_clients(
-        host,
-        &profile_of(host, email),
-        &perch::probe::Installed::unknown(CLAUDE_VERSION),
-    )
-    .expect("every marker here can be corroborated or dismissed")
+    match perch::live::ask(host, &[perch::live::Place::at(profile_of(host, email))]) {
+        perch::live::Answer::Idle(_) => Vec::new(),
+        perch::live::Answer::NotIdle(perch::live::NotIdle::Live(clients)) => {
+            clients.iter().map(|client| client.pid).collect()
+        }
+        perch::live::Answer::NotIdle(perch::live::NotIdle::Unsure(unsure)) => panic!(
+            "every marker here can be corroborated or dismissed: {}",
+            unsure.refusal(&perch::probe::Installed::unknown(CLAUDE_VERSION))
+        ),
+    }
 }
 
 #[test]
