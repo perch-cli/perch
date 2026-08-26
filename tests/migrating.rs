@@ -1364,3 +1364,46 @@ fn a_registry_holding_a_name_this_build_refuses_still_has_a_perch_remove() {
         "and the Account is gone: {printed}"
     );
 }
+
+// ————— a name rule and the registry version move together —————
+
+/// What this build's name rules answer over a fixed corpus, as one number.
+///
+/// FNV-1a over the accept/reject bits. Written out rather than taken from a
+/// crate, because what it has to be is stable across builds and not fast.
+fn what_the_name_rules_answer() -> u64 {
+    let mut names: Vec<String> = SPELLINGS.iter().map(|held| (*held).to_string()).collect();
+    names.extend(every_spelling_over(ALPHABET));
+    names.extend(every_spelling_over(V2_ALPHABET));
+    names.sort();
+    names.dedup();
+
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    for name in names {
+        for kind in [registry::NameKind::Group, registry::NameKind::Alias] {
+            let bit = u8::from(registry::validate_name(kind, &name).is_ok());
+            digest = (digest ^ u64::from(bit)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    digest
+}
+
+/// A rule joining `validate_name` moves `CURRENT_VERSION` with it.
+///
+/// The failure this catches is the one neither the migration nor the refusal
+/// can: a control-character rule joined `validate_name` under version 2 and the
+/// version stood still, so version 2 is two shapes and one of them had no step.
+#[test]
+fn a_name_rule_that_moves_takes_the_registry_version_with_it() {
+    // Bounded by the corpus: a rule turning on a character no spelling here
+    // carries, or on a spelling longer than three, passes this without being
+    // asked about.
+    assert_eq!(
+        (CURRENT_VERSION, what_the_name_rules_answer()),
+        (4, 0xedc6_ef37_3813_2c93),
+        "the name rules and the registry version have to move together: give \
+         `migration::forward` a step for the shape below this one, widen the \
+         `a_version_<n>_perch_accepted` that names it, bump `CURRENT_VERSION`, \
+         and record the new number here"
+    );
+}
