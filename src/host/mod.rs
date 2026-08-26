@@ -807,8 +807,16 @@ pub mod prelude {
 /// behind a fake there is a different answer to who this process is.
 pub fn temp_beside(host: &dyn Host, path: &Path) -> PathBuf {
     let mut beside = path.as_os_str().to_os_string();
-    beside.push(format!(".perch-tmp.{}", host.process_id()));
+    beside.push(temp_suffix(host.process_id()));
     PathBuf::from(beside)
+}
+
+/// What [`temp_beside`] puts after the target's name. Its own function because
+/// the fake strips it to decide which file a write beside one is *for*, and a
+/// spelling that drifted would leave every fixture aimed at a private write
+/// quietly arranging nothing.
+pub fn temp_suffix(pid: u32) -> String {
+    format!(".perch-tmp.{pid}")
 }
 
 /// The mode a replacement for this file should be created with: the one the file

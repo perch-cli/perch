@@ -1306,7 +1306,7 @@ impl FakeHost {
     /// of whoever is writing it, and the arrangement is about the disk and the
     /// directory rather than about a filename.
     fn intended(&self, path: &Path) -> PathBuf {
-        let suffix = format!(".perch-tmp.{}", self.process_id());
+        let suffix = super::temp_suffix(self.process_id());
         match path
             .as_os_str()
             .to_str()
@@ -1713,7 +1713,6 @@ impl port::Files for FakeHost {
     }
 
     fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
-        self.record(Effect::Took(path.to_path_buf()));
         // Told apart from the path being taken: `AlreadyExists` is contention
         // and anything else is the filesystem refusing, and `lock::take` waits
         // the first out and reports the second.
@@ -1747,6 +1746,10 @@ impl port::Files for FakeHost {
         let lands_at = self.lands_at(path);
         self.fs.dirs.borrow_mut().insert(lands_at.clone());
         self.mark_written(&lands_at);
+        // Recorded where the lock was taken, and not before the refusals above
+        // it: `Effect::Took` is the fake's word for an acquired lock, and
+        // `lock::take` asks up to eight times for one it never gets.
+        self.record(Effect::Took(path.to_path_buf()));
         Ok(())
     }
 
