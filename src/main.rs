@@ -37,20 +37,7 @@ enum Command {
     ///
     /// The Account you are on stays active and its session is untouched, so
     /// gaining an Account never costs you the one you are using.
-    Add {
-        /// The Group to put the new Account in. Without it, the Account's
-        /// organization is offered as a default for you to confirm.
-        #[arg(long, value_name = "NAME")]
-        group: Option<String>,
-
-        /// Put the new Account in no Group, and ask nothing.
-        #[arg(long, conflicts_with = "group")]
-        no_group: bool,
-
-        /// A short name to reach the Account by, instead of its email address.
-        #[arg(long, value_name = "NAME")]
-        alias: Option<String>,
-    },
+    Add(AddArgs),
 
     /// Name an Account, so no command needs its email address.
     ///
@@ -133,27 +120,7 @@ enum Command {
     /// is every Account Perch holds, and a Scope narrows it to the Accounts you
     /// could Cycle between — where you would land before you switch. Renders
     /// from cache unless you ask it to fetch.
-    List {
-        /// Which Accounts to show: a Group by name, or `ungrouped` for the
-        /// Accounts in no Group. Without one, every Account Perch holds.
-        #[arg(value_name = "SCOPE")]
-        scope: Option<String>,
-
-        /// Read current Utilization from Anthropic first.
-        ///
-        /// Exactly the Accounts about to be shown and no others, so narrowing
-        /// the listing narrows the reads with it. Roughly 28-30 reads an hour
-        /// are allowed per Account and the allowance does not refill early, so
-        /// a figure that cannot be read falls back to the cached one rather
-        /// than failing.
-        #[arg(long)]
-        refresh: bool,
-
-        /// Emit machine-readable output, with an observation time on every
-        /// Utilization figure.
-        #[arg(long)]
-        json: bool,
-    },
+    List(ListArgs),
 
     /// Log an Account in again, in place.
     ///
@@ -162,10 +129,7 @@ enum Command {
     /// Credential is replaced. The Account you are working in is untouched,
     /// unless it is the one being repaired — then its fresh Credential becomes
     /// the live one, because a repair nothing reads is not a repair.
-    Relogin {
-        /// The Account: its Alias, or its email address.
-        target: String,
-    },
+    Relogin(ReloginArgs),
 
     /// Give up an Account: forget it, and delete the Credential Perch holds.
     ///
@@ -173,14 +137,7 @@ enum Command {
     /// the Alias it answered to is free again. Removing the Account you are on
     /// names the Account Perch will leave active, lands on it first, and asks
     /// before any of it happens.
-    Remove {
-        /// The Account: its Alias, or its email address.
-        target: String,
-
-        /// Remove it without being asked to confirm.
-        #[arg(long)]
-        yes: bool,
-    },
+    Remove(RemoveArgs),
 
     /// Launch Claude Code as one Account, without changing which one is active.
     ///
@@ -188,39 +145,14 @@ enum Command {
     /// editor extension and in the desktop app — because a Run points one
     /// process at one Profile and touches nothing else. Two terminals can run
     /// two Accounts at once, and the client's exit code is Perch's.
-    Run {
-        /// The Account to run as: its Alias, or its email address. A Group has
-        /// no single meaning here, so naming one is refused.
-        target: String,
-
-        /// What to run, after a mandatory `--`: a program and its arguments, or
-        /// Claude Code's own arguments where the first word is a flag. Nothing
-        /// here is read by Perch, so a `--json` after `--` is the program's.
-        #[arg(last = true, allow_hyphen_values = true, num_args = .., value_name = "COMMAND")]
-        command: Vec<String>,
-    },
+    Run(RunArgs),
 
     /// Show the active Account and its cached Utilization.
     ///
     /// The Account you are on and nothing else — a set of Accounts is
     /// `perch list`, at whatever breadth. Renders from cache unless you ask it
     /// to fetch, so it is cheap enough for a shell prompt.
-    Status {
-        /// Read current Utilization from Anthropic first.
-        ///
-        /// The one Account this command is about, and no others. Asking for a
-        /// refresh is the only thing in Perch that touches the network, here or
-        /// on a listing. Roughly 28-30 reads an hour are allowed per Account
-        /// and the allowance does not refill early, so a figure that cannot be
-        /// read falls back to the cached one rather than failing.
-        #[arg(long)]
-        refresh: bool,
-
-        /// Emit machine-readable output, with an observation time on every
-        /// Utilization figure.
-        #[arg(long)]
-        json: bool,
-    },
+    Status(StatusArgs),
 
     /// Make an Account active everywhere, with no login flow.
     ///
@@ -231,11 +163,7 @@ enum Command {
     /// The Credential you are leaving is Captured back into its own Profile
     /// first, so a Rotation that happened while it was active is not lost. Your
     /// memory, settings, plugins and project history are untouched.
-    Switch {
-        /// The Account to switch to — its Alias or its email address — or a
-        /// Group to Cycle within.
-        target: Option<String>,
-    },
+    Switch(SwitchArgs),
 
     /// Replace this Perch with a newer Release.
     ///
@@ -253,35 +181,7 @@ enum Command {
     /// Channel it really is when the path does not.
     ///
     /// Nothing Perch holds is touched: no registry, no Credential, no Profile.
-    Upgrade {
-        /// The Release to install, with or without its leading `v`. Without
-        /// this, the newest.
-        ///
-        /// Not with `--check`, which asks what the newest Release is and has no
-        /// use for a named one. Refused rather than ignored, because a named
-        /// Release that is quietly thrown away is one nobody is told about.
-        #[arg(long, value_name = "TAG", conflicts_with = "check")]
-        release: Option<String>,
-
-        /// Say what is installed and what is newest, and install nothing.
-        #[arg(long)]
-        check: bool,
-
-        /// That answer as a document.
-        #[arg(long, requires = "check")]
-        json: bool,
-
-        /// Which Channel installed this Perch, for when its path does not say.
-        #[arg(long, value_name = "NAME")]
-        channel: Option<String>,
-
-        /// Agree ahead of time to a Release older than the one installed.
-        ///
-        /// Nothing is installed by a check, so there is nothing for it to agree
-        /// to.
-        #[arg(long, conflicts_with = "check")]
-        yes: bool,
-    },
+    Upgrade(UpgradeArgs),
 
     /// Say which Perch is installed, and whether a newer Release exists.
     ///
@@ -351,7 +251,7 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
 /// already misbehaving, and each promises at `--help` to touch nothing Perch
 /// holds. Neither reads the registry, so the next command carries it forward.
 fn migrates(command: &Command) -> bool {
-    !matches!(command, Command::Version | Command::Upgrade { .. })
+    !matches!(command, Command::Version | Command::Upgrade(_))
 }
 
 fn main() {
@@ -383,19 +283,7 @@ fn main() {
     }
 
     let outcome = match cli.command {
-        Command::Add {
-            group,
-            no_group,
-            alias,
-        } => ok(add::run(
-            &host,
-            AddArgs {
-                group,
-                no_group,
-                alias,
-            },
-            &mut out,
-        )),
+        Command::Add(args) => ok(add::run(&host, args, &mut out)),
         // `--unset` needs no reading of its own: clap requires a name unless
         // it was passed and refuses both together, so the name's absence is
         // exactly the flag.
@@ -424,49 +312,17 @@ fn main() {
         )),
         Command::Group { action } => ok(group::run(&host, action, &mut out)),
         Command::Holdings { action } => ok(holdings::run(&host, action, &mut out)),
-        Command::List {
-            scope,
-            refresh,
-            json,
-        } => ok(list::run(
-            &host,
-            ListArgs {
-                scope,
-                refresh,
-                json,
-            },
-            &mut out,
-        )),
-        Command::Relogin { target } => ok(relogin::run(&host, ReloginArgs { target }, &mut out)),
-        Command::Remove { target, yes } => {
-            ok(remove::run(&host, RemoveArgs { target, yes }, &mut out))
-        }
+        Command::List(args) => ok(list::run(&host, args, &mut out)),
+        Command::Relogin(args) => ok(relogin::run(&host, args, &mut out)),
+        Command::Remove(args) => ok(remove::run(&host, args, &mut out)),
         // The one command whose exit code is not Perch's own: what the client
         // said is what a script reads.
-        Command::Run { target, command } => run::run(&host, RunArgs { target, command }, &mut out),
-        Command::Status { refresh, json } => {
-            ok(status::run(&host, StatusArgs { refresh, json }, &mut out))
-        }
-        Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
+        Command::Run(args) => run::run(&host, args, &mut out),
+        Command::Status(args) => ok(status::run(&host, args, &mut out)),
+        Command::Switch(args) => ok(switch::run(&host, args, &mut out)),
         // What `brew` or `npm` exited with, because a code of Perch's own
         // would lose which of their failures it was.
-        Command::Upgrade {
-            release,
-            check,
-            json,
-            channel,
-            yes,
-        } => upgrade::run(
-            &host,
-            UpgradeArgs {
-                release,
-                check,
-                json,
-                channel,
-                yes,
-            },
-            &mut out,
-        ),
+        Command::Upgrade(args) => upgrade::run(&host, args, &mut out),
         Command::Version => ok(version::run(&host, &mut out)),
         // A `check` reports what it decided, so a scheduler tells a Switch
         // from a figure it could not read without parsing the line
@@ -517,7 +373,7 @@ mod tests {
 
     fn command_of(line: &[&str]) -> Vec<String> {
         match Cli::try_parse_from(line).expect("the line parses").command {
-            Command::Run { command, .. } => command,
+            Command::Run(RunArgs { command, .. }) => command,
             _ => panic!("`{}` is not a Run", line.join(" ")),
         }
     }
@@ -681,17 +537,8 @@ mod tests {
     #[test]
     fn the_two_commands_for_a_misbehaving_machine_skip_the_migration() {
         assert!(!migrates(&Command::Version));
-        assert!(!migrates(&Command::Upgrade {
-            release: None,
-            check: false,
-            channel: None,
-            json: false,
-            yes: false,
-        }));
-        assert!(migrates(&Command::Status {
-            refresh: false,
-            json: false
-        }));
+        assert!(!migrates(&Command::Upgrade(UpgradeArgs::default())));
+        assert!(migrates(&Command::Status(StatusArgs::default())));
     }
 
     /// The fixtures are a Target and the three flags that would narrow an

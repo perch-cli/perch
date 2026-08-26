@@ -22,11 +22,10 @@ use crate::switch::{self, Captured, Switched};
 use crate::target::{self, Target};
 use crate::utilization;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, clap::Args)]
 pub struct SwitchArgs {
-    /// What to switch to: an Account by Alias or email address, or a Group to
-    /// Cycle within. Without one, Perch Cycles within the current Account's
-    /// Group.
+    /// The Account to switch to — its Alias or its email address — or a
+    /// Group to Cycle within.
     pub target: Option<String>,
 }
 

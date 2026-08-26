@@ -19,13 +19,19 @@ use crate::probe::{Identity, Store};
 use crate::profile;
 use crate::registry::{self, Account, NO_GROUP, NameKind, Registry};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, clap::Args)]
 pub struct AddArgs {
     /// The Group to put the new Account in. Without it, the Account's
-    /// organization is offered as a default for confirmation.
+    /// organization is offered as a default for you to confirm.
+    #[arg(long, value_name = "NAME")]
     pub group: Option<String>,
-    /// Leave the Account in no Group at all, and ask nothing.
+
+    /// Put the new Account in no Group, and ask nothing.
+    #[arg(long, conflicts_with = "group")]
     pub no_group: bool,
+
+    /// A short name to reach the Account by, instead of its email address.
+    #[arg(long, value_name = "NAME")]
     pub alias: Option<String>,
 }
 

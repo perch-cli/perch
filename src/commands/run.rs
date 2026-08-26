@@ -19,16 +19,18 @@ use crate::registry::{self, Registry};
 use crate::switch;
 use crate::{carry, probe, reconcile, target};
 
-#[derive(Debug, Clone)]
+/// What a Run was asked for. `command` is text, like every other word Perch
+/// takes: one that is not text is refused by the parser rather than mangled here.
+#[derive(Debug, Clone, clap::Args)]
 pub struct RunArgs {
-    /// The Account to run as: its Alias, or its email address.
+    /// The Account to run as: its Alias, or its email address. A Group has
+    /// no single meaning here, so naming one is refused.
     pub target: String,
 
-    /// What was typed after `--`, one word per element and none of them read:
-    /// the program to run and its arguments, or Claude Code's own arguments
-    /// where the first word is a flag. Empty is `perch run <target>` on its own.
-    /// Text, like every other word Perch takes; one that is not text is refused
-    /// by the parser rather than mangled here.
+    /// What to run, after a mandatory `--`: a program and its arguments, or
+    /// Claude Code's own arguments where the first word is a flag. Nothing
+    /// here is read by Perch, so a `--json` after `--` is the program's.
+    #[arg(last = true, allow_hyphen_values = true, num_args = .., value_name = "COMMAND")]
     pub command: Vec<String>,
 }
 

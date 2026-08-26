@@ -30,9 +30,9 @@ use crate::target;
 const WHY_THE_DEFAULT_PROFILE: &str = "the Default Profile, which is where this Account's repaired Credential has \
      to land";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, clap::Args)]
 pub struct ReloginArgs {
-    /// The Account to log in again: its Alias, or its email address.
+    /// The Account: its Alias, or its email address.
     pub target: String,
 }
 
