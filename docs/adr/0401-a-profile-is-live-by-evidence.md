@@ -116,6 +116,30 @@ without Renewing anything. The Watcher is not blinded by a Run.
 
 ## Consequences
 
+The ask has one entry and one answer carrying three states: Idle, the clients
+running, and the doubt. Which way doubt resolves is a named reading of that
+answer rather than a choice of function, and there is no conversion to a bare
+yes or no — so a caller that resolves it towards Live says so where a reader can
+see it. It was two entries and two answers before, and the four callers that had
+only the boolean could not see doubt at all: `perch holdings import` and `perch
+holdings purge` told somebody to quit a client that nothing had said was
+running, for a `sessions` directory that had merely not been readable.
+
+The rule that a Marker which cannot be read or understood is no evidence at all
+therefore lives beside the ask rather than inside the module that reads Markers.
+What Claude Code invented — where the directory is, what a Marker holds, how one
+is written — stays there (ADR an-assumption-is-probed); the five-second margin,
+the direction doubt resolves in, and what a refusal says are judgments made
+above it (ADR code-lives-where-it-reaches).
+
+A refusal about a Live Profile is two sentences from two owners. The evidence —
+which clients, and where — is the ask's, because it is one sentence at every
+caller. What did not happen is the caller's, because it differs: a Switch
+changed nothing, a Purge purged nothing, a Renewal left the cached figure. Only
+the first of those is true of a doubt as well, so a doubt keeps the promise and
+drops the advice; there is no client for it to name and no session to quit
+(ADR a-refusal-is-a-promise).
+
 The liveness ask is taken under Claude Code's locks rather than ahead of them.
 It is a statement about a moment and taking a lock can take seconds, so a
 `claude` started during that wait is one an earlier answer never saw.
