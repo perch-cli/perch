@@ -347,10 +347,11 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
 
 /// Whether this command comes after a registry migration.
 ///
-/// `version` does not: it is what somebody runs when the machine is already
-/// misbehaving, and it read and wrote nothing when it was a flag.
+/// Two do not, for one reason: each is what somebody runs when the machine is
+/// already misbehaving, and each promises at `--help` to touch nothing Perch
+/// holds. Neither reads the registry, so the next command carries it forward.
 fn migrates(command: &Command) -> bool {
-    !matches!(command, Command::Version)
+    !matches!(command, Command::Version | Command::Upgrade { .. })
 }
 
 fn main() {
@@ -675,9 +676,18 @@ mod tests {
         }
     }
 
+    /// Both promise at `--help` to touch nothing Perch holds, and a migration is
+    /// a read of the registry and a write of it under the lock.
     #[test]
-    fn the_version_question_is_the_one_command_that_skips_the_migration() {
+    fn the_two_commands_for_a_misbehaving_machine_skip_the_migration() {
         assert!(!migrates(&Command::Version));
+        assert!(!migrates(&Command::Upgrade {
+            release: None,
+            check: false,
+            channel: None,
+            json: false,
+            yes: false,
+        }));
         assert!(migrates(&Command::Status {
             refresh: false,
             json: false

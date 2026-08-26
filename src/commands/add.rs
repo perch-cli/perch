@@ -102,6 +102,8 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         )));
     }
 
+    // On disk by here, so an unnoted failure sends a script back to log in
+    // again as an Account Perch already holds.
     report(
         out,
         &registry,
@@ -109,6 +111,12 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         args.alias.as_deref(),
         group.as_deref(),
     )
+    .map_err(|error| {
+        error.with_note(&format!(
+            "The Account was added: {email} has a Profile of its own and Perch \
+             holds its Credential. Only the report could not be printed.",
+        ))
+    })
 }
 
 /// Gives the Account a Profile of its own and returns the entry that records it,
@@ -294,14 +302,11 @@ fn report(
     group: Option<&str>,
 ) -> Result<()> {
     let added = registry.account(email).expect("the Account was just added");
-    let mut description = email.to_string();
-    let details: Vec<String> = [added.identity.organization_name.clone(), added.plan.clone()]
-        .into_iter()
-        .flatten()
-        .collect();
-    if !details.is_empty() {
-        description.push_str(&format!(" ({})", details.join(", ")));
-    }
+    let description = crate::commands::described(
+        email,
+        added.identity.organization_name.as_deref(),
+        added.plan.as_deref(),
+    );
 
     say(out, &format!("\nAdded {description}."))?;
     if let Some(alias) = alias {

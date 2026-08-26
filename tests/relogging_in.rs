@@ -45,6 +45,49 @@ fn is_disabled(host: &FakeHost, email: &str) -> bool {
         .disabled
 }
 
+/// A repair records the fresh Credential and saves the registry before it
+/// reports, so a stdout that will not take the report is a repair that stands
+/// under a non-zero exit — and unnoted it sends somebody back through a browser
+/// login for an Account that is already working again.
+#[test]
+fn a_repair_that_stands_says_so_when_only_the_report_could_not_be_written() {
+    /// A stdout that takes everything until the report itself. What is written
+    /// before it is written before the repair is recorded.
+    struct NowhereToWriteTheReport;
+
+    impl std::io::Write for NowhereToWriteTheReport {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Repaired ") {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = broken_second_account();
+
+    let refused = perch::commands::relogin::run(
+        &host,
+        perch::commands::relogin::ReloginArgs {
+            target: "overflow".to_string(),
+        },
+        &mut NowhereToWriteTheReport,
+    )
+    .expect_err("the report could not be written");
+
+    assert!(
+        refused.to_string().contains("repair itself finished"),
+        "the failure says which half of the command it was: {refused}"
+    );
+    assert!(
+        quarantine_of(&host, SECOND_EMAIL).is_none(),
+        "and it was the reporting half, so the Quarantine is over"
+    );
+}
+
 #[test]
 fn a_repair_replaces_the_credential_and_clears_the_quarantine() {
     let host = broken_second_account();

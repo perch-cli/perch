@@ -470,6 +470,18 @@ pub fn asking(platform: Platform, user_id: Option<u32>) -> Option<Driven> {
     }
 }
 
+/// Whether that answer says it is running, rather than merely that it is there.
+///
+/// `launchctl print` succeeds for any label launchd has bootstrapped, throttled
+/// and waiting-to-restart included, so macOS reads the state out of the answer.
+/// `systemctl is-active` is the question, so its status is the whole of it.
+pub fn says_it_is_running(platform: Platform, ran: &crate::host::Execution) -> bool {
+    match platform {
+        Platform::MacOs => ran.succeeded() && ran.stdout.contains("state = running"),
+        Platform::Other | Platform::Windows => ran.succeeded(),
+    }
+}
+
 /// What to call the arrangement when saying it out loud, in the platform's own word.
 ///
 /// Service is the domain term, and the sentence telling somebody where to look has to

@@ -542,6 +542,32 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a lock taken through a linked directory excludes one taken directly",
+        asserts: |host, root, adapter, _now| {
+            let real = root.join("the-real-directory");
+            host.create_dir_all(&real).expect("it is made");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            let linked = root.join("the-linked-directory");
+            host.link(Link::Symbolic, &real, &linked)
+                .expect("the directory is linked");
+
+            // One `mkdir` under two spellings. `lock::take` is the whole of Perch's
+            // mutual exclusion, and a `CLAUDE_CONFIG_DIR` naming a link is how the
+            // two spellings come to be in play at once.
+            host.create_dir_exclusive(&linked.join("the-lock"))
+                .expect("the first take makes it");
+            assert!(
+                matches!(
+                    host.create_dir_exclusive(&real.join("the-lock")),
+                    Err(HostError::AlreadyExists { .. })
+                ),
+                "{adapter}: the same directory addressed the other way is already there"
+            );
+        },
+    },
+    Case {
         named: "asking what a name under a linked directory links to reads through the link",
         asserts: |host, root, adapter, _now| {
             let real = root.join("the-real-directory");

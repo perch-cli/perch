@@ -330,7 +330,9 @@ fn a_path_a_shell_would_split_survives_the_unit_it_is_written_into() {
 
 #[test]
 fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
-    for hostile in ["x\" && evil.exe && set \"y=", "%APPDATA%"] {
+    // Absolute for the platform under test, so what refuses each is the quoting
+    // rather than `perch_home`'s own refusal of a path that names no one place.
+    for hostile in [r#"C:\x" && evil.exe && set "y="#, r"C:\%APPDATA%"] {
         let host = watched()
             .with_platform(Platform::Windows)
             .with_env("PERCH_HOME", hostile);
@@ -1196,6 +1198,46 @@ fn status_answers_on_a_machine_perch_holds_nothing_on() {
         !said.contains("watcher-may-act"),
         "and it says nothing about a grant on a machine with no registry to \
          hold one: {said}"
+    );
+}
+
+/// `launchctl print` exits 0 for any label launchd has bootstrapped, so its status
+/// says the Service is installed and says nothing about whether it is up. A job
+/// launchd is throttling — the case a moved binary produces — is the one where the
+/// two answers come apart.
+#[test]
+fn a_launch_agent_launchd_is_only_holding_is_not_reported_as_running() {
+    let loaded_but_down = Execution {
+        status: 0,
+        stdout: "cli.perch.watch = {\n\tstate = not running\n\tlast exit code = 78\n}".to_string(),
+        stderr: String::new(),
+    };
+    let host = mac().with_exec(
+        "launchctl",
+        &["print", "gui/501/cli.perch.watch"],
+        loaded_but_down,
+    );
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: false });
+
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    assert!(
+        !said.contains("and is running"),
+        "launchd is holding the label rather than running the job: {said}"
+    );
+
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: true });
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    assert!(
+        said.contains(r#""running": false"#),
+        "and a script reads the same answer: {said}"
+    );
+    assert!(
+        said.contains(r#""installed": true"#),
+        "which is a different fact from the Service being there: {said}"
     );
 }
 

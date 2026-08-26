@@ -36,6 +36,55 @@ fn holds(host: &FakeHost, email: &str) -> bool {
     registry_of(host).account(email).is_some()
 }
 
+/// A Remove deletes the Credential and saves the registry before it reports, so
+/// a stdout that will not take the report is a change that landed under a
+/// non-zero exit — and unnoted it sends a script back to give up an Account it
+/// has already given up, which the second time is exit 12.
+#[test]
+fn a_remove_that_landed_says_so_when_only_the_report_could_not_be_written() {
+    /// A stdout that takes everything until the report itself, which is the
+    /// window this is about: the line naming the Target is written before
+    /// anything is deleted, so a stdout refusing *that* has lost nothing.
+    struct NowhereToWriteTheReport;
+
+    impl std::io::Write for NowhereToWriteTheReport {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Removed ") {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = machine_with_two_accounts();
+
+    let refused = perch::commands::remove::run(
+        &host,
+        RemoveArgs {
+            target: SECOND_EMAIL.to_string(),
+            yes: true,
+        },
+        &mut NowhereToWriteTheReport,
+    )
+    .expect_err("the report could not be written");
+
+    assert!(
+        refused.to_string().contains("Remove itself finished"),
+        "the failure says which half of the command it was: {refused}"
+    );
+    assert!(
+        !holds(&host, SECOND_EMAIL),
+        "and it was the reporting half, so the Account is given up"
+    );
+    assert!(
+        credential_of(&host, SECOND_EMAIL).is_none(),
+        "and the Credential Perch held for it is deleted"
+    );
+}
+
 #[test]
 fn removing_an_account_forgets_it_and_deletes_the_credential_perch_held() {
     let host = machine_with_two_accounts();

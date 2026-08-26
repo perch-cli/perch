@@ -1294,9 +1294,46 @@ pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
         .env_var("PERCH_HOME")
         .filter(|overridden| !overridden.is_empty())
     {
+        // A relative one is the same harm the empty case is refused for, and it
+        // is the one a Service carries into a unit file to resolve against a
+        // working directory nobody chose.
+        if !names_one_place(host.platform(), &overridden) {
+            return Err(PerchError::Invalid(format!(
+                "PERCH_HOME is set to `{}`, which is not an absolute path — so \
+                 where Perch holds the Holdings would depend on the directory \
+                 each command was run from, and a second one would look like an \
+                 empty machine.\n\
+                 Set it to a full path, or unset it for {}.",
+                overridden,
+                home_dir(host)
+                    .map(|home| home.join(".config").join("perch").display().to_string())
+                    .unwrap_or_else(|_| "~/.config/perch".to_string()),
+            )));
+        }
         return Ok(PathBuf::from(overridden));
     }
     Ok(home_dir(host)?.join(".config").join("perch"))
+}
+
+/// Whether a path names the same place from every working directory.
+///
+/// Asked of the Host's platform rather than of `Path::is_absolute`, which is
+/// compiled for the machine running the code: a fake standing in for Windows
+/// would otherwise answer as the Linux it runs on.
+fn names_one_place(platform: crate::host::Platform, text: &str) -> bool {
+    match platform {
+        crate::host::Platform::Windows => {
+            let mut bytes = text.bytes();
+            // A UNC path, or a drive letter and a separator. A leading `\\` alone
+            // is relative to whichever drive the process is on.
+            text.starts_with(r"\\")
+                || matches!(
+                    (bytes.next(), bytes.next(), bytes.next()),
+                    (Some(letter), Some(b':'), Some(b'\\' | b'/')) if letter.is_ascii_alphabetic()
+                )
+        }
+        crate::host::Platform::MacOs | crate::host::Platform::Other => text.starts_with('/'),
+    }
 }
 
 fn home_dir(host: &dyn Host) -> Result<PathBuf> {
@@ -1939,9 +1976,13 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
     // cloning the Holdings to set one `u32` is a deep copy of every Account and
     // its figures per write, which a Watcher pays every round.
     registry.version = CURRENT_VERSION;
-    let body = serde_json::to_string_pretty(&*registry)
+    // Pushed rather than `format!`ed onto, for the reason the line above is in
+    // place: a second full copy of the Holdings is a copy a Watcher pays for
+    // every round.
+    let mut body = serde_json::to_string_pretty(&*registry)
         .map_err(|err| PerchError::Other(format!("could not serialize the registry: {err}")))?;
-    write(host, &path, &format!("{body}\n"))
+    body.push('\n');
+    write(host, &path, &body)
 }
 
 /// Replaces the registry in one step, or not at all, and for its owner alone.
@@ -3217,6 +3258,49 @@ mod tests {
             perch_home(&host).unwrap(),
             std::path::PathBuf::from("/Users/someone/.config/perch")
         );
+    }
+
+    /// The same harm as the empty case, arrived at by naming somewhere rather
+    /// than nowhere: `PERCH_HOME=perch-data` makes every directory its own
+    /// machine, each looking empty to the next and adopting again.
+    #[test]
+    fn a_perch_home_that_names_no_one_place_is_refused_rather_than_followed() {
+        for (platform, relative, absolute) in [
+            (crate::host::Platform::Other, "perch-data", "/srv/perch"),
+            (crate::host::Platform::MacOs, "../perch", "/srv/perch"),
+            (
+                crate::host::Platform::Windows,
+                r"work\perch",
+                r"C:\work\perch",
+            ),
+            (
+                crate::host::Platform::Windows,
+                r"\perch",
+                r"\\host\share\perch",
+            ),
+        ] {
+            let host = crate::host::FakeHost::new()
+                .with_platform(platform)
+                .with_env("HOME", "/Users/someone")
+                .with_env("PERCH_HOME", relative);
+
+            let refused = perch_home(&host).expect_err("{relative} names no one place");
+            assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
+            assert!(
+                refused.to_string().contains(relative),
+                "the refusal names the value: {refused}"
+            );
+
+            let host = crate::host::FakeHost::new()
+                .with_platform(platform)
+                .with_env("HOME", "/Users/someone")
+                .with_env("PERCH_HOME", absolute);
+            assert_eq!(
+                perch_home(&host).unwrap(),
+                std::path::PathBuf::from(absolute),
+                "and one that does is taken as it stands, on {platform:?}"
+            );
+        }
     }
 
     /// `export PERCH_HOME=$SOMETHING_UNSET` is the ordinary way to arrive here,

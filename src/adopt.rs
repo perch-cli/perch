@@ -133,17 +133,11 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
 /// A remark rather than output: this is news about the machine, and two of the
 /// callers that reach adoption render JSON on the stream it would land on.
 fn report(host: &dyn Host, findings: &Findings) {
-    let mut description = findings.identity.email.clone();
-    let details: Vec<String> = [
-        findings.identity.organization_name.clone(),
-        findings.credential.subscription_type.clone(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if !details.is_empty() {
-        description.push_str(&format!(" ({})", details.join(", ")));
-    }
+    let description = crate::commands::described(
+        &findings.identity.email,
+        findings.identity.organization_name.as_deref(),
+        findings.credential.subscription_type.as_deref(),
+    );
 
     host.note(&format!(
         "Adopted the Claude Code login as your first Profile: {description}"

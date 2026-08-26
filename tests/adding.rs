@@ -47,6 +47,44 @@ fn assert_the_active_account_survived(host: &FakeHost) {
     );
 }
 
+/// An Add records the Account and saves the registry before it reports, so a
+/// stdout that will not take the report is a login that landed under a non-zero
+/// exit — and unnoted it sends somebody back through a browser login for an
+/// Account Perch already holds.
+#[test]
+fn an_add_that_landed_says_so_when_only_the_report_could_not_be_written() {
+    /// A stdout that takes everything until the report itself. What is written
+    /// before it is written before the Account is recorded.
+    struct NowhereToWriteTheReport;
+
+    impl std::io::Write for NowhereToWriteTheReport {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Added ") {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = ready_to_add();
+
+    let refused =
+        perch::commands::add::run(&host, add_to_group("work"), &mut NowhereToWriteTheReport)
+            .expect_err("the report could not be written");
+
+    assert!(
+        refused.to_string().contains("Account was added"),
+        "the failure says which half of the command it was: {refused}"
+    );
+    assert!(
+        registry_of(&host).account(SECOND_EMAIL).is_some(),
+        "and it was the reporting half, so the Account is held"
+    );
+}
+
 #[test]
 fn a_login_is_launched_inside_a_new_profile_of_its_own() {
     let host = ready_to_add();

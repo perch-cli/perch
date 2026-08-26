@@ -231,6 +231,22 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // rather than a write, and an address no directory can be named after is a
     // refusal — met half way through, it means undoing work never started.
 
+    // Said here rather than left to `profile_dir_for`, whose refusal names a
+    // registry an Import requires to be empty — so it points at a file the
+    // Account it is about is never in.
+    for account in &export.registry.accounts {
+        if registry::slug(account.email()).is_empty() {
+            return Err(PerchError::Invalid(format!(
+                "The Export holds an Account recorded as `{}`, which has no \
+                 character a Profile directory can be named after — so Perch \
+                 cannot say where its Credential would be kept.\n\
+                 Nothing was imported. That Account has to be removed on a \
+                 machine that still holds it, and the Export taken again.",
+                account.email(),
+            )));
+        }
+    }
+
     // And no two may land in one place: `user+work@` and `user.work@` flatten to
     // one Profile name, and storing over it supersedes the Credential already
     // there, which `perch add` refuses where a login enters.
@@ -646,7 +662,18 @@ mod tests {
 
         let refused = place(&host, &export).expect_err("`@` names no directory");
 
-        assert!(refused.to_string().contains('@'), "{refused}");
+        let said = refused.to_string();
+        assert!(said.contains('@'), "{said}");
+        // An Import needs an empty registry, so the one `profile_dir_for` would
+        // send somebody to edit is the one file the Account is not in.
+        assert!(
+            said.contains("Export"),
+            "the refusal names the file the Account is actually in: {said}"
+        );
+        assert!(
+            !said.contains("registry.json"),
+            "and not one this machine is required not to have: {said}"
+        );
         assert!(
             !host.path_exists(&registry::profile_dir_for(&host, "one@example.com").unwrap()),
             "and the Profile of the Account listed before it was never made"

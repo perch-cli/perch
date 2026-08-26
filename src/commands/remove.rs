@@ -126,7 +126,14 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
         ))
     })?;
 
-    report(host, out, &named, alias.as_deref(), &consequence, &deleted)
+    // On disk by here, so an unnoted failure sends a script back to give up an
+    // Account it has already given up.
+    report(host, out, &named, alias.as_deref(), &consequence, &deleted).map_err(|error| {
+        error.with_note(
+            "The Remove itself finished: the Account is given up and its \
+             Credential deleted, and only the report could not be printed.",
+        )
+    })
 }
 
 /// The two Profiles this removal writes into, refused while a client is holding

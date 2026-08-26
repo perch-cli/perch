@@ -271,6 +271,11 @@ pub fn renames(document: &str) -> Vec<Renamed> {
         .ok()
         .and_then(|held| held.as_object().map(|held| renames_in(held, carried)))
         .unwrap_or_default()
+        .into_iter()
+        // A name carried to itself is one the pass held on to, which is what
+        // every name not mentioned here already says.
+        .filter(|entry| entry.was != entry.is_now)
+        .collect()
 }
 
 /// Whether [`forward`] has a step that moves a document claiming this version.
@@ -385,9 +390,16 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
     taken.extend(aliases.clone());
 
     let mut renamed = Vec::new();
+    // What has been let stand, across both kinds because they share one
+    // namespace. A name moves for what it is and for what it sits beside.
+    let mut standing: Vec<(NameKind, String)> = Vec::new();
     for (kind, held) in [(NameKind::Group, groups), (NameKind::Alias, aliases)] {
         for was in held {
-            if crate::registry::validate_name(kind, &was).is_ok() {
+            let beside = standing
+                .iter()
+                .any(|(_, held)| a_published_perch_told_them_apart(held, &was));
+            if crate::registry::validate_name(kind, &was).is_ok() && !beside {
+                standing.push((kind, was));
                 continue;
             }
             // A name no Perch of this version ever accepted is a hand edit, and
@@ -399,10 +411,44 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
                 continue;
             };
             taken.push(is_now.clone());
+            standing.push((kind, is_now.clone()));
             renamed.push(Renamed { kind, was, is_now });
         }
     }
+    renamed.extend(kept_from_the_fold(&standing, &renamed));
     renamed
+}
+
+/// Whether two names one published Perch held as two are one to this build.
+///
+/// Every version this pass sees compared by `to_lowercase`, which applies Greek's
+/// final-sigma rule; this build folds `ς` and `σ` together. Two the older fold
+/// also held as one are a hand edit, which `load` names.
+fn a_published_perch_told_them_apart(one: &str, other: &str) -> bool {
+    crate::registry::same_name(one, other) && one.to_lowercase() != other.to_lowercase()
+}
+
+/// A name left standing said as a rename to itself, where one that folds
+/// together with it moved.
+///
+/// [`now_called`]'s fold would otherwise carry the name that stayed to the new
+/// name of the one that went, losing a Group. [`renames`] drops it from the report.
+fn kept_from_the_fold(standing: &[(NameKind, String)], renamed: &[Renamed]) -> Vec<Renamed> {
+    standing
+        .iter()
+        .filter(|(kind, name)| {
+            renamed.iter().any(|entry| {
+                entry.kind == *kind
+                    && entry.was != *name
+                    && crate::registry::same_name(&entry.was, name)
+            })
+        })
+        .map(|(kind, name)| Renamed {
+            kind: *kind,
+            was: name.clone(),
+            is_now: name.clone(),
+        })
+        .collect()
 }
 
 /// When a `checks` record says its Switch happened. Parsed rather than compared
@@ -974,6 +1020,66 @@ mod tests {
                 "`{claimed}` is a Group that was declared"
             );
         }
+    }
+
+    /// v0.2.0 compared names with `to_lowercase`, which lowercases a final `Σ`
+    /// to `ς`; this build folds `ς` and `σ` together. So it declared `ΧΡΟΝΟΣ`
+    /// and `χρονοσ` as two Groups, and `validate` now reads them as one name and
+    /// refuses — taking every command with it, `perch group rename` included.
+    #[test]
+    fn two_v1_names_this_build_folds_together_are_repaired_though_each_is_valid() {
+        let upper = "\u{3a7}\u{3a1}\u{39f}\u{39d}\u{39f}\u{3a3}";
+        let lower = "\u{3c7}\u{3c1}\u{3bf}\u{3bd}\u{3bf}\u{3c3}";
+        assert!(
+            crate::registry::validate_name(NameKind::Group, upper).is_ok()
+                && crate::registry::validate_name(NameKind::Group, lower).is_ok(),
+            "neither name is refused for itself, which is what hid this"
+        );
+
+        let moved = forwarded(
+            &serde_json::json!({
+                "version": 1,
+                "groups": { upper: { "watcher_threshold_percent": 90 },
+                            lower: { "watcher_threshold_percent": 50 } },
+                "accounts": [
+                    { "identity": { "email": "a@b.com" }, "group": upper },
+                    { "identity": { "email": "c@d.com" }, "group": lower },
+                ],
+            })
+            .to_string(),
+        );
+
+        let groups = moved["groups"].as_object().expect("the Groups");
+        assert_eq!(groups.len(), 2, "both Groups come forward: {groups:?}");
+        assert_ne!(
+            moved["accounts"][0]["group"], moved["accounts"][1]["group"],
+            "and the two Accounts stay in the two Groups they were in"
+        );
+        for account in moved["accounts"].as_array().expect("the Accounts") {
+            let claimed = account["group"].as_str().expect("a claim");
+            assert!(
+                groups.contains_key(claimed),
+                "`{claimed}` is a Group that was declared"
+            );
+        }
+        assert_eq!(
+            groups[upper]["watcher_threshold_percent"], 90,
+            "the Group that kept its name kept its Settings: {groups:?}"
+        );
+    }
+
+    /// Two names a published Perch could not have written as two — `to_lowercase`
+    /// folded them as this build does — are a hand edit, and stay one for `load`
+    /// to name rather than being given a second name here.
+    #[test]
+    fn two_names_no_published_perch_told_apart_are_left_for_the_refusal() {
+        assert_eq!(
+            renames(
+                &serde_json::json!({ "version": 1, "groups": { "work": {}, "Work": {} } })
+                    .to_string()
+            ),
+            Vec::new()
+        );
     }
 
     /// The rename walks `accounts` to move the Group each one claims, and one

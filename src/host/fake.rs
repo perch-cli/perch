@@ -1717,8 +1717,12 @@ impl port::Files for FakeHost {
                 path: parent.to_path_buf(),
             });
         }
-        self.fs.dirs.borrow_mut().insert(path.to_path_buf());
-        self.mark_written(path);
+        // Where it lands rather than where it was addressed, as `create_file_with_mode`
+        // is: one directory under two spellings is one `mkdir`, so a lock taken
+        // through a link has to exclude the take that names it directly.
+        let lands_at = self.lands_at(path);
+        self.fs.dirs.borrow_mut().insert(lands_at.clone());
+        self.mark_written(&lands_at);
         Ok(())
     }
 
