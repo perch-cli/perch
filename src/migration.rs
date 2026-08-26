@@ -732,6 +732,64 @@ fn own(value: Value) -> Map<String, Value> {
 mod tests {
     use super::*;
 
+    /// Transitional: the table answers exactly as the three predicates it
+    /// replaces. Goes with them in the commit that deletes them, and until then
+    /// is the whole of what says the rename pass still renames what it did — a
+    /// rename that moved being a Group lost.
+    #[test]
+    fn the_table_answers_as_the_predicates_it_replaces() {
+        let alphabet = [
+            'a', '-', '\u{1b}', '\u{202e}', 'Σ', 'ς', '.', '0', '@', ' ', '_',
+        ];
+        let mut names: Vec<String> = vec![
+            String::new(),
+            " ".to_string(),
+            "none".to_string(),
+            "None".to_string(),
+            "ungrouped".to_string(),
+            "UNGROUPED".to_string(),
+            "global".to_string(),
+            "Global".to_string(),
+            "work".to_string(),
+            "overflow-ltd".to_string(),
+            "café".to_string(),
+            "日本".to_string(),
+            "ΟΔΟΣ".to_string(),
+            "οδοσ".to_string(),
+        ];
+        for one in alphabet {
+            names.push(one.to_string());
+            for two in alphabet {
+                names.push(format!("{one}{two}"));
+                for three in alphabet {
+                    names.push(format!("{one}{two}{three}"));
+                }
+            }
+        }
+
+        for name in &names {
+            for (version, predicate) in [
+                (1u64, a_version_1_perch_accepted as WrittenByPerch),
+                (2, a_version_2_perch_accepted),
+                (3, a_version_3_perch_accepted),
+            ] {
+                assert_eq!(
+                    crate::name::rules_for(version).accepts(name),
+                    predicate(name),
+                    "version {version} disagrees about {name:?}"
+                );
+            }
+            for other in ["ΟΔΟΣ", "οδοσ", "work", "Work"] {
+                assert_eq!(
+                    !crate::name::rules_for(2).one_name(name, other)
+                        && crate::name::same_name(name, other),
+                    a_published_perch_told_them_apart(name, other),
+                    "the folds disagree about {name:?} and {other:?}"
+                );
+            }
+        }
+    }
+
     /// A registry v0.2.0 wrote, serialized by v0.2.0's own serde impls.
     const V0_2_0: &str = include_str!("../tests/fixtures/registry-v0.2.0.json");
 

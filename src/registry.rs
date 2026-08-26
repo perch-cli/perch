@@ -23,6 +23,11 @@ use crate::probe::{Identity, LockSpec};
 /// the guard is only worth having if this moves whenever the shape does.
 pub const CURRENT_VERSION: u32 = 4;
 
+/// A version is a row of name rules, so the table's length is this number: a row
+/// joining without this moving, or this moving without a row, fails the build
+/// (ADR an-invariant-gets-a-door).
+const _: () = assert!(CURRENT_VERSION as usize == crate::name::ROWS.len());
+
 /// One Quota Window's Utilization, as observed at a point in time
 /// (ADR a-figure-carries-its-age).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
