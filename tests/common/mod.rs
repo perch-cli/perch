@@ -184,15 +184,15 @@ pub fn a_client_marker(pid: u32, began: DateTime<Utc>) -> String {
     )
 }
 
-/// A machine with a client running against `config_dir` right now: the marker
-/// it wrote, and a process still behind it.
-pub fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHost {
-    let marker = a_client_marker(pid, host.now());
-    host.with_file(
-        probe::session_marker_at(Path::new(config_dir), pid),
-        &marker,
-    )
-    .with_live_process(pid)
+/// A client running against `config_dir` right now: the marker it wrote, and a
+/// process still behind it. Takes the machine by reference, as [`a_run_against`]
+/// does, so a fixture arranged inside a login or a wait can reach it too.
+pub fn a_client_running_against(host: &FakeHost, config_dir: impl AsRef<Path>, pid: u32) {
+    host.set_file(
+        probe::session_marker_at(config_dir.as_ref(), pid),
+        &a_client_marker(pid, host.now()),
+    );
+    host.set_live_process(pid);
 }
 
 /// Runs `perch run <target>`, returning the status the client exited with — or

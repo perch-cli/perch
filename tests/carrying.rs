@@ -297,15 +297,7 @@ fn a_profile_used_after_the_default_one_is_what_is_copied() {
 #[test]
 fn nothing_is_written_while_a_client_is_running_against_that_profile() {
     let host = machine();
-    let profile = profile_of(&host, SECOND_EMAIL);
-    host.set_file(
-        profile.join("sessions/4242.json"),
-        &format!(
-            r#"{{"pid":4242,"cwd":"{HERE}","startedAt":{}}}"#,
-            host.now().timestamp_millis()
-        ),
-    );
-    let host = host.with_live_process(4242);
+    a_client_running_against(&host, profile_of(&host, SECOND_EMAIL), 4242);
     let before = identity_of(&host, SECOND_EMAIL);
 
     let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");

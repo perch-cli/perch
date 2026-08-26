@@ -393,7 +393,8 @@ fn without_a_terminal_the_active_account_goes_only_when_asked_for_outright() {
 
 #[test]
 fn removal_is_refused_while_the_accounts_profile_is_live() {
-    let host = client_running_against(machine_with_two_accounts(), SECOND_PROFILE, 4242);
+    let host = machine_with_two_accounts();
+    a_client_running_against(&host, SECOND_PROFILE, 4242);
 
     let (result, _) = run_remove(&host, SECOND_EMAIL);
 
@@ -409,8 +410,8 @@ fn removing_the_active_account_is_refused_while_a_client_is_running_against_the_
     // The Account's own Profile is quiet; it is the Default Profile that a
     // client is holding, and that is where the Account Perch lands on has to be
     // written (ADR a-profile-is-live-by-evidence).
-    let host = client_running_against(machine_with_two_accounts(), DEFAULT_PROFILE, 5150)
-        .with_answers(&["y"]);
+    let host = machine_with_two_accounts().with_answers(&["y"]);
+    a_client_running_against(&host, DEFAULT_PROFILE, 5150);
 
     let (result, _) = run_remove(&host, EMAIL);
 

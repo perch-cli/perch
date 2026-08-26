@@ -274,8 +274,8 @@ fn the_rotation_is_written_back_inside_claude_codes_locks() {
 fn a_credential_a_client_is_holding_is_never_renewed() {
     let host = machine_with_two_accounts();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
-    let host = client_running_against(host, "/Users/someone/.claude", 4242)
-        .with_reply(TOKEN_URL, 200, RENEWED);
+    let host = host.with_reply(TOKEN_URL, 200, RENEWED);
+    a_client_running_against(&host, "/Users/someone/.claude", 4242);
     host.forget_effects();
 
     let (result, printed) = run_status_refresh(&host, false);
@@ -917,8 +917,8 @@ fn a_renewal_mid_landing_is_refused_for_a_client_running_against_the_default_pro
         a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
         // Spent in its own Profile, so a reading of it wants a Renewal.
         host.set_keychain_item(&store_of(&host, email).keychain_service, LOGIN_NAME, SPENT);
-        let host = client_running_against(host, "/Users/someone/.claude", 4242)
-            .with_reply(TOKEN_URL, 200, RENEWED);
+        let host = host.with_reply(TOKEN_URL, 200, RENEWED);
+        a_client_running_against(&host, "/Users/someone/.claude", 4242);
         host.forget_effects();
 
         let (result, printed) = run_status_refresh(&host, false);

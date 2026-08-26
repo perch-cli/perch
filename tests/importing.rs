@@ -864,7 +864,7 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
     // What a Purge that could not finish leaves: a Profile directory with a
     // client in it and no registry naming it.
     let profile = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
-    let host = client_running_against(host, &profile.to_string_lossy(), 4242);
+    a_client_running_against(&host, &profile, 4242);
 
     let (outcome, _) = run_import(&host, AT);
 

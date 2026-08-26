@@ -533,14 +533,7 @@ fn a_healthy_account_may_be_logged_in_again() {
 #[test]
 fn a_profile_a_client_is_running_against_is_refused_before_a_login_is_spent() {
     let host = broken_second_account();
-    let profile = store_of(&host, SECOND_EMAIL).config_dir;
-    let marker = format!(
-        r#"{{"pid":4242,"cwd":"/Users/someone/work","startedAt":{}}}"#,
-        host.now().timestamp_millis()
-    );
-    let host = host
-        .with_file(profile.join("sessions/4242.json"), &marker)
-        .with_live_process(4242);
+    a_client_running_against(&host, store_of(&host, SECOND_EMAIL).config_dir, 4242);
     host.forget_effects();
 
     let (result, _) = run_relogin(&host, "overflow");
@@ -609,14 +602,7 @@ fn a_client_started_during_the_login_stops_the_repair_of_the_account_you_are_on(
     let host = host.with_login(|host: &FakeHost, dir: &std::path::Path| {
         // Somebody starts a client on the Default Profile while the browser is
         // open — nothing to do with the directory the login itself runs in.
-        host.set_file(
-            "/Users/someone/.claude/sessions/4242.json",
-            &format!(
-                r#"{{"pid":4242,"cwd":"/Users/someone/work","startedAt":{}}}"#,
-                host.now().timestamp_millis()
-            ),
-        );
-        host.set_live_process(4242);
+        a_client_running_against(host, "/Users/someone/.claude", 4242);
         login_producing(REPAIRED, IDENTITY_FILE)(host, dir)
     });
     host.forget_effects();
@@ -657,14 +643,7 @@ fn a_client_that_starts_during_the_lock_wait_still_stops_the_repair() {
                 "/Users/someone/.claude/.oauth_refresh.lock",
             ))
             .expect("the holder is done");
-            host.set_file(
-                "/Users/someone/.claude/sessions/7788.json",
-                &format!(
-                    r#"{{"pid":7788,"cwd":"/Users/someone/work","startedAt":{}}}"#,
-                    now.timestamp_millis()
-                ),
-            );
-            host.set_live_process(7788);
+            a_client_running_against(host, "/Users/someone/.claude", 7788);
         });
 
     let (result, _) = run_relogin(&host, EMAIL);
@@ -691,7 +670,7 @@ fn repairing_the_account_you_are_on_is_refused_while_a_client_holds_the_default_
     // it is the Credential a running session is holding.
     let host = machine_with_two_accounts().with_login(login_producing(REPAIRED, IDENTITY_FILE));
     quarantine(&host, EMAIL);
-    let host = client_running_against(host, "/Users/someone/.claude", 4242);
+    a_client_running_against(&host, "/Users/someone/.claude", 4242);
     host.forget_effects();
 
     let (result, _) = run_relogin(&host, EMAIL);
