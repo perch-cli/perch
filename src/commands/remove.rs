@@ -12,12 +12,11 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{Presumed, said_yes, say, still_ours};
+use crate::commands::{Presumed, refuse_while_anything_is_running, said_yes, say, still_ours};
 use crate::credentials;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::live;
 use crate::lock::Held;
 use crate::name;
 use crate::probe::Installed;
@@ -32,6 +31,15 @@ use crate::target;
 /// one thing when Perch asks and another when it acts.
 const WHY_THE_DEFAULT_PROFILE: &str = "the Default Profile, which is where the Account Perch would land on has to \
      be written";
+
+/// Whether the Default Profile joins the Profiles this removal writes into: it
+/// does where an Account is landed on in place of the one being given up.
+fn why_the_default_profile(consequence: &Consequence) -> Option<&'static str> {
+    consequence
+        .successor
+        .is_some()
+        .then_some(WHY_THE_DEFAULT_PROFILE)
+}
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct RemoveArgs {
@@ -87,7 +95,12 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let installed =
         Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
 
-    refuse_while_anything_is_running(host, &account, &consequence, &installed)?;
+    refuse_while_anything_is_running(
+        host,
+        &account,
+        why_the_default_profile(&consequence),
+        &installed,
+    )?;
 
     if !agreed(host, out, &registry, &account, &consequence, args.yes)? {
         return say(out, "Nothing was removed.");
@@ -96,7 +109,12 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // Asked again: somebody may have started a client while the question sat
     // there, and an answer about the machine as it was before lunch says nothing
     // about the Profile this is about to delete.
-    refuse_while_anything_is_running(host, &account, &consequence, &installed)?;
+    refuse_while_anything_is_running(
+        host,
+        &account,
+        why_the_default_profile(&consequence),
+        &installed,
+    )?;
 
     // The question above is the one wait in Perch with no bound on it, so it is
     // the one place the registry lock can go stale under a command that is
@@ -138,31 +156,6 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
              Credential deleted, and only the report could not be printed.",
         )
     })
-}
-
-/// The two Profiles this removal writes into, refused while a client is holding
-/// either. One place, because it is asked twice — once so a machine that was
-/// never going to allow this is not put through the question, and once after the
-/// answer, because the question is unbounded and two spellings of one pair of
-/// checks is how the second ask comes to be weaker than the first.
-fn refuse_while_anything_is_running(
-    host: &dyn Host,
-    account: &Account,
-    consequence: &Consequence,
-    installed: &Installed,
-) -> Result<()> {
-    let mut places = vec![live::Place::of_the_profile(host, account)?];
-    if consequence.successor.is_some() {
-        // Its Credential is the one a running client is holding, and this would
-        // replace it rather than renew it.
-        places.push(live::Place::new(
-            WHY_THE_DEFAULT_PROFILE,
-            registry::the_default_profile(host)?.config_dir,
-        ));
-    }
-
-    live::ask(host, &places).idle_or(installed, &live::NOTHING_WAS_CHANGED)?;
-    Ok(())
 }
 
 fn consequence_of(registry: &Registry, account: &Account) -> Consequence {

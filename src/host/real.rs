@@ -1388,8 +1388,7 @@ fn waited_out(millis: u64) {
         // `EINTR` is the cut-short this rounds again on. Any other failure is
         // one nothing here can mend, and rounding on it would spin — so the
         // wait that is still owed is slept out instead.
-        if answered < 0
-            && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+        if answered < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
         {
             std::thread::sleep(left);
             return;

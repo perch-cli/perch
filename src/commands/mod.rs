@@ -371,6 +371,31 @@ pub fn refuse_a_quarantined_account(
     }
 }
 
+/// Refuses to write into a Profile a client is holding, over the one or two this
+/// command writes; `also_the_default_profile` is why that one joins them. One
+/// function rather than one per command: each asks twice, and two spellings of
+/// one pair of checks is how the second ask comes to be weaker than the first
+/// (ADR a-profile-is-live-by-evidence).
+pub fn refuse_while_anything_is_running(
+    host: &dyn Host,
+    account: &crate::registry::Account,
+    also_the_default_profile: Option<&'static str>,
+    installed: &crate::probe::Installed,
+) -> Result<()> {
+    let mut places = vec![crate::live::Place::of_the_profile(host, account)?];
+    if let Some(why) = also_the_default_profile {
+        // Its Credential is the one a running client is holding, and this would
+        // replace it rather than renew it.
+        places.push(crate::live::Place::new(
+            why,
+            crate::registry::the_default_profile(host)?.config_dir,
+        ));
+    }
+
+    crate::live::ask(host, &places).idle_or(installed, &crate::live::NOTHING_WAS_CHANGED)?;
+    Ok(())
+}
+
 /// What the Accounts in no Group are shown under. Being in no Group is not a
 /// Group (ADR a-group-is-a-declaration), so this never reads like a Group's
 /// name.
