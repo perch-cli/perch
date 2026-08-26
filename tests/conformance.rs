@@ -678,11 +678,14 @@ const CASES: &[Case] = &[
             );
 
             // `O_NOFOLLOW` then `fchmod`, so narrowing a link fails rather than
-            // sending the mode wherever it points.
-            assert!(
-                host.make_private(&linked.join("named")).is_err(),
-                "{adapter}: and narrowing one is refused rather than followed"
-            );
+            // sending the mode wherever it points. Where the bits mean nothing
+            // there is nothing to redirect, and both adapters say so.
+            if modes_mean_something() {
+                assert!(
+                    host.make_private(&linked.join("named")).is_err(),
+                    "{adapter}: and narrowing one is refused rather than followed"
+                );
+            }
 
             host.remove_link(&linked.join("named"))
                 .expect("the link is taken away");
