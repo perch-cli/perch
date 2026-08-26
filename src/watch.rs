@@ -10,7 +10,7 @@
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
-use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
+use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, Result};
 use crate::live::{self, NotIdle};
 use crate::probe::Installed;
 use crate::registry::{Account, Checked, Settings};
@@ -676,20 +676,17 @@ pub fn refused_or_raised(not_idle: NotIdle, installed: &Installed) -> Result<Out
         // Reported as the Switch would have reported it, because it is the same refusal
         // about the same Profile — and waiting is an answer, because the client exits
         // and the round after it moves.
-        NotIdle::Live(clients) => Ok(Outcome::Refused {
-            why: PerchError::ProfileLive(format!(
-                "A client is running against {}.\n{}",
-                live::clause(&clients),
-                live::NOTHING_WAS_CHANGED
-            ))
-            .to_string(),
+        running @ NotIdle::Live(_) => Ok(Outcome::Refused {
+            why: running
+                .refusal(installed, &live::NOTHING_WAS_CHANGED)
+                .to_string(),
             // Asked before the burst, so nothing has been spent on it.
             after_reading: false,
             contended: false,
         }),
         // This does not clear itself: a `sessions` directory nobody can read is a machine
         // somebody has to look at, so the loop stops rather than deciding.
-        unsure @ NotIdle::Unsure(_) => Err(unsure.refusal(installed, live::NOTHING_WAS_CHANGED)),
+        unsure @ NotIdle::Unsure(_) => Err(unsure.refusal(installed, &live::NOTHING_WAS_CHANGED)),
     }
 }
 

@@ -19,6 +19,7 @@ use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::host::{Host, HostError};
 use crate::import;
+use crate::probe::Installed;
 use crate::registry;
 
 pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
@@ -46,7 +47,12 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // the one wait here with no bound on it — so the hold taken before it may be
     // one another `perch` has since claimed and put an Account down under.
     still_ours(&mut perch, "imported")?;
-    let placed = import::place(host, &export)?;
+    // Once per command, which is [`Installed`]'s own rule, and tolerated where it
+    // fails: liveness is answered by Markers rather than by the version, and a
+    // machine being restored onto need not have Claude Code on it yet.
+    let installed =
+        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
+    let placed = import::place(host, &export, &installed)?;
     registry::save(host, &mut perch, &mut restored).map_err(|error| {
         placed.undo(host);
         error.with_note(

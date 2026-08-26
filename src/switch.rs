@@ -430,7 +430,7 @@ pub fn make_live(
 
         holds.around(|| {
             live::ask(host, &[live::Place::new(whose, &store.config_dir)])
-                .idle_or(installed, live::NOTHING_WAS_CHANGED)
+                .idle_or(installed, &live::NOTHING_WAS_CHANGED)
         })?;
 
         let prepared = holds.around(|| prepare(host, account, None, installed.clone(), store))?;
@@ -733,7 +733,7 @@ fn prepare(
     // from the session using it.
     if let Some(outgoing) = outgoing {
         live::ask(host, &[live::Place::of_the_profile(host, outgoing)?])
-            .idle_or(&installed, live::NOTHING_WAS_CHANGED)?;
+            .idle_or(&installed, &live::NOTHING_WAS_CHANGED)?;
     }
 
     // From whichever of the Profile's two Credential Stores holds one: an

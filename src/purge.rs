@@ -16,7 +16,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::live;
 use crate::lock;
-use crate::probe;
+use crate::probe::{self, Installed};
 use crate::registry::{self, Account, Registry};
 
 /// What a Purge took.
@@ -42,44 +42,54 @@ pub struct Unnamed {
     pub credentials: usize,
 }
 
+/// What a Purge that will not run leaves behind: everything, a Purge being all
+/// or nothing.
+const NOTHING_WAS_PURGED: live::Consequence = live::Consequence {
+    nothing_happened: "Nothing was purged.",
+    quit_it: "A Purge deletes those directories, and what is in them belongs to \
+              whatever is holding them until it exits — quit it and run this \
+              again.",
+};
+
 /// Refuses while a client is running against a Profile a Purge would delete.
 ///
 /// ADR a-profile-is-live-by-evidence's rule at its extreme: a Purge deletes those
 /// directories rather than writing into them, and doubt counts as a client. Asked
 /// of the same set [`forget_what_the_registry_does_not_name`] empties.
-pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) -> Result<()> {
-    let mut running: Vec<String> = registry
+pub fn refuse_while_anything_is_running(
+    host: &dyn Host,
+    registry: &Registry,
+    installed: &Installed,
+) -> Result<()> {
+    let mut places: Vec<live::Place> = registry
         .accounts
         .iter()
-        .filter(|account| {
+        .filter_map(|account| {
             account
                 .profile_dir(host)
-                .is_ok_and(|dir| live::ask(host, &[live::Place::at(&dir)]).counts_as_live())
+                .ok()
+                .map(|dir| live::Place::new(format!("the Profile of {}", account.email()), dir))
         })
-        .map(|account| format!("the Profile of {}", account.email()))
         .collect();
 
     // Named generically, because there is nothing to name them by: a login in
     // progress has no Account yet, and a Profile the registry does not hold has
     // no address Perch can put to the user.
-    running.extend(
+    places.extend(
         what_the_registry_does_not_name(host, registry)?
             .into_iter()
-            .filter(|dir| live::ask(host, &[live::Place::at(dir)]).counts_as_live())
-            .map(|dir| format!("{}, which no Account of Perch's names", dir.display())),
+            .map(|dir| {
+                live::Place::new(
+                    format!("{}, which no Account of Perch's names", dir.display()),
+                    dir,
+                )
+            }),
     );
 
-    if running.is_empty() {
-        return Ok(());
+    match live::ask(host, &places) {
+        live::Answer::Idle(_) => Ok(()),
+        live::Answer::NotIdle(not_idle) => Err(not_idle.refusal(installed, &NOTHING_WAS_PURGED)),
     }
-
-    Err(PerchError::ProfileLive(format!(
-        "A client is running against {}.\n\
-         Nothing was purged. A Purge deletes those directories, and what is in \
-         them belongs to whatever is holding them until it exits — quit it and \
-         run this again.",
-        running.join(", "),
-    )))
 }
 
 /// Every directory under Perch's home that is or was a Profile: one under
@@ -440,8 +450,9 @@ mod tests {
             &probe::session_marker(crate::host::fake::THIS_PROCESS, host.now()),
         );
 
-        let refused = refuse_while_anything_is_running(&host, &registry)
-            .expect_err("something is holding that Profile");
+        let refused =
+            refuse_while_anything_is_running(&host, &registry, &Installed::unknown("2.1.221"))
+                .expect_err("something is holding that Profile");
 
         assert_eq!(refused.exit_code(), crate::error::EXIT_PROFILE_LIVE);
         assert!(refused.to_string().contains("two@example.com"), "{refused}");

@@ -118,10 +118,10 @@ impl Answer {
     /// only when it is quiet.
     /// The witness, or the refusal — for the caller that hands a [`PerchError`]
     /// on rather than deciding between the two ways it was not Idle.
-    pub fn idle_or(self, installed: &Installed, nothing_happened: &str) -> Result<Idle> {
+    pub fn idle_or(self, installed: &Installed, consequence: &Consequence) -> Result<Idle> {
         match self {
             Answer::Idle(idle) => Ok(idle),
-            Answer::NotIdle(not_idle) => Err(not_idle.refusal(installed, nothing_happened)),
+            Answer::NotIdle(not_idle) => Err(not_idle.refusal(installed, consequence)),
         }
     }
 
@@ -146,27 +146,45 @@ impl Answer {
 }
 
 impl NotIdle {
-    /// The refusal: what the evidence says, then the caller's own sentence about
-    /// what did not happen.
+    /// The refusal: what the evidence says, then what the caller says about
+    /// itself.
     ///
-    /// Only the Live arm takes that sentence — a doubt's refusal names the broken
-    /// assumption instead, and says what to do (ADR an-assumption-is-probed).
-    pub fn refusal(self, installed: &Installed, nothing_happened: &str) -> PerchError {
+    /// A doubt keeps only the promise: its own refusal names the broken assumption
+    /// and says what to do about the directory (ADR an-assumption-is-probed).
+    pub fn refusal(self, installed: &Installed, consequence: &Consequence) -> PerchError {
+        let Consequence {
+            nothing_happened,
+            quit_it,
+        } = consequence;
         match self {
             NotIdle::Live(clients) => PerchError::ProfileLive(format!(
-                "A client is running against {}.\n{nothing_happened}",
+                "A client is running against {}.\n{nothing_happened} {quit_it}",
                 clause(&clients)
             )),
-            NotIdle::Unsure(unsure) => unsure.refusal(installed),
+            NotIdle::Unsure(unsure) => unsure.refusal(installed).with_note(nothing_happened),
         }
     }
 }
 
-/// What a command that writes into a Profile says it did instead. One sentence
-/// rather than four, because a Switch, a repair, a removal and a watched round
-/// all leave exactly nothing behind and all offer the same two ways out.
-pub const NOTHING_WAS_CHANGED: &str = "Nothing was changed. That Credential \
-     belongs to it until it exits — quit it, or switch to a different Account.";
+/// What a caller says about itself when the ask does not come back Idle.
+///
+/// Two sentences rather than one, because only the first is true either way: a
+/// doubt has no client to name and no session to quit, and a refusal that leaves
+/// out what did not happen is not one (ADR a-refusal-is-a-promise).
+pub struct Consequence {
+    /// What did not happen. Said whichever way the ask failed.
+    pub nothing_happened: &'static str,
+    /// What to do about the client, for the refusal that has one to point at.
+    pub quit_it: &'static str,
+}
+
+/// What a Switch, a repair, a removal and a watched round all say: they leave
+/// exactly nothing behind, and they offer the same two ways out.
+pub const NOTHING_WAS_CHANGED: Consequence = Consequence {
+    nothing_happened: "Nothing was changed.",
+    quit_it: "That Credential belongs to it until it exits — quit it, or switch \
+              to a different Account.",
+};
 
 /// Which clients, and where — the opening every refusal about a Live Profile
 /// shares. Grouped by place in the order they were asked about, because a reader

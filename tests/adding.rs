@@ -955,6 +955,32 @@ fn a_login_somebody_is_still_driving_is_never_reaped_however_old_it_is() {
     );
 }
 
+/// And nothing reaps one it cannot answer for either. A `sessions` directory
+/// that is there and will not be read establishes nothing about the login being
+/// driven through it, and reaping on that doubt costs somebody the login they
+/// are in the middle of.
+#[test]
+fn a_login_whose_sessions_directory_will_not_be_read_is_never_reaped_either() {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first Account is adopted");
+
+    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let sessions = perch::probe::sessions_dir(&pending);
+    host.create_dir_all(&sessions).expect("the login made it");
+    let host = host.with_unlistable_dir(&sessions, "permission denied");
+
+    // Long past the point where an abandoned one would have gone.
+    host.set_now(host.now() + chrono::Duration::hours(6));
+    run_list(&host, false).0.expect("a listing");
+
+    assert!(
+        host.path_exists(&pending),
+        "the directory the login is running in is still there"
+    );
+}
+
 /// On macOS the keychain item lives outside the directory its name is derived
 /// from, so a store that refuses stops the removal rather than being shrugged
 /// off. What is left is a Profile nothing names: untidy, and recoverable.

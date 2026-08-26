@@ -638,8 +638,14 @@ fn refuse_if_live(
     let places: Vec<live::Place> = asked.in_use_from.iter().map(live::Place::at).collect();
     let running = match live::ask(host, &places) {
         live::Answer::Idle(_) => return Ok(()),
+        // Its own `spent`, rather than the `false` a `PerchError` folds to: a
+        // doubt met after a request went out is a round that spent one, and the
+        // Back-off paces on that.
         live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => {
-            return Err(unsure.refusal(installed).into());
+            return Err(Outcome::Failed {
+                why: unsure.refusal(installed).to_string(),
+                spent: because.spent(),
+            });
         }
         live::Answer::NotIdle(live::NotIdle::Live(clients)) => clients,
     };
@@ -924,12 +930,48 @@ fn not_renewed(why: Refused) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::FakeHost;
+    use crate::host::prelude::*;
 
     fn attempt(email: &str, outcome: Outcome) -> Attempt {
         Attempt {
             email: email.to_string(),
             named: email.to_string(),
             outcome,
+        }
+    }
+
+    /// A refusal made before the first request is one a Back-off must not pace,
+    /// and one made after a rejection is one it must — for both ways the ask can
+    /// come back, not only for the one that names a client.
+    #[test]
+    fn a_doubt_paces_the_back_off_by_what_the_round_had_already_spent() {
+        let dir = std::path::PathBuf::from("/Users/someone/.claude");
+        let host = FakeHost::new()
+            .with_env("USER", "someone")
+            .with_unlistable_dir(crate::probe::sessions_dir(&dir), "permission denied");
+        host.create_dir_all(&crate::probe::sessions_dir(&dir))
+            .expect("the directory is there and will not be read");
+        let asked = Asked {
+            store: crate::probe::store_for_profile(&host, &dir).expect("USER is set"),
+            its_own_profile: true,
+            arriving_in_a_landing: false,
+            in_use_from: vec![dir],
+            shares_its_profile_with: None,
+        };
+        let installed = Installed::unknown("2.1.221");
+
+        for (because, paced) in [
+            (Because::ItSaysItRanOut, false),
+            (Because::AnthropicRefusedIt, true),
+        ] {
+            let refused = refuse_if_live(&host, &asked, &installed, because)
+                .expect_err("whether a client is running got no answer");
+            assert!(
+                matches!(refused, Outcome::Failed { spent, .. } if spent == paced),
+                "\"{}\" spends {paced}: {refused:?}",
+                because.clause()
+            );
         }
     }
 

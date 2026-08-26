@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use crate::commands::{Presumed, ask, ask_a_word, export, said_yes, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Platform};
+use crate::probe::Installed;
 use crate::purge::{self, Purged};
 use crate::registry::{self, Account, Registry};
 
@@ -43,7 +44,13 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     let mut perch = registry::lock(host)?;
     let (mut registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
 
-    purge::refuse_while_anything_is_running(host, &registry)?;
+    // Once per command, which is [`Installed`]'s own rule, and tolerated where it
+    // fails: liveness is answered by Markers rather than by the version, and the
+    // machine somebody is giving up on is one whose Claude Code may be gone.
+    let installed =
+        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
+
+    purge::refuse_while_anything_is_running(host, &registry, &installed)?;
 
     say(
         out,
@@ -101,7 +108,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // Asked again over the same window as the hold: somebody may have started a
     // client while the passphrase was being typed. First *and* last, because the
     // first ask is what stops five questions to somebody this will refuse.
-    purge::refuse_while_anything_is_running(host, &registry).map_err(and_the_export)?;
+    purge::refuse_while_anything_is_running(host, &registry, &installed).map_err(and_the_export)?;
 
     // Before anything is deleted, and refused rather than continued if it will
     // not stop — ADR a-removal-lands-first at the scale of the whole machine. A

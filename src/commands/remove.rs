@@ -161,7 +161,7 @@ fn refuse_while_anything_is_running(
         ));
     }
 
-    live::ask(host, &places).idle_or(installed, live::NOTHING_WAS_CHANGED)?;
+    live::ask(host, &places).idle_or(installed, &live::NOTHING_WAS_CHANGED)?;
     Ok(())
 }
 

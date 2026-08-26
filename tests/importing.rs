@@ -9,7 +9,9 @@ mod common;
 
 use chrono::Utc;
 use common::*;
-use perch::error::{EXIT_CONFLICT, EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
+use perch::error::{
+    EXIT_CONFLICT, EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE,
+};
 use perch::host::prelude::*;
 use perch::host::{FakeHost, Platform};
 use perch::registry::{Active, Quarantine, Registry};
@@ -872,6 +874,11 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
     assert!(error.to_string().contains(EMAIL), "{error}");
     assert!(
+        error.to_string().contains("pid 4242"),
+        "and which client to quit, since that is the whole of what the reader \
+         has to do: {error}"
+    );
+    assert!(
         registry_on(&host).is_none(),
         "and nothing was imported: an Import is whole or it did not happen"
     );
@@ -955,5 +962,37 @@ fn an_import_says_what_bringing_the_registry_forward_renamed() {
             .keys()
             .collect::<Vec<_>>(),
         vec!["work"]
+    );
+}
+
+/// The same rule the Purge obeys, at the other end of the Holdings: a `sessions`
+/// directory that is there and will not be read establishes nothing, and reading
+/// it as a client sends somebody looking for a terminal that may not be open.
+#[test]
+fn an_import_whose_sessions_directory_will_not_be_read_writes_nothing_and_says_so() {
+    let sealed = an_export_of_a_whole_machine();
+    let host = a_new_machine_holding(&sealed);
+    // What a Purge that could not finish leaves: a Profile directory with no
+    // registry naming it, and a `sessions` inside it nobody can read.
+    let profile = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
+    let sessions = perch::probe::sessions_dir(&profile);
+    host.create_dir_all(&sessions).expect("it is left behind");
+    let host = host.with_unlistable_dir(&sessions, "permission denied");
+
+    let (outcome, _) = run_import(&host, AT);
+
+    let error = outcome.expect_err("whether a client is running got no answer");
+    assert_eq!(
+        error.exit_code(),
+        EXIT_PROBE_REFUSED,
+        "nothing was established, which is not a Live Profile: {error}"
+    );
+    assert!(
+        error.to_string().contains("make that directory readable"),
+        "{error}"
+    );
+    assert!(
+        registry_on(&host).is_none(),
+        "and nothing was imported: an Import is whole or it did not happen"
     );
 }
