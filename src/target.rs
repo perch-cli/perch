@@ -10,7 +10,8 @@
 //! collisions existing stops being true the day a migration lets one through.
 
 use crate::error::{PerchError, Result};
-use crate::registry::{self, Registry};
+use crate::name;
+use crate::registry::Registry;
 
 /// What a Target turned out to name, and how it matched.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,7 +100,7 @@ fn matched(registry: &Registry, target: &str) -> Option<Target> {
     if let Some(account) = registry
         .accounts
         .iter()
-        .find(|held| registry::same_name(held.email(), target))
+        .find(|held| name::same_name(held.email(), target))
     {
         return Some(Target::Account {
             email: account.email().to_string(),

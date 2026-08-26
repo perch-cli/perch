@@ -18,6 +18,7 @@ use common::*;
 use perch::commands::config::ConfigCommand;
 use perch::host::FakeHost;
 use perch::host::prelude::*;
+use perch::name;
 use perch::registry::{
     self, CURRENT_VERSION, DEFAULT_WATCHER_THRESHOLD_PERCENT, Settings, Strategy,
 };
@@ -740,7 +741,7 @@ fn a_v1_registry_naming(group: &str, alias: &str) -> String {
 fn the_corpus_holds_names_this_build_refuses() {
     let refused = every_name_a_published_perch_accepted()
         .into_iter()
-        .filter(|name| registry::validate_name(registry::NameKind::Group, name).is_err())
+        .filter(|name| name::validate(name::NameKind::Group, name).is_err())
         .count();
 
     assert!(
@@ -805,7 +806,7 @@ fn every_pair_this_build_folds_together() -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     for (at, one) in names.iter().enumerate() {
         for other in &names[at + 1..] {
-            if registry::same_name(one, other) && a_published_perch_held_them_as_two(one, other) {
+            if name::same_name(one, other) && a_published_perch_held_them_as_two(one, other) {
                 pairs.push((one.clone(), other.clone()));
             }
         }
@@ -1086,7 +1087,7 @@ fn a_v2_registry_naming(group: &str, alias: &str) -> String {
 fn the_version_2_corpus_holds_names_this_build_refuses() {
     let refused = every_name_a_version_2_perch_accepted()
         .into_iter()
-        .filter(|name| registry::validate_name(registry::NameKind::Group, name).is_err())
+        .filter(|name| name::validate(name::NameKind::Group, name).is_err())
         .count();
 
     assert!(
@@ -1220,7 +1221,7 @@ fn every_name_a_version_3_perch_accepted() -> Vec<String> {
 fn the_version_3_corpus_holds_names_this_build_refuses() {
     let refused = every_name_a_version_3_perch_accepted()
         .into_iter()
-        .filter(|name| registry::validate_name(registry::NameKind::Group, name).is_err())
+        .filter(|name| name::validate(name::NameKind::Group, name).is_err())
         .count();
 
     assert!(
@@ -1380,8 +1381,8 @@ fn what_the_name_rules_answer() -> u64 {
 
     let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
     for name in names {
-        for kind in [registry::NameKind::Group, registry::NameKind::Alias] {
-            let bit = u8::from(registry::validate_name(kind, &name).is_ok());
+        for kind in [name::NameKind::Group, name::NameKind::Alias] {
+            let bit = u8::from(name::validate(kind, &name).is_ok());
             digest = (digest ^ u64::from(bit)).wrapping_mul(0x0000_0100_0000_01b3);
         }
     }

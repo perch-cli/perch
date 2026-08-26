@@ -241,7 +241,7 @@ struct Candidate {
 /// `Registry::is_active` gives: `upsert` matches case-folded and stores the
 /// incoming spelling, so the Alias map can name an entry the old way.
 fn may_cross(account: &Account, email: &str, group: Option<&str>) -> bool {
-    use crate::registry::same_name;
+    use crate::name::same_name;
 
     same_name(account.email(), email)
         || match (account.group.as_deref(), group) {

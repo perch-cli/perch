@@ -13,7 +13,8 @@ use serde_json::{Map, Value};
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{NameKind, Settings, UngroupedConfig};
+use crate::name::NameKind;
+use crate::registry::{Settings, UngroupedConfig};
 
 /// The oldest version any published Perch stamped, and so the oldest shape this
 /// has. Below it is a number no Perch wrote.
@@ -148,11 +149,11 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
         // `ungrouped` is a legitimate key here and is not a Group, so a v1
         // registry that declared a Group by that name must not have the
         // Ungrouped Scope's Cooldown re-keyed onto the renamed Group.
-        let under = match crate::registry::means_ungrouped(&group) {
+        let under = match crate::name::means_ungrouped(&group) {
             // The constant rather than the spelling found: `record_check` only
             // ever writes that one, so a key that folds to it under any other
             // capitalization becomes a second key `validate` refuses.
-            true => crate::registry::UNGROUPED.to_string(),
+            true => crate::name::UNGROUPED.to_string(),
             false => now_called(NameKind::Group, &group, &renamed),
         };
         // Two v1 keys can land on one — a Group called `Ungrouped` beside the
@@ -208,12 +209,10 @@ fn rename_what_this_build_refuses(held: &mut Map<String, Value>, written_by_perc
         // spelling rather than being looked for among the renames.
         let carried = checks
             .iter()
-            .map(
-                |(group, check)| match crate::registry::means_ungrouped(group) {
-                    true => (group.clone(), check.clone()),
-                    false => (now_called(NameKind::Group, group, &renamed), check.clone()),
-                },
-            )
+            .map(|(group, check)| match crate::name::means_ungrouped(group) {
+                true => (group.clone(), check.clone()),
+                false => (now_called(NameKind::Group, group, &renamed), check.clone()),
+            })
             .collect();
         held.insert("checks".to_string(), Value::Object(carried));
     }
@@ -228,7 +227,7 @@ fn now_called(kind: NameKind, name: &str, renamed: &[Renamed]) -> String {
     let of_the_kind = || renamed.iter().filter(|entry| entry.kind == kind);
     of_the_kind()
         .find(|entry| entry.was == name)
-        .or_else(|| of_the_kind().find(|entry| crate::registry::same_name(&entry.was, name)))
+        .or_else(|| of_the_kind().find(|entry| crate::name::same_name(&entry.was, name)))
         .map_or_else(|| name.to_string(), |entry| entry.is_now.clone())
 }
 
@@ -313,7 +312,7 @@ fn written_by_perch(claimed: u64) -> WrittenByPerch {
 fn a_version_1_perch_accepted(name: &str) -> bool {
     !name.trim().is_empty()
         && !name.chars().any(char::is_whitespace)
-        && name.to_lowercase() != crate::registry::NO_GROUP
+        && name.to_lowercase() != crate::name::NO_GROUP
         && !name.contains('@')
 }
 
@@ -325,8 +324,8 @@ fn a_version_1_perch_accepted(name: &str) -> bool {
 fn a_version_2_perch_accepted(name: &str) -> bool {
     !name.trim().is_empty()
         && !name.chars().any(char::is_whitespace)
-        && !crate::registry::means_the_ungrouped_scope(name)
-        && !crate::registry::means_global(name)
+        && !crate::name::means_the_ungrouped_scope(name)
+        && !crate::name::means_global(name)
         && !name.contains('@')
         && !name.starts_with('-')
 }
@@ -337,8 +336,8 @@ fn a_version_3_perch_accepted(name: &str) -> bool {
     !name.trim().is_empty()
         && !name.chars().any(char::is_whitespace)
         && crate::host::unshowable_character_in(name).is_none()
-        && !crate::registry::means_the_ungrouped_scope(name)
-        && !crate::registry::means_global(name)
+        && !crate::name::means_the_ungrouped_scope(name)
+        && !crate::name::means_global(name)
         && !name.contains('@')
         && !name.starts_with('-')
 }
@@ -360,7 +359,7 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
         // second name.
         if !groups
             .iter()
-            .any(|held| crate::registry::same_name(held, &claimed))
+            .any(|held| crate::name::same_name(held, &claimed))
         {
             groups.push(claimed);
         }
@@ -380,7 +379,7 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
             let beside = standing
                 .iter()
                 .any(|(_, held)| a_published_perch_told_them_apart(held, &was));
-            if crate::registry::validate_name(kind, &was).is_ok() && !beside {
+            if crate::name::validate(kind, &was).is_ok() && !beside {
                 standing.push((kind, was));
                 continue;
             }
@@ -407,7 +406,7 @@ fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Ve
 /// final-sigma rule; this build folds `ς` and `σ` together. Two the older fold
 /// also held as one are a hand edit, which `load` names.
 fn a_published_perch_told_them_apart(one: &str, other: &str) -> bool {
-    crate::registry::same_name(one, other) && one.to_lowercase() != other.to_lowercase()
+    crate::name::same_name(one, other) && one.to_lowercase() != other.to_lowercase()
 }
 
 /// A name left standing said as a rename to itself, where one that folds
@@ -422,7 +421,7 @@ fn kept_from_the_fold(standing: &[(NameKind, String)], renamed: &[Renamed]) -> V
             renamed.iter().any(|entry| {
                 entry.kind == *kind
                     && entry.was != *name
-                    && crate::registry::same_name(&entry.was, name)
+                    && crate::name::same_name(&entry.was, name)
             })
         })
         .map(|(kind, name)| Renamed {
@@ -472,11 +471,11 @@ fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
     // gaining a number; `global` and `ungrouped` are whole words and take one.
     let kept: String = name
         .chars()
-        .filter(|c| crate::registry::a_name_may_carry(*c) && !crate::host::is_unshowable(*c))
+        .filter(|c| crate::name::a_name_may_carry(*c) && !crate::host::is_unshowable(*c))
         .collect();
     // What is left may still open with something that may only follow: a `-`,
     // a combining mark, a digit of another script.
-    let opened = kept.trim_start_matches(|c| !crate::registry::a_name_may_open_with(c));
+    let opened = kept.trim_start_matches(|c| !crate::name::a_name_may_open_with(c));
     let base = match opened.is_empty() {
         true => match kind {
             NameKind::Group => "group",
@@ -490,10 +489,10 @@ fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
             _ => format!("{base}-{at}"),
         })
         .find(|candidate| {
-            crate::registry::validate_name(kind, candidate).is_ok()
+            crate::name::validate(kind, candidate).is_ok()
                 && !taken
                     .iter()
-                    .any(|held| crate::registry::same_name(held, candidate))
+                    .any(|held| crate::name::same_name(held, candidate))
         })
 }
 
@@ -875,7 +874,7 @@ mod tests {
         );
         for name in now {
             assert!(
-                crate::registry::validate_name(NameKind::Group, name).is_ok(),
+                crate::name::validate(NameKind::Group, name).is_ok(),
                 "`{name}` is a name this build accepts"
             );
         }
@@ -976,8 +975,8 @@ mod tests {
         let upper = "\u{3a7}\u{3a1}\u{39f}\u{39d}\u{39f}\u{3a3}";
         let lower = "\u{3c7}\u{3c1}\u{3bf}\u{3bd}\u{3bf}\u{3c3}";
         assert!(
-            crate::registry::validate_name(NameKind::Group, upper).is_ok()
-                && crate::registry::validate_name(NameKind::Group, lower).is_ok(),
+            crate::name::validate(NameKind::Group, upper).is_ok()
+                && crate::name::validate(NameKind::Group, lower).is_ok(),
             "neither name is refused for itself, which is what hid this"
         );
 

@@ -10,7 +10,8 @@
 //! printing a word `perch config set` would refuse.
 
 use crate::error::{PerchError, Result};
-use crate::registry::{self, Registry, Scope, Strategy, UNGROUPED};
+use crate::name::UNGROUPED;
+use crate::registry::{self, Registry, Scope, Strategy};
 
 /// One Setting, as Perch names it.
 ///

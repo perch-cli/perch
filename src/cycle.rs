@@ -12,6 +12,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::error::{PerchError, Result};
+use crate::name;
 use crate::registry::{
     self, Account, CachedUtilization, Registry, Scope, Strategy, WindowUtilization,
 };
@@ -267,9 +268,7 @@ impl SetAside {
     /// an Identity re-read under another capitalization otherwise leaves a
     /// set-aside Account quietly no longer set aside.
     fn holds(&self, email: &str) -> bool {
-        self.emails
-            .iter()
-            .any(|held| registry::same_name(held, email))
+        self.emails.iter().any(|held| name::same_name(held, email))
     }
 }
 
@@ -369,7 +368,7 @@ pub fn choose(
     }
 
     let is_leaving = |ranked: &Ranked| {
-        leaving.is_some_and(|email| registry::same_name(ranked.account.email(), email))
+        leaving.is_some_and(|email| name::same_name(ranked.account.email(), email))
     };
     let here = ranked.iter().find(|ranked| is_leaving(ranked));
     let landable: Vec<&Ranked> = ranked
@@ -468,7 +467,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
         .and_then(|active| {
             accounts
                 .iter()
-                .find(|account| registry::same_name(account.email(), active))
+                .find(|account| name::same_name(account.email(), active))
         })
         .filter(|account| is_a_candidate(registry, account))
         .map(|account| headroom_of(account));
@@ -509,8 +508,7 @@ fn place(
     let headroom = headroom_of(account);
     // Asked only of a candidate, which is the only set `choose` asks it of: it
     // drops the non-candidates before looking for the one being left.
-    let staying =
-        candidate && leaving.is_some_and(|email| registry::same_name(account.email(), email));
+    let staying = candidate && leaving.is_some_and(|email| name::same_name(account.email(), email));
     // Exhausted asked outright rather than left to `worth_leaving_for`, whose
     // `here` is `None` both for an unobserved active Account and for an
     // exhausted one — so `is_none_or` would pass every exhausted candidate.
