@@ -184,15 +184,15 @@ pub fn a_client_marker(pid: u32, began: DateTime<Utc>) -> String {
     )
 }
 
-/// A machine with a client running against `config_dir` right now: the marker
-/// it wrote, and a process still behind it.
-pub fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHost {
-    let marker = a_client_marker(pid, host.now());
-    host.with_file(
-        probe::session_marker_at(Path::new(config_dir), pid),
-        &marker,
-    )
-    .with_live_process(pid)
+/// A client running against `config_dir` right now: the marker it wrote, and a
+/// process still behind it. Takes the machine by reference, as [`a_run_against`]
+/// does, so a fixture arranged inside a login or a wait can reach it too.
+pub fn a_client_running_against(host: &FakeHost, config_dir: impl AsRef<Path>, pid: u32) {
+    host.set_file(
+        probe::session_marker_at(config_dir.as_ref(), pid),
+        &a_client_marker(pid, host.now()),
+    );
+    host.set_live_process(pid);
 }
 
 /// Runs `perch run <target>`, returning the status the client exited with — or
@@ -344,12 +344,7 @@ pub fn machine_with_three_accounts() -> FakeHost {
 /// declared interchangeable, one of them running dry.
 pub fn three_accounts_in_one_group() -> FakeHost {
     let host = machine_with_three_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
     host
 }
 
@@ -414,6 +409,18 @@ pub fn declare_group(host: &FakeHost, name: &str) {
     )
     .0
     .unwrap_or_else(|err| panic!("could not declare `{name}`: {err}"));
+}
+
+/// A Group with these Accounts in it: the result, rather than the two commands
+/// that produce it. Panics naming the Account that would not join, a failure
+/// inside the loop being otherwise a message about no Account in particular.
+pub fn a_group_of(host: &FakeHost, name: &str, accounts: &[&str]) {
+    declare_group(host, name);
+    for account in accounts {
+        move_to_group(host, account, name)
+            .0
+            .unwrap_or_else(|err| panic!("`{account}` could not join `{name}`: {err}"));
+    }
 }
 
 pub fn move_to_group(host: &FakeHost, target: &str, group: &str) -> (perch::Result<()>, String) {
@@ -503,12 +510,7 @@ pub fn watched() -> FakeHost {
     .0
     .expect("the second Account is added");
 
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
+    a_group_of(&host, "work", &[EMAIL, SECOND_EMAIL]);
     config_set(&host, &["work", "watcher-may-act", "true"])
         .0
         .expect("the Group says the watcher may act");
