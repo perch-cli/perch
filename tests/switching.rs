@@ -224,6 +224,10 @@ fn the_switch_captures_first_patches_the_identity_last_and_holds_claude_codes_lo
             // the locks can take seconds.
             format!("read {SECOND_EMAIL}'s Profile"),
             "read the live store".to_string(),
+            // Asked before it is written over: a Run against the Account being
+            // left Rotates its own Profile's copy, so the live one is sometimes
+            // the older of the two and Capturing it would retire the newer.
+            format!("read {EMAIL}'s Profile"),
             format!("wrote {EMAIL}'s Profile"),
             format!("read {EMAIL}'s Profile"),
             "wrote the live store".to_string(),
@@ -253,6 +257,33 @@ fn the_credential_the_outgoing_account_rotated_to_is_captured_before_it_is_repla
         stored_credential(&host, EMAIL).as_deref(),
         Some(rotated.as_str()),
         "the Rotation would be lost if the Capture did not happen first"
+    );
+}
+
+/// A Run points a client at the Account's own Profile, so a Rotation there
+/// retires the refresh token the live copy still carries — leaving that Profile
+/// holding the Account's only working Credential, which a Capture would take.
+#[test]
+fn a_capture_does_not_write_the_live_credential_over_a_newer_one_the_profile_holds() {
+    let host = machine_with_two_accounts();
+    // What a `perch run someone@example.com` leaves behind: the client Rotated
+    // in the Account's own Profile, so that copy expires later than the live one.
+    let rotated = CREDENTIAL
+        .replace("sk-ant-ort01-test", "sk-ant-ort01-rotated")
+        .replace("1785000000000", "1785999999999");
+    host.set_keychain_item(&profile_service(&host, EMAIL), LOGIN_NAME, &rotated);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("the Switch runs");
+    assert_eq!(
+        stored_credential(&host, EMAIL).as_deref(),
+        Some(rotated.as_str()),
+        "the Capture is declined: the live copy's refresh token is the retired one"
+    );
+    assert!(
+        printed.contains("newer Credential"),
+        "and the declined Capture is said rather than swallowed: {printed}"
     );
 }
 

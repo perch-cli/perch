@@ -219,6 +219,16 @@ fn report(
             out,
             "Perch held no active Account, so there was nothing to Capture.",
         )?,
+        // A `perch run` against the Account being left Rotated its own Profile's
+        // copy, so the live one is the older. Said, because it is the one case
+        // where the Account keeps a Credential the live store never held.
+        Captured::Superseded { outgoing } => say(
+            out,
+            &format!(
+                "{outgoing}'s Profile already held a newer Credential than the \
+                 live one, so it was kept rather than Captured over."
+            ),
+        )?,
         // The repair for a Switch that stopped before it named the Account it
         // had landed on. Nothing was Captured because nothing had moved on.
         Captured::NothingToSave => say(

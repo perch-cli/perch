@@ -51,6 +51,11 @@ pub enum Captured {
     /// before it was recorded. No Rotation to save, whether or not the Account
     /// being left is the Account being switched to.
     NothingToSave,
+    /// The outgoing Account's own Profile holds a Credential newer than the live
+    /// one, so Capturing would write a retired refresh token over the working
+    /// copy. Declined: a Capture exists to keep the newest Credential, and here
+    /// the newest is the one already stored.
+    Superseded { outgoing: String },
 }
 
 /// Why a Switch is being made, and so what else the save recording it carries.
@@ -844,11 +849,33 @@ fn capture(
         };
     }
 
-    profile::store_credential(host, &outgoing.store(host)?, live.as_str())?;
+    // A Run points a client at the Account's own Profile (ADR a-run-is-one-shot),
+    // so a Rotation there leaves the live copy the older of the two and
+    // Capturing it would retire the newer.
+    let store = outgoing.store(host)?;
+    if let Ok(Some(held)) = probe::read_credential(host, &store, &prepared.installed)
+        && supersedes(&held, &live)
+    {
+        return Ok(Captured::Superseded {
+            outgoing: outgoing.email().to_string(),
+        });
+    }
+    profile::store_credential(host, &store, live.as_str())?;
 
     Ok(Captured::Copied {
         from: outgoing.email().to_string(),
     })
+}
+
+/// Whether the copy an Account's own Profile holds is newer than the live one.
+///
+/// `expiresAt` is what a Rotation moves. Strictly later, and only where both say
+/// so: a Credential silent about its expiry is no evidence.
+fn supersedes(held: &Credential, live: &Credential) -> bool {
+    matches!(
+        (held.expires_at, live.expires_at),
+        (Some(held), Some(live)) if held > live
+    )
 }
 
 /// Whether an Identity naming somebody other than the outgoing Account is borne
@@ -1000,6 +1027,10 @@ fn only_captured(captured: &Captured, outgoing: Option<&Account>, incoming: &Acc
         (Captured::NotTheirs { outgoing, live }, _) => format!(
             "The live Credential belongs to {live} rather than to {outgoing}, so \
              it was left where it was and {outgoing}'s Profile is untouched."
+        ),
+        (Captured::Superseded { outgoing }, _) => format!(
+            "{outgoing}'s Profile already held a newer Credential than the live \
+             one, so it was kept rather than written over."
         ),
         (_, Some(outgoing)) => format!("{}'s Profile is unchanged.", outgoing.email()),
         (_, None) => String::new(),
