@@ -20,12 +20,14 @@ use crate::probe::LockSpec;
 /// How many times a contended lock is waited on before Perch gives up. Claude
 /// Code holds these for one refresh, so a lock still held after this long is
 /// far more likely to belong to something wedged than to something working.
-const ATTEMPTS: u32 = 5;
+const ATTEMPTS: u32 = 8;
 
-/// How long to wait between attempts. Claude Code jitters the same wait; Perch
-/// takes these locks once per command rather than in a loop, so a fixed wait
-/// has nothing to spread out.
-const WAIT_MILLIS: u64 = 1_000;
+/// How long to wait before the first re-try, doubling with each one after it to
+/// about three seconds in all. `mkdir` is the whole protocol, so a contender
+/// learns the lock is free only by asking again — and Claude Code holds one for
+/// a single refresh, which is tens of milliseconds. A flat wait spends the whole
+/// of the first one learning that, and jitter has nothing here to spread out.
+const FIRST_WAIT_MILLIS: u64 = 25;
 
 /// Locks that are held right now, and are released when this is dropped.
 pub struct Held<'a> {
@@ -342,7 +344,7 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
                     return Ok(());
                 }
                 if attempt < ATTEMPTS {
-                    host.sleep(WAIT_MILLIS);
+                    host.sleep(FIRST_WAIT_MILLIS << (attempt - 1));
                 }
             }
             Err(err) => {

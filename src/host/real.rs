@@ -761,25 +761,16 @@ impl Waiting for RealHost {
         listen_for_interrupts();
     }
 
-    /// In slices, checking between them, because no platform can be relied on to
-    /// cut a sleeping thread short — `nanosleep` reports how much was left and
-    /// the standard library goes back round for the rest. The slice is what the
-    /// person waits for after pressing Ctrl-C, and the only cost of a shorter
-    /// one is a wakeup that does nothing.
+    /// On something the handler can wake rather than in slices that check a flag
+    /// between naps: this is where a Service spends its life, and a wait of two
+    /// and a half minutes was fifteen hundred wakeups.
     fn wait(&self, millis: u64) -> Waited {
-        const SLICE_MILLIS: u64 = 100;
-
-        let mut left = millis;
-        while left > 0 {
-            if interrupted() {
-                return Waited::Interrupted;
-            }
-            let slice = left.min(SLICE_MILLIS);
-            std::thread::sleep(std::time::Duration::from_millis(slice));
-            left -= slice;
+        // Asked before the wait as well as after, so an interrupt that landed
+        // while the round was working is not one this wait sits through.
+        if interrupted() {
+            return Waited::Interrupted;
         }
-        // Asked once more at the end, so a Ctrl-C inside the last slice ends
-        // this wait rather than being carried into the next one.
+        waited_out(millis);
         match interrupted() {
             true => Waited::Interrupted,
             false => Waited::Fully,
@@ -1306,18 +1297,93 @@ fn interrupted() -> bool {
 fn listen_for_interrupts() {
     unsafe extern "C" fn stop(signal: libc::c_int) {
         INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let end = WOKEN[1].load(std::sync::atomic::Ordering::Relaxed);
+        if end >= 0 {
+            // SAFETY: `write` is async-signal-safe, and the descriptor is one
+            // this process opened and never closes. A full pipe or a short
+            // write costs nothing: the flag above is what is read.
+            let _ = unsafe { libc::write(end, [0u8].as_ptr().cast(), 1) };
+        }
         // Only the signal that arrived is stood down, so a first Ctrl-C followed
         // by a `systemctl stop` still kills a wedged loop.
         // SAFETY: `signal` is async-signal-safe and installs the default.
         unsafe { libc::signal(signal, libc::SIG_DFL) };
     }
 
-    // SAFETY: the handler stores to an atomic and restores the default
-    // disposition, both async-signal-safe. `signal` returns the previous
-    // handler, which nothing here needs.
+    open_the_pipe();
+    // SAFETY: the handler stores to an atomic, writes a byte to a pipe and
+    // restores the default disposition, all three async-signal-safe. `signal`
+    // returns the previous handler, which nothing here needs.
     unsafe {
         libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
+    }
+}
+
+/// The ends of the pipe a handler writes to, or `-1` where none is open.
+///
+/// A pipe rather than a condition variable, which a handler may not lock, and
+/// rather than the signal alone cutting the sleep short: `nanosleep` reports how
+/// much was left and the standard library goes back round for the rest.
+#[cfg(unix)]
+static WOKEN: [std::sync::atomic::AtomicI32; 2] = [
+    std::sync::atomic::AtomicI32::new(-1),
+    std::sync::atomic::AtomicI32::new(-1),
+];
+
+/// Opens it, once. Close-on-exec so a Run's client does not inherit two
+/// descriptors it has no use for, and non-blocking so a handler firing more
+/// often than a wait drains it still returns.
+#[cfg(unix)]
+fn open_the_pipe() {
+    let mut ends = [-1 as libc::c_int; 2];
+    // SAFETY: `pipe` writes two descriptors into the array it is handed, and
+    // writes none where it fails.
+    if unsafe { libc::pipe(ends.as_mut_ptr()) } != 0 {
+        return;
+    }
+    for end in ends {
+        // SAFETY: each is a descriptor `pipe` has just answered with.
+        unsafe {
+            libc::fcntl(end, libc::F_SETFD, libc::FD_CLOEXEC);
+            libc::fcntl(end, libc::F_SETFL, libc::O_NONBLOCK);
+        }
+    }
+    WOKEN[0].store(ends[0], std::sync::atomic::Ordering::Relaxed);
+    WOKEN[1].store(ends[1], std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Waits out `millis`, or until a handler writes to the pipe.
+///
+/// Round again on a `poll` cut short, because the only handler installed here
+/// sets the flag the caller reads next — so a return with it unset is a signal
+/// belonging to somebody else and the wait it interrupted is still owed.
+#[cfg(unix)]
+fn waited_out(millis: u64) {
+    let end = WOKEN[0].load(std::sync::atomic::Ordering::Relaxed);
+    if end < 0 {
+        std::thread::sleep(std::time::Duration::from_millis(millis));
+        return;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(millis);
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() || interrupted() {
+            return;
+        }
+        let mut watched = libc::pollfd {
+            fd: end,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // `poll` counts in milliseconds and takes an `int`, which tops out at
+        // about twenty-four days — far past the longest wait the watcher takes.
+        let capped = i32::try_from(left.as_millis()).unwrap_or(i32::MAX);
+        // SAFETY: one initialized `pollfd`, naming a descriptor this process
+        // owns, and a count matching the array it is handed.
+        if unsafe { libc::poll(&mut watched, 1, capped) } != 0 {
+            return;
+        }
     }
 }
 
@@ -1328,28 +1394,75 @@ fn listen_for_interrupts() {
 /// kills a handler that claims them seconds later anyway.
 #[cfg(windows)]
 fn listen_for_interrupts() {
-    use windows_sys::Win32::Foundation::{FALSE, TRUE};
+    use windows_sys::Win32::Foundation::{FALSE, HANDLE, TRUE};
     use windows_sys::Win32::System::Console::{
         CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
     };
+    use windows_sys::Win32::System::Threading::SetEvent;
 
     unsafe extern "system" fn stop(event: u32) -> windows_sys::core::BOOL {
         match event {
             CTRL_C_EVENT | CTRL_BREAK_EVENT
                 if !INTERRUPTED.swap(true, std::sync::atomic::Ordering::Relaxed) =>
             {
+                let woken = WOKEN.load(std::sync::atomic::Ordering::Relaxed);
+                if woken != 0 {
+                    // SAFETY: an event handle this process created and never
+                    // closes. A failure leaves the wait to run its timeout out,
+                    // which is what it did before there was an event at all.
+                    unsafe { SetEvent(woken as HANDLE) };
+                }
                 TRUE
             }
             _ => FALSE,
         }
     }
 
-    // SAFETY: the handler stores to an atomic and reads its argument, and stays
-    // valid for the life of the process. A registration that fails leaves the
-    // default handler in place, which is every other command's behavior.
+    open_the_event();
+    // SAFETY: the handler stores to an atomic, signals an event and reads its
+    // argument, and stays valid for the life of the process. A registration that
+    // fails leaves the default handler in place, which is every other command's.
     unsafe {
         SetConsoleCtrlHandler(Some(stop), TRUE);
     }
+}
+
+/// The event a handler signals, or nought where none is open.
+///
+/// Manual reset, because the flag beside it is never cleared either: once the
+/// loop has been asked to stop, every wait after it is one that ends at once.
+#[cfg(windows)]
+static WOKEN: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+#[cfg(windows)]
+fn open_the_event() {
+    use windows_sys::Win32::Foundation::FALSE;
+    use windows_sys::Win32::System::Threading::CreateEventW;
+
+    // SAFETY: default security, manual reset, unsignalled, unnamed — four
+    // arguments that borrow nothing.
+    let event = unsafe { CreateEventW(std::ptr::null(), 1, FALSE, std::ptr::null()) };
+    WOKEN.store(event as isize, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Waits out `millis`, or until the handler signals the event.
+#[cfg(windows)]
+fn waited_out(millis: u64) {
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+
+    let woken = WOKEN.load(std::sync::atomic::Ordering::Relaxed);
+    if woken == 0 {
+        std::thread::sleep(std::time::Duration::from_millis(millis));
+        return;
+    }
+    // `INFINITE` is `u32::MAX`, so a wait is capped one short of it rather than
+    // becoming a wait with no end.
+    let capped = u32::try_from(millis)
+        .unwrap_or(u32::MAX - 1)
+        .min(u32::MAX - 1);
+    // SAFETY: an event handle this process created and never closes.
+    unsafe { WaitForSingleObject(woken as HANDLE, capped) };
 }
 
 /// A platform with neither is one where Ctrl-C keeps its default meaning, and
@@ -1359,6 +1472,12 @@ fn listen_for_interrupts() {
 /// marker, which is exactly why it is safe to be killed there.
 #[cfg(not(any(unix, windows)))]
 fn listen_for_interrupts() {}
+
+/// With nothing to be woken by, the wait is the sleep it always was.
+#[cfg(not(any(unix, windows)))]
+fn waited_out(millis: u64) {
+    std::thread::sleep(std::time::Duration::from_millis(millis));
+}
 
 /// Makes the *name* durable, once the bytes behind it are. `sync_all` on the
 /// file promises its contents survive; the directory entry a rename created is a
