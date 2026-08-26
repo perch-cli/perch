@@ -200,15 +200,14 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
     if let Err(why) = name::validate(name::NameKind::Group, name) {
         return PerchError::NotFound(format!("No Group called `{name}`. {why}"));
     }
-    // The other name a `perch group add` would be refused for. Aliases and Group
-    // names share one namespace, so a name already answering for an Account is
-    // one nothing may declare a Group under.
+    // Aliases and Group names share one namespace, so a name already answering
+    // for an Account is one no Group may be called. Said without the tail's
+    // offer to declare it: none of the commands reaching here declares one.
     if let Some((alias, email)) = registry.declared_alias(name) {
         return PerchError::NotFound(format!(
             "No Group called `{name}`. `{alias}` is an Alias for {email}, and a \
-             name cannot be both — so there is no `perch group add {name}` to \
-             make one. Name the Group something else, or free the Alias with \
-             `perch alias {email} --unset`."
+             name cannot be both, so no Group can be called that. {}",
+            groups_perch_holds(registry)
         ));
     }
 
@@ -226,6 +225,23 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
         ),
     };
     PerchError::NotFound(format!("No Group called `{name}`. {help}"))
+}
+
+/// The Groups there are to name, for a refusal that cannot offer to declare the
+/// one it was handed.
+fn groups_perch_holds(registry: &Registry) -> String {
+    let declared: Vec<&String> = registry.groups.keys().collect();
+    match declared.is_empty() {
+        true => "No Groups have been declared yet.".to_string(),
+        false => format!(
+            "Groups Perch holds: {}.",
+            declared
+                .iter()
+                .map(|held| held.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 /// Every Group with what it holds and what governs it, so the rules Cycling
