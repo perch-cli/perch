@@ -305,11 +305,11 @@ fn written_by_perch(claimed: u64) -> WrittenByPerch {
     }
 }
 
-/// Version 1's rules, at the loosest of the three builds that stamped it.
+/// Version 1's rules, at the loosest of the three published builds.
 ///
-/// History rather than a rule, as the two below are. Almost nothing was refused,
-/// and `almost` is what this says: a name outside even these is a hand edit,
-/// named at `load` rather than quietly given a different one.
+/// History rather than a rule, as the two below are. Unreleased builds stamped
+/// version 1 too and refused less; a name only those accepted predates the
+/// first release, and is named at `load` rather than renamed.
 fn a_version_1_perch_accepted(name: &str) -> bool {
     !name.trim().is_empty()
         && !name.chars().any(char::is_whitespace)
@@ -317,20 +317,18 @@ fn a_version_1_perch_accepted(name: &str) -> bool {
         && !name.contains('@')
 }
 
-/// Version 2's rules are version 3's, with the characters version 3 added to
-/// [`crate::host::is_unshowable`] still drawn rather than refused.
+/// Version 2's rules, at the loosest of the builds that stamped it.
 ///
-/// Stood in for rather than stripped, so a name of nothing else stays one: `x`
-/// breaks no other rule, so what is left is whether another rule was broken.
+/// A character rule joined `validate_name` part way through version 2 and the
+/// version did not move with it, so version 2 is two shapes: this is the
+/// earlier, which refused no character at all.
 fn a_version_2_perch_accepted(name: &str) -> bool {
-    let stood_in: String = name
-        .chars()
-        .map(|c| match version_2_drew(c) {
-            true => 'x',
-            false => c,
-        })
-        .collect();
-    a_version_3_perch_accepted(&stood_in)
+    !name.trim().is_empty()
+        && !name.chars().any(char::is_whitespace)
+        && !crate::registry::means_the_ungrouped_scope(name)
+        && !crate::registry::means_global(name)
+        && !name.contains('@')
+        && !name.starts_with('-')
 }
 
 /// Version 3's rules, written out rather than read off `validate_name`, which
@@ -343,22 +341,6 @@ fn a_version_3_perch_accepted(name: &str) -> bool {
         && !crate::registry::means_global(name)
         && !name.contains('@')
         && !name.starts_with('-')
-}
-
-/// The characters version 2 drew and version 3 refuses: everything Unicode calls
-/// `Default_Ignorable_Code_Point` that the hand-picked set was short of.
-fn version_2_drew(c: char) -> bool {
-    matches!(c,
-        '\u{034F}' | '\u{2065}' | '\u{3164}' | '\u{FFA0}'
-        | '\u{115F}'..='\u{1160}'
-        | '\u{17B4}'..='\u{17B5}'
-        | '\u{180B}'..='\u{180D}'
-        | '\u{180F}'
-        | '\u{FE00}'..='\u{FE0F}'
-        | '\u{FFF0}'..='\u{FFF8}'
-        | '\u{1BCA0}'..='\u{1BCA3}'
-        | '\u{1D173}'..='\u{1D17A}'
-        | '\u{E0080}'..='\u{E0FFF}')
 }
 
 fn renames_in(held: &Map<String, Value>, written_by_perch: WrittenByPerch) -> Vec<Renamed> {
@@ -869,43 +851,6 @@ mod tests {
             moved["aliases"].get("w").is_some(),
             "an Alias is the same namespace and the same rules"
         );
-    }
-
-    /// The step's set is the difference between two rules, so every character in
-    /// it is one this build refuses. A representative of each range, a range
-    /// written wrong being what a set stated as ranges gets wrong.
-    #[test]
-    fn every_character_the_step_carries_forward_is_one_this_build_refuses() {
-        for c in [
-            '\u{034F}',
-            '\u{2065}',
-            '\u{3164}',
-            '\u{FFA0}',
-            '\u{115F}',
-            '\u{1160}',
-            '\u{17B4}',
-            '\u{17B5}',
-            '\u{180B}',
-            '\u{180D}',
-            '\u{180F}',
-            '\u{FE00}',
-            '\u{FE0F}',
-            '\u{FFF0}',
-            '\u{FFF8}',
-            '\u{1BCA0}',
-            '\u{1BCA3}',
-            '\u{1D173}',
-            '\u{1D17A}',
-            '\u{E0080}',
-            '\u{E0FFF}',
-        ] {
-            assert!(version_2_drew(c), "U+{:04X} is in the step's set", c as u32);
-            assert!(
-                crate::host::is_unshowable(c),
-                "U+{:04X} is one version 3 refuses",
-                c as u32
-            );
-        }
     }
 
     /// An escape is no `char::is_whitespace`, so every published Perch accepted

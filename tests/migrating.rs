@@ -783,27 +783,14 @@ fn every_name_a_published_perch_accepted_comes_forward_into_one_that_loads() {
     }
 }
 
-/// The characters version 2 refused: `Cc` and the hand-picked formatting set it
-/// carried. Spelled out rather than read off this build, which is short of
-/// nothing it had — a filter asking `is_unshowable` would assert that what Perch
-/// refuses is what Perch refuses.
-fn version_2_refused(c: char) -> bool {
-    c.is_control()
-        || matches!(c,
-            '\u{00AD}' | '\u{061C}' | '\u{FEFF}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206F}'
-            | '\u{180E}'
-            | '\u{E0000}'..='\u{E007F}')
-}
-
-/// Version 2's own name rules, as version 2 held them.
+/// Version 2's own name rules, at the loosest of the builds that stamped it.
+///
+/// A character rule joined `validate_name` part way through version 2 and the
+/// version did not move with it, so version 2 is two shapes. The earlier one
+/// refused no character at all, and a rename is owed every name it accepted.
 fn a_version_2_perch_accepted(name: &str) -> bool {
     !name.trim().is_empty()
         && !name.chars().any(char::is_whitespace)
-        && !name.chars().any(version_2_refused)
         && !matches!(
             name.to_lowercase().as_str(),
             "none" | "ungrouped" | "global"
