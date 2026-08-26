@@ -766,9 +766,12 @@ fn act(
         .as_ref()
         .map_err(|why| PerchError::Other(why.to_string()))?
         .clone();
-    let idle = match live::refuse_if_live(host, &outgoing, &installed) {
-        Ok(idle) => idle,
-        Err(not_idle) => return watch::refused_or_raised(not_idle),
+    let places = [live::Place::of_the_profile(host, &outgoing)?];
+    let idle = match live::ask(host, &places) {
+        live::Answer::Idle(idle) => idle,
+        live::Answer::NotIdle(not_idle) => {
+            return watch::refused_or_raised(not_idle, &installed);
+        }
     };
 
     // The burst, and the longest thing a round does: one read per candidate, each

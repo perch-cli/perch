@@ -11,28 +11,218 @@ use std::path::{Path, PathBuf};
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
 use crate::probe::{self, Installed};
-use crate::registry::{self, Account};
+use crate::registry::Account;
 
-/// The processes running against a config directory right now. A marker is
-/// evidence only when it is corroborated, and one that cannot be read or
-/// understood is no evidence at all: a Profile is Live when something says so.
-/// One situation is neither belief nor dismissal — a running process whose start
-/// the operating system will not say — and that is a refusal.
+/// A config directory the ask covers, and what a refusal about it calls it.
+///
+/// Two fields rather than a pair, because every caller supplies both and a
+/// `(&str, &Path)` lets them cross.
+pub struct Place {
+    whose: String,
+    dir: PathBuf,
+}
+
+impl Place {
+    /// A directory the caller has a name for — an Account's Profile, the Default
+    /// Profile, a Profile an Import is about to write into.
+    pub fn new(whose: impl Into<String>, dir: impl Into<PathBuf>) -> Place {
+        Place {
+            whose: whose.into(),
+            dir: dir.into(),
+        }
+    }
+
+    /// A directory named by its own path, for the caller with nothing better to
+    /// call it: a login Perch is driving, a Profile a Run is Carrying into, a
+    /// Credential Store a Renewal would replace.
+    pub fn at(dir: impl Into<PathBuf>) -> Place {
+        let dir = dir.into();
+        Place::new(dir.display().to_string(), dir)
+    }
+
+    /// An Account's own Profile. Fails where the address has no character a
+    /// directory can be named after, which is a question about the registry
+    /// rather than about liveness and so reaches the caller as itself.
+    pub fn of_the_profile(host: &dyn Host, account: &Account) -> Result<Place> {
+        Ok(Place::new(
+            format!("{}'s Profile", account.email()),
+            account.profile_dir(host)?,
+        ))
+    }
+}
+
+/// One client running against one of the places asked about.
+pub struct Client {
+    pub pid: u32,
+    /// The place's own name, carried through so a refusal naming several says
+    /// which pid is where.
+    pub whose: String,
+}
+
+/// What the ask came back with.
+///
+/// Three states behind two arms, and no `From<Answer> for bool`: which way doubt
+/// resolves is named at the call site or nowhere.
+pub enum Answer {
+    Idle(Idle),
+    NotIdle(NotIdle),
+}
+
+/// The Profile asked about is not a Live Profile: nothing is running against the
+/// Credential a write would go under.
+///
+/// A witness on the terms [`crate::switch::Settled`] sets out. Its field is
+/// private, so the only way to hold one is to have matched an [`Answer`].
+pub struct Idle(());
+
+/// The two ways it is not Idle. No catch-all arm, so a third breaks the build.
+pub enum NotIdle {
+    /// A client is running against at least one of the places. The one that
+    /// resolves itself: the client exits, and the Credential stops being its.
+    Live(Vec<Client>),
+    /// Nothing was established, which is not the same as nothing running.
+    Unsure(Unsure),
+}
+
+/// The processes running against a set of config directories right now.
+///
+/// A Marker is evidence only when it is corroborated, and one that cannot be
+/// read or understood is no evidence at all: a Profile is Live when something
+/// says so.
+pub fn ask(host: &dyn Host, places: &[Place]) -> Answer {
+    let mut found = Vec::new();
+    let mut doubt = None;
+    for place in places {
+        match clients_in(host, &place.dir) {
+            Ok(running) => found.extend(running.into_iter().map(|pid| Client {
+                pid,
+                whose: place.whose.clone(),
+            })),
+            // Kept rather than returned: evidence outranks doubt where the set
+            // holds both, because a client that can be quit is a refusal the
+            // reader can act on and an unreadable directory is one they cannot.
+            Err(unsure) => doubt = doubt.or(Some(unsure)),
+        }
+    }
+
+    match (found.is_empty(), doubt) {
+        (false, _) => Answer::NotIdle(NotIdle::Live(found)),
+        (true, Some(unsure)) => Answer::NotIdle(NotIdle::Unsure(unsure)),
+        (true, None) => Answer::Idle(Idle(())),
+    }
+}
+
+impl Answer {
+    /// Whether a caller that only declines rather than refusing should decline.
+    /// Doubt counts as a client for that purpose: the Carry writes into a Profile
+    /// only when it is quiet.
+    /// The witness, or the refusal — for the caller that hands a [`PerchError`]
+    /// on rather than deciding between the two ways it was not Idle.
+    pub fn idle_or(self, installed: &Installed, nothing_happened: &str) -> Result<Idle> {
+        match self {
+            Answer::Idle(idle) => Ok(idle),
+            Answer::NotIdle(not_idle) => Err(not_idle.refusal(installed, nothing_happened)),
+        }
+    }
+
+    pub fn counts_as_live(&self) -> bool {
+        self.counts_as_live_but(None)
+    }
+
+    /// The same, discounting one process — which is only ever the caller's own. A
+    /// Run claims its Profile before it reconciles and Carries, and that claim is
+    /// a Marker, so the Carry that follows would find it and decline to write. A
+    /// reading rather than a parameter of the ask, because any *other* client is
+    /// still a client and doubt still resolves towards Live.
+    pub fn counts_as_live_but(&self, mine: Option<u32>) -> bool {
+        match self {
+            Answer::Idle(_) => false,
+            Answer::NotIdle(NotIdle::Unsure(_)) => true,
+            Answer::NotIdle(NotIdle::Live(clients)) => {
+                clients.iter().any(|client| Some(client.pid) != mine)
+            }
+        }
+    }
+}
+
+impl NotIdle {
+    /// The refusal: what the evidence says, then the caller's own sentence about
+    /// what did not happen.
+    ///
+    /// Only the Live arm takes that sentence — a doubt's refusal names the broken
+    /// assumption instead, and says what to do (ADR an-assumption-is-probed).
+    pub fn refusal(self, installed: &Installed, nothing_happened: &str) -> PerchError {
+        match self {
+            NotIdle::Live(clients) => PerchError::ProfileLive(format!(
+                "A client is running against {}.\n{nothing_happened}",
+                clause(&clients)
+            )),
+            NotIdle::Unsure(unsure) => probe::refusal(
+                probe::assumption::SESSION_MARKER,
+                &unsure.detail(),
+                installed.version(),
+            ),
+        }
+    }
+}
+
+/// What a command that writes into a Profile says it did instead. One sentence
+/// rather than four, because a Switch, a repair, a removal and a watched round
+/// all leave exactly nothing behind and all offer the same two ways out.
+pub const NOTHING_WAS_CHANGED: &str = "Nothing was changed. That Credential \
+     belongs to it until it exits — quit it, or switch to a different Account.";
+
+/// Which clients, and where — the opening every refusal about a Live Profile
+/// shares. Grouped by place in the order they were asked about, because a reader
+/// with two Profiles named at them has to know which to quit.
+pub fn clause(clients: &[Client]) -> String {
+    let mut places: Vec<(&str, Vec<String>)> = Vec::new();
+    for client in clients {
+        match places.iter_mut().find(|(whose, _)| *whose == client.whose) {
+            Some((_, pids)) => pids.push(client.pid.to_string()),
+            None => places.push((&client.whose, vec![client.pid.to_string()])),
+        }
+    }
+
+    places
+        .iter()
+        .map(|(whose, pids)| format!("{whose} (pid {})", pids.join(", ")))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The processes running against a config directory right now, as
+/// [`live_clients`] reported them before the ask had one answer.
 pub fn live_clients(host: &dyn Host, config_dir: &Path, installed: &Installed) -> Result<Vec<u32>> {
-    clients_in(host, config_dir).map_err(|unsure| {
-        probe::refusal(
+    match ask(host, &[Place::at(config_dir)]) {
+        Answer::Idle(_) => Ok(Vec::new()),
+        Answer::NotIdle(NotIdle::Live(clients)) => {
+            Ok(clients.iter().map(|client| client.pid).collect())
+        }
+        Answer::NotIdle(NotIdle::Unsure(unsure)) => Err(probe::refusal(
             probe::assumption::SESSION_MARKER,
             &unsure.detail(),
             installed.version(),
-        )
-    })
+        )),
+    }
+}
+
+/// Whether anything may be running against a config directory, where a marker
+/// that can be neither corroborated nor dismissed counts as one.
+pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
+    anything_running_but(host, config_dir, None)
+}
+
+/// The same, discounting one process — which is only ever the caller's own.
+pub fn anything_running_but(host: &dyn Host, config_dir: &Path, mine: Option<u32>) -> bool {
+    ask(host, &[Place::at(config_dir)]).counts_as_live_but(mine)
 }
 
 /// Why whether anything is running went unanswered. Both are doubt rather than
 /// an answer, and neither is decided here: a caller that must not write under a
 /// client reads either as one, and the caller that can name a Claude Code
 /// version turns either into a refusal that says which it met.
-enum Unsure {
+pub enum Unsure {
     /// A marker naming a running process whose start the operating system will
     /// not say, so it can be neither corroborated nor dismissed.
     WhenItBegan(PathBuf),
@@ -49,7 +239,7 @@ enum Unsure {
 }
 
 impl Unsure {
-    fn detail(&self) -> String {
+    pub(crate) fn detail(&self) -> String {
         match self {
             Unsure::WhenItBegan(marker) => format!(
                 "{} names a running process, but when that process began could \
@@ -71,27 +261,6 @@ impl Unsure {
                 dir.display()
             ),
         }
-    }
-}
-
-/// Whether anything may be running against a config directory, where a marker
-/// that can be neither corroborated nor dismissed counts as one. The question
-/// [`live_clients`] answers, for the caller with no Claude Code version to name
-/// an assumption against: the Carry writes into a Profile only when it is quiet,
-/// and doubt is the same answer as a client for that purpose.
-pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
-    anything_running_but(host, config_dir, None)
-}
-
-/// The same, discounting one process — which is only ever the caller's own. A Run
-/// claims its Profile before it reconciles and Carries, and that claim is a
-/// Marker, so the Carry that follows would find it and decline to write.
-/// Discounting rather than skipping the question: any *other* client is still a
-/// client, and doubt still resolves towards Live.
-pub fn anything_running_but(host: &dyn Host, config_dir: &Path, mine: Option<u32>) -> bool {
-    match clients_in(host, config_dir) {
-        Ok(running) => running.iter().any(|pid| Some(*pid) != mine),
-        Err(_) => true,
     }
 }
 
@@ -161,111 +330,6 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
 /// so an NTP correction makes a live process look younger than the session it
 /// just recorded.
 const CLOCK_STEP_MARGIN_MILLIS: i64 = 5_000;
-
-/// The Profile that was asked about is not a Live Profile: nothing is running
-/// against the Credential a write would go under.
-///
-/// A witness on the terms [`crate::switch::Settled`] sets out — the negative of a **Live
-/// Profile**, constructible only by [`refuse_if_live`].
-pub struct Idle(());
-
-/// Every way the liveness ask can fail, by name.
-///
-/// Named one at a time rather than collapsed into a [`PerchError`] because two
-/// of the three are not refusals at all, and a caller deciding what to do next
-/// has to tell them apart. No catch-all arm, so a fourth breaks the build.
-pub enum NotIdle {
-    /// A client is running against the Profile, and this is the sentence saying
-    /// which. The one that resolves itself: the client exits, and the Credential
-    /// stops being its.
-    Live(String),
-    /// The `sessions` directory is there and would not be read — the root-owned
-    /// one a `sudo claude` leaves. Nothing about the Profile was established,
-    /// which is not the same as nothing running against it.
-    SessionsUnreadable(PerchError),
-    /// The Account is recorded under an address no Profile directory can be
-    /// named after, so there is nowhere to ask about.
-    Unnameable(PerchError),
-}
-
-/// For the callers that have nothing to decide off which way it failed, and only
-/// want to hand it on — the shape `?` gives them for free.
-impl From<NotIdle> for PerchError {
-    fn from(not_idle: NotIdle) -> PerchError {
-        match not_idle {
-            NotIdle::Live(why) => PerchError::ProfileLive(why),
-            NotIdle::SessionsUnreadable(error) | NotIdle::Unnameable(error) => error,
-        }
-    }
-}
-
-/// Refuses to touch a Profile something else is holding
-/// Public because two callers ask it
-/// *before* they spend something rather than after: `perch relogin` before a
-/// browser round trip, and `perch watcher run` before it reads every
-/// candidate's Utilization.
-pub fn refuse_if_live(
-    host: &dyn Host,
-    account: &Account,
-    installed: &Installed,
-) -> std::result::Result<Idle, NotIdle> {
-    let profile_dir = account.profile_dir(host).map_err(NotIdle::Unnameable)?;
-    refuse_if_live_in(
-        host,
-        &profile_dir,
-        &format!("{}'s Profile", account.email()),
-        installed,
-    )
-}
-
-/// The same, of a config directory named rather than derived — the Default
-/// Profile, which belongs to no one Account and is where a repair of the Account
-/// you are on has to land.
-pub fn refuse_if_live_in(
-    host: &dyn Host,
-    config_dir: &Path,
-    whose: &str,
-    installed: &Installed,
-) -> std::result::Result<Idle, NotIdle> {
-    let running = live_clients(host, config_dir, installed).map_err(NotIdle::SessionsUnreadable)?;
-    if running.is_empty() {
-        return Ok(Idle(()));
-    }
-
-    let pids: Vec<String> = running.iter().map(u32::to_string).collect();
-    Err(NotIdle::Live(format!(
-        "A client is running against {whose} (pid {}).\n\
-         Nothing was changed. That Credential belongs to it until it exits — \
-         quit it, or switch to a different Account.",
-        pids.join(", ")
-    )))
-}
-
-/// Both Profiles a command may write into, refused while a client is holding
-/// either. One place, because every command that needs this asks it twice —
-/// before an unbounded wait and after — and two spellings of one pair of checks
-/// is how the second ask comes to be weaker than the first. The sentence is the
-/// caller's: what makes the Default Profile wrong differs for repair and removal.
-pub fn refuse_if_live_anywhere(
-    host: &dyn Host,
-    account: &Account,
-    the_default_profile_too: Option<&str>,
-    installed: &Installed,
-) -> Result<()> {
-    refuse_if_live(host, account, installed)?;
-
-    if let Some(whose) = the_default_profile_too {
-        // Its Credential is the one a running client is holding, and this would
-        // replace it rather than renew it.
-        refuse_if_live_in(
-            host,
-            &registry::the_default_profile(host)?.config_dir,
-            whose,
-            installed,
-        )?;
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
@@ -347,8 +411,11 @@ mod tests {
         );
     }
 
+    /// Not a Live Profile and not a refusal: nothing about that Profile was ever
+    /// established, because there is nowhere to ask about. It reaches the caller
+    /// as the registry question it is rather than as a liveness answer.
     #[test]
-    fn an_address_no_profile_can_be_named_after_is_unnameable_rather_than_idle() {
+    fn an_address_no_profile_can_be_named_after_has_nowhere_to_ask_about() {
         let host = FakeHost::new();
         let nameless = Account {
             identity: Identity {
@@ -365,20 +432,10 @@ mod tests {
             utilization: None,
         };
 
-        let not_idle = refuse_if_live(&host, &nameless, &Installed::unknown("2.1.221"))
+        let nowhere = Place::of_the_profile(&host, &nameless)
             .err()
             .expect("there is nowhere to ask about");
 
-        assert!(
-            matches!(not_idle, NotIdle::Unnameable(_)),
-            "not a Live Profile and not a refusal: nothing about that Profile \
-             was ever established"
-        );
-        assert_eq!(
-            PerchError::from(not_idle).exit_code(),
-            crate::error::EXIT_INVALID,
-            "and it keeps the code the failure earned, rather than being folded \
-             into the refusal's",
-        );
+        assert_eq!(nowhere.exit_code(), crate::error::EXIT_INVALID);
     }
 }

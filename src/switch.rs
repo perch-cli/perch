@@ -428,7 +428,10 @@ pub fn make_live(
         // alone — the Account's own Profile is only read here.
         let mut holds = lock::Holds::of(held, perch);
 
-        holds.around(|| live::refuse_if_live_in(host, &store.config_dir, whose, installed))?;
+        holds.around(|| {
+            live::ask(host, &[live::Place::new(whose, &store.config_dir)])
+                .idle_or(installed, live::NOTHING_WAS_CHANGED)
+        })?;
 
         let prepared = holds.around(|| prepare(host, account, None, installed.clone(), store))?;
 
@@ -729,7 +732,8 @@ fn prepare(
     // incoming Account's is only ever read from, and reading takes nothing away
     // from the session using it.
     if let Some(outgoing) = outgoing {
-        live::refuse_if_live(host, outgoing, &installed)?;
+        live::ask(host, &[live::Place::of_the_profile(host, outgoing)?])
+            .idle_or(&installed, live::NOTHING_WAS_CHANGED)?;
     }
 
     // From whichever of the Profile's two Credential Stores holds one: an

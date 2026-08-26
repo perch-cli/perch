@@ -11,7 +11,8 @@
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
-use crate::live::NotIdle;
+use crate::live::{self, NotIdle};
+use crate::probe::Installed;
 use crate::registry::{Account, Checked, Settings};
 
 /// How long the watcher waits between Refreshing the Account it is on.
@@ -670,21 +671,25 @@ impl Outcome {
 ///
 /// Every variant answered by name, with no catch-all — a fourth way for the ask to fail
 /// breaks the build here until the round says which of the two it is.
-pub fn refused_or_raised(not_idle: NotIdle) -> Result<Outcome> {
+pub fn refused_or_raised(not_idle: NotIdle, installed: &Installed) -> Result<Outcome> {
     match not_idle {
         // Reported as the Switch would have reported it, because it is the same refusal
         // about the same Profile — and waiting is an answer, because the client exits
         // and the round after it moves.
-        NotIdle::Live(why) => Ok(Outcome::Refused {
-            why: PerchError::ProfileLive(why).to_string(),
+        NotIdle::Live(clients) => Ok(Outcome::Refused {
+            why: PerchError::ProfileLive(format!(
+                "A client is running against {}.\n{}",
+                live::clause(&clients),
+                live::NOTHING_WAS_CHANGED
+            ))
+            .to_string(),
             // Asked before the burst, so nothing has been spent on it.
             after_reading: false,
             contended: false,
         }),
-        // Neither of these clears itself: a `sessions` directory nobody can read and an
-        // address no Profile can be named after are both a machine somebody has to look
-        // at, so the loop stops rather than deciding.
-        NotIdle::SessionsUnreadable(error) | NotIdle::Unnameable(error) => Err(error),
+        // This does not clear itself: a `sessions` directory nobody can read is a machine
+        // somebody has to look at, so the loop stops rather than deciding.
+        unsure @ NotIdle::Unsure(_) => Err(unsure.refusal(installed, live::NOTHING_WAS_CHANGED)),
     }
 }
 
@@ -1792,9 +1797,15 @@ mod tests {
 
     #[test]
     fn every_way_the_liveness_ask_fails_is_a_refused_round_or_a_raise() {
-        let refused = refused_or_raised(NotIdle::Live(
-            "A client is running against someone@example.com's Profile (pid 4242).".to_string(),
-        ))
+        let installed = Installed::unknown("1.2.3");
+
+        let refused = refused_or_raised(
+            NotIdle::Live(vec![live::Client {
+                pid: 4242,
+                whose: "someone@example.com's Profile".to_string(),
+            }]),
+            &installed,
+        )
         .expect("a client that will exit is a round that decided, not a failure");
         assert!(
             matches!(&refused, Outcome::Refused { why, .. } if why.contains("pid 4242")),
@@ -1802,20 +1813,15 @@ mod tests {
         );
         assert_eq!(refused.exit_code(), EXIT_NOTHING_TO_DO);
 
-        let unreadable = refused_or_raised(NotIdle::SessionsUnreadable(PerchError::ProbeRefused {
-            assumption: "session marker".to_string(),
-            detail: "sessions could not be read".to_string(),
-            version: "1.2.3".to_string(),
-            note: None,
-        }))
+        let unreadable = refused_or_raised(
+            NotIdle::Unsure(live::Unsure::Unlistable {
+                dir: std::path::PathBuf::from("/home/someone/.claude/sessions"),
+                why: crate::host::HostError::Other("permission denied".to_string()),
+            }),
+            &installed,
+        )
         .expect_err("a directory nobody can read does not clear itself");
         assert_eq!(unreadable.exit_code(), crate::error::EXIT_PROBE_REFUSED);
-
-        let unnameable = refused_or_raised(NotIdle::Unnameable(PerchError::Invalid(
-            "`@` has no character a Profile directory can be named after.".to_string(),
-        )))
-        .expect_err("an address no Profile can be named after is not a wait");
-        assert_eq!(unnameable.exit_code(), crate::error::EXIT_INVALID);
     }
 
     #[test]
