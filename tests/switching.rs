@@ -1115,10 +1115,10 @@ fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_cl
 fn a_lock_abandoned_on_the_last_attempt_is_taken_rather_than_reported_as_held() {
     let host = machine_with_two_accounts();
     let now = host.now();
-    // The refresh lock goes stale at 60s and each of the four waits advances the
-    // fake clock by a second, so a lock held since 56.5s ago reads as alive on
-    // attempts one to four and as abandoned on the fifth — the last there is.
-    let host = host.with_dir_held_since(REFRESH_LOCK, now - chrono::Duration::milliseconds(56_500));
+    // The refresh lock goes stale at 60s and the waits before the last attempt
+    // come to 3.175s, so a lock held since 58s ago reads as alive on the first
+    // seven attempts and as abandoned on the eighth, which is the last there is.
+    let host = host.with_dir_held_since(REFRESH_LOCK, now - chrono::Duration::milliseconds(58_000));
 
     run_switch(&host, SECOND_EMAIL)
         .0
