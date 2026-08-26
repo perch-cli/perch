@@ -7,6 +7,8 @@
 //! ADR claude-code-chooses-the-store's, and this module is the only place they
 //! are spelled.
 
+use zeroize::Zeroize;
+
 use crate::host::{Execution, write_double_quoted};
 use crate::secret::Secret;
 
@@ -176,7 +178,13 @@ pub fn decode_password_output(stdout: &str) -> String {
     match hex_decode(trimmed) {
         Some(bytes) => match String::from_utf8(bytes) {
             Ok(text) => text,
-            Err(_) => trimmed.to_string(),
+            // The error owns the decoded bytes, so dropping it frees a copy of
+            // the Credential — the one way out of here that does.
+            Err(refused) => {
+                let mut decoded = refused.into_bytes();
+                decoded.zeroize();
+                trimmed.to_string()
+            }
         },
         None => trimmed.to_string(),
     }
