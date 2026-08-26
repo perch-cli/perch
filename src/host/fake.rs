@@ -1970,6 +1970,10 @@ impl port::Links for FakeHost {
             _ => {}
         }
 
+        // Keyed where the link lands, as `symlink(2)` makes it and
+        // `link_target` reads it back: the directories above resolve and the
+        // last component does not.
+        let at = &self.lands_at(at);
         self.fs
             .links
             .borrow_mut()

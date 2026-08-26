@@ -3585,29 +3585,39 @@ mod tests {
     #[test]
     fn a_declared_group_or_an_alias_nothing_would_have_accepted_is_named_too() {
         let holdings = [
-            (r#""groups":{"my work":{}}"#, "carries ` ` (U+0020)"),
+            (2, r#""groups":{"my work":{}}"#, "carries ` ` (U+0020)"),
             (
+                2,
                 r#""groups":{"none":{}}"#,
                 "addresses the Accounts in no Group",
             ),
             (
+                2,
                 r#""aliases":{"someone@example.com":"other@example.com"}"#,
                 "carries `@` (U+0040)",
             ),
             (
+                2,
                 r#""groups":{"work":{}},"aliases":{"work":"someone@example.com"}"#,
                 "share one namespace",
             ),
+            // Version 3, where a control character is a name no Perch gave. A
+            // version 2 Perch gave one for six of the eight days it was current,
+            // so the step forward owes that document a rename rather than this.
             (
+                3,
                 r#""groups":{"\u001b[31mred":{}}"#,
                 "a control character (U+001B)",
             ),
         ];
 
-        for (held, expected) in holdings {
+        for (version, held, expected) in holdings {
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
             let path = registry_path(&host).unwrap();
-            host.set_file(&path, &format!(r#"{{"version":2,"accounts":[],{held}}}"#));
+            host.set_file(
+                &path,
+                &format!(r#"{{"version":{version},"accounts":[],{held}}}"#),
+            );
 
             let refused = load(&host).expect_err("that is not a name Perch would have given");
             let said = refused.to_string();

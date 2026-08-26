@@ -209,6 +209,57 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a link made under a linked directory lands where the directory resolves",
+        asserts: |host, root, adapter, _now| {
+            let held = root.join("held");
+            let through = root.join("through");
+            let target = root.join("a-target");
+            host.create_dir_all(&held).expect("the directory is made");
+            host.create_file_with_mode(&target, "what it holds", PRIVATE_FILE_MODE)
+                .expect("the file is written");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &held, &through)
+                .expect("the directory is reached through a link");
+
+            host.link(Link::Symbolic, &target, &through.join("named"))
+                .expect("the link is made");
+
+            assert_eq!(
+                host.link_target(&held.join("named")).ok().flatten(),
+                Some(target.clone()),
+                "{adapter}: `symlink(2)` resolves every component but the last, \
+                 so the link is in the directory rather than beside it"
+            );
+            assert_eq!(
+                host.link_target(&through.join("named")).ok().flatten(),
+                Some(target),
+                "{adapter}: and it is found under the name it was made with"
+            );
+            assert_eq!(
+                host.link_target(&through).ok().flatten(),
+                Some(held.clone()),
+                "{adapter}: the directory in front of it is still a link"
+            );
+
+            // A write through the link is a write into the directory, and the
+            // link is no more a directory afterwards than it was before.
+            host.create_file_with_mode(&through.join("written"), "through", PRIVATE_FILE_MODE)
+                .expect("the file is written");
+            assert_eq!(
+                host.read_file(&held.join("written")).ok().as_deref(),
+                Some("through"),
+                "{adapter}: a write through a linked directory lands inside it"
+            );
+            assert_eq!(
+                host.link_target(&through).ok().flatten(),
+                Some(held),
+                "{adapter}: and the link is still a link"
+            );
+        },
+    },
+    Case {
         named: "a read follows a symbolic link whose target is relative",
         asserts: |host, root, adapter, _now| {
             let real = root.join("beside-the-link");
