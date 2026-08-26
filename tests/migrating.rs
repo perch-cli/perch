@@ -1389,22 +1389,36 @@ fn what_the_name_rules_answer() -> u64 {
     digest
 }
 
-/// A rule joining `validate_name` moves `CURRENT_VERSION` with it.
+/// The rule table itself, as one number: every row, every rule, every set and
+/// every fold, rendered and folded with FNV-1a.
 ///
-/// The failure this catches is the one neither the migration nor the refusal
-/// can: a control-character rule joined `validate_name` under version 2 and the
-/// version stood still, so version 2 is two shapes and one of them had no step.
+/// Written out rather than taken from a crate, because what it has to be is
+/// stable across builds and not fast.
+fn what_the_table_holds() -> u64 {
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in format!("{:?}", perch::name::ROWS).bytes() {
+        digest = (digest ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    digest
+}
+
+/// A name rule that moves takes the registry version with it. Two numbers,
+/// neither covering the other: the table sees a row gain, lose or reorder a
+/// rule for any character; the corpus sees a rule's own body change, bounded to
+/// the spellings it holds. A row arriving or leaving is `registry.rs`'s `const`
+/// assertion instead (ADR an-invariant-gets-a-door).
 #[test]
 fn a_name_rule_that_moves_takes_the_registry_version_with_it() {
-    // Bounded by the corpus: a rule turning on a character no spelling here
-    // carries, or on a spelling longer than three, passes this without being
-    // asked about.
     assert_eq!(
-        (CURRENT_VERSION, what_the_name_rules_answer()),
-        (4, 0xedc6_ef37_3813_2c93),
+        (
+            CURRENT_VERSION,
+            what_the_table_holds(),
+            what_the_name_rules_answer()
+        ),
+        (4, 0x762b_c79f_9267_bf5f, 0xedc6_ef37_3813_2c93),
         "the name rules and the registry version have to move together: give \
-         `migration::forward` a step for the shape below this one, widen the \
-         `a_version_<n>_perch_accepted` that names it, bump `CURRENT_VERSION`, \
-         and record the new number here"
+         `migration::forward` a step for the shape below this one if the shape \
+         moved, add the `name::Rules` row that says what the version below \
+         accepted, bump `CURRENT_VERSION`, and record the new number here"
     );
 }

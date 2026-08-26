@@ -317,6 +317,7 @@ fn one_sigma(name: &str) -> impl Iterator<Item = char> + '_ {
 /// A row below the newest names nothing this build can change: it is what a
 /// published Perch did, and a predicate reading live code answers for what this
 /// build does instead (ADR a-registry-comes-forward).
+#[derive(Debug)]
 pub struct Rules {
     rules: &'static [Rule],
     fold: Fold,
