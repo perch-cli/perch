@@ -164,16 +164,7 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
             true => crate::name::UNGROUPED.to_string(),
             false => now_called(NameKind::Group, &group, &renamed),
         };
-        // Two v1 keys can land on one — a Group called `Ungrouped` beside the
-        // Ungrouped Scope's own record — and the later Switch wins, as
-        // `with_every_check_under_the_declared_spelling` settles the same one.
-        let kept = Value::Object(kept);
-        match checks.get(&under).and_then(switched_at) {
-            Some(held) if switched_at(&kept).is_none_or(|arriving| arriving < held) => {}
-            _ => {
-                checks.insert(under, kept);
-            }
-        }
+        keep_the_later_switch(&mut checks, under, Value::Object(kept));
     }
     moved.insert("checks".to_string(), Value::Object(checks));
 
@@ -213,15 +204,16 @@ fn rename_what_this_build_refuses(held: &mut Map<String, Value>, wrote_it: &name
         held.insert("accounts".to_string(), Value::Array(carried));
     }
     if let Some(Value::Object(checks)) = held.get("checks") {
-        // `ungrouped` is a legitimate key here and is no Group, so it keeps its
-        // spelling rather than being looked for among the renames.
-        let carried = checks
-            .iter()
-            .map(|(group, check)| match crate::name::means_ungrouped(group) {
-                true => (group.clone(), check.clone()),
-                false => (now_called(NameKind::Group, group, &renamed), check.clone()),
-            })
-            .collect();
+        let mut carried = Map::new();
+        for (group, check) in checks {
+            // `ungrouped` is a legitimate key here and is no Group, so it keeps
+            // its spelling rather than being looked for among the renames.
+            let under = match crate::name::means_ungrouped(group) {
+                true => group.clone(),
+                false => now_called(NameKind::Group, group, &renamed),
+            };
+            keep_the_later_switch(&mut carried, under, check.clone());
+        }
         held.insert("checks".to_string(), Value::Object(carried));
     }
 }
@@ -379,6 +371,20 @@ fn kept_from_the_fold(standing: &[(NameKind, String)], renamed: &[Renamed]) -> V
             is_now: name.clone(),
         })
         .collect()
+}
+
+/// One `checks` record settled against whatever already holds its key.
+///
+/// Two keys can land on one — a Group called `Ungrouped` beside the Ungrouped
+/// Scope's own record, or two spellings a rename folds together — and the later
+/// Switch wins: the older one is a Cooldown that has already run out.
+fn keep_the_later_switch(checks: &mut Map<String, Value>, under: String, arriving: Value) {
+    match checks.get(&under).and_then(switched_at) {
+        Some(held) if switched_at(&arriving).is_none_or(|at| at < held) => {}
+        _ => {
+            checks.insert(under, arriving);
+        }
+    }
 }
 
 /// When a `checks` record says its Switch happened. Parsed rather than compared

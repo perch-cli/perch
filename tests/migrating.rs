@@ -1308,6 +1308,30 @@ fn a_version_3_name_of_a_word_and_a_symbol_keeps_the_word() {
     );
 }
 
+/// Two `checks` keys can fold onto one across a rename just as they can across
+/// version 1's step, and the same rule settles both: the later Switch paces the
+/// Scope. Whichever key `serde_json` happened to hold first winning is a Cooldown
+/// that expired months ago, and a Watcher free to Switch the moment it reads one.
+#[test]
+fn two_v3_cooldowns_landing_on_one_key_keep_the_later_switch() {
+    let mut held: serde_json::Value =
+        serde_json::from_str(&a_v3_registry_naming("dev.ops", "the-alias")).expect("a document");
+    held["checks"] = serde_json::json!({
+        "DEV.OPS": { "switched_at": "2026-08-14T10:00:00Z" },
+        "dev.ops": { "switched_at": "2026-01-01T00:00:00Z" },
+    });
+    let host = machine_holding(&held.to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let written: serde_json::Value =
+        serde_json::from_str(&on_disk(&host)).expect("a document came back");
+    assert_eq!(
+        written["checks"]["devops"]["switched_at"], "2026-08-14T10:00:00Z",
+        "the August record paces the renamed Group, not the January one: {written}"
+    );
+}
+
 /// Renaming onto a name something already answers to would be no rename at all,
 /// and the repair puts two version 3 names on one base every time.
 #[test]
