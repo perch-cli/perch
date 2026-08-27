@@ -292,6 +292,14 @@ machine runs for you, or a sequence of Checks something else schedules. One of
 them at a time.
 _Avoid_: daemon, monitor, background job
 
+**Round**:
+One pass of the Watcher: read the Account it is on, decide what that figure
+means, and act if acting is what was decided. What a Check is exactly one of and
+what the loop repeats, so the arrangements differ in what paces a round rather
+than in what one is. What it decided is said in one line — and, for a Check, in
+the exit code.
+_Avoid_: tick, pass, iteration, cycle
+
 **Check**:
 One round of the Watcher taken on its own — `perch watcher check` — for a
 scheduler to run. The loop's policy exactly, run once, saying what it decided in

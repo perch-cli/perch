@@ -69,10 +69,18 @@ correctly placed already — a module that pulled `Quarantine::document` away fr
 ## What a thing means, and what it does
 
 The same rule read one level up: a subsystem is split by whether a function
-decides something or performs it. `src/watch.rs` holds what a round *means* and
-`src/commands/watch.rs` holds what a round *does*. What makes that line hold is
-that nothing in `watch.rs` reaches the network or the filesystem, so everything
-in it can be argued with in a unit test.
+decides something or performs it. `src/watch.rs` holds what a figure *means*,
+`src/round.rs` holds what a round *decides*, and `src/commands/watch.rs` holds
+what it *does*. What makes those lines hold is that neither of the first two
+reaches the network or the filesystem, so everything in them can be argued with
+in a unit test.
+
+`round.rs` is this document's own rule applied to the watcher. A round's
+decisions name an `observe::Attempt`, a `switch::Settled` and a `cycle`
+candidate — and `observe`, `switch` and `registry` each import `watch`, so
+spelling them there would have `watch` importing three modules that import it.
+That is the inversion refused above for `Account::document`, reached from the
+other end. The lowest module naming all three did not exist, so it does.
 
 ## A seam with one adapter is a hypothetical seam
 
@@ -100,16 +108,19 @@ distinction its weightiest, and `--json` puts `"order": "ranked" | "held"` in a
 contract scripts branch on. A rendering is not disqualified by being a
 rendering.
 
-**Round** and **witness** are out. A load-bearing noun in an interface does have
-to be a word the project knows — but the round has no module and no interface of
-its own, so the glossary would be learning a word only the source uses, which is
-the drift the vocabulary exists to prevent. If the round is ever given its own
-interface, the term comes with it. **witness** is defined once in the source, at
-`switch::Settled`, and every other use points there
-(ADR an-ordering-is-a-type).
+**Round** is in and **witness** is out. A load-bearing noun in an interface has
+to be a word the project knows, and the round now has both — `round::permitted`,
+`round::refused_the_reading`, `round::considered` and `round::Verdict` — so the
+term came with the interface, which is what this document said it would.
+**witness** stays out: it is defined once in the source, at `switch::Settled`,
+and every other use points there (ADR an-ordering-is-a-type).
 
 ## Consequences
 
+- **`src/round.rs` exists**, holding what a round decides: `permitted`, which
+  says whether there is anything here for a watcher to do; `refused_the_reading`,
+  which says whether the figure can be acted on and whether a Back-off paces the
+  hold; `considered`; and `Verdict`. **Round** is a `CONTEXT.md` term.
 - **`src/listing.rs` exists**, holding what a Listing *is*: `Section` with the
   ranked-versus-held distinction, `scopes`, `scope_json`, and the Account
   `document`. `commands/list.rs` keeps what it *does* — the breadth somebody
