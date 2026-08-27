@@ -1569,12 +1569,12 @@ impl port::Files for FakeHost {
     fn file_mode(&self, path: &Path) -> Result<Option<u32>, HostError> {
         // Through a link, as `metadata` reads through one: the mode of a
         // symbolic link is not a thing anybody asks about.
-        let Some(path) = self.resolved(path).as_deref().map(Path::to_path_buf) else {
+        let Some(resolved) = self.resolved(path) else {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
             });
         };
-        let path = path.as_path();
+        let path = resolved.as_path();
         // Windows has no mode and relies on the profile ACL, and the real Host
         // answers `None` there. A number here would let a test drive
         // `tighten_if_loose` on a platform where none of it happens.
@@ -1719,10 +1719,11 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unwritable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        let lands_at = self.lands_at(path);
         // A link in the way counts, whether or not it still resolves: `mkdir`
         // does not follow the last component, so it fails `EEXIST` at a symlink
         // whatever it points at. `path_exists` answers the Reconcile's question.
-        if self.fs.links.borrow().contains_key(&self.lands_at(path)) || self.path_exists(path) {
+        if self.fs.links.borrow().contains_key(&lands_at) || self.path_exists(path) {
             return Err(HostError::AlreadyExists {
                 path: path.to_path_buf(),
             });
@@ -1743,7 +1744,6 @@ impl port::Files for FakeHost {
         // Where it lands rather than where it was addressed, as `create_file_with_mode`
         // is: one directory under two spellings is one `mkdir`, so a lock taken
         // through a link has to exclude the take that names it directly.
-        let lands_at = self.lands_at(path);
         self.fs.dirs.borrow_mut().insert(lands_at.clone());
         self.mark_written(&lands_at);
         // Recorded where the lock was taken, and not before the refusals above
