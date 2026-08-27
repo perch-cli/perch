@@ -485,11 +485,11 @@ pub fn unshowable_character_in(value: &str) -> Option<String> {
 /// run or the one that says what failed. One copy: `perch upgrade` and
 /// `perch watcher install` are read side by side, so two spellings of "as
 /// somebody would have typed it" is two answers to one question.
-pub fn as_typed(program: &Path, args: &[String]) -> String {
+pub fn as_typed(program: &Path, args: &[impl AsRef<str>]) -> String {
     let mut line = program.to_string_lossy().into_owned();
     for arg in args {
         line.push(' ');
-        line.push_str(arg);
+        line.push_str(arg.as_ref());
     }
     line
 }

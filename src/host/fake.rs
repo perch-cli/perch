@@ -807,7 +807,7 @@ impl FakeHost {
         self.processes
             .executions
             .borrow_mut()
-            .insert(exec_key(program, args), execution);
+            .insert(super::as_typed(Path::new(program), args), execution);
     }
 
     /// What an interactive login leaves behind in the directory it was pointed
@@ -1375,15 +1375,6 @@ fn a_prefix_of(text: &str, bytes: usize) -> String {
         .take_while(|(at, _)| *at < bytes)
         .map(|(_, c)| c)
         .collect()
-}
-
-fn exec_key(program: &str, args: &[&str]) -> String {
-    let mut key = program.to_string();
-    for arg in args {
-        key.push(' ');
-        key.push_str(arg);
-    }
-    key
 }
 
 impl port::Clock for FakeHost {
@@ -2172,7 +2163,7 @@ impl port::Processes for FakeHost {
         self.processes
             .executions
             .borrow()
-            .get(&exec_key(program, args))
+            .get(&super::as_typed(Path::new(program), args))
             .cloned()
             .ok_or_else(|| HostError::Other(format!("no such program: {program}")))
     }
@@ -2208,7 +2199,7 @@ impl port::Processes for FakeHost {
             .processes
             .executions
             .borrow()
-            .get(&exec_key(program, args))
+            .get(&super::as_typed(Path::new(program), args))
         {
             return Ok(arranged.status);
         }
