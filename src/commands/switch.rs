@@ -12,12 +12,12 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::say;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::Installed;
-use crate::registry::{Account, Registry, Scope, Settled};
+use crate::registry::{self, Account, Registry, Scope, Settled};
+use crate::say;
 use crate::switch::{self, Captured, Switched};
 use crate::target::{self, Target};
 use crate::utilization;
@@ -92,7 +92,7 @@ fn decide(
     let scope = match target {
         Some(target) => {
             let found = target::resolve(registry, target)?;
-            say(out, &found.matched())?;
+            say::line(out, &found.matched())?;
             match found {
                 Target::Group { name } => Scope::Group(name),
                 Target::Alias { email, .. } | Target::Account { email } => {
@@ -132,7 +132,7 @@ fn decide(
 /// where the user would otherwise find out by losing the session they were in. A
 /// code of its own, because no other refusal is answered by logging in again.
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
-    crate::commands::refuse_a_quarantined_account(
+    registry::refuse_a_quarantined_account(
         registry,
         incoming.email(),
         "Nothing was changed — switching to it would make a Credential live \
@@ -144,7 +144,7 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Accou
 /// Group decides where it may look.
 fn leaving<'a>(registry: &'a Registry, settled: &Settled) -> Result<&'a Account> {
     registry.active_account(settled).ok_or_else(|| {
-        crate::commands::no_active_account(registry, ", so there is no Group to Cycle within")
+        registry::no_active_account(registry, ", so there is no Group to Cycle within")
     })
 }
 
@@ -188,7 +188,7 @@ fn report(
         Captured::Copied { .. } => {}
         // The one case where a Capture was declined rather than found
         // unnecessary, so it says what was live and what was spared.
-        Captured::NotTheirs { outgoing, live } => say(
+        Captured::NotTheirs { outgoing, live } => say::line(
             out,
             &format!(
                 "The live Credential names {live}, not {outgoing}, so it was not \
@@ -199,14 +199,14 @@ fn report(
         )?,
         // The one case where switching back to that Account needs a login
         // rather than just working.
-        Captured::NothingLive => say(
+        Captured::NothingLive => say::line(
             out,
             "There was no live Credential to Capture — Claude Code was logged out.",
         )?,
         // The live store held something that was not a Credential. Said rather
         // than swallowed, and not refused either: bytes nothing can read are not
         // a Rotation, and this Switch puts a usable Credential back in front.
-        Captured::Unreadable { outgoing, why } => say(
+        Captured::Unreadable { outgoing, why } => say::line(
             out,
             &format!(
                 "The live Credential could not be read, so it was not Captured \
@@ -215,14 +215,14 @@ fn report(
         )?,
         // Also worth saying: whatever was live belonged to no Account Perch
         // holds, so it was replaced rather than kept anywhere.
-        Captured::NoOutgoing => say(
+        Captured::NoOutgoing => say::line(
             out,
             "Perch held no active Account, so there was nothing to Capture.",
         )?,
         // A `perch run` against the Account being left Rotated its own Profile's
         // copy, so the live one is the older. Said, because it is the one case
         // where the Account keeps a Credential the live store never held.
-        Captured::Superseded { outgoing } => say(
+        Captured::Superseded { outgoing } => say::line(
             out,
             &format!(
                 "{outgoing}'s Profile already held a newer Credential than the \
@@ -231,7 +231,7 @@ fn report(
         )?,
         // The repair for a Switch that stopped before it named the Account it
         // had landed on. Nothing was Captured because nothing had moved on.
-        Captured::NothingToSave => say(
+        Captured::NothingToSave => say::line(
             out,
             &format!(
                 "{}'s Credential was already the live one, so there was nothing \
@@ -246,7 +246,7 @@ fn report(
     // what it was chosen on and the Scope the Cycle stayed inside. One line,
     // because the ranking is not worth defending.
     let named = registry.named_for_the_user(incoming.email());
-    say(
+    say::line(
         out,
         &match chosen {
             Some(chosen) => format!("Switched to {named}, {chosen}."),

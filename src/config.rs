@@ -12,6 +12,7 @@
 use crate::error::{PerchError, Result};
 use crate::name::UNGROUPED;
 use crate::registry::{self, Registry, Scope, Strategy};
+use crate::say;
 
 /// One Setting, as Perch names it.
 ///
@@ -247,7 +248,7 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
     Some(format!(
         "{} now holds {}, and nothing Cycles between them unasked: {} {} it may.",
         scope.described(),
-        crate::commands::accounts(held),
+        say::accounts(held),
         says.join(" and "),
         if says.len() == 1 { "says" } else { "say" },
     ))
@@ -383,6 +384,19 @@ pub fn listed(names: &[&str]) -> String {
                 .join(", ")
         ),
     }
+}
+
+/// What Cycling will not do with the Accounts in no Group until it is told it
+/// may, and which way the Setting gating the Scope is set — both halves, because
+/// the rule alone reads as "you have yet to say it" to somebody who has. Keyed
+/// from [`Setting`] and in the values a `set` takes, so neither
+/// can drift from it. The clause carries no label; a caller supplies one.
+pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
+    format!(
+        "only moves between these when you say it may — `{}` is {}",
+        Setting::Interchangeable.as_str(),
+        registry.ungrouped.interchangeable
+    )
 }
 
 #[cfg(test)]
@@ -621,7 +635,7 @@ mod tests {
         let key = Setting::Interchangeable.as_str();
         assert_eq!(Setting::parse_quietly(key), Some(Setting::Interchangeable));
         assert!(
-            crate::commands::cycling_among_ungrouped(&Registry::default()).contains(key),
+            cycling_among_ungrouped(&Registry::default()).contains(key),
             "the clause `perch list` and `perch group list` share names it",
         );
     }

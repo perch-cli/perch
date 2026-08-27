@@ -12,9 +12,9 @@
 use std::io::Write;
 
 use crate::ask;
-use crate::commands::{say, say_json};
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Platform};
+use crate::say;
 use crate::upgrade::{self, Channel, Replacement, Wanted};
 
 #[derive(Debug, Clone, Default, clap::Args)]
@@ -89,7 +89,7 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
             }
             std::cmp::Ordering::Less => {
                 if !agree_to_going_back(host, wanted, installed, args.yes, out)? {
-                    say(out, "Nothing was installed.")?;
+                    say::line(out, "Nothing was installed.")?;
                     return Ok(crate::error::EXIT_OK);
                 }
             }
@@ -108,7 +108,7 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     if replaced == crate::error::EXIT_OK
         && let Some(said) = crate::commands::service::refreshed_after_an_upgrade(host)
     {
-        say(out, &said)?;
+        say::line(out, &said)?;
     }
     Ok(replaced)
 }
@@ -196,7 +196,7 @@ fn check(
     let behind = upgrade::compare(&newest, installed) == std::cmp::Ordering::Greater;
 
     if json {
-        return say_json(
+        return say::json(
             out,
             &serde_json::json!({
                 "installed": installed,
@@ -207,9 +207,9 @@ fn check(
         );
     }
 
-    say(out, &format!("installed  {installed}"))?;
-    say(out, &format!("newest     {newest}"))?;
-    say(
+    say::line(out, &format!("installed  {installed}"))?;
+    say::line(out, &format!("newest     {newest}"))?;
+    say::line(
         out,
         &format!(
             "channel    {}",
@@ -219,7 +219,7 @@ fn check(
             )
         ),
     )?;
-    say(
+    say::line(
         out,
         match (behind, channel.is_some()) {
             // Said only where it is true: on a binary nothing placed, `perch
@@ -259,7 +259,7 @@ fn agree_to_going_back(
         )));
     }
 
-    say(
+    say::line(
         out,
         &format!(
             "{wanted} is older than the {installed} that is installed.\n\
@@ -287,7 +287,7 @@ fn hand_it_over(
     args: &[String],
     out: &mut dyn Write,
 ) -> Result<i32> {
-    say(out, &crate::host::as_typed(program, args))?;
+    say::line(out, &crate::host::as_typed(program, args))?;
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     host.exec_interactive(&program.to_string_lossy(), &borrowed, &[])
         .map_err(|err| {
@@ -316,7 +316,7 @@ fn replace_it_ourselves(host: &dyn Host, tag: &str, out: &mut dyn Write) -> Resu
     host.write_private_file(&at, script)
         .map_err(|err| PerchError::Other(format!("could not write {}: {err}", at.display())))?;
 
-    say(out, &format!("installing {tag} over this Installation"))?;
+    say::line(out, &format!("installing {tag} over this Installation"))?;
 
     let ran = run_the_installer(host, &at, tag);
 

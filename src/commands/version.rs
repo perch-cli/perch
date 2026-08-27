@@ -7,13 +7,13 @@
 
 use std::io::Write;
 
-use crate::commands::write_failed;
 use crate::error::Result;
 use crate::host::Host;
+use crate::say;
 use crate::upgrade;
 
 /// Written rather than said: the report carries its own newline and may be two
 /// lines, where `say` is one line with a newline put on it.
 pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
-    write!(out, "{}", upgrade::version_report(host)).map_err(write_failed)
+    write!(out, "{}", upgrade::version_report(host)).map_err(say::failed)
 }

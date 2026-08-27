@@ -11,6 +11,7 @@ use crate::login;
 use crate::probe::{self, Findings, Store, Verdict};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
+use crate::say;
 
 /// Loads the registry, adopting the existing login the first time Perch runs.
 ///
@@ -134,7 +135,7 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
 /// A remark rather than output: this is news about the machine, and two of the
 /// callers that reach adoption render JSON on the stream it would land on.
 fn report(host: &dyn Host, findings: &Findings) {
-    let description = crate::commands::described(
+    let description = say::described(
         &findings.identity.email,
         findings.identity.organization_name.as_deref(),
         findings.credential.subscription_type.as_deref(),

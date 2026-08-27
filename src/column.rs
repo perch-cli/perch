@@ -13,9 +13,9 @@ use std::io::Write;
 
 use unicode_width::UnicodeWidthStr;
 
-use crate::commands::write_failed;
 use crate::error::Result;
 use crate::host::Shown;
+use crate::say;
 
 /// How many terminal cells a string is drawn in. Not its bytes and not its
 /// characters: a CJK Group name is drawn two columns per character and a
@@ -53,7 +53,7 @@ pub const LABEL_WIDTH: usize = 14;
 /// Writes a label and a value in that column, for the surfaces that render an
 /// Account as labeled lines.
 pub fn write_labeled(out: &mut dyn Write, label: &str, value: &Shown) -> Result<()> {
-    writeln!(out, "{}{value}", padded(&Shown::of(label), LABEL_WIDTH)).map_err(write_failed)
+    writeln!(out, "{}{value}", padded(&Shown::of(label), LABEL_WIDTH)).map_err(say::failed)
 }
 
 #[cfg(test)]

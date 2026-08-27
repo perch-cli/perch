@@ -23,6 +23,7 @@ use crate::name;
 use crate::probe::{self, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Registry};
+use crate::say;
 
 /// Refuses to import onto a machine still holding anything, and names the one
 /// command that makes room.
@@ -42,13 +43,9 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
     }
 
     let holding = match (accounts, groups) {
-        (0, declared) => format!("no Account but {}", crate::commands::groups(declared)),
-        (held, 0) => crate::commands::accounts(held),
-        (held, declared) => format!(
-            "{} and {}",
-            crate::commands::accounts(held),
-            crate::commands::groups(declared)
-        ),
+        (0, declared) => format!("no Account but {}", say::groups(declared)),
+        (held, 0) => say::accounts(held),
+        (held, declared) => format!("{} and {}", say::accounts(held), say::groups(declared)),
     };
     // Said only where a Group is part of what is held: an Import refused over
     // Accounts alone is refused for the sentence above it.

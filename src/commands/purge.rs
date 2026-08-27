@@ -13,13 +13,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::ask;
-use crate::commands::{export, say, still_ours};
+use crate::commands::{export, still_ours};
+use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::{Host, Platform};
 use crate::probe::Installed;
 use crate::purge::{self, Purged};
 use crate::registry::{self, Account, Registry};
+use crate::say;
 
 /// The word, typed out. A letter is what fingers answer before eyes have read
 /// anything, and this is the one command nothing undoes.
@@ -62,7 +64,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
 
     purge::refuse_while_anything_is_running(host, &registry, &installed)?;
 
-    say(
+    say::line(
         out,
         &what_will_go(
             &registry,
@@ -97,11 +99,11 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
             // Export written a question ago is a file full of working
             // Credentials at a path the user is about to stop thinking about.
             return match exported {
-                Some(path) => say(
+                Some(path) => say::line(
                     out,
                     &format!("Nothing was purged. {}", the_export_is_at(&path)),
                 ),
-                None => say(out, "Nothing was purged."),
+                None => say::line(out, "Nothing was purged."),
             };
         }
     }
@@ -243,7 +245,7 @@ fn what_will_go(
                 "Perch holds {} under {} that it cannot name{}. A Purge empties \
                  every one of their Credential Stores and deletes {} itself. \
                  {NOTHING_UNDOES_IT}{and_the_service}",
-                crate::commands::profiles(profiles),
+                say::profiles(profiles),
                 home.display(),
                 // Only where the registry is the reason: one that parsed and
                 // names nobody is the ordinary leftover of a login that died at
@@ -263,7 +265,7 @@ fn what_will_go(
          holds for them, and {} itself. {NOTHING_UNDOES_IT}\n\
          Claude Code goes on running as whatever it is logged in as — the live \
          Credential is not Perch's to take away.{and_the_service}",
-        crate::commands::accounts(accounts.len()),
+        say::accounts(accounts.len()),
         accounts.join(", "),
         home.display(),
     )
@@ -390,7 +392,7 @@ fn report(
     // Said as what happened rather than as a count, because "Purged 0 Accounts"
     // is not a sentence — and holding none is a real state here: it is what a
     // Purge that stopped in its last step leaves for the next one to finish.
-    say(
+    say::line(
         out,
         &match (purged.accounts, purged.unnamed.profiles) {
             (0, 0) => format!(
@@ -403,13 +405,13 @@ fn report(
             // registry would not parse still held every one of these.
             (0, profiles) => format!(
                 "Purged {} Perch could not name, {} among them, and {} is gone.",
-                crate::commands::profiles(profiles),
-                crate::commands::credentials(purged.unnamed.credentials),
+                say::profiles(profiles),
+                say::credentials(purged.unnamed.credentials),
                 home.display(),
             ),
             (accounts, _) => format!(
                 "Purged {}, and {} is gone.",
-                crate::commands::accounts(accounts),
+                say::accounts(accounts),
                 home.display(),
             ),
         },
@@ -417,12 +419,12 @@ fn report(
 
     // Beside a count of Accounts, because that count does not include them.
     if purged.accounts > 0 && purged.unnamed.profiles > 0 {
-        say(
+        say::line(
             out,
             &format!(
                 "{} under it named no Account, and {} deleted with them.",
-                crate::commands::profiles(purged.unnamed.profiles),
-                crate::commands::credentials(purged.unnamed.credentials),
+                say::profiles(purged.unnamed.profiles),
+                say::credentials(purged.unnamed.credentials),
             ),
         )?;
     }
@@ -431,12 +433,12 @@ fn report(
     // is still logged in as is said in the question this run was agreed to, which
     // is where it is load-bearing (ADR perch-says-what-it-did).
     if purged.credentials < purged.accounts {
-        say(
+        say::line(
             out,
             &format!(
                 "{} of them had nothing in either Credential Store to delete — {}.",
-                crate::commands::accounts(purged.accounts - purged.credentials),
-                crate::commands::a_store_that_held_nothing(host),
+                say::accounts(purged.accounts - purged.credentials),
+                credentials::a_store_that_held_nothing(host),
             ),
         )?;
     }
@@ -445,7 +447,7 @@ fn report(
     // one wrote: the path is the only thing left that names the Holdings, and
     // the run that destroyed them is where it matters most.
     if let Some(path) = exported {
-        say(out, &the_export_is_at(path))?;
+        say::line(out, &the_export_is_at(path))?;
     }
 
     Ok(())

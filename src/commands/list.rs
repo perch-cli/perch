@@ -15,7 +15,8 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::column;
-use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, group, say, say_json, write_failed};
+use crate::commands::group;
+use crate::config;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Shown};
@@ -24,6 +25,7 @@ use crate::name;
 use crate::name::UNGROUPED;
 use crate::observe::Report;
 use crate::registry::{self, Account, Registry};
+use crate::say;
 use crate::utilization;
 
 /// What a listing was asked for. `scope` is the word as it was typed rather than
@@ -110,7 +112,7 @@ impl Scope {
         match self {
             Scope::Everything => None,
             Scope::Group(name) => Some(group_heading(name)),
-            Scope::Ungrouped => Some(IN_NO_GROUP.to_string()),
+            Scope::Ungrouped => Some(listing::IN_NO_GROUP.to_string()),
         }
     }
 
@@ -344,7 +346,7 @@ fn render_human(
     report.write_notes_beside_the_accounts(out)?;
 
     if let Some(heading) = scope.heading() {
-        say(out, &heading)?;
+        say::line(out, &heading)?;
     }
 
     // One table rather than one per section: a table that broke for a heading
@@ -353,13 +355,13 @@ fn render_human(
     let accounts = &listing::flattened(sections);
     let rows = rows(registry, accounts, now);
     if rows.is_empty() {
-        say(out, &nothing_here(registry, scope))?;
+        say::line(out, &nothing_here(registry, scope))?;
         // The footer's one line that is about the machine rather than about the
         // rows: a Scope holding nobody is as unsettled as any other, and this is
         // the whole of what a listing of it has to say.
         if let Some(line) = registry.active().a_switch_in_flight() {
-            say(out, "")?;
-            say(out, &line)?;
+            say::line(out, "")?;
+            say::line(out, &line)?;
         }
         return Ok(());
     }
@@ -411,15 +413,18 @@ fn render_human(
         // After the Reserve, because it qualifies it: the count above is over
         // Accounts a Cycle may move between, and this is the sentence saying
         // whether it may.
-        footer.push(format!("Cycling {}.", cycling_among_ungrouped(registry)));
+        footer.push(format!(
+            "Cycling {}.",
+            config::cycling_among_ungrouped(registry)
+        ));
     }
     footer.extend(what_is_broken(registry, accounts));
 
     if !footer.is_empty() {
-        say(out, "")?;
+        say::line(out, "")?;
     }
     for line in footer {
-        say(out, &line)?;
+        say::line(out, &line)?;
     }
 
     Ok(())
@@ -475,7 +480,7 @@ fn write_row(
         line.push_str("  ");
     }
     line.push_str(figure);
-    writeln!(out, "{}", line.trim_end()).map_err(write_failed)
+    writeln!(out, "{}", line.trim_end()).map_err(say::failed)
 }
 
 /// A listing with nothing in it, said as the state it is rather than as an
@@ -529,7 +534,7 @@ fn render_json(
         "refresh": report.document(),
     });
 
-    say_json(out, &document)
+    say::json(out, &document)
 }
 
 #[cfg(test)]

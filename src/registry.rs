@@ -1719,12 +1719,72 @@ fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
         .map_err(|err| PerchError::file_write(path, err))
 }
 
+/// Why there is no active Account, in the terms the way out depends on: holding
+/// nothing, a login is the way in; holding Accounts, Perch has merely been left
+/// on nobody and naming one is what `perch switch` is for. `because` is what the
+/// command wanted an active Account for. One function, because two commands meet
+/// this state and only one of them told the difference.
+pub fn no_active_account(registry: &Registry, because: &str) -> PerchError {
+    if registry.accounts.is_empty() {
+        return PerchError::NotFound(format!(
+            "Perch holds no Accounts{because}. Run `claude` and log in, then run \
+             Perch again."
+        ));
+    }
+    PerchError::NotFound(format!(
+        "Perch holds no active Account{because}. `perch switch <target>` makes \
+         {} active.",
+        match registry.accounts.len() {
+            1 => "the one it holds".to_string(),
+            held => format!("one of the {held} it holds"),
+        }
+    ))
+}
+
+/// Refuses to act on an Account whose Credential no longer works, in the words of
+/// whichever command was asked; `consequence` is what did not happen and why it
+/// would have been worse than nothing. One function rather than one per command:
+/// `perch run` and `perch switch` meet this state over the same Account and must
+/// not describe it in two ways.
+pub fn refuse_a_quarantined_account(
+    registry: &Registry,
+    email: &str,
+    consequence: &str,
+) -> Result<()> {
+    let account = registry.held(email)?;
+    match account.quarantine {
+        None => Ok(()),
+        Some(why) => Err(why.refusal(&registry.named_for_the_user(email), email, consequence)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::host::Refusing;
     use crate::host::prelude::*;
     use chrono::TimeZone;
+
+    /// The way out turns on what is held, and both commands that meet this state
+    /// read the same sentence: a login is the answer only where there is nothing
+    /// to switch to.
+    #[test]
+    fn what_to_do_about_no_active_account_depends_on_what_perch_holds() {
+        let empty = Registry::default();
+        let said = no_active_account(&empty, "").to_string();
+        assert!(said.contains("no Accounts"), "{said}");
+        assert!(said.contains("`claude`"), "{said}");
+
+        let mut held = Registry::default();
+        held.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
+        let said = no_active_account(&held, ", so there is no Group to Cycle within").to_string();
+        assert!(said.contains("no Group to Cycle within"), "{said}");
+        assert!(said.contains("the one it holds"), "{said}");
+        assert!(
+            !said.contains("`claude`"),
+            "a login repairs nothing here: {said}"
+        );
+    }
 
     #[test]
     fn an_account_is_found_however_its_address_is_capitalized() {

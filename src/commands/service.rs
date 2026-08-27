@@ -11,11 +11,11 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::commands::{say, say_json};
 use crate::cycle;
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::holdings;
 use crate::host::{Host, Platform};
+use crate::say;
 use crate::service::{self, Driven, Manager, Standing, Unit};
 use crate::{registry, upgrade};
 
@@ -74,7 +74,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // What it did and which binary it baked in, and nothing about starting at login
     // (ADR perch-says-what-it-did). The log stays, because where a Service writes
     // differs by platform.
-    say(
+    say::line(
         out,
         &format!(
             "{} {} as {}.",
@@ -86,7 +86,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             manager.described(),
         ),
     )?;
-    say(
+    say::line(
         out,
         &format!(
             "Its decisions go to {}.",
@@ -95,7 +95,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     )?;
 
     if any_scope_may_act(host) == Some(false) {
-        say(out, service::HOLDS_FOR_A_GRANT)?;
+        say::line(out, service::HOLDS_FOR_A_GRANT)?;
     }
     Ok(EXIT_OK)
 }
@@ -125,13 +125,13 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 
     match installed {
         true => {
-            say(out, TAKEN_BACK)?;
+            say::line(out, TAKEN_BACK)?;
             Ok(EXIT_OK)
         }
         // The code for a request that was already true: a machine with no Service is
         // the machine an `uninstall` was asked to produce.
         false => {
-            say(
+            say::line(
                 out,
                 "There is no Service installed, so there was nothing to take \
                  back.",
@@ -149,10 +149,10 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
     let standing = asked_of_the_machine(host)?;
     match json {
-        true => say_json(out, &standing.document())?,
+        true => say::json(out, &standing.document())?,
         false => {
             for line in standing.lines() {
-                say(out, &line)?;
+                say::line(out, &line)?;
             }
         }
     }
@@ -240,7 +240,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
 
     take_the_unit_back(host, at.as_deref())?;
 
-    say(out, TAKEN_BACK)?;
+    say::line(out, TAKEN_BACK)?;
     Ok(true)
 }
 

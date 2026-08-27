@@ -16,11 +16,12 @@ use crate::adopt;
 use zeroize::Zeroizing;
 
 use crate::ask;
-use crate::commands::{say, still_ours};
+use crate::commands::still_ours;
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::host::Host;
 use crate::registry::Registry;
+use crate::say;
 
 pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Before the passphrase, because all three are refusals somebody should meet
@@ -178,7 +179,7 @@ fn refuse_a_directory_that_is_not_there(host: &dyn Host, path: &Path) -> Result<
 /// once is a file nobody finds out is unreadable until the machine it would have
 /// restored is gone. Empty is the same skip, typed rather than configured.
 fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
-    say(
+    say::line(
         out,
         "This file holds a working Credential for every Account Perch has. It is \
          encrypted with a passphrase you choose, and there is no way into it \
@@ -211,18 +212,18 @@ fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<S
 /// it (ADR perch-says-what-it-did). The Accounts without a Credential are.
 fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     let accounts = export.accounts();
-    say(
+    say::line(
         out,
         &format!(
             "Exported {} to {}.",
-            crate::commands::accounts(accounts),
+            say::accounts(accounts),
             path.display(),
         ),
     )?;
 
     let bare = export.without_a_credential();
     if !bare.is_empty() {
-        say(
+        say::line(
             out,
             &format!(
                 "Neither Credential Store held anything for {}, so the Export \
