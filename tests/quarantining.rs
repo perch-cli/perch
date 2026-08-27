@@ -14,7 +14,7 @@ mod common;
 use common::*;
 use perch::anthropic::{PROFILE_URL, TOKEN_URL, USAGE_URL};
 use perch::error::{EXIT_NOTHING_TO_DO, EXIT_QUARANTINED};
-use perch::host::FakeHost;
+use perch::host::{FakeHost, Refusing};
 use perch::registry::Quarantine;
 
 /// A Credential whose access token ran out twenty minutes ago, so anything that
@@ -105,7 +105,7 @@ fn a_rotation_that_could_not_be_stored_quarantines_rather_than_reading_as_a_fail
     // and the keychain will not take it either: Anthropic has retired the old
     // refresh token and Perch cannot keep the new one.
     let host = machine_with_two_accounts()
-        .with_unwritable_file(CREDENTIALS_PATH, "no space left on device")
+        .with_a_path_refusing(CREDENTIALS_PATH, Refusing::Write, "no space left on device")
         .with_reply(TOKEN_URL, 200, RENEWED);
     host.forget_keychain_item(DEFAULT_SERVICE, LOGIN_NAME);
     host.set_file(CREDENTIALS_PATH, SPENT);
@@ -126,7 +126,7 @@ fn a_rotation_that_could_not_be_stored_quarantines_rather_than_reading_as_a_fail
 #[test]
 fn a_renewal_that_rotated_nothing_is_a_failed_reading_rather_than_a_quarantine() {
     let host = machine_with_two_accounts()
-        .with_unwritable_file(CREDENTIALS_PATH, "no space left on device")
+        .with_a_path_refusing(CREDENTIALS_PATH, Refusing::Write, "no space left on device")
         .with_reply(TOKEN_URL, 200, RENEWED_WITHOUT_ROTATION);
     host.forget_keychain_item(DEFAULT_SERVICE, LOGIN_NAME);
     host.set_file(CREDENTIALS_PATH, SPENT);

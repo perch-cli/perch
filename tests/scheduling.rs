@@ -17,9 +17,9 @@ use perch::error::{
     EXIT_HELD, EXIT_INVALID, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NO_CANDIDATE, EXIT_NOT_FOUND,
     EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
-use perch::host::FakeHost;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Refusing};
 
 /// A machine where a check finds the active Account following `here` and the Account it
 /// could move to following `there` — one figure per reading, the last of them for every
@@ -416,7 +416,7 @@ fn a_check_stopped_by_something_that_will_not_clear_itself_exits_on_it() {
     let plaintext = store_of(&host, EMAIL).credentials_file;
     let host = host
         .with_keychain_truncating_after(20)
-        .with_unwritable_file(&plaintext, "no space left on device");
+        .with_a_path_refusing(&plaintext, Refusing::Write, "no space left on device");
 
     let (result, printed) = run_watch_once(&host);
 
@@ -458,7 +458,8 @@ fn a_check_with_nobody_active_says_there_is_nothing_to_watch() {
 
 #[test]
 fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed() {
-    let host = checked(&[95.0], &[10.0]).with_unwritable_file(REGISTRY_PATH, "read-only");
+    let host =
+        checked(&[95.0], &[10.0]).with_a_path_refusing(REGISTRY_PATH, Refusing::Write, "read-only");
 
     let (result, printed) = run_watch_once(&host);
 
@@ -484,7 +485,7 @@ fn a_check_that_switched_and_then_failed_still_paces_the_next_one() {
     let host = checked(&[86.0], &[5.0]);
     // The Credential is written and the Identity patch is what fails, so the machine is
     // part way through a Switch rather than untouched.
-    let host = host.with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let host = host.with_a_path_refusing(IDENTITY_PATH, Refusing::Write, "read-only file");
     let switched_at = host.now();
 
     let (result, _) = run_watch_once(&host);

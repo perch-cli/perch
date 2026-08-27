@@ -11,7 +11,7 @@ use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
 use perch::host::prelude::*;
-use perch::host::{FakeHost, Platform, fake::Effect};
+use perch::host::{FakeHost, Platform, Refusing, fake::Effect};
 
 /// A machine with the first Account already adopted and a second login waiting
 /// to be run.
@@ -569,8 +569,9 @@ fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
 
     let host = host
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
-        .with_unwritable_file(
+        .with_a_path_refusing(
             "/Users/someone/.config/perch/profiles/overflow-example-com/.claude.json",
+            Refusing::Write,
             "Permission denied (os error 13)",
         );
     let (result, _) = run_add(&host, add_to_group("work"));
@@ -602,8 +603,9 @@ fn a_profile_whose_credential_would_not_go_down_is_not_left_behind() {
     let host = host
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
         .with_platform(Platform::Other)
-        .with_unwritable_file(
+        .with_a_path_refusing(
             "/Users/someone/.config/perch/profiles/overflow-example-com/.credentials.json",
+            Refusing::Write,
             "Permission denied (os error 13)",
         );
     let profile = store_of(&host, SECOND_EMAIL).config_dir;
@@ -629,7 +631,11 @@ fn a_profile_the_registry_would_not_record_is_taken_back_out_again() {
 
     let host = host
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
-        .with_unwritable_file(REGISTRY_PATH, "Permission denied (os error 13)");
+        .with_a_path_refusing(
+            REGISTRY_PATH,
+            Refusing::Write,
+            "Permission denied (os error 13)",
+        );
 
     let (result, _) = run_add(&host, add_to_group("work"));
 
@@ -917,7 +923,7 @@ fn a_login_whose_identity_file_cannot_be_read_is_refused_by_name() {
     let store = perch::probe::store_for_profile(&host, &pending).expect("USER is set");
 
     let host = host
-        .with_unreadable_file(&store.identity_file, "permission denied")
+        .with_a_path_refusing(&store.identity_file, Refusing::Read, "permission denied")
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
 
     let (result, _) = run_add(&host, AddArgs::default());
@@ -985,7 +991,7 @@ fn a_login_whose_sessions_directory_will_not_be_read_is_never_reaped_either() {
     let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     let sessions = perch::probe::sessions_dir(&pending);
     host.create_dir_all(&sessions).expect("the login made it");
-    let host = host.with_unlistable_dir(&sessions, "permission denied");
+    let host = host.with_a_path_refusing(&sessions, Refusing::List, "permission denied");
 
     // Long past the point where an abandoned one would have gone.
     host.set_now(host.now() + chrono::Duration::hours(6));

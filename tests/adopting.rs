@@ -9,7 +9,7 @@ mod common;
 use common::*;
 use perch::error::{EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_PROBE_REFUSED};
 use perch::host::prelude::*;
-use perch::host::{Execution, FakeHost};
+use perch::host::{Execution, FakeHost, Refusing};
 use perch::registry;
 
 #[test]
@@ -193,8 +193,9 @@ fn an_identity_file_perch_cannot_parse_is_refused_and_names_the_assumption() {
 fn an_identity_file_that_cannot_be_read_is_not_reported_as_a_missing_account() {
     let host = machine_with_claude_code()
         .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
-        .with_unreadable_file(
+        .with_a_path_refusing(
             "/Users/someone/.claude.json",
+            Refusing::Read,
             "Permission denied (os error 13)",
         );
 
@@ -303,7 +304,11 @@ fn a_login_whose_address_names_no_directory_is_refused_rather_than_adopted() {
 /// outside Perch's home entirely.
 #[test]
 fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {
-    let host = logged_in_machine().with_unwritable_file(REGISTRY_PATH, "no space left on device");
+    let host = logged_in_machine().with_a_path_refusing(
+        REGISTRY_PATH,
+        Refusing::Write,
+        "no space left on device",
+    );
     let dir = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
     let store = perch::probe::store_for_profile(&host, &dir).expect("USER is set");
 

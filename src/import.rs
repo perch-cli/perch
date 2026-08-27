@@ -387,6 +387,7 @@ fn landed(host: &dyn Host, store: &Store, carried: &str) -> bool {
 mod tests {
     use super::*;
     use crate::export::CURRENT_VERSION;
+    use crate::host::Refusing;
     use crate::host::prelude::*;
     use crate::probe::Identity;
     use crate::registry::Active;
@@ -661,7 +662,7 @@ mod tests {
         let second = holdings::profile_dir_for(&host, "two@example.com")
             .unwrap()
             .join(".credentials.json");
-        let host = host.with_unwritable_file(&second, "No space left on device");
+        let host = host.with_a_path_refusing(&second, Refusing::Write, "No space left on device");
         let mut export = an_export();
         export
             .credentials

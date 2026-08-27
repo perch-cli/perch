@@ -10,7 +10,7 @@ mod common;
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::EXIT_KEYCHAIN_UNAVAILABLE;
-use perch::host::{FakeHost, Files, Platform};
+use perch::host::{FakeHost, Files, Platform, Refusing};
 
 /// The Credential of an Account that has since Rotated several times: what a
 /// copy left behind in the store Perch stopped writing to would be.
@@ -99,7 +99,7 @@ fn a_credential_file_others_could_read_is_tightened_and_reported_rather_than_ref
 fn a_credential_file_that_cannot_be_tightened_is_still_said_out_loud() {
     let host = logged_in_machine_off_macos()
         .with_file_mode(CREDENTIALS_PATH, 0o644)
-        .with_unwritable_file(CREDENTIALS_PATH, "Operation not permitted");
+        .with_a_path_refusing(CREDENTIALS_PATH, Refusing::Write, "Operation not permitted");
 
     let (result, _) = run_status(&host, false);
 
@@ -261,7 +261,11 @@ fn a_credential_stored_in_the_second_choice_store_empties_the_first() {
 
     // The file this platform reads first can no longer be written — a full
     // disk, a mode Perch cannot undo — so the Switch has to use the other one.
-    let host = host.with_unwritable_file(live, "No space left on device (os error 28)");
+    let host = host.with_a_path_refusing(
+        live,
+        Refusing::Write,
+        "No space left on device (os error 28)",
+    );
     run_switch(&host, SECOND_EMAIL)
         .0
         .expect("a Switch is not lost to one store refusing");
@@ -294,8 +298,16 @@ fn a_superseded_copy_that_survives_in_the_store_read_first_is_a_failure() {
     // Readable, and neither writable nor removable: the file is still there and
     // still answers, so it still wins.
     let host = host
-        .with_unwritable_file(&live, "Read-only file system (os error 30)")
-        .with_undeletable_file(&live, "Read-only file system (os error 30)");
+        .with_a_path_refusing(
+            &live,
+            Refusing::Write,
+            "Read-only file system (os error 30)",
+        )
+        .with_a_path_refusing(
+            &live,
+            Refusing::Delete,
+            "Read-only file system (os error 30)",
+        );
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -470,7 +482,11 @@ fn a_switch_neither_store_would_keep_intact_stops_at_the_write() {
 fn a_store_that_would_not_take_the_write_at_all_keeps_the_credential_it_had() {
     let host = machine_with_two_accounts()
         .with_locked_keychain("the keychain is locked")
-        .with_unwritable_file(CREDENTIALS_PATH, "Permission denied (os error 13)");
+        .with_a_path_refusing(
+            CREDENTIALS_PATH,
+            Refusing::Write,
+            "Permission denied (os error 13)",
+        );
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -553,8 +569,16 @@ fn a_superseded_copy_that_is_already_gone_is_noted_and_not_refused() {
     // Never written and refusing the removal anyway, which is the state a
     // directory somebody took the write bit off leaves.
     let host = host
-        .with_unwritable_file(&store.credentials_file, "Permission denied (os error 13)")
-        .with_undeletable_file(&store.credentials_file, "Permission denied (os error 13)");
+        .with_a_path_refusing(
+            &store.credentials_file,
+            Refusing::Write,
+            "Permission denied (os error 13)",
+        )
+        .with_a_path_refusing(
+            &store.credentials_file,
+            Refusing::Delete,
+            "Permission denied (os error 13)",
+        );
 
     perch::profile::store_credential(&host, &store, CREDENTIAL)
         .expect("the keychain took it and the file holds nothing to supersede it");

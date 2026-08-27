@@ -13,7 +13,7 @@ use perch::error::{
     EXIT_CONFLICT, EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE,
 };
 use perch::host::prelude::*;
-use perch::host::{FakeHost, Platform};
+use perch::host::{FakeHost, Platform, Refusing};
 use perch::registry::{Active, Quarantine, Registry};
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -503,7 +503,7 @@ fn an_import_that_fails_part_way_takes_back_what_it_had_already_placed() {
     // one it is does not matter: what is under test is that the others do not
     // survive it.
     let refuses = store_of(&host, SECOND_EMAIL).credentials_file;
-    let host = host.with_unwritable_file(&refuses, "No space left on device");
+    let host = host.with_a_path_refusing(&refuses, Refusing::Write, "No space left on device");
 
     let (outcome, _printed) = run_import(&host, AT);
 
@@ -535,7 +535,11 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
     let orphan = store_of(&host, EMAIL);
     let host = host.with_file(&orphan.credentials_file, CREDENTIAL);
     let made = store_of(&host, SECOND_EMAIL);
-    let host = host.with_unwritable_file(&made.credentials_file, "No space left on device");
+    let host = host.with_a_path_refusing(
+        &made.credentials_file,
+        Refusing::Write,
+        "No space left on device",
+    );
 
     let (outcome, _printed) = run_import(&host, AT);
 
@@ -621,7 +625,11 @@ fn a_rollback_leaves_what_the_account_it_stopped_on_never_wrote() {
     let host = host
         .with_file(&landing.credentials_file, THIRD_CREDENTIAL)
         .with_file(&landing.identity_file, r#"{"hasCompletedOnboarding":true}"#)
-        .with_unwritable_file(&landing.credentials_file, "No space left on device");
+        .with_a_path_refusing(
+            &landing.credentials_file,
+            Refusing::Write,
+            "No space left on device",
+        );
 
     let (outcome, _printed) = run_import(&host, AT);
 
@@ -659,7 +667,7 @@ fn a_rollback_leaves_a_credential_this_import_never_wrote() {
         .with_platform(Platform::Other)
         .with_file(AT, &sealed)
         .with_secrets(&[PASSPHRASE])
-        .with_unwritable_file(REGISTRY_PATH, "No space left on device");
+        .with_a_path_refusing(REGISTRY_PATH, Refusing::Write, "No space left on device");
     // A directory the registry never named, holding somebody's live Credential —
     // the leftover a `perch add` that died at the browser step leaves.
     let landing = store_of(&host, THIRD_EMAIL);
@@ -688,7 +696,7 @@ fn a_registry_that_cannot_be_written_takes_every_profile_back_out_with_it() {
     let host = machine_with_claude_code()
         .with_file(AT, &sealed)
         .with_secrets(&[PASSPHRASE])
-        .with_unwritable_file(REGISTRY_PATH, "No space left on device");
+        .with_a_path_refusing(REGISTRY_PATH, Refusing::Write, "No space left on device");
 
     let (outcome, _printed) = run_import(&host, AT);
 
@@ -873,7 +881,11 @@ fn an_imported_profile_holds_the_identity_file_its_account_had() {
 fn an_account_whose_export_carried_no_identity_file_still_gets_one() {
     let from = machine_with_two_accounts();
     let unreadable = store_of(&from, SECOND_EMAIL).identity_file;
-    let from = from.with_unreadable_file(unreadable, "Permission denied (os error 13)");
+    let from = from.with_a_path_refusing(
+        unreadable,
+        Refusing::Read,
+        "Permission denied (os error 13)",
+    );
     let sealed = {
         let host = from.with_secrets(&[PASSPHRASE, PASSPHRASE]);
         run_export(&host, AT).0.expect("the export is written");
@@ -1011,7 +1023,7 @@ fn an_import_whose_sessions_directory_will_not_be_read_writes_nothing_and_says_s
     let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
     let sessions = perch::probe::sessions_dir(&profile);
     host.create_dir_all(&sessions).expect("it is left behind");
-    let host = host.with_unlistable_dir(&sessions, "permission denied");
+    let host = host.with_a_path_refusing(&sessions, Refusing::List, "permission denied");
 
     let (outcome, _) = run_import(&host, AT);
 

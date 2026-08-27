@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 
 use common::*;
 use perch::carry;
-use perch::host::FakeHost;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Refusing};
 
 /// Where the person's own `.claude.json` is: beside the Default Profile, as
 /// Claude Code writes it.
@@ -346,7 +346,7 @@ fn nothing_is_written_while_whether_a_client_is_running_has_no_answer() {
     let sessions = profile.join("sessions");
     host.create_dir_all(&sessions)
         .expect("the Profile is there");
-    let host = host.with_unlistable_dir(&sessions, "permission denied");
+    let host = host.with_a_path_refusing(&sessions, Refusing::List, "permission denied");
     let before = identity_of(&host, SECOND_EMAIL);
 
     let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");
@@ -403,7 +403,7 @@ fn a_profile_that_cannot_be_written_is_remarked_on_and_the_run_happens_anyway() 
         let host = machine();
         profile_of(&host, SECOND_EMAIL).join(".claude.json")
     };
-    let host = machine().with_unwritable_file(&identity, "permission denied");
+    let host = machine().with_a_path_refusing(&identity, Refusing::Write, "permission denied");
 
     let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");
 

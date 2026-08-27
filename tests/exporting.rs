@@ -13,7 +13,7 @@ use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
 use perch::export;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
-use perch::host::{FakeHost, PRIVATE_FILE_MODE};
+use perch::host::{FakeHost, PRIVATE_FILE_MODE, Refusing};
 use perch::registry::Quarantine;
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -282,7 +282,11 @@ fn nothing_the_export_holds_reaches_standard_output() {
 /// likely to say more than it meant to.
 #[test]
 fn a_write_that_fails_says_so_without_saying_what_it_was_writing() {
-    let host = a_machine_worth_backing_up().with_unwritable_file(AT, "No space left on device");
+    let host = a_machine_worth_backing_up().with_a_path_refusing(
+        AT,
+        Refusing::Write,
+        "No space left on device",
+    );
 
     let (outcome, printed) = run_export(&host, AT);
 

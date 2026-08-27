@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
-use perch::host::{FakeHost, Link, PRIVATE_DIR_MODE, Platform};
+use perch::host::{FakeHost, Link, PRIVATE_DIR_MODE, Platform, Refusing};
 use perch::reconcile::reconcile;
 
 /// The Default Profile: the configuration directory Claude Code falls back to,
@@ -224,7 +224,11 @@ fn nothing_is_ever_copied_into_the_profile() {
 
 #[test]
 fn a_link_that_cannot_be_made_refuses_and_names_the_entry_and_the_reason() {
-    let host = machine().with_unwritable_file(profile("plugins"), "Read-only file system");
+    let host = machine().with_a_path_refusing(
+        profile("plugins"),
+        Refusing::Write,
+        "Read-only file system",
+    );
 
     let refusal = run_reconcile(&host).expect_err("the Run does not launch");
 
@@ -243,7 +247,11 @@ fn a_link_that_cannot_be_made_refuses_and_names_the_entry_and_the_reason() {
 fn a_windows_refusal_says_what_it_tried_and_what_would_let_it_through() {
     let host = machine()
         .with_platform(Platform::Windows)
-        .with_unwritable_file(profile("CLAUDE.md"), "The device is not ready");
+        .with_a_path_refusing(
+            profile("CLAUDE.md"),
+            Refusing::Write,
+            "The device is not ready",
+        );
 
     let said = run_reconcile(&host)
         .expect_err("the Run does not launch")
@@ -588,7 +596,7 @@ fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mo
             "/Users/someone/.config/perch/profiles/somebody-else/plugins",
             &stale,
         )
-        .with_undeletable_file(&stale, "Permission denied (os error 13)");
+        .with_a_path_refusing(&stale, Refusing::Delete, "Permission denied (os error 13)");
 
     let said = run_reconcile(&host)
         .expect_err("the stale link cannot be replaced")

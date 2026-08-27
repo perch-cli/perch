@@ -500,6 +500,7 @@ fn gone_quiet_for(host: &dyn Host, at: &Path, stale_millis: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::host::Refusing;
     use crate::host::prelude::*;
     use std::path::{Path, PathBuf};
 
@@ -704,10 +705,10 @@ mod tests {
             // staleness window so the hiccup is the only thing under test —
             // `let_go_if_stale` owns what happens beyond it.
             host.sleep(10_000);
-            host.set_unwritable(&lock.dir, "Permission denied");
+            host.now_refusing(&lock.dir, Refusing::Write, "Permission denied");
             held.renew();
             still_held = held.still_held();
-            host.writable_again(&lock.dir);
+            host.no_longer_refusing(&lock.dir, Refusing::Write);
             Ok(())
         });
         ran.expect("the work finishes");
@@ -735,10 +736,10 @@ mod tests {
             // Inside the staleness window, for the reason the touch case above
             // gives.
             host.sleep(10_000);
-            host.set_unreadable(&lock.dir, "Permission denied");
+            host.now_refusing(&lock.dir, Refusing::Read, "Permission denied");
             held.renew();
             still_held = held.still_held();
-            host.forget_unreadable(&lock.dir);
+            host.no_longer_refusing(&lock.dir, Refusing::Read);
             Ok(())
         });
         ran.expect("the work finishes");
@@ -768,9 +769,9 @@ mod tests {
             let mut still_held = true;
             let ran: Result<()> = under(&host, vec![lock.clone()], |held| {
                 if unreadable {
-                    host.set_unreadable(&lock.dir, "Permission denied");
+                    host.now_refusing(&lock.dir, Refusing::Read, "Permission denied");
                 } else {
-                    host.set_unwritable(&lock.dir, "Permission denied");
+                    host.now_refusing(&lock.dir, Refusing::Write, "Permission denied");
                 }
                 // Past the window rather than merely past the update interval,
                 // which is what tells this apart from a hiccup.
@@ -778,9 +779,9 @@ mod tests {
                 held.renew();
                 still_held = held.still_held();
                 if unreadable {
-                    host.forget_unreadable(&lock.dir);
+                    host.no_longer_refusing(&lock.dir, Refusing::Read);
                 } else {
-                    host.writable_again(&lock.dir);
+                    host.no_longer_refusing(&lock.dir, Refusing::Write);
                 }
                 Ok(())
             });
@@ -812,12 +813,12 @@ mod tests {
             // Unreadable from here to the end, so the read `release` makes is
             // the one that fails — a `chmod` on the parent, an EIO, the handle
             // contention Windows shows for a directory something else is in.
-            host.set_unreadable(&lock.dir, "Permission denied");
+            host.now_refusing(&lock.dir, Refusing::Read, "Permission denied");
             Ok(())
         });
         ran.expect("the work finishes");
 
-        host.forget_unreadable(&lock.dir);
+        host.no_longer_refusing(&lock.dir, Refusing::Read);
         assert!(
             !host.path_exists(Path::new(&lock.dir)),
             "an unreadable artifact is Perch's own I/O faltering, not evidence \
@@ -863,7 +864,8 @@ mod tests {
     #[test]
     fn a_lock_nothing_can_be_established_about_is_waited_on_rather_than_taken() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
-        let host = FakeHost::new().with_unreadable_file(&lock.dir, "Permission denied");
+        let host =
+            FakeHost::new().with_a_path_refusing(&lock.dir, Refusing::Read, "Permission denied");
         // Held by somebody, and refusing to say when they last said so.
         already_held(&host, &lock);
 
@@ -883,7 +885,8 @@ mod tests {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
         // Nothing is at the path, so the take itself succeeds — and then the
         // stamp cannot be read.
-        let host = FakeHost::new().with_unreadable_file(&lock.dir, "Permission denied");
+        let host =
+            FakeHost::new().with_a_path_refusing(&lock.dir, Refusing::Read, "Permission denied");
 
         let mut ran = false;
         let outcome: Result<()> = under(&host, vec![lock.clone()], |_| {
@@ -969,7 +972,8 @@ mod tests {
             "without clearing it: a takeover is asked for by asking to hold it"
         );
 
-        let host = FakeHost::new().with_unreadable_file(&lock.dir, "Permission denied");
+        let host =
+            FakeHost::new().with_a_path_refusing(&lock.dir, Refusing::Read, "Permission denied");
         assert_eq!(
             is_held(&host, &lock),
             None,

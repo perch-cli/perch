@@ -1005,6 +1005,7 @@ fn not_renewed(why: Refused) -> Outcome {
 mod tests {
     use super::*;
     use crate::host::FakeHost;
+    use crate::host::Refusing;
     use crate::host::prelude::*;
 
     fn attempt(email: &str, outcome: Outcome) -> Attempt {
@@ -1023,7 +1024,11 @@ mod tests {
         let dir = std::path::PathBuf::from("/Users/someone/.claude");
         let host = FakeHost::new()
             .with_env("USER", "someone")
-            .with_unlistable_dir(crate::probe::sessions_dir(&dir), "permission denied");
+            .with_a_path_refusing(
+                crate::probe::sessions_dir(&dir),
+                Refusing::List,
+                "permission denied",
+            );
         host.create_dir_all(&crate::probe::sessions_dir(&dir))
             .expect("the directory is there and will not be read");
         let asked = Asked {

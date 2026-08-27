@@ -16,7 +16,7 @@ use perch::commands::watcher::WatcherCommand;
 use perch::error::{EXIT_HELD, EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_OK};
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
-use perch::host::{Execution, FakeHost, Platform};
+use perch::host::{Execution, FakeHost, Platform, Refusing};
 use std::path::PathBuf;
 
 /// Where a `systemd --user` unit goes on the fixture's machine.
@@ -715,7 +715,7 @@ fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
 #[test]
 fn a_watcher_lock_that_will_not_be_taken_at_all_is_not_a_watcher_that_is_running() {
     let spec = perch::holdings::watcher_lock_spec(&linux()).expect("home is known");
-    let host = linux().with_unwritable_file(&spec.dir, "the filesystem said no");
+    let host = linux().with_a_path_refusing(&spec.dir, Refusing::Write, "the filesystem said no");
     run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");

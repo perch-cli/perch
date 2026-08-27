@@ -11,8 +11,8 @@ mod common;
 use common::*;
 use perch::commands::remove::RemoveArgs;
 use perch::error::{EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
-use perch::host::FakeHost;
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Refusing};
 use perch::probe::Identity;
 use perch::registry::{Account, Active};
 
@@ -221,7 +221,11 @@ fn removing_the_active_account_names_what_will_be_active_and_asks_first() {
 fn a_removal_that_fails_after_landing_still_records_who_is_live() {
     let host = machine_with_two_accounts()
         .with_answers(&["y"])
-        .with_undeletable_file(format!("{FIRST_PROFILE}/.credentials.json"), "read-only");
+        .with_a_path_refusing(
+            format!("{FIRST_PROFILE}/.credentials.json"),
+            Refusing::Delete,
+            "read-only",
+        );
 
     let (result, printed) = run_remove(&host, EMAIL);
 
@@ -247,7 +251,7 @@ fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happe
     // Both stores hold a copy — the state a Profile is left in by a machine that
     // has been both — and only the file will not be given up.
     host.set_file(&store.credentials_file, CREDENTIAL);
-    let host = host.with_undeletable_file(&store.credentials_file, "read-only");
+    let host = host.with_a_path_refusing(&store.credentials_file, Refusing::Delete, "read-only");
 
     let (result, printed) = run_remove(&host, EMAIL);
 
@@ -790,7 +794,11 @@ fn a_lock_somebody_is_holding_stops_a_removal_as_held_rather_than_as_a_fault() {
 
 #[test]
 fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
-    let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        REGISTRY_PATH,
+        Refusing::Write,
+        "read-only",
+    );
 
     let (result, _) = run_remove_with(
         &host,
@@ -817,7 +825,11 @@ fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
 
 #[test]
 fn a_landing_perch_cannot_write_down_removes_nothing_and_moves_nothing() {
-    let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        REGISTRY_PATH,
+        Refusing::Write,
+        "read-only",
+    );
 
     let (result, _) = run_remove_with(
         &host,
@@ -898,7 +910,7 @@ fn a_profile_directory_that_will_not_go_is_a_note_rather_than_a_failure() {
     // build joins paths with the other separator, so a fixture holding the
     // forward-slash spelling would assert on a path nothing ever prints.
     let profile = store_of(&host, SECOND_EMAIL).config_dir;
-    let host = host.with_undeletable_file(&profile, "in use");
+    let host = host.with_a_path_refusing(&profile, Refusing::Delete, "in use");
 
     let (result, _) = run_remove_with(
         &host,

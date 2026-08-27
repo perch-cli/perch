@@ -26,7 +26,7 @@ pub mod fake;
 pub mod real;
 
 #[cfg(any(test, feature = "fakes"))]
-pub use fake::FakeHost;
+pub use fake::{FakeHost, Refusing};
 pub use real::RealHost;
 
 /// The result of running another program.

@@ -1722,6 +1722,7 @@ fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::Refusing;
     use crate::host::prelude::*;
     use chrono::TimeZone;
 
@@ -2374,7 +2375,11 @@ mod tests {
         let before = format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[]}}");
         let host = crate::host::FakeHost::new()
             .with_file(path, &before)
-            .with_unwritable_file(path, "No space left on device (os error 28)");
+            .with_a_path_refusing(
+                path,
+                Refusing::Write,
+                "No space left on device (os error 28)",
+            );
 
         // Holding the Account its `active` names, so `validate` passes and the
         // unwritable file is what fails the save: refused at the first step, the
@@ -2799,7 +2804,7 @@ mod tests {
         let unreadable = crate::host::FakeHost::new()
             .with_env("HOME", "/Users/someone")
             .with_file(&path, "{}")
-            .with_unreadable_file(&path, "permission denied");
+            .with_a_path_refusing(&path, Refusing::Read, "permission denied");
 
         let failed = load(&unreadable).expect_err("a registry that is there must be readable");
         let said = failed.to_string();

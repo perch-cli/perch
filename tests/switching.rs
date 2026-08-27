@@ -25,9 +25,9 @@ use perch::error::{
     EXIT_CONFLICT, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO,
     EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED,
 };
-use perch::host::FakeHost;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Refusing};
 use perch::probe;
 use perch::registry::{Active, Quarantine};
 
@@ -316,11 +316,11 @@ fn a_rotation_is_not_lost_to_an_identity_perch_itself_failed_to_patch() {
     // Three, because the Switch that loses the Rotation is the one to a *third*
     // Account: with two, the repair path recognizes the Account it is on.
     let host = machine_with_three_accounts();
-    host.set_unwritable(IDENTITY_PATH, "read-only file");
+    host.now_refusing(IDENTITY_PATH, Refusing::Write, "read-only file");
     run_switch(&host, SECOND_EMAIL)
         .0
         .expect_err("the Identity could not be patched");
-    host.writable_again(IDENTITY_PATH);
+    host.no_longer_refusing(IDENTITY_PATH, Refusing::Write);
     assert!(
         identity_file(&host).contains(EMAIL),
         "the file still names the Account the Switch left: {}",
@@ -472,11 +472,15 @@ fn a_switch_never_writes_one_accounts_identity_into_anothers_profile() {
     // A Switch interrupted between writing the Credential and patching the
     // Identity, so Perch and Claude Code disagree about who is active. Anything
     // copying the live Identity into the Account being left copies the wrong one.
-    let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        IDENTITY_PATH,
+        Refusing::Write,
+        "read-only file",
+    );
     run_switch(&host, SECOND_EMAIL)
         .0
         .expect_err("the Identity could not be patched");
-    host.writable_again(IDENTITY_PATH);
+    host.no_longer_refusing(IDENTITY_PATH, Refusing::Write);
 
     run_switch(&host, EMAIL).0.expect("the Switch back runs");
     let (result, printed) = run_switch(&host, SECOND_EMAIL);
@@ -532,8 +536,9 @@ fn the_switch_reports_where_it_landed_and_what_the_cache_says_about_it() {
 fn a_sessions_directory_that_will_not_be_read_stops_the_switch_rather_than_reading_as_empty() {
     let host = machine_with_two_accounts()
         .with_file(format!("{FIRST_PROFILE}/sessions/77.json"), "{}")
-        .with_unreadable_file(
+        .with_a_path_refusing(
             format!("{FIRST_PROFILE}/sessions"),
+            Refusing::Read,
             "Permission denied (os error 13)",
         );
 
@@ -632,7 +637,7 @@ fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account
 #[test]
 fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_over() {
     let host = two_accounts_off_macos();
-    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+    host.now_refusing(CREDENTIALS_PATH, Refusing::Read, "Permission denied");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -642,7 +647,7 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
         error.to_string().contains(EMAIL),
         "and names the Account whose Credential it may be: {error}"
     );
-    host.forget_unreadable(CREDENTIALS_PATH);
+    host.no_longer_refusing(CREDENTIALS_PATH, Refusing::Read);
     assert_eq!(
         host.file(CREDENTIALS_PATH).as_deref(),
         Some(CREDENTIAL),
@@ -807,8 +812,9 @@ fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client(
 fn a_marker_that_cannot_be_read_at_all_holds_the_profile_of_a_running_client() {
     let host = machine_with_two_accounts()
         .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
-        .with_unreadable_file(
+        .with_a_path_refusing(
             format!("{FIRST_PROFILE}/sessions/4242.json"),
+            Refusing::Read,
             "Permission denied",
         )
         .with_live_process(4242);
@@ -841,8 +847,9 @@ fn a_sessions_that_is_a_file_is_doubt_rather_than_an_idle_profile() {
 fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
     let host = machine_with_two_accounts()
         .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
-        .with_unreadable_file(
+        .with_a_path_refusing(
             format!("{FIRST_PROFILE}/sessions/4242.json"),
+            Refusing::Read,
             "Permission denied",
         );
 
@@ -853,8 +860,9 @@ fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
 fn an_unreadable_marker_whose_process_is_alive_names_the_file_rather_than_the_clock() {
     let host = machine_with_two_accounts()
         .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
-        .with_unreadable_file(
+        .with_a_path_refusing(
             format!("{FIRST_PROFILE}/sessions/4242.json"),
+            Refusing::Read,
             "Permission denied",
         )
         .with_live_process(4242);
@@ -922,7 +930,11 @@ fn a_live_process_whose_start_cannot_be_read_is_a_refusal_naming_the_assumption(
 
 #[test]
 fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
-    let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        IDENTITY_PATH,
+        Refusing::Write,
+        "read-only file",
+    );
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -976,13 +988,17 @@ fn patching_the_identity_does_not_narrow_a_file_that_was_open() {
 
 #[test]
 fn running_the_switch_again_finishes_a_job_that_stopped_half_way() {
-    let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        IDENTITY_PATH,
+        Refusing::Write,
+        "read-only file",
+    );
     run_switch(&host, SECOND_EMAIL)
         .0
         .expect_err("the Identity could not be patched");
 
     // The file can be written again — the permission was fixed, the disk freed.
-    host.writable_again(IDENTITY_PATH);
+    host.no_longer_refusing(IDENTITY_PATH, Refusing::Write);
     let (result, printed) = run_switch(&host, SECOND_EMAIL);
 
     result.expect("the repair runs rather than being refused as unnecessary");
@@ -1061,7 +1077,7 @@ fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared
     let long_ago = host.now() - chrono::Duration::seconds(120);
     let host = host
         .with_dir_held_since(REFRESH_LOCK, long_ago)
-        .with_undeletable_file(REFRESH_LOCK, "Device or resource busy");
+        .with_a_path_refusing(REFRESH_LOCK, Refusing::Delete, "Device or resource busy");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1091,7 +1107,7 @@ fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_d
     // not described by turning two knobs that could be turned apart.
     let host = host
         .with_dir_held_since(REFRESH_LOCK, long_ago)
-        .with_unlistable_dir(REFRESH_LOCK, "Permission denied");
+        .with_a_path_refusing(REFRESH_LOCK, Refusing::List, "Permission denied");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1341,7 +1357,11 @@ fn switching_from_a_logged_out_claude_code_says_there_was_nothing_live_to_captur
 
 #[test]
 fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
-    let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        REGISTRY_PATH,
+        Refusing::Write,
+        "read-only",
+    );
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1366,7 +1386,11 @@ fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
 
 #[test]
 fn a_switch_that_moves_nothing_takes_its_landing_back() {
-    let host = two_accounts_off_macos().with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+    let host = two_accounts_off_macos().with_a_path_refusing(
+        CREDENTIALS_PATH,
+        Refusing::Write,
+        "read-only file",
+    );
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1403,7 +1427,7 @@ fn two_accounts_off_macos() -> FakeHost {
 fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
     let host = two_accounts_off_macos();
     let outgoing = store_of(&host, EMAIL).credentials_file;
-    let host = host.with_unwritable_file(&outgoing, "read-only file");
+    let host = host.with_a_path_refusing(&outgoing, Refusing::Write, "read-only file");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1434,7 +1458,7 @@ fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_la
     let mut registry = registry_of(&host);
     registry.settle(None);
     save_registry(&host, &registry);
-    let host = host.with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+    let host = host.with_a_path_refusing(CREDENTIALS_PATH, Refusing::Write, "read-only file");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1458,7 +1482,11 @@ fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_la
 
 #[test]
 fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
-    let host = two_accounts_off_macos().with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+    let host = two_accounts_off_macos().with_a_path_refusing(
+        CREDENTIALS_PATH,
+        Refusing::Write,
+        "read-only file",
+    );
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1486,7 +1514,7 @@ fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged()
     let host = two_accounts_off_macos();
     host.remove_file(std::path::Path::new(CREDENTIALS_PATH))
         .expect("the login is given up");
-    let host = host.with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+    let host = host.with_a_path_refusing(CREDENTIALS_PATH, Refusing::Write, "read-only file");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1505,7 +1533,11 @@ fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged()
 
 #[test]
 fn an_identity_that_cannot_be_patched_with_nothing_active_still_says_what_to_run() {
-    let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        IDENTITY_PATH,
+        Refusing::Write,
+        "read-only file",
+    );
     let mut registry = registry_of(&host);
     registry.settle(None);
     save_registry(&host, &registry);
@@ -1572,7 +1604,11 @@ fn a_switch_onto_the_active_account_repairs_an_identity_naming_nobody() {
 
 #[test]
 fn an_identity_file_that_cannot_be_read_stops_the_switch_at_its_last_step() {
-    let host = machine_with_two_accounts().with_unreadable_file(IDENTITY_PATH, "permission denied");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        IDENTITY_PATH,
+        Refusing::Read,
+        "permission denied",
+    );
     // Derived rather than spelled: `~/.claude.json` is a join, so a Windows
     // build renders it `/Users/someone\.claude.json` and the constant the
     // fixture arranges the failure with is not the string the refusal prints.
@@ -1922,7 +1958,7 @@ fn a_landing_is_resolved_with_claude_codes_locks_held() {
 fn a_live_store_that_will_not_answer_resolves_no_landing() {
     let host = two_accounts_off_macos();
     a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
-    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+    host.now_refusing(CREDENTIALS_PATH, Refusing::Read, "Permission denied");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
@@ -1935,7 +1971,7 @@ fn a_live_store_that_will_not_answer_resolves_no_landing() {
     );
     assert!(said.contains("Nothing was changed"), "{said}");
 
-    host.forget_unreadable(CREDENTIALS_PATH);
+    host.no_longer_refusing(CREDENTIALS_PATH, Refusing::Read);
     assert_eq!(
         host.file(CREDENTIALS_PATH).as_deref(),
         Some(CREDENTIAL),
@@ -2013,7 +2049,11 @@ fn a_landing_nothing_accounts_for_is_refused_naming_both_readings() {
 
 #[test]
 fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_save() {
-    let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let host = machine_with_two_accounts().with_a_path_refusing(
+        IDENTITY_PATH,
+        Refusing::Write,
+        "read-only file",
+    );
     run_switch(&host, SECOND_EMAIL)
         .0
         .expect_err("the Identity could not be patched");
@@ -2024,7 +2064,7 @@ fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_s
     );
     // The user carries on working, and Claude Code Rotates.
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
-    host.writable_again(IDENTITY_PATH);
+    host.no_longer_refusing(IDENTITY_PATH, Refusing::Write);
 
     let (result, printed) = run_switch(&host, SECOND_EMAIL);
 
