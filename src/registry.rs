@@ -1486,11 +1486,8 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
             .with_note(&the_file_to_edit(path))
         })?;
 
-    // Normalized first, so `load` and `save` judge one shape: `validate` asks
-    // `declared_group` about the `checks` key, and would otherwise refuse a
-    // registry this line repairs — leaving no command able to read the file.
-    let registry = with_every_claimed_group_declared(registry);
-    validate(&registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
+    let registry =
+        readable(registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
 
     Ok(Some(registry))
 }
@@ -1799,12 +1796,23 @@ fn refuse_a_name_nothing_would_have_accepted(
     }
 }
 
+/// A registry from outside this Perch, made readable: every claimed Group
+/// declared, every `checks` key under its declared spelling, then validated. The
+/// pair and never one — `validate` asks `declared_group` about the `checks` key,
+/// so validating before normalizing refuses a shape the normalizer repairs. The
+/// refusal is undecorated, because a `load` and an Import name different files.
+pub fn readable(registry: Registry) -> Result<Registry> {
+    let registry = with_every_claimed_group_declared(registry);
+    validate(&registry)?;
+    Ok(registry)
+}
+
 /// Declares any Group an Account claims but nothing declared.
 ///
 /// One nothing declares falls out of `perch list`, which walks the declared
 /// Groups and then the Accounts in none (ADR the-listing-owns-the-set). A claim
 /// differing only in case joins rather than becoming a second key.
-pub(crate) fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
+fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
     let claimed: Vec<String> = registry
         .accounts
         .iter()
@@ -2538,8 +2546,7 @@ mod tests {
             .checks
             .insert("Work".to_string(), Checked { switched_at: at });
 
-        let mut registry = with_every_claimed_group_declared(registry);
-        validate(&registry).expect("one Group, one Check");
+        let mut registry = readable(registry).expect("one Group, one Check");
         assert_eq!(
             registry.checks.keys().collect::<Vec<_>>(),
             vec!["work"],
@@ -2549,6 +2556,36 @@ mod tests {
         registry.forget_group("work");
         validate(&registry).expect("and it goes when the Group it paces goes");
         assert!(registry.checks.is_empty(), "{:?}", registry.checks);
+    }
+
+    /// The order is the whole of the contract: `validate` asks `declared_group`
+    /// about the `checks` key, so a registry judged before it is normalized is
+    /// refused over the very Group the normalizer is about to declare.
+    #[test]
+    fn a_registry_is_normalized_before_it_is_validated_and_never_after() {
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut registry = Registry::default();
+        // A Group an Account claims and nothing declared, which is the shape
+        // `with_every_claimed_group_declared` exists to repair.
+        registry.upsert(Account {
+            identity: Identity {
+                email: "someone@example.com".into(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: Some("work".to_string()),
+            utilization: None,
+        });
+        registry
+            .checks
+            .insert("work".to_string(), Checked { switched_at: at });
+
+        validate(&registry).expect_err("judged as it arrived, the key names no declared Group");
+        readable(registry).expect("through the door, the Group is declared before it is asked for");
     }
 
     /// The fold happens before `validate`, so the collision it refuses is one
