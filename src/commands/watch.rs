@@ -19,15 +19,14 @@ use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::live;
-use crate::lock;
+use crate::lock::{self, Lost};
 use crate::observe;
 use crate::probe;
 use crate::registry::{self, Registry};
 use crate::round::{self, Verdict, Watching};
 use crate::switch::{self, NotSwitched, Resolved};
 use crate::watch::{
-    self, Backoff, Cooled, Fullest, Holding, Lost, Outcome, Recently, Round, Speak,
-    nothing_was_switched,
+    self, Backoff, Cooled, Fullest, Holding, Outcome, Recently, Round, Speak, nothing_was_switched,
 };
 
 /// One round, for whatever scheduled it.

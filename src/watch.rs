@@ -12,6 +12,7 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, Result};
 use crate::live::{self, NotIdle};
+use crate::lock::Lost;
 use crate::probe::Installed;
 use crate::registry::{Account, Checked, Settings};
 
@@ -539,25 +540,6 @@ pub fn set_aside(
         emails,
     }
 }
-
-/// Why a round may not go on, which is the whole of what stops one part way.
-///
-/// Both are sticky — a watch taken over is never regained and a stop is never
-/// withdrawn — so a caller that has been told one may ask again for nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Lost {
-    /// Another Watcher took the watch over.
-    HandedOver,
-    /// This Watcher was asked to stop.
-    Stopped,
-}
-
-/// The question asked in front of everything a round spends: every request that
-/// goes out to Anthropic, and every keychain read on the walk that settles a
-/// Landing. A callable rather than an answer carried in, because the answer
-/// changes between two of them inside one turn; `&mut` because answering renews
-/// the hold.
-pub type StillOurs<'a> = &'a mut dyn FnMut() -> std::result::Result<(), Lost>;
 
 /// What a round decided.
 ///

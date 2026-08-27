@@ -16,11 +16,11 @@ use crate::error::{PerchError, Result};
 use crate::host::{self, Host};
 use crate::live;
 use crate::lock;
+use crate::lock::{Lost, StillOurs};
 use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, Active, Quarantine, Registry, Scope, Settled};
-use crate::watch::{Lost, StillOurs};
 
 /// What the Capture found — the part of a Switch worth saying out loud, because
 /// it is what protects the Account being left behind.
