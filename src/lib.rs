@@ -11,6 +11,7 @@
 
 pub mod adopt;
 pub mod anthropic;
+pub mod ask;
 pub mod carry;
 pub mod column;
 pub mod commands;

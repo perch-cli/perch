@@ -14,7 +14,8 @@ use std::path::Path;
 
 use zeroize::Zeroizing;
 
-use crate::commands::{ask_passphrase, refuse_without_a_terminal, say, still_ours};
+use crate::ask;
+use crate::commands::{say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::holdings;
@@ -27,7 +28,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Both before the passphrase, because both are refusals somebody should meet
     // before typing one. The file comes first: a path that is a typo is answered
     // by naming the path, not by advice about a machine nobody asked about.
-    refuse_without_a_terminal(host, "perch holdings import")?;
+    ask::needs_a_terminal(host, "perch holdings import")?;
     let sealed = read_the_file(host, path)?;
 
     let mut perch = holdings::lock(host)?;
@@ -105,7 +106,7 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
 /// an Import differs from the Export it mirrors: a passphrase being *checked* is
 /// answered by the file, and no decision needs one (ADR perch-says-what-it-did).
 fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
-    ask_passphrase(host, out, "Passphrase: ")?.ok_or_else(|| {
+    ask::a_passphrase(host, out, "Passphrase: ")?.ok_or_else(|| {
         PerchError::Invalid(
             "No passphrase was typed, and there is no way into an Export without \
              one. Nothing was imported."

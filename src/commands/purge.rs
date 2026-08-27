@@ -12,7 +12,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::commands::{Presumed, ask, ask_a_word, export, said_yes, say, still_ours};
+use crate::ask;
+use crate::commands::{export, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::{Host, Platform};
@@ -291,11 +292,16 @@ fn offer_an_export(
     // Nobody who is not there to answer this is there to type a passphrase at
     // the two prompts that follow, so end of input declines rather than taking
     // the `[Y/n]`.
-    if !said_yes(host, out, "Write an Export first? [Y/n]: ", Presumed::Yes)? {
+    if !ask::said_yes(
+        host,
+        out,
+        "Write an Export first? [Y/n]: ",
+        ask::Presumed::Yes,
+    )? {
         return Ok(());
     }
 
-    let Some(path) = ask(host, out, "Where to write it: ")?
+    let Some(path) = ask::line(host, out, "Where to write it: ")?
         .map(|typed| expanded(host, typed.trim()))
         .transpose()?
         .filter(|path| !path.as_os_str().is_empty())
@@ -365,7 +371,7 @@ fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
 /// read anything. Trimmed and case-folded, because the guard is against the
 /// reflex rather than against the keyboard.
 fn agreed(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
-    let answered = ask_a_word(
+    let answered = ask::a_word(
         host,
         out,
         &format!("Type `{THE_WORD}` to give the machine back: "),
