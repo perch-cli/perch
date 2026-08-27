@@ -410,11 +410,11 @@ impl Scope {
     }
 }
 
-/// The Switch a scheduled Check made within a Group, so the next can be paced by
-/// it (ADR a-watcher-knob-is-arithmetic). Written down only because
-/// `perch watcher check` is a fresh process each time; the loop keeps the same
-/// fact in memory. Per Group: a Switch within `work` says nothing about how soon
-/// `personal` may move.
+/// The last unasked Switch within a Scope, so the next round can be paced by it
+/// (ADR a-watcher-knob-is-arithmetic). Written down rather than kept in memory
+/// because a Watcher is a process its own Service restarts, and a Cooldown a
+/// restart clears is no Cooldown. Per Scope: a Switch within `work` says nothing
+/// about how soon `personal` may move.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Checked {
@@ -575,9 +575,11 @@ pub struct Registry {
     /// nothing can walk it as one.
     #[serde(default)]
     pub ungrouped: UngroupedConfig,
-    /// What the last scheduled Check did in each Group. Written by `perch
-    /// watcher check` and by nothing else, and absent from the file until one
-    /// of them Switches.
+    /// The last unasked Switch in each Scope. Written by `perch watcher run` and
+    /// `perch watcher check`, and absent from the file until one of them
+    /// Switches. Spelled `checks` because a Watcher that only ran scheduled
+    /// wrote it first, and a key is registry shape: renaming it is a migration
+    /// rather than a rename.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub checks: BTreeMap<String, Checked>,
 }
@@ -896,8 +898,8 @@ impl Registry {
     /// Forgets a Group. The caller establishes nothing is left in it: dropping
     /// the Group is not a way to empty it.
     ///
-    /// What a scheduled Check left goes with it, or a Group declared under the
-    /// same name later would inherit a cooldown from a Group it never was.
+    /// What a Watcher left goes with it, or a Group declared under the same name
+    /// later would inherit a cooldown from a Group it never was.
     pub fn forget_group(&mut self, name: &str) {
         let Some(declared) = self.declared_group(name).map(str::to_string) else {
             return;
@@ -906,8 +908,7 @@ impl Registry {
         self.checks.remove(&declared);
     }
 
-    /// What the last scheduled Check did within a Group, if one has Switched
-    /// there.
+    /// The last unasked Switch within a Scope, if one has happened there.
     pub fn checked(&self, group: &str) -> Option<&Checked> {
         self.checks
             .iter()
@@ -915,11 +916,11 @@ impl Registry {
             .map(|(_, checked)| checked)
     }
 
-    /// Records a Switch a Check made, for the next one to be paced by.
+    /// Records an unasked Switch, for the next round to be paced by.
     ///
-    /// Filed under the spelling the Group was declared under, so a Check naming
+    /// Filed under the spelling the Group was declared under, so a round naming
     /// it in another case does not leave a second record pacing nothing.
-    pub fn record_check(&mut self, group: &str, at: DateTime<Utc>) {
+    pub fn record_switch(&mut self, group: &str, at: DateTime<Utc>) {
         let under = self.declared_group(group).unwrap_or(group).to_string();
         self.checks.insert(under, Checked { switched_at: at });
     }
@@ -1630,7 +1631,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
     }
 
     // What `checks` is keyed on, the one pointer into the Group namespace with no
-    // rule of its own: `record_check` keeps the name it was handed when it cannot
+    // rule of its own: `record_switch` keeps the name it was handed when it cannot
     // resolve one, and `forget_group` only clears what it can.
     for named in registry.checks.keys() {
         if same_name(named, UNGROUPED) || registry.declared_group(named).is_some() {
@@ -1644,7 +1645,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
     }
 
     // `checked` answers with the first match in `BTreeMap` order and
-    // `record_check` writes under the declared spelling, so two keys that fold
+    // `record_switch` writes under the declared spelling, so two keys that fold
     // to one pace the next Check off a record nothing is keeping.
     if let Some((already, name)) = first_collision(registry.checks.keys().map(String::as_str)) {
         return Err(PerchError::Invalid(format!(
@@ -1803,7 +1804,7 @@ fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Regis
     let keyed: Vec<String> = registry.checks.keys().cloned().collect();
     for name in keyed {
         // The Ungrouped Scope has no declaration to be brought to, so it is
-        // brought to the constant `record_check` writes. Without this the key is
+        // brought to the constant `record_switch` writes. Without this the key is
         // the only one in the map that can outlive its own spelling.
         let declared = match means_ungrouped(&name) {
             true => Some(UNGROUPED.to_string()),
@@ -2465,7 +2466,7 @@ mod tests {
         validate(&registry).expect("the Accounts in no Group Cycle too");
     }
 
-    /// `checked` answers with the first in `BTreeMap` order and `record_check`
+    /// `checked` answers with the first in `BTreeMap` order and `record_switch`
     /// writes under the declared spelling, so the record read is not the record
     /// kept — and a Cooldown read off a stale one Switches sooner than 15
     /// minutes.
@@ -2704,7 +2705,7 @@ mod tests {
         );
 
         let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
-        registry.record_check("work", at);
+        registry.record_switch("work", at);
         let back: Registry =
             serde_json::from_str(&serde_json::to_string(&registry).unwrap()).unwrap();
 
@@ -2722,7 +2723,7 @@ mod tests {
     fn forgetting_a_group_forgets_what_a_check_recorded_against_it() {
         let mut registry = Registry::default();
         registry.declare_group("work").expect("a usable name");
-        registry.record_check("work", Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap());
+        registry.record_switch("work", Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap());
 
         registry.forget_group("work");
 
@@ -3163,7 +3164,7 @@ mod tests {
         assert_eq!(registry.accounts_in("WORK").len(), 1);
 
         let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
-        registry.record_check("WORK", at);
+        registry.record_switch("WORK", at);
         assert!(
             registry.checked("work").is_some(),
             "one Cooldown record, under the spelling the Group was declared as"

@@ -158,7 +158,7 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
         // registry that declared a Group by that name must not have the
         // Ungrouped Scope's Cooldown re-keyed onto the renamed Group.
         let under = match crate::name::means_ungrouped(&group) {
-            // The constant rather than the spelling found: `record_check` only
+            // The constant rather than the spelling found: `record_switch` only
             // ever writes that one, so a key that folds to it under any other
             // capitalization becomes a second key `validate` refuses.
             true => crate::name::UNGROUPED.to_string(),

@@ -936,7 +936,7 @@ fn an_export_is_judged_by_the_shape_that_will_be_written_rather_than_the_one_tha
     // registry — or one whose Group was removed beside it — carries.
     export
         .registry
-        .record_check("nobody-declared-this", Utc::now());
+        .record_switch("nobody-declared-this", Utc::now());
     let sealed = perch::export::seal(&export, PASSPHRASE).expect("it seals");
     let host = a_new_machine_holding(&sealed);
 

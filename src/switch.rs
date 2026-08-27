@@ -60,23 +60,19 @@ pub enum Captured {
 
 /// Why a Switch is being made, and so what else the save recording it carries.
 ///
-/// A scheduled `perch watcher check` is a process with no memory, so what paces
-/// the next one reaches the registry in the *same* save as the Switch it paces
+/// A Watcher is a process a supervisor may restart, so what paces the next round
+/// reaches the registry in the *same* save as the Switch it paces
 /// (ADR a-watcher-knob-is-arithmetic).
 #[derive(Debug)]
 pub enum Reason {
     /// `perch switch` — somebody asked for this one.
     Asked,
-    /// `perch watcher run` — the Watcher moved unasked, in a loop somebody is
-    /// watching. What paces the next round is the
-    /// [`Recently`](crate::watch::Recently) that process is already holding, so
-    /// nothing is written down beyond the Switch itself. An arm of its own so
-    /// that a loop has one to pass rather than claiming a Check nothing ran.
-    Loop,
-    /// `perch watcher check` — the Watcher moved unasked, and the Scope it moved
-    /// within records the Check that did it, in the same save.
-    /// [`record_the_switch`] is where that is honored.
-    Check {
+    /// `perch watcher run` or `perch watcher check` — the Watcher moved unasked,
+    /// and the Scope it moved within records it, in the same save.
+    /// [`record_the_switch`] is where that is honored. One arm for both, because
+    /// a Cooldown a loop kept in memory alone was one its own Service cleared by
+    /// restarting it.
+    Unasked {
         /// The Scope the Switch was taken within, which is what the record is
         /// kept per.
         scope: Scope,
@@ -151,10 +147,10 @@ fn record_the_switch(
     let moved = landing.moved();
 
     // Before `record`, so that the save `record` makes carries both. Only where
-    // something moved: pacing the next Check on a Switch that changed nothing
+    // something moved: pacing the next round on a Switch that changed nothing
     // would be pacing the Watcher on its failures.
-    if moved && let Reason::Check { scope, at } = &reason {
-        registry.record_check(scope.word(), *at);
+    if moved && let Reason::Unasked { scope, at } = &reason {
+        registry.record_switch(scope.word(), *at);
     }
 
     match landing.record(host, perch, registry) {
@@ -1239,7 +1235,7 @@ mod tests {
             &mut perch,
             &mut registry,
             landing(Err(ordinary()), true),
-            Reason::Check {
+            Reason::Unasked {
                 scope: Scope::Group("work".to_string()),
                 at,
             },
@@ -1280,7 +1276,7 @@ mod tests {
             &mut perch,
             &mut registry,
             landing(Err(ordinary()), false),
-            Reason::Check {
+            Reason::Unasked {
                 scope: Scope::Group("work".to_string()),
                 at: Utc.with_ymd_and_hms(2026, 8, 17, 9, 30, 0).unwrap(),
             },

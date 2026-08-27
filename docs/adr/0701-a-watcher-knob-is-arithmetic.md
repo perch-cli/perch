@@ -102,7 +102,7 @@ unknown above a window that is certainly full, which is right for a Switch
 somebody asked for, and unasked it is a move onto an Account the Watcher knows
 nothing about.
 
-## The Cooldown is the Watcher's rather than the machine's
+## The Cooldown is written down, because a Watcher gets restarted
 
 **Fifteen minutes.** A five-hour window moves slowly enough that fifteen
 minutes never misses a real crossing, and often enough that a Watcher which has
@@ -115,25 +115,35 @@ not watch*.
 It is asked before the candidates are read rather than after, because a round
 that may not act has no business spending an allowance on figures it cannot use.
 
-**The loop keeps it in memory and nowhere else.** A Cooldown is about the loop
-somebody is running rather than about the machine: recording it in the registry
-would have one person's Watcher pacing another's decisions. Stopping the loop
-and starting it again is a person saying "go on then", and a loop starts with
-nothing to wait for.
+**Every unasked Switch is written down, and both arrangements read it.** What
+Switched, and when, is written against the Scope in the registry in the same
+save as the Switch it paces — and the round ahead reads it back under the lock,
+so the Cooldown a round is held by is the one that was on record when it
+decided. Per Scope rather than per machine, because a Switch within one Group
+has nothing to say about how soon another may move, and only a Switch that
+happened writes one: a round that changed nothing has nothing to pace.
 
-**A `perch watcher check` records it, because there is no loop for it to live
-in.** Scheduled, the Watcher is a sequence of processes and no one of them is
-it, so a Cooldown kept in memory would be a Cooldown that never held anything
-and a Check every minute would Switch every minute whatever the Group said. What
-one Check Switched, and when, is written against the Group in the registry for
-the next Check to read — in the same save as the Switch it paces. Per Group
-rather than per machine, because a Switch within one Group has nothing to say
-about how soon another may move, and only a Switch that happened writes one: a
-Check that changed nothing has nothing to pace.
+Scheduled, the Watcher is a sequence of processes and no one of them is it, so a
+Cooldown in memory would be one that never held anything and a Check every
+minute would Switch every minute whatever the Group said. That much was always
+true. What this record got wrong is that the loop is any different: **a Service
+restarts it.** `Restart=always` with `RestartSec=30` and launchd's `KeepAlive`
+both bring the loop straight back — launchd with no give-up at all — so a
+Cooldown the loop held in memory was one its own supervisor cleared thirty
+seconds after a Switch, which is the Watcher moving you twice in a minute by
+exactly the arrangement ADR the-machine-runs-the-watcher introduced.
 
-None of that makes the Cooldown the machine's. Two people running two loops pace
-themselves separately; the record is the scheduled Watcher's memory, kept where
-that Watcher can reach it, and the loop neither reads nor writes it.
+The reasoning it replaces was that stopping the loop and starting it again is a
+person saying "go on then". A supervisor is not a person, and nothing in the
+process can tell the two apart. So the person who deliberately restarts a loop
+now waits out what is left of a Cooldown, which is the cost of the Watcher not
+being able to ask who restarted it — and the cheaper of the two mistakes, since
+the other one is a machine that Switches on a crash loop.
+
+The Cooldown being on disk does not make it the machine's. A registry is per
+Perch home and the watch is held by a lock over that home, so there is exactly
+one Watcher writing one record: two people watching pace themselves separately
+because they are not sharing a registry to begin with.
 
 **There is no no-return.** Nothing is Switched during a Cooldown, so nothing can
 be Switched back either, and a rule barring the Account just left could never

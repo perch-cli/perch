@@ -468,7 +468,7 @@ fn the_ungrouped_scopes_cooldown_is_not_moved_onto_a_group_called_ungrouped() {
     );
 }
 
-/// The other half of it: `record_check` writes one spelling of that key, so a
+/// The other half of it: `record_switch` writes one spelling of that key, so a
 /// Cooldown that came forward under any other one is a second key `validate`
 /// refuses the moment the next Check tries to record its own.
 #[test]
@@ -579,7 +579,7 @@ fn a_group_only_an_account_claims_is_renamed_rather_than_left_to_brick_the_machi
 }
 
 /// A Group called `Ungrouped` and the Ungrouped Scope itself both key a record
-/// here, and both come forward under the one spelling `record_check` writes. The
+/// here, and both come forward under the one spelling `record_switch` writes. The
 /// later of the two is the one that survives: the older one winning is a Check
 /// free to Switch inside a Cooldown that is still running.
 #[test]
