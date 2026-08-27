@@ -816,10 +816,7 @@ impl Registry {
     /// names that differ only in case are one name here, so this is how a Group
     /// typed in passing is matched to the one that exists.
     pub fn declared_group(&self, name: &str) -> Option<&str> {
-        self.groups
-            .keys()
-            .find(|declared| same_name(declared, name))
-            .map(String::as_str)
+        by_folded_key(&self.groups, name).map(|(declared, _)| declared)
     }
 
     /// Declares a Group, refusing a name that is not usable or already means
@@ -942,10 +939,7 @@ impl Registry {
 
     /// The last unasked Switch within a Scope, if one has happened there.
     pub fn checked(&self, group: &str) -> Option<&Checked> {
-        self.checks
-            .iter()
-            .find(|(declared, _)| same_name(declared, group))
-            .map(|(_, checked)| checked)
+        by_folded_key(&self.checks, group).map(|(_, checked)| checked)
     }
 
     /// Records an unasked Switch, for the next round to be paced by.
@@ -1014,10 +1008,7 @@ impl Registry {
     /// The Alias held under a name, whatever it was capitalized as, and the
     /// Account it reaches.
     pub fn declared_alias(&self, name: &str) -> Option<(&str, &str)> {
-        self.aliases
-            .iter()
-            .find(|(alias, _)| same_name(alias, name))
-            .map(|(alias, email)| (alias.as_str(), email.as_str()))
+        by_folded_key(&self.aliases, name).map(|(alias, email)| (alias, email.as_str()))
     }
 
     /// Refuses an Alias and a Group name that would not both be free.
@@ -1508,6 +1499,17 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 fn without_a_position(said: &str) -> String {
     said.rsplit_once(" at line ")
         .map_or_else(|| said.to_string(), |(what, _)| what.to_string())
+}
+
+/// One entry of a map keyed by a Name, found under any capitalization of it.
+///
+/// Two names differing only in case are one Name, so `groups`, `checks` and
+/// `aliases` are read by scan rather than by key. The spelling found comes back
+/// too: that is the one written down, and the one a refusal quotes.
+fn by_folded_key<'a, V>(map: &'a BTreeMap<String, V>, name: &str) -> Option<(&'a str, &'a V)> {
+    map.iter()
+        .find(|(declared, _)| same_name(declared, name))
+        .map(|(declared, held)| (declared.as_str(), held))
 }
 
 /// The refusal for a registry claiming a version no Perch has stamped, or none
