@@ -154,16 +154,19 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
         return named_channel(word);
     }
 
-    let exe = host
-        .current_exe()
-        .map_err(|err| PerchError::Other(format!("could not find Perch's own binary: {err}")))?;
-
     upgrade::channel(host)?.ok_or_else(|| {
         // The installer's directory as *this* machine would have it: naming a
         // path the reader does not have is how a refusal stops being actionable.
         let expected = upgrade::installer_dir(host)
             .map(|dir| dir.display().to_string())
             .unwrap_or_else(|_| "its own directory".to_string());
+        // Here rather than above: `upgrade::channel` has already asked, and on
+        // the path that answers nothing renders this. A read that fails is the
+        // refusal that one raises, in these same words.
+        let exe = host
+            .current_exe()
+            .map(|at| at.display().to_string())
+            .unwrap_or_else(|_| "the path it is at".to_string());
 
         PerchError::Invalid(format!(
             "Perch is installed at {}, and nothing about that path says which \
@@ -175,7 +178,7 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
              Re-run the installer from https://github.com/{} to move to a \
              managed Installation, or say which Channel this is with \
              `--channel homebrew|npm|installer`.",
-            exe.display(),
+            exe,
             upgrade::REPO
         ))
     })
