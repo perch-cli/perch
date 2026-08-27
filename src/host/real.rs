@@ -817,7 +817,16 @@ impl Network for RealHost {
                 execution.stderr.trim()
             )));
         }
-        split_reply(&stdout)
+        // Truncated in place rather than copied out, a second buffer being a
+        // second copy of a reply that may run to `MAX_REPLY_BYTES`. `Zeroizing`
+        // wipes the whole capacity, so the digits past the new length still go.
+        let (body, status) = status_after(&stdout)?;
+        let mut body_only = stdout;
+        body_only.truncate(body);
+        Ok(HttpResponse {
+            status,
+            body: body_only,
+        })
     }
 }
 
@@ -825,12 +834,12 @@ impl Filesystem for RealHost {}
 
 impl Host for RealHost {}
 
-/// The body and the status code out of what `curl` wrote. Apart from the caller
-/// so it can be asserted on, since `FakeHost::http` answers with a
-/// `HttpResponse` already built. A status code that will not parse is said
-/// rather than read as zero, which is a status no server sends about a request
-/// that may never have been made.
-fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
+/// Where the body ends and what status `curl` appended after it. A length
+/// rather than the body itself, so the caller keeps the buffer it already holds.
+/// Apart from the caller so it can be asserted on, `FakeHost::http` answering
+/// with a `HttpResponse` already built. A status code that will not parse is
+/// said rather than read as zero, which is a status no server sends.
+fn status_after(stdout: &str) -> Result<(usize, u16), HostError> {
     let (body, code) = stdout
         .rsplit_once('\n')
         .ok_or_else(|| HostError::Other("curl produced no status code".into()))?;
@@ -840,10 +849,7 @@ fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
             code.trim()
         ))
     })?;
-    Ok(HttpResponse {
-        status,
-        body: Zeroizing::new(body.to_string()),
-    })
+    Ok((body.len(), status))
 }
 
 /// One line from standard input, or `None` at end of it. Through the same reader
@@ -1999,29 +2005,36 @@ mod tests {
     /// with a response already built, so no behavior test ever splits a reply.
     #[test]
     fn a_reply_is_split_into_a_body_and_a_status_and_says_so_when_it_cannot_be() {
-        let reply = split_reply("{\"five_hour\":{}}\n200").expect("that is a reply");
-        assert_eq!(reply.status, 200);
-        assert_eq!(*reply.body, "{\"five_hour\":{}}");
+        let split = |wrote: &str| {
+            status_after(wrote).map(|(body, status)| (wrote[..body].to_string(), status))
+        };
+
+        let (body, status) = split("{\"five_hour\":{}}\n200").expect("that is a reply");
+        assert_eq!(status, 200);
+        assert_eq!(body, "{\"five_hour\":{}}");
 
         // A body with newlines in it: the split is the *last* one, because the
         // status is what curl appends.
-        let reply = split_reply("first\nsecond\n429").expect("that is a reply too");
-        assert_eq!(reply.status, 429);
-        assert_eq!(*reply.body, "first\nsecond");
+        let (body, status) = split("first\nsecond\n429").expect("that is a reply too");
+        assert_eq!(status, 429);
+        assert_eq!(body, "first\nsecond");
 
         // An empty body still carries a status, which is what a 204 looks like.
-        assert_eq!(split_reply("\n204").expect("a bodyless reply").status, 204);
+        assert_eq!(
+            split("\n204").expect("a bodyless reply"),
+            (String::new(), 204)
+        );
 
         // And what curl did not write is said as itself rather than read as a
         // status of zero, which `anthropic::understand` has no arm for.
-        let refused = split_reply("something went wrong\nnot a number")
-            .expect_err("that is not a status code");
+        let refused =
+            split("something went wrong\nnot a number").expect_err("that is not a status code");
         assert!(
             refused.to_string().contains("not a number"),
             "and it quotes what curl actually printed: {refused}"
         );
 
-        let refused = split_reply("no newline at all").expect_err("that is not a reply");
+        let refused = split("no newline at all").expect_err("that is not a reply");
         assert!(refused.to_string().contains("no status code"), "{refused}");
     }
 
