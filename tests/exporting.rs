@@ -412,15 +412,20 @@ fn a_path_whose_directory_is_not_there_is_refused_rather_than_having_one_made() 
 /// written to survive.
 #[test]
 fn an_export_named_relative_to_a_cwd_inside_perchs_home_is_refused_too() {
-    let home = "/Users/someone/.config/perch";
-    let host = a_machine_worth_backing_up().in_directory(home);
+    let host = a_machine_worth_backing_up().in_directory("/Users/someone/.config/perch");
+    // As *this* build spells it: `perch_home` joins, so the separators in the
+    // refusal are the ones the platform running the test puts there.
+    let home = perch::registry::perch_home(&host)
+        .expect("home is known")
+        .display()
+        .to_string();
 
     let (outcome, _printed) = run_export(&host, "backup.age");
 
     let refused = outcome.expect_err("the Export would go with the home");
     assert_eq!(refused.exit_code(), EXIT_INVALID, "{refused}");
     assert!(
-        refused.to_string().contains(home),
+        refused.to_string().contains(&home),
         "it names the home: {refused}"
     );
     assert!(
