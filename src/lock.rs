@@ -34,7 +34,12 @@ pub enum Lost {
 /// Landing. A callable rather than an answer carried in, because the answer
 /// changes between two of them inside one turn; `&mut` because answering renews
 /// the hold.
-pub type StillOurs<'a> = &'a mut dyn FnMut() -> std::result::Result<(), Lost>;
+pub type Asking<'a, E> = &'a mut dyn FnMut() -> std::result::Result<(), E>;
+
+/// The ask a Watcher passes, which is the only one that can answer no. A caller
+/// nobody can take the machine off passes [`std::convert::Infallible`] instead,
+/// and the arms that read this answer stop existing for it.
+pub type StillOurs<'a> = Asking<'a, Lost>;
 
 /// How many times a contended lock is waited on before Perch gives up. Claude
 /// Code holds these for one refresh, so a lock still held after this long is
