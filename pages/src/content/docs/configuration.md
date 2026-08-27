@@ -15,6 +15,7 @@ complete over SSH and in CI.
 | `strategy` | any Scope | `most-headroom`, `soonest-reset` | `most-headroom` |
 | `watcher-may-act` | any Scope | `true`, `false` | `false` |
 | `watcher-threshold-percent` | any Scope | 0–100 | `80` |
+| `watcher-margin-percent` | any Scope | 1–100 | `10` |
 | `interchangeable` | `ungrouped` only | `true`, `false` | `false` |
 
 ## A Setting is said about the Scope it governs
@@ -43,12 +44,15 @@ ungrouped interchangeable true
 ungrouped strategy most-headroom
 ungrouped watcher-may-act false
 ungrouped watcher-threshold-percent 80
+ungrouped watcher-margin-percent 10
 personal strategy most-headroom
 personal watcher-may-act false
 personal watcher-threshold-percent 80
+personal watcher-margin-percent 10
 work strategy soonest-reset
 work watcher-may-act false
 work watcher-threshold-percent 70
+work watcher-margin-percent 10
 ```
 
 **Reading is not writing.** A bare `perch config get` prints every Scope's
@@ -99,9 +103,9 @@ whose figure does not above nothing at all: an Account that says when it comes
 back is preferred to one that does not, and where none of them says, the Cycle
 falls back to the room it can see and says that is what it did.
 
-## The watcher's two
+## The watcher's three
 
-The **watcher's** two fields govern [`perch watcher`](watching.md) and nothing
+The **watcher's** three fields govern [`perch watcher`](watching.md) and nothing
 else. `watcher-may-act` says whether it may Switch within that Scope at all, and
 is off by default because a Scope only ever changes underneath you because you
 said it could. It is said about the Scope it grants and reaches no other, so a
@@ -118,25 +122,32 @@ It **holds** it: it reads nothing and moves nothing, says what is missing, and
 starts deciding again the moment the grant comes back. The grant is about
 whether it may *act*, and a held Watcher is not acting.
 
-**How full is too full is the only preference in the loop**. The three numbers
-beside it are arithmetic, so they are fixed rather than offered:
+`watcher-margin-percent` is the second half of the same question, and a
+different one: how *empty* a candidate has to be before moving to it is worth
+doing, in points under the threshold. At the default 10 and a threshold of 80,
+nothing above 70% is moved to. Two knobs rather than one because the ceiling is
+the threshold less the margin, so a single knob moves both: raising the
+threshold to 90 to reach a ceiling of 80 also delays when you are moved off,
+which is the opposite of what a conservative destination rule wants.
+
+`0` is refused. An Account is left at or over the threshold and a candidate is
+set aside above the ceiling, so at a margin of nothing an Account at exactly 80%
+would be both full enough to leave and clear enough to arrive at. A margin wider
+than the threshold is fine, and is a Scope that will only move onto an Account
+with nothing used at all — a coherent thing to ask for, reached from either
+side.
+
+**The two numbers beside them are arithmetic, so they are fixed rather than
+offered:**
 
 - How often it **reads** — two and a half minutes, derived from Anthropic's
   allowance of ~28-30 reads an hour rather than from anyone's taste. A Group
   configured to read every ten seconds would be a Group configured to spend that
   allowance and be refused.
-- The **margin** — 10 points under the threshold — which is what a candidate has
-  to be clear of the threshold by to be worth moving to. Nobody wants the low
-  end, where a destination barely emptier than the Account you are on is
-  accepted; the high end is already reachable by moving the threshold.
 - The **cooldown** — 15 minutes — which is the least it leaves between two
   Switches. A five-hour window moves slowly enough that fifteen minutes never
   misses a real crossing, which is arithmetic about the window rather than a
   taste.
-
-A threshold under the margin is not refused — it is a Group that will only move
-onto an Account with nothing used at all, which is a coherent thing to ask for.
-The margin does not get to veto the one Setting that is a preference.
 
 ## Reading it back
 

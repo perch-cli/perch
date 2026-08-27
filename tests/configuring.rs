@@ -373,7 +373,7 @@ fn a_watcher_number_out_of_range_is_refused_with_the_range_it_accepts() {
     );
 }
 
-/// The three the Watcher does not carry: refused in the same words any other
+/// The two the Watcher does not carry: refused in the same words any other
 /// unknown key is, with no half-life in which they are quietly ignored.
 #[test]
 fn the_settings_the_watcher_shed_are_no_longer_keys_a_scope_carries() {
@@ -381,7 +381,6 @@ fn the_settings_the_watcher_shed_are_no_longer_keys_a_scope_carries() {
 
     for (key, value) in [
         ("watcher-cooldown-minutes", "30"),
-        ("watcher-margin-percent", "25"),
         ("watcher-no-return", "false"),
     ] {
         let (result, _) = config_set(&host, &["work", key, value]);
@@ -395,16 +394,54 @@ fn the_settings_the_watcher_shed_are_no_longer_keys_a_scope_carries() {
 
     let (result, printed) = config_get(&host, &["work"]);
     result.expect("the Settings that are left still read back");
-    for gone in [
-        "watcher-cooldown-minutes",
-        "watcher-margin-percent",
-        "watcher-no-return",
-    ] {
+    for gone in ["watcher-cooldown-minutes", "watcher-no-return"] {
         assert!(
             !printed.contains(gone),
-            "and none of the three is on the listing either: {printed}"
+            "and neither of the two is on the listing either: {printed}"
         );
     }
+}
+
+#[test]
+fn a_scope_sets_how_empty_a_candidate_has_to_be_apart_from_when_it_is_moved() {
+    let host = three_accounts_in_one_group();
+
+    let (result, said) = config_set(&host, &["work", "watcher-margin-percent", "40"]);
+
+    result.expect("a margin is a Setting a Group carries");
+    assert_eq!(group_config(&host, "work").watcher_margin_percent, 40);
+    assert!(
+        said.contains("40%"),
+        "and the line says the ceiling it comes to, not the margin again: \
+         {said}"
+    );
+
+    let (result, printed) = config_get(&host, &["work"]);
+    result.expect("it reads back");
+    assert!(
+        printed.contains("watcher-margin-percent 40"),
+        "every line `get` prints is the tail of the `set` that restores it: \
+         {printed}"
+    );
+}
+
+/// A margin of nothing is the one value the arithmetic cannot mean: an Account is
+/// left on `>=` the threshold and a candidate set aside on `>` the ceiling, so at
+/// zero one Account is both full enough to leave and clear enough to arrive at.
+#[test]
+fn a_margin_of_nothing_is_refused_and_names_the_range_it_takes() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = config_set(&host, &["work", "watcher-margin-percent", "0"]);
+
+    let error = result.expect_err("zero is out of range");
+    assert_eq!(error.exit_code(), EXIT_INVALID, "{error}");
+    assert!(error.to_string().contains("between 1 and 100"), "{error}");
+    assert_eq!(
+        group_config(&host, "work").watcher_margin_percent,
+        10,
+        "refused, so unchanged"
+    );
 }
 
 #[test]

@@ -21,7 +21,7 @@ use crate::probe::{Identity, LockSpec};
 ///
 /// A registry claiming a higher one is refused rather than silently misread, and
 /// the guard is only worth having if this moves whenever the shape does.
-pub const CURRENT_VERSION: u32 = 4;
+pub const CURRENT_VERSION: u32 = 5;
 
 /// A version is a row of name rules, so the table's length is this number: a row
 /// joining without this moving, or this moving without a row, fails the build
@@ -254,6 +254,18 @@ impl Strategy {
 /// unattended Switch means the Account really is running out.
 pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
 
+/// The watcher's margin when nobody has said otherwise, in percentage points
+/// under the threshold. Wide enough that a candidate barely emptier than the
+/// Account being left is refused, which is what stops two Accounts walking
+/// upward together.
+pub const DEFAULT_WATCHER_MARGIN_PERCENT: u8 = 10;
+
+/// The least a margin may be. Nothing is out of range rather than permissive: an
+/// Account is left on `>=` the threshold and a candidate set aside on `>` the
+/// ceiling, so at a margin of nothing one Account is both full enough to leave
+/// and clear enough to arrive at.
+pub const MIN_MARGIN_PERCENT: u8 = 1;
+
 /// The most a Setting said as a share of something can be.
 ///
 /// Not the bound on a Utilization figure, which `validate` checks separately:
@@ -266,6 +278,12 @@ pub const MAX_PERCENTAGE: u8 = 100;
 /// the sentence and the number cannot disagree.
 pub fn a_percentage() -> String {
     format!("a whole number between 0 and {MAX_PERCENTAGE}")
+}
+
+/// The same for a margin, whose floor is not zero. Built from the bounds for
+/// [`a_percentage`]'s reason.
+pub fn a_margin() -> String {
+    format!("a whole number between {MIN_MARGIN_PERCENT} and {MAX_PERCENTAGE}")
 }
 
 /// Every Setting there is, all of them set: what one Scope holds
@@ -284,6 +302,11 @@ pub struct Settings {
     pub watcher_may_act: bool,
     /// The Utilization the watcher would act at, as a percentage.
     pub watcher_threshold_percent: u8,
+    /// How far under the threshold a candidate has to sit before moving to it is
+    /// worth doing, in percentage points. Separate from the threshold because
+    /// the two are not one preference: how full is too full to stay on, and how
+    /// empty is empty enough to move to, are answered by different appetites.
+    pub watcher_margin_percent: u8,
 }
 
 impl Default for Settings {
@@ -292,6 +315,7 @@ impl Default for Settings {
             strategy: Strategy::default(),
             watcher_may_act: false,
             watcher_threshold_percent: DEFAULT_WATCHER_THRESHOLD_PERCENT,
+            watcher_margin_percent: DEFAULT_WATCHER_MARGIN_PERCENT,
         }
     }
 }
@@ -309,6 +333,14 @@ impl Settings {
                 "watcher-threshold-percent",
                 self.watcher_threshold_percent,
                 &a_percentage(),
+            ));
+        }
+        if !(MIN_MARGIN_PERCENT..=MAX_PERCENTAGE).contains(&self.watcher_margin_percent) {
+            return Err(out_of_range(
+                scope,
+                "watcher-margin-percent",
+                self.watcher_margin_percent,
+                &a_margin(),
             ));
         }
         Ok(())

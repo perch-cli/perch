@@ -314,15 +314,17 @@ _Avoid_: limit, cap, trigger
 
 **Margin**:
 How far under the Threshold a candidate has to sit before moving to it is worth
-doing. What refuses a destination nearly as full as the Account being left.
+doing. What refuses a destination nearly as full as the Account being left. A
+Scope's, in percentage points, and never nothing: at a Margin of nothing one
+Account is both full enough to leave and clear enough to arrive at.
 _Avoid_: buffer, hysteresis, gap, slack
 
 **Cooldown**:
 The least wall-clock the Watcher leaves between one Switch and the next,
-whatever the figures do in between. It belongs to the Watcher rather than to
-the machine: the loop carries it in memory and forgets it when it stops, and a
-Check records it against its Group, because there is no loop for it to live in
-and the Check after it would otherwise be paced by nothing.
+whatever the figures do in between. Recorded against the Scope it paces, in the
+same save as the Switch that started it, and read back at the top of every
+round — because a Watcher is a process its own Service restarts, and a Cooldown
+a restart clears is no Cooldown.
 _Avoid_: backoff, debounce, rate limit, throttle
 
 **Back-off**:

@@ -527,7 +527,7 @@ fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
 /// Written down rather than read off `CURRENT_VERSION`: a step that named the
 /// current version would land on it whatever it became, so a shape moving with
 /// no step to carry it would compile.
-const CARRIED_TO: u32 = 4;
+const CARRIED_TO: u32 = 5;
 
 // Short of the shape this build reads, `load` deserializes what the step left
 // behind as a shape it is not. Reading `CURRENT_VERSION` above would make this
@@ -655,6 +655,33 @@ mod tests {
             .expect("a document a Perch wrote")
             .expect("this one is not the shape this build reads");
         serde_json::from_str(&moved).expect("what comes out is a document")
+    }
+
+    /// Version 5 moved a Setting rather than a name, so the step is the stamp and
+    /// the Settings a Scope already held: the margin is what nobody said, and
+    /// serde reads it as the compiled-in default when the tree is built.
+    #[test]
+    fn a_version_4_registry_comes_forward_saying_nothing_about_the_margin() {
+        let moved = forwarded(
+            r#"{"version":4,"accounts":[],"groups":{"work":{"strategy":"soonest-reset","watcher_may_act":true,"watcher_threshold_percent":90}}}"#,
+        );
+
+        assert_eq!(moved["version"], Value::from(5));
+        assert_eq!(moved["groups"]["work"]["watcher_threshold_percent"], 90);
+        assert_eq!(
+            moved["groups"]["work"]["watcher_margin_percent"],
+            Value::Null
+        );
+
+        let read: crate::registry::Registry =
+            serde_json::from_value(moved).expect("the shape this build reads");
+        assert_eq!(
+            read.group("work")
+                .expect("the Group came forward")
+                .watcher_margin_percent,
+            crate::registry::DEFAULT_WATCHER_MARGIN_PERCENT,
+            "a Scope that never said is the Scope the constant is for"
+        );
     }
 
     /// The floor the chain keeps: a number below the oldest any Perch stamped
@@ -996,6 +1023,7 @@ mod tests {
             forwarded(V0_2_0)["groups"]["work"],
             serde_json::json!({
                 "strategy": "most-headroom",
+                "watcher_margin_percent": 10,
                 "watcher_may_act": true,
                 "watcher_threshold_percent": 80,
             })
@@ -1010,6 +1038,7 @@ mod tests {
                 "interchangeable": true,
                 "settings": {
                     "strategy": "soonest-reset",
+                    "watcher_margin_percent": 10,
                     "watcher_may_act": false,
                     "watcher_threshold_percent": 85,
                 },
@@ -1051,6 +1080,7 @@ mod tests {
             moved["groups"]["work"],
             serde_json::json!({
                 "strategy": "most-headroom",
+                "watcher_margin_percent": 10,
                 "watcher_may_act": true,
                 "watcher_threshold_percent": 80,
             })

@@ -421,9 +421,23 @@ pub const ROWS: &[Rules] = &[
         ],
         fold: Fold::Lowercase,
     },
-    // Version 4, this build. The live unshowable set, because "current" is
-    // whatever this build does — and the allow-list, which subsumes whitespace,
-    // the `@` and the leading `-` the three rows above name one at a time.
+    // Version 4. The live unshowable set, because "current" is whatever this
+    // build does — and the allow-list, which subsumes whitespace, the `@` and
+    // the leading `-` the three rows above name one at a time.
+    Rules {
+        rules: &[
+            Rule::Empty,
+            Rule::Unshowable(crate::host::UNSHOWABLE),
+            Rule::NotAnIdentifier,
+            Rule::OpensWrong,
+            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
+            Rule::MeansEveryScope(&[GLOBAL]),
+        ],
+        fold: Fold::OneSigma,
+    },
+    // Version 5, this build. Version 4's rules, because the shape that moved was
+    // a Setting rather than a name — written out rather than aliased, or the
+    // next divergence would be an edit to two versions.
     Rules {
         rules: &[
             Rule::Empty,

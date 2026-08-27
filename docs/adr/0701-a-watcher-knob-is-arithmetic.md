@@ -9,11 +9,11 @@ arrangements, and the policy is this record.
 
 Five numbers pace it — the interval between Refreshes, the Back-off after a
 Refresh that could not be read, the Cooldown between two Switches, the Margin
-under the Threshold, and the Threshold itself. **Only the Threshold is anyone's
-to set.** The other four are arithmetic, about Anthropic's allowance or about
-how fast a Quota Window moves, and a Setting is where somebody's preference
-enters rather than where a derivation is retyped. A Group that could poll every
-ten seconds would be a Group configured to be refused.
+under the Threshold, and the Threshold itself. **The Threshold and the Margin
+are the two anyone sets.** The other three are arithmetic, about Anthropic's
+allowance or about how fast a Quota Window moves, and a Setting is where
+somebody's preference enters rather than where a derivation is retyped. A Group
+that could poll every ten seconds would be a Group configured to be refused.
 
 ## It Refreshes the active Account, every two and a half minutes
 
@@ -95,22 +95,45 @@ happens and never stops it happening. Only the Margin does, by turning the round
 into `Exhausted` — exit `17` — which is the true answer: there is nowhere better
 to go.
 
-**The Margin is ten points, relative to the Threshold.** Relative rather than
-absolute, so it tracks the Threshold as it changes: "ten points under" still
-means something once somebody sets the Threshold to 60, where a fixed 70 would
-quietly stop meaning anything. A constant rather than a Setting because nobody
-wants the low end and the high end is already reachable by moving the
-Threshold — and the low end permits a contradiction, since an Account is left on
-`>=` the Threshold and a candidate is set aside on `>` the ceiling, so at a
-Margin of nothing an Account at exactly 80% would be full enough to leave and
-clear enough to arrive at.
+**The Margin is ten points by default, relative to the Threshold.** Relative
+rather than absolute, so it tracks the Threshold as it changes: "ten points
+under" still means something once somebody sets the Threshold to 60, where a
+fixed 70 would quietly stop meaning anything.
+
+It was a constant, on the reasoning that nobody wants the low end and the high
+end is already reachable by moving the Threshold. **The second half of that was
+wrong.** The ceiling is the Threshold less the Margin, so the two move together:
+raising the Threshold to 90 to reach a ceiling of 80 also delays when you are
+moved off, which is the opposite of what somebody asking for a conservative
+destination wants. "Leave at 80, and only arrive under 50" was not reachable by
+any setting of the one knob, and it is a coherent thing to want — the person who
+would rather sit out a round than land somewhere they will cross again within
+the hour. So the Margin is `watcher-margin-percent`, Overridable per Scope
+beside the Threshold.
+
+The low end stays refused, because there the arithmetic genuinely cannot mean
+what it says: an Account is left on `>=` the Threshold and a candidate is set
+aside on `>` the ceiling, so at a Margin of nothing an Account at exactly 80%
+would be full enough to leave and clear enough to arrive at. One is the floor,
+and a `0` is refused naming the range rather than accepted and made safe — the
+comparison is not the thing to bend.
+
+What the knob costs is the fourth Setting, and it is worth it because the two
+questions are genuinely two: *how full is too full to stay on* and *how empty is
+empty enough to move to* are answered by different appetites, and a person who
+has an opinion about the second has no way to say it through the first.
 
 Collapsing the Margin into the Threshold is refused. Making the rule symmetric —
 you are moved off above the line and never onto anything above it — is one
 number with one meaning in both directions and repairs that asymmetry by
 construction, but it is exactly a Margin of nothing with the comparison
-tightened, so it re-buys the walk upward the Margin exists to stop. The concept
-has to survive; only a knob for it does not.
+tightened, so it re-buys the walk upward the Margin exists to stop. A Margin that
+is settable is still a Margin: what the knob moves is how wide it is, never
+whether there is one.
+
+A Scope that sets a Margin wider than its Threshold is in range, and is a Scope
+that will only move onto an Account with nothing used at all — the same coherent
+ask a Threshold under the Margin already was, reached from the other side.
 
 The Margin sets candidates aside before the Strategy ranks them rather than
 vetoing the winner afterwards. A `soonest-reset` Group would otherwise be told
@@ -179,7 +202,7 @@ was for is kept here instead, at no surface at all:
 > because the Cooldown subsumes it, not because returning immediately is
 > acceptable.
 
-## The Threshold is the one preference
+## The Threshold is the preference the Margin is measured from
 
 How full is too full cannot be derived from Anthropic's allowance or from the
 length of a window. Somebody who never wants to hit a wall mid-task sets 60;
@@ -195,8 +218,8 @@ Margin is in range, and is a Group that will only move onto an Account with
 nothing used at all — a coherent thing to ask for, and refusing it would make
 the order two `perch config set`s are typed in matter.
 
-It keeps its `watcher-` prefix, which groups the two Settings the Watcher owns
-and separates a Watcher rule from `strategy`, which governs Cycles nobody is
+It keeps its `watcher-` prefix, which groups the Settings the Watcher owns and
+separates a Watcher rule from `strategy`, which governs Cycles nobody is
 watching.
 
 ## It acts only where two statements have been made
@@ -277,10 +300,11 @@ Credential is Captured first (ADR a-switch-is-written-down-first), Claude Code's
 locks are taken, and a Live Profile's token is never Renewed. Running while
 Claude Code is working is the normal case rather than the exception.
 
-`perch config` carries two Watcher Settings — `watcher-may-act` and
-`watcher-threshold-percent` — beside `strategy`, and `interchangeable` on the
-Ungrouped Scope alone. **All four pacing concepts survive as concepts.** Threshold,
-Margin, Cooldown and Back-off are each still an idea and each keeps its glossary
-entry: a person meets these words in a `cooling` line and in a held round, and a
-term you meet but cannot look up is worse conceptual surface than one you can.
-What is settable is smaller than what is named.
+`perch config` carries three Watcher Settings — `watcher-may-act`,
+`watcher-threshold-percent` and `watcher-margin-percent` — beside `strategy`,
+and `interchangeable` on the Ungrouped Scope alone. **All four pacing concepts
+survive as concepts.** Threshold, Margin, Cooldown and Back-off are each still an
+idea and each keeps its glossary entry: a person meets these words in a
+`cooling` line and in a held round, and a term you meet but cannot look up is
+worse conceptual surface than one you can. What is settable is still smaller
+than what is named.

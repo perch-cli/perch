@@ -252,15 +252,8 @@ fn for_how_long(span: Duration) -> String {
 /// move you again.
 pub const COOLDOWN_MINUTES: u32 = 15;
 
-/// How far under the threshold a candidate has to sit before moving to it is worth
-/// doing, in percentage points.
-///
-/// Relative to the threshold, so it tracks it — and never nothing, because a candidate
-/// is set aside on `>` and an Account is left on `>=`.
-pub const MARGIN_PERCENT: u8 = 10;
-
-/// The rule a Group gives the watcher: one number, because *when* a move is wanted is
-/// the only one of its pacing questions that is anyone's.
+/// The rule a Scope gives the watcher: the two numbers saying when a move is wanted
+/// and what is worth moving to, which are the pacing questions that are anyone's.
 ///
 /// A copy taken at the top of a round, so a `perch config set` landing mid-round cannot
 /// set a candidate aside by a figure the line does not quote.
@@ -269,22 +262,26 @@ pub struct Policy {
     /// How full the Account you are on has to be before moving off it is wanted, as a
     /// percentage of its fullest Quota Window.
     pub threshold: u8,
+    /// How far under the threshold a candidate has to sit before moving to it is worth
+    /// doing, in percentage points. Relative to the threshold, so it tracks it.
+    pub margin: u8,
 }
 
 impl Policy {
     pub fn of(config: &Settings) -> Policy {
         Policy {
             threshold: config.watcher_threshold_percent,
+            margin: config.watcher_margin_percent,
         }
     }
 
     /// The Utilization a candidate has to be at or under to be worth moving to — the
-    /// threshold less [`MARGIN_PERCENT`].
+    /// threshold less the margin.
     ///
     /// Saturating, so a threshold under the margin only moves to an Account with
     /// nothing used at all rather than never moving.
     pub fn ceiling(&self) -> u8 {
-        self.threshold.saturating_sub(MARGIN_PERCENT)
+        self.threshold.saturating_sub(self.margin)
     }
 }
 
@@ -1615,7 +1612,28 @@ mod tests {
 
     #[test]
     fn a_threshold_under_the_margin_bars_everything_but_an_empty_account() {
-        assert_eq!(Policy { threshold: 5 }.ceiling(), 0);
+        assert_eq!(
+            Policy {
+                threshold: 5,
+                margin: 10
+            }
+            .ceiling(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_scope_that_set_its_own_margin_gets_the_ceiling_it_asked_for() {
+        assert_eq!(
+            Policy {
+                threshold: 80,
+                margin: 40
+            }
+            .ceiling(),
+            40,
+            "the margin is the one knob that moves a ceiling without moving \
+             when you are moved off"
+        );
     }
 
     #[test]

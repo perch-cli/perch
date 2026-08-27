@@ -112,14 +112,15 @@ are on and stands still on the ones you are not, so two Accounts either side of
 the threshold do not trade places — they walk upward together, and every Switch
 costs a Capture and a Credential write to land you somewhere with almost nothing
 left. **The margin is what stops it**; the cooldown paces what the margin has
-already allowed. Both are fixed, and each is printed when it is what decided a
-round:
+already allowed. Each is printed when it is what decided a round:
 
-- a **margin** of 10 points under the threshold, which nothing is moved to
-  unless it clears. At an 80% threshold that means nothing above 70%. A round
+- a **margin**, 10 points under the threshold by default, which nothing is moved
+  to unless it clears. At an 80% threshold that means nothing above 70%. A round
   with nowhere clear enough says there is nowhere better to go, which is the
   true answer — and it is the only one of the two that can say so, because a
   cooldown sets how often a pointless move happens and never stops it happening.
+  `perch config set <scope> watcher-margin-percent <points>` moves it; the
+  cooldown below is fixed.
 - a **cooldown** of 15 minutes between one Switch and the next, whatever the
   figures do in between. A five-hour window moves slowly enough that fifteen
   minutes never misses a real crossing. It is checked before anything is read:

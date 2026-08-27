@@ -23,16 +23,18 @@ pub enum Setting {
     Strategy,
     WatcherMayAct,
     WatcherThresholdPercent,
+    WatcherMarginPercent,
 }
 
 /// Every Setting there is, in the order every surface offers them. The
 /// declaration a Scope is Cycled within at all comes first, because the rest of
 /// the page says how it is Cycled.
-pub const SETTINGS: [Setting; 4] = [
+pub const SETTINGS: [Setting; 5] = [
     Setting::Interchangeable,
     Setting::Strategy,
     Setting::WatcherMayAct,
     Setting::WatcherThresholdPercent,
+    Setting::WatcherMarginPercent,
 ];
 
 impl Setting {
@@ -42,6 +44,7 @@ impl Setting {
             Setting::Strategy => "strategy",
             Setting::WatcherMayAct => "watcher-may-act",
             Setting::WatcherThresholdPercent => "watcher-threshold-percent",
+            Setting::WatcherMarginPercent => "watcher-margin-percent",
         }
     }
 
@@ -104,6 +107,7 @@ impl Setting {
             Setting::Strategy => settings.strategy.as_str().to_string(),
             Setting::WatcherMayAct => settings.watcher_may_act.to_string(),
             Setting::WatcherThresholdPercent => settings.watcher_threshold_percent.to_string(),
+            Setting::WatcherMarginPercent => settings.watcher_margin_percent.to_string(),
         }
     }
 
@@ -129,6 +133,9 @@ impl Setting {
             Setting::WatcherMayAct => settings.watcher_may_act = yes_or_no(self.as_str(), value)?,
             Setting::WatcherThresholdPercent => {
                 settings.watcher_threshold_percent = percentage(self.as_str(), value)?
+            }
+            Setting::WatcherMarginPercent => {
+                settings.watcher_margin_percent = margin(self.as_str(), value)?
             }
         }
         settings.validate(scope)?;
@@ -194,6 +201,17 @@ impl Setting {
                 "`perch watcher run` Switches {within} once that much of the \
                  fullest Quota Window of the Account you are on has been used. \
                  {ONLY_WHILE_IT_RUNS}"
+            ),
+            Setting::WatcherMarginPercent => format!(
+                "`perch watcher run` will only move {within} to an Account at \
+                 {}% or under — that many points below the threshold of {}%. A \
+                 round with nowhere that empty to go says so rather than moving \
+                 you onto an Account nearly as full as the one you are on. \
+                 {ONLY_WHILE_IT_RUNS}",
+                settings
+                    .watcher_threshold_percent
+                    .saturating_sub(settings.watcher_margin_percent),
+                settings.watcher_threshold_percent,
             ),
         }
     }
@@ -331,6 +349,19 @@ fn percentage(key: &str, value: &str) -> Result<u8> {
         .ok()
         .filter(|percent| *percent <= registry::MAX_PERCENTAGE)
         .ok_or_else(|| not_a_value(key, value, &registry::a_percentage()))
+}
+
+/// The same for a margin, whose floor is not zero. Its own so that the person
+/// who typed `0` is told the range that would have been taken, rather than
+/// reaching `validate`'s refusal, which addresses somebody reading a file.
+fn margin(key: &str, value: &str) -> Result<u8> {
+    value
+        .parse::<u8>()
+        .ok()
+        .filter(|percent| {
+            (registry::MIN_MARGIN_PERCENT..=registry::MAX_PERCENTAGE).contains(percent)
+        })
+        .ok_or_else(|| not_a_value(key, value, &registry::a_margin()))
 }
 
 /// A value refused for the value it is, said to somebody who just typed it —
