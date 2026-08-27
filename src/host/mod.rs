@@ -878,7 +878,7 @@ pub(crate) struct Settled(Option<PathBuf>);
 pub(crate) fn settled(host: &dyn Host, path: &Path) -> Settled {
     const FOLLOWED: usize = 8;
 
-    let mut at = flattened(path);
+    let mut at = flattened(&from_the_root(host, path));
     for _ in 0..FOLLOWED {
         match deepest_link_on(host, &at) {
             Some(followed) => at = flattened(&followed),
@@ -886,6 +886,24 @@ pub(crate) fn settled(host: &dyn Host, path: &Path) -> Settled {
         }
     }
     Settled(None)
+}
+
+/// A path read from wherever Perch was run, where it does not name one from the
+/// root. `starts_with` matches components, so a bare `backup.age` shares none
+/// with the directory it is sitting in and every containment question about it
+/// answers "elsewhere".
+fn from_the_root(host: &dyn Host, path: &Path) -> PathBuf {
+    // Asked of the platform the *Host* reports, and joined with `/` by hand, for
+    // `probe::rooted`'s reason: `is_absolute` and `join` read the separator of
+    // the platform this build runs on.
+    let typed = path.to_string_lossy();
+    if typed.is_empty() || crate::probe::rooted(&typed, host.platform() == Platform::Windows) {
+        return path.to_path_buf();
+    }
+    match host.current_dir() {
+        Ok(here) => PathBuf::from(format!("{}/{typed}", here.display())),
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 /// `.` and `..` taken out, so what is left is a path of names: the walk below
@@ -1124,11 +1142,12 @@ mod tests {
             Some(Path::new("/Users/someone/elsewhere")),
             "a path with no link on it is itself"
         );
-        // A relative path runs out of parents at the empty one rather than at
-        // the root, which is the other way this walk has to know it is done.
+        // A path naming no place from the root is read from where Perch was
+        // run, since `starts_with` matches components and a bare name shares
+        // none with the directory it is sitting in.
         assert_eq!(
             settled(&host, Path::new("neither/is/this")).at(),
-            Some(Path::new("neither/is/this")),
+            Some(Path::new("/Users/someone/work/neither/is/this")),
         );
     }
 

@@ -405,6 +405,27 @@ fn a_path_whose_directory_is_not_there_is_refused_rather_than_having_one_made() 
     );
 }
 
+/// The relative half of the rule `perch holdings purge`'s own prompt already
+/// holds. A bare filename is a file beside the current directory, and where that
+/// directory is inside Perch's home the Export lands in what a Purge deletes
+/// whole — the only copy of every Credential, gone with the Holdings it was
+/// written to survive.
+#[test]
+fn an_export_named_relative_to_a_cwd_inside_perchs_home_is_refused_too() {
+    let home = "/Users/someone/.config/perch";
+    let host = a_machine_worth_backing_up().in_directory(home);
+
+    let (outcome, _printed) = run_export(&host, "backup.age");
+
+    let refused = outcome.expect_err("the Export would go with the home");
+    assert_eq!(refused.exit_code(), EXIT_INVALID, "{refused}");
+    assert!(refused.to_string().contains(home), "it names the home: {refused}");
+    assert!(
+        host.file("/Users/someone/.config/perch/backup.age").is_none(),
+        "and nothing was written there"
+    );
+}
+
 #[test]
 fn a_machine_holding_no_accounts_is_told_so_rather_than_given_an_empty_file() {
     let host = typing_the_passphrase(machine_with_claude_code());
