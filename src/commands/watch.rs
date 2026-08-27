@@ -897,6 +897,7 @@ fn considered(
     _cooled: &Cooled<'_>,
     _idle: &Idle,
 ) -> Vec<Considered> {
+    let sharers = crate::registry::Sharers::across(registry);
     watching
         .scope
         .accounts(registry)
@@ -905,7 +906,7 @@ fn considered(
             // Through the registry's own answer rather than `!=`, which would be
             // correct only by two facts that are true two modules away.
             !name::same_name(account.email(), watching.account.email())
-                && cycle::is_a_candidate(registry, account)
+                && cycle::is_a_candidate(&sharers, account)
         })
         .map(|account| Considered {
             email: account.email().to_string(),

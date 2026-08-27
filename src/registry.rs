@@ -1234,6 +1234,35 @@ pub fn same_profile(one: &str, other: &str) -> bool {
     slug(one) == slug(other)
 }
 
+/// Which Profiles more than one Account derives, settled in one pass.
+///
+/// `is_a_candidate` asks this of every Account and is asked of every one, so
+/// answering it by [`sharing_a_profile_with`]'s scan cost n² for one fact.
+pub struct Sharers(std::collections::HashSet<String>);
+
+impl Sharers {
+    pub fn across(registry: &Registry) -> Sharers {
+        // Counting is sound because `validate` refuses two Accounts under one
+        // folded address, so nobody is counted as sharing with themselves.
+        let mut once: std::collections::HashSet<String> =
+            std::collections::HashSet::with_capacity(registry.accounts.len());
+        let mut twice = std::collections::HashSet::new();
+        let mut slugged = String::new();
+        for account in &registry.accounts {
+            slug_into(&mut slugged, account.email());
+            if !once.insert(slugged.clone()) {
+                twice.insert(slugged.clone());
+            }
+        }
+        Sharers(twice)
+    }
+
+    /// Whether this Account's Profile is one another Account derives too.
+    pub fn hold(&self, email: &str) -> bool {
+        self.0.contains(slug(email).as_str())
+    }
+}
+
 /// The other Account a Profile belongs to as well, where there is one.
 ///
 /// Three commands ask it — a Switch, a Renewal and a Remove — and each spelled

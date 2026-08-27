@@ -339,9 +339,10 @@ pub fn choose(
         )));
     }
 
+    let sharers = registry::Sharers::across(registry);
     let mut ranked: Vec<Ranked> = accounts
         .iter()
-        .filter(|account| is_a_candidate(registry, account))
+        .filter(|account| is_a_candidate(&sharers, account))
         .map(|account| Ranked {
             account,
             headroom: headroom_of(account),
@@ -349,7 +350,7 @@ pub fn choose(
         .collect();
     if ranked.is_empty() {
         return Err(PerchError::NoCandidate(nobody_is_a_candidate(
-            registry, scope, &accounts,
+            &sharers, scope, &accounts,
         )));
     }
 
@@ -462,6 +463,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     let accounts = scope.accounts(registry);
     // The Account a Cycle would be leaving, measured exactly as `choose`
     // measures it, and only where it is a candidate carrying a figure.
+    let sharers = registry::Sharers::across(registry);
     let leaving = registry.active().whose();
     let here = leaving
         .and_then(|active| {
@@ -469,7 +471,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
                 .iter()
                 .find(|account| name::same_name(account.email(), active))
         })
-        .filter(|account| is_a_candidate(registry, account))
+        .filter(|account| is_a_candidate(&sharers, account))
         .map(|account| headroom_of(account));
     let here = measured_against(here.as_ref());
     // Measured once each rather than inside a comparator that runs O(n log n)
@@ -480,7 +482,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
         .map(|account| {
             (
                 account,
-                place(registry, account, leaving, here, strategy, now),
+                place(&sharers, account, leaving, here, strategy, now),
             )
         })
         .collect();
@@ -497,14 +499,14 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
 type Place = ((u8, u8, u8), f64);
 
 fn place(
-    registry: &Registry,
+    sharers: &registry::Sharers,
     account: &Account,
     leaving: Option<&str>,
     here: Option<&Headroom>,
     strategy: Strategy,
     now: DateTime<Utc>,
 ) -> Place {
-    let candidate = is_a_candidate(registry, account);
+    let candidate = is_a_candidate(sharers, account);
     let headroom = headroom_of(account);
     // Asked only of a candidate, which is the only set `choose` asks it of: it
     // drops the non-candidates before looking for the one being left.
@@ -526,10 +528,8 @@ fn place(
 ///
 /// One predicate, because what a Cycle may choose, what a Scope has left to draw
 /// on ([`crate::reserve`]) and what a Remove lands on are one set of Accounts.
-pub fn is_a_candidate(registry: &Registry, account: &Account) -> bool {
-    !account.disabled
-        && !account.quarantined()
-        && registry::sharing_a_profile_with(registry, account).is_none()
+pub fn is_a_candidate(sharers: &registry::Sharers, account: &Account) -> bool {
+    !account.disabled && !account.quarantined() && !sharers.hold(account.email())
 }
 
 /// Whether anything has declared the Accounts in this Scope interchangeable.
@@ -547,7 +547,7 @@ pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
 /// Account is a candidate. Shared with the Reserve, which counts the same set —
 /// and every way out of [`is_a_candidate`] is counted here, or a Scope held back
 /// by only the missing one renders an empty parenthetical.
-pub fn out_of_the_running(registry: &Registry, accounts: &[&Account]) -> String {
+pub fn out_of_the_running(sharers: &registry::Sharers, accounts: &[&Account]) -> String {
     let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
     let disabled = accounts
         .iter()
@@ -555,11 +555,7 @@ pub fn out_of_the_running(registry: &Registry, accounts: &[&Account]) -> String 
         .count();
     let sharing = accounts
         .iter()
-        .filter(|a| {
-            !a.disabled
-                && !a.quarantined()
-                && registry::sharing_a_profile_with(registry, a).is_some()
-        })
+        .filter(|a| !a.disabled && !a.quarantined() && sharers.hold(a.email()))
         .count();
     let mut out = Vec::new();
     if disabled > 0 {
@@ -642,12 +638,16 @@ fn chosen_basis(best: &Ranked, strategy: Strategy, now: DateTime<Utc>) -> Basis 
 
 /// The Scope holds Accounts and none of them is a candidate. Which way each one
 /// left the running is [`out_of_the_running`]'s to count.
-fn nobody_is_a_candidate(registry: &Registry, scope: &Scope, accounts: &[&Account]) -> String {
+fn nobody_is_a_candidate(
+    sharers: &registry::Sharers,
+    scope: &Scope,
+    accounts: &[&Account],
+) -> String {
     format!(
         "No Account in {} is a Cycle candidate ({}), so there is nowhere to \
          Switch to. Nothing was changed.",
         scope.place(),
-        out_of_the_running(registry, accounts),
+        out_of_the_running(sharers, accounts),
     )
 }
 
@@ -729,7 +729,7 @@ fn everyone_is_exhausted(
     // What the filter took out before any of this was measured. Without it the
     // refusal sends somebody off to wait for a quota reset about a Group whose
     // two Accounts with full Headroom are merely disabled.
-    let set_aside = out_of_the_running(registry, accounts);
+    let set_aside = out_of_the_running(&registry::Sharers::across(registry), accounts);
     let (every, also) = match set_aside.is_empty() {
         true => (String::new(), String::new()),
         false => (
@@ -794,7 +794,7 @@ pub(crate) mod tests {
         spare.disabled = true;
 
         let said = nobody_is_a_candidate(
-            &holding(vec![broken.clone(), spare.clone()]),
+            &registry::Sharers::across(&holding(vec![broken.clone(), spare.clone()])),
             &Scope::Ungrouped,
             &[&broken, &spare],
         );
@@ -812,7 +812,7 @@ pub(crate) mod tests {
         let other = account("some.one@example.com", vec![]);
 
         let said = nobody_is_a_candidate(
-            &holding(vec![one.clone(), other.clone()]),
+            &registry::Sharers::across(&holding(vec![one.clone(), other.clone()])),
             &Scope::Ungrouped,
             &[&one, &other],
         );
@@ -1922,7 +1922,7 @@ mod properties {
             // Only where the Account being left is one a Cycle would consider:
             // the figure beside a broken Credential is not a standard anything
             // has to beat.
-            if !is_a_candidate(&arrangement.registry, leaving) {
+            if !is_a_candidate(&registry::Sharers::across(&arrangement.registry), leaving) {
                 continue;
             }
             let here = headroom_of(leaving);
