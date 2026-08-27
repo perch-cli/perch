@@ -143,7 +143,11 @@ impl std::fmt::Debug for Export {
 ///
 /// Nothing is Renewed and nothing is Rotated. A store that will not say what it
 /// holds stops the Export rather than being recorded as an Account with none.
-pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
+pub fn gather(
+    host: &dyn Host,
+    registry: &Registry,
+    installed: &crate::probe::Installed,
+) -> Result<Export> {
     // Filled in place rather than gathered beside it and moved in at the end:
     // `Export`'s `Drop` is what wipes these two maps, so a store that refuses
     // partway would otherwise free every Credential read before it untouched.
@@ -155,7 +159,7 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
     };
 
     for account in &registry.accounts {
-        if let Some(credential) = read_the_credential(host, registry, account)? {
+        if let Some(credential) = read_the_credential(host, registry, account, installed)? {
             gathered
                 .credentials
                 .insert(account.email().to_string(), credential);
@@ -182,11 +186,12 @@ fn read_the_credential(
     host: &dyn Host,
     registry: &Registry,
     account: &Account,
+    installed: &crate::probe::Installed,
 ) -> Result<Option<String>> {
     // The live store first, and its own Profile as a fallback rather than the
     // answer: `claude /logout` empties the live store and leaves the Account
     // active, holding a Credential Perch has perfectly well.
-    if let Some(live) = the_live_store(host, registry, account)?
+    if let Some(live) = the_live_store(host, registry, account, installed)?
         && let Some(credential) = read_from(host, &live, account)?
     {
         return Ok(Some(credential));
@@ -209,6 +214,7 @@ fn the_live_store(
     host: &dyn Host,
     registry: &Registry,
     account: &Account,
+    installed: &crate::probe::Installed,
 ) -> Result<Option<crate::probe::Store>> {
     // A *settled* registry rather than `is_active`, which during a Landing
     // answers with the Account being **left** while the live store may hold the
@@ -220,14 +226,10 @@ fn the_live_store(
         return Ok(None);
     }
     let live = registry::the_default_profile(host)?;
-    // Tolerated rather than allowed to skip the read below: the version is only
-    // what a refusal quotes, and an Export is what a decommissioned machine runs.
-    let installed = crate::probe::Installed::probed(host)
-        .unwrap_or_else(|_| crate::probe::Installed::unknown("(not installed)"));
     // An Identity that is absent, or that will not be read, is not evidence
     // against — only one naming somebody else is.
     let somebody_else = matches!(
-        crate::probe::read_identity(host, &live, &installed),
+        crate::probe::read_identity(host, &live, installed),
         Ok(Some(identity)) if !name::same_name(&identity.email, account.email())
     );
     Ok((!somebody_else).then_some(live))
@@ -602,7 +604,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::probe::Identity;
+    use crate::probe::{Identity, Installed};
     use crate::registry::Quarantine;
 
     const PASSPHRASE: &str = "correct horse battery staple";
@@ -679,7 +681,8 @@ mod tests {
         registry.upsert(crate::cycle::tests::account("one@example.com", vec![]));
         registry.upsert(crate::cycle::tests::account("@", vec![]));
 
-        let gathered = gather(&host, &registry).expect("`@` names no store to read");
+        let gathered = gather(&host, &registry, &Installed::unknown("2.1.221"))
+            .expect("`@` names no store to read");
 
         assert_eq!(gathered.accounts(), 2, "both travel in the registry");
         assert!(
@@ -1034,7 +1037,8 @@ mod tests {
             .unwrap();
         host.set_keychain_item(&store.keychain_service, &store.keychain_account, "held");
 
-        let export = gather(&host, &registry).expect("both stores answer");
+        let export =
+            gather(&host, &registry, &Installed::unknown("2.1.221")).expect("both stores answer");
 
         assert_eq!(export.credentials.get("one@example.com").unwrap(), "held");
         assert_eq!(
@@ -1072,7 +1076,8 @@ mod tests {
         host.lock_keychain("User interaction is not allowed");
         registry.upsert(account);
 
-        let refused = gather(&host, &registry).expect_err("nothing can be read");
+        let refused = gather(&host, &registry, &Installed::unknown("2.1.221"))
+            .expect_err("nothing can be read");
         assert!(refused.to_string().contains("one@example.com"), "{refused}");
         assert!(refused.to_string().contains("partial restore"), "{refused}");
     }

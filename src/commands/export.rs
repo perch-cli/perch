@@ -32,8 +32,22 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
+    // Once per command, which is [`Installed`]'s own rule, and tolerated where
+    // it fails: the version is only what a refusal quotes, and an Export is what
+    // a decommissioned machine runs.
+    let installed = crate::probe::Installed::probed(host)
+        .unwrap_or_else(|_| crate::probe::Installed::unknown("(not installed)"));
+
     let mut landed = None;
-    let written = write_the_export(host, &mut perch, &mut registry, path, &mut landed, out);
+    let written = write_the_export(
+        host,
+        &mut perch,
+        &mut registry,
+        path,
+        &mut landed,
+        &installed,
+        out,
+    );
     match (written, landed) {
         // The bytes land before the report, so a terminal that has gone away
         // fails a command whose file is there — and a re-run is refused for the
@@ -59,6 +73,7 @@ pub fn write_the_export(
     registry: &mut Registry,
     path: &Path,
     landed: &mut Option<PathBuf>,
+    installed: &crate::probe::Installed,
     out: &mut dyn Write,
 ) -> Result<()> {
     refuse_a_directory_that_is_not_there(host, path)?;
@@ -79,7 +94,7 @@ pub fn write_the_export(
     }
 
     let passphrase = agreed_passphrase(host, out)?;
-    let export = export::gather(host, registry)?;
+    let export = export::gather(host, registry, installed)?;
     let sealed = export::seal(&export, &passphrase)?;
 
     // Asked again, because the check above was two blocking questions ago and the

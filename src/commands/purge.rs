@@ -70,7 +70,14 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         // The offer's *own* failure carries the note as well, because the bytes
         // land before the report. Taken as a value first, so the borrow of
         // `exported` the call holds is over before the note reads it.
-        let offered = offer_an_export(host, &mut perch, &mut registry, &mut exported, out);
+        let offered = offer_an_export(
+            host,
+            &mut perch,
+            &mut registry,
+            &mut exported,
+            &installed,
+            out,
+        );
         offered.map_err(|error| still_standing(error, exported.as_deref()))?;
         // The note again, because the question *between* the offer and the
         // decision is a failure path of its own: `agreed` writes a prompt and
@@ -263,6 +270,7 @@ fn offer_an_export(
     perch: &mut crate::lock::Held<'_>,
     registry: &mut Registry,
     landed: &mut Option<PathBuf>,
+    installed: &Installed,
     out: &mut dyn Write,
 ) -> Result<()> {
     // Nothing to put in one. `perch holdings export` refuses this too, and
@@ -297,12 +305,14 @@ fn offer_an_export(
     // The Export's own refusals are about the Export, and every one of them is
     // true. None says what the person typing `perch holdings purge` is waiting to
     // hear, which is whether the Purge happened.
-    export::write_the_export(host, perch, registry, &path, landed, out).map_err(|error| {
-        error.with_note(
-            "Nothing was purged. Run `perch holdings purge` again — answering \
+    export::write_the_export(host, perch, registry, &path, landed, installed, out).map_err(
+        |error| {
+            error.with_note(
+                "Nothing was purged. Run `perch holdings purge` again — answering \
              `n` to the offer purges without an Export.",
-        )
-    })?;
+            )
+        },
+    )?;
     Ok(())
 }
 
