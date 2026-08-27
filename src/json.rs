@@ -75,11 +75,7 @@ pub fn set_value_at(contents: &str, key: &str, value: &str) -> Option<Secret> {
     let Some((span, indented)) = replacement(contents, key, value) else {
         return insert(contents, key, value);
     };
-    Some(spliced(&[
-        &contents[..span.0],
-        &indented,
-        &contents[span.1..],
-    ]))
+    Some(splice(contents, span, &indented))
 }
 
 /// The same, and nothing at all where the document already holds what the splice
@@ -90,8 +86,12 @@ pub fn changed_value_at(contents: &str, key: &str, value: &str) -> Option<Secret
     let Some((span, indented)) = replacement(contents, key, value) else {
         return insert(contents, key, value);
     };
-    (contents[span.0..span.1] != *indented.as_str())
-        .then(|| spliced(&[&contents[..span.0], &indented, &contents[span.1..]]))
+    (contents[span.0..span.1] != *indented.as_str()).then(|| splice(contents, span, &indented))
+}
+
+/// The document with one span of it replaced, in a buffer wiped on drop.
+fn splice(contents: &str, span: (usize, usize), indented: &Secret) -> Secret {
+    spliced(&[&contents[..span.0], indented.as_str(), &contents[span.1..]])
 }
 
 /// The span a splice of `key` replaces and the text it writes there, or nothing
