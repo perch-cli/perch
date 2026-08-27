@@ -790,7 +790,10 @@ mod tests {
         assert!(refused.to_string().contains("passphrase"), "{refused}");
 
         let refused = unseal("not an age file at all", PASSPHRASE).expect_err("nor does this");
-        assert!(refused.to_string().contains("not an `age` file"), "{refused}");
+        assert!(
+            refused.to_string().contains("not an `age` file"),
+            "{refused}"
+        );
         assert!(
             !refused.to_string().contains("intact"),
             "a file that was never an Export is not a damaged one: {refused}"
@@ -842,10 +845,13 @@ mod tests {
             "{no_passphrase}"
         );
 
-        let too_much_work = would_not_open(ARMOR_BEGIN, age::DecryptError::ExcessiveWork {
-            required: MAX_WORK_FACTOR + 1,
-            target: MAX_WORK_FACTOR - 4,
-        });
+        let too_much_work = would_not_open(
+            ARMOR_BEGIN,
+            age::DecryptError::ExcessiveWork {
+                required: MAX_WORK_FACTOR + 1,
+                target: MAX_WORK_FACTOR - 4,
+            },
+        );
         let said = too_much_work.to_string();
         assert!(
             !said.contains("not an `age` file") && !said.contains("not the passphrase"),

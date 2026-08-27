@@ -419,9 +419,13 @@ fn an_export_named_relative_to_a_cwd_inside_perchs_home_is_refused_too() {
 
     let refused = outcome.expect_err("the Export would go with the home");
     assert_eq!(refused.exit_code(), EXIT_INVALID, "{refused}");
-    assert!(refused.to_string().contains(home), "it names the home: {refused}");
     assert!(
-        host.file("/Users/someone/.config/perch/backup.age").is_none(),
+        refused.to_string().contains(home),
+        "it names the home: {refused}"
+    );
+    assert!(
+        host.file("/Users/someone/.config/perch/backup.age")
+            .is_none(),
         "and nothing was written there"
     );
 }

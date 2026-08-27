@@ -1253,7 +1253,8 @@ const CASES: &[Case] = &[
             // dangling — anything existing at it. `symlink(2)` says EEXIST.
             let inner = root.join("inner");
             let through = root.join("through");
-            host.create_dir_exclusive(&inner).expect("the real directory");
+            host.create_dir_exclusive(&inner)
+                .expect("the real directory");
             if !can_link(host, Link::Symbolic, root, adapter) {
                 return;
             }
