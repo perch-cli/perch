@@ -207,7 +207,7 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
         return PerchError::NotFound(format!(
             "No Group called `{name}`. `{alias}` is an Alias for {email}, and a \
              name cannot be both, so no Group can be called that. {}",
-            groups_perch_holds(registry)
+            super::groups_perch_holds(registry)
         ));
     }
 
@@ -216,32 +216,12 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
         // A near miss is a typo far more often than it is a Group somebody
         // meant to declare, so it is not also handed a way to create the typo.
         Some(suggestion) => suggestion,
-        None if declared.is_empty() => {
-            format!("No Groups have been declared yet. Declare it with `perch group add {name}`.")
-        }
         None => format!(
-            "Groups Perch holds: {}.\nDeclare it with `perch group add {name}`.",
-            declared.join(", ")
+            "{}\nDeclare it with `perch group add {name}`.",
+            super::groups_perch_holds(registry)
         ),
     };
     PerchError::NotFound(format!("No Group called `{name}`. {help}"))
-}
-
-/// The Groups there are to name, for a refusal that cannot offer to declare the
-/// one it was handed.
-fn groups_perch_holds(registry: &Registry) -> String {
-    let declared: Vec<&String> = registry.groups.keys().collect();
-    match declared.is_empty() {
-        true => "No Groups have been declared yet.".to_string(),
-        false => format!(
-            "Groups Perch holds: {}.",
-            declared
-                .iter()
-                .map(|held| held.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
 }
 
 /// Every Group with what it holds and what governs it, so the rules Cycling

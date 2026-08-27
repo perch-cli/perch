@@ -230,12 +230,10 @@ fn no_scope_was_named(registry: &Registry, key: &str, value: &str) -> PerchError
 /// missing Scope ends with it, because "name a Scope" is no use to somebody who
 /// does not know what theirs are called.
 fn the_scopes(registry: &Registry) -> String {
-    let groups: Vec<&str> = registry.groups.keys().map(String::as_str).collect();
-    let held = match groups.is_empty() {
-        true => "No Groups have been declared yet.".to_string(),
-        false => format!("Groups Perch holds: {}.", groups.join(", ")),
-    };
-    format!("`{UNGROUPED}` addresses the Accounts in no Group. {held}")
+    format!(
+        "`{UNGROUPED}` addresses the Accounts in no Group. {}",
+        super::groups_perch_holds(registry)
+    )
 }
 
 /// The form `set` takes, said whenever the words said were not it.

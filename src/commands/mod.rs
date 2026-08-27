@@ -417,6 +417,18 @@ pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
     )
 }
 
+/// The Groups there are to name, said as a sentence.
+///
+/// Every refusal about a Group or a Scope that is not there ends with it: "name
+/// a Group" is no use to somebody who does not know what theirs are called.
+pub fn groups_perch_holds(registry: &crate::registry::Registry) -> String {
+    let declared: Vec<&str> = registry.groups.keys().map(String::as_str).collect();
+    match declared.is_empty() {
+        true => "No Groups have been declared yet.".to_string(),
+        false => format!("Groups Perch holds: {}.", declared.join(", ")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
