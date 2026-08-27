@@ -19,15 +19,14 @@ use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::live;
-use crate::lock;
+use crate::lock::{self, Lost};
 use crate::observe;
 use crate::probe;
 use crate::registry::{self, Registry};
 use crate::round::{self, Verdict, Watching};
 use crate::switch::{self, NotSwitched, Resolved};
 use crate::watch::{
-    self, Backoff, Cooled, Fullest, Holding, Lost, Outcome, Recently, Round, Speak,
-    nothing_was_switched,
+    self, Backoff, Cooled, Fullest, Holding, Outcome, Recently, Round, Speak, nothing_was_switched,
 };
 
 /// One round, for whatever scheduled it.
@@ -333,7 +332,7 @@ fn opening(host: &dyn Host) -> Result<String> {
         // The one reader that asks whether a Landing is in flight rather than settling
         // one: this holds no lock, and a Switch left in flight is exactly the state
         // where there is nothing to say yet.
-        let watching = switch::nothing_in_flight(&registry)
+        let watching = registry::nothing_in_flight(&registry)
             .and_then(|settled| round::permitted(&registry, &settled).ok())?;
         Some((
             registry.named_for_the_user(watching.account.email()),

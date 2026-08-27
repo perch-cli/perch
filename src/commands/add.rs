@@ -294,11 +294,7 @@ fn resolve_group(
 fn announcement(registry: &Registry) -> String {
     format!(
         "Logging in to a new Profile.{}",
-        login::leaving_the_active_account_alone(
-            registry
-                .active_account()
-                .map(crate::registry::Account::email)
-        )
+        login::leaving_the_active_account_alone(registry.active().whose())
     )
 }
 

@@ -84,7 +84,11 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
 /// [`crate::commands::no_active_account`]'s to say, `perch switch` meeting the
 /// same state.
 fn active_email(registry: &Registry) -> Result<String> {
-    match registry.active_account() {
+    match registry
+        .active()
+        .whose()
+        .and_then(|email| registry.account(email))
+    {
         Some(account) => Ok(account.email().to_string()),
         None => Err(crate::commands::no_active_account(registry, "")),
     }

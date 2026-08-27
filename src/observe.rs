@@ -21,11 +21,11 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::live;
 use crate::lock::{self, Held};
+use crate::lock::{Lost, StillOurs};
 use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
-use crate::watch::{Lost, StillOurs};
 
 /// Whose the allowance a refresh spends is (ADR a-watcher-knob-is-arithmetic).
 ///

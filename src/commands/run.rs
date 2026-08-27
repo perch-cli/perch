@@ -71,7 +71,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // The one file Reconcile cannot link, because it holds the Account as well
     // as the person (ADR everything-but-the-account). It asks whether a Landing
     // is in flight rather than settling one, since a Run holds no registry lock.
-    let settled = switch::nothing_in_flight(&registry);
+    let settled = registry::nothing_in_flight(&registry);
 
     carry::carry(
         host,
@@ -246,18 +246,18 @@ fn launching(
     registry: &Registry,
     email: &str,
     said: &str,
-    settled: Option<&switch::Settled>,
+    settled: Option<&registry::Settled>,
 ) -> String {
     let named = registry.named_for_the_user(email);
     // Nothing about who is active where nothing has settled who is active:
     // saying it about the Account a Switch was leaving is saying it about the
     // one Account it may no longer be true of.
-    let active = settled.and_then(|_| registry.active().whose());
+    let active = settled.and_then(|settled| Some((settled, registry.active().whose()?)));
     match active {
         // Both Accounts named the way every other command names one, through
         // `is_active` — the one place the registry answers a question about an
         // address, so an Alias `upsert` has respelled is not named twice.
-        Some(active) if !registry.is_active(email) => format!(
+        Some((settled, active)) if !registry.is_active(settled, email) => format!(
             "Running {said} as {named}, in this terminal alone. {} stays the \
              active Account everywhere else.",
             registry.named_for_the_user(active)

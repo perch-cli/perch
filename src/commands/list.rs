@@ -296,7 +296,7 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
     accounts
         .iter()
         .map(|account| Row {
-            active: registry.is_active(account.email()),
+            active: registry.active().is_active(account.email()),
             cells: columns(&alias_of, account),
             figures: utilization::lines(account, now, width),
         })

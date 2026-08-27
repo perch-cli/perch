@@ -538,6 +538,13 @@ impl Active {
         }
     }
 
+    /// Whether this address is the one a reader would call active, which during
+    /// a Landing is the Account being *left*. Ungated, for a renderer that shows
+    /// the Landing beside the answer rather than declining to answer.
+    pub fn is_active(&self, email: &str) -> bool {
+        self.whose().is_some_and(|active| same_name(active, email))
+    }
+
     /// Whether this address is named here in any role, case-folded like every
     /// other way the registry is asked about a name.
     pub fn names(&self, email: &str) -> bool {
@@ -600,6 +607,25 @@ impl Active {
     /// registry of a machine that has never Switched has always looked like.
     fn is_nobody(&self) -> bool {
         matches!(self, Active::Nobody)
+    }
+}
+
+/// No Landing is in flight, so the registry a reader is about to ask tells the
+/// truth about who is active. A witness (ADR an-ordering-is-a-type), and the
+/// negative of a Landing, so nothing is promoted. Two things earn it:
+/// [`Registry::settle`] records what a walk settled a Landing on, and
+/// [`nothing_in_flight`] finds there was none to settle.
+pub struct Settled(());
+
+/// The witness for a reader that has a Landing to *check* rather than one to
+/// settle: a `perch watcher run` says what it is about to watch off a registry it
+/// has not locked, and a Landing in flight is the state where it has nothing to
+/// say yet, because [`Active::whose`] answers with the Account being *left*.
+/// `None` is the whole of what it can answer about a Landing.
+pub fn nothing_in_flight(registry: &Registry) -> Option<Settled> {
+    match registry.active() {
+        Active::Landing { .. } => None,
+        Active::Nobody | Active::Settled(_) => Some(Settled(())),
     }
 }
 
@@ -697,7 +723,7 @@ impl Registry {
             .find(|account| same_name(account.email(), email))
     }
 
-    pub fn active_account(&self) -> Option<&Account> {
+    pub fn active_account(&self, _settled: &Settled) -> Option<&Account> {
         self.active.whose().and_then(|email| self.account(email))
     }
 
@@ -738,8 +764,9 @@ impl Registry {
     ///
     /// An address rather than an [`Active`], which is what makes "settled" true
     /// of what it leaves: handed the enum it would accept a Landing.
-    pub fn settle(&mut self, on: Option<String>) {
+    pub fn settle(&mut self, on: Option<String>) -> Settled {
         self.active = Active::settled_on(on);
+        Settled(())
     }
 
     /// Whether this address is the one the registry records as active.
@@ -747,10 +774,8 @@ impl Registry {
     /// Case-folded, like every other way the registry is asked about a name:
     /// `upsert` stores the incoming spelling, so an Identity re-read with
     /// different capitalization would leave an exact `==` answering wrongly.
-    pub fn is_active(&self, email: &str) -> bool {
-        self.active
-            .whose()
-            .is_some_and(|active| same_name(active, email))
+    pub fn is_active(&self, _settled: &Settled, email: &str) -> bool {
+        self.active.is_active(email)
     }
 
     /// Every Group name in use. A Group an Account claims is always declared
@@ -1408,10 +1433,9 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
 /// How long a Watcher that died holding the watcher lock keeps it.
 ///
 /// Derived rather than chosen: the longest a healthy Watcher goes quiet is its
-/// longest wait between rounds plus the round after it. Deliberately long, and
-/// what pays for it is that a Watcher finding the lock held holds and comes back.
-const WATCHER_STALE_MILLIS: i64 =
-    (crate::watch::LONGEST_WAIT_MILLIS + crate::watch::REFRESH_INTERVAL_MILLIS) as i64;
+/// longest wait between rounds plus the round after it. The number is here and
+/// the derivation is asserted in `watch`, where both its terms live.
+pub(crate) const WATCHER_STALE_MILLIS: i64 = 1_350_000;
 
 /// Comfortably inside a round, so the renewal a round makes always touches.
 const WATCHER_UPDATE_MILLIS: i64 = 60_000;
@@ -1504,11 +1528,8 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
             .with_note(&the_file_to_edit(path))
         })?;
 
-    // Normalized first, so `load` and `save` judge one shape: `validate` asks
-    // `declared_group` about the `checks` key, and would otherwise refuse a
-    // registry this line repairs — leaving no command able to read the file.
-    let registry = with_every_claimed_group_declared(registry);
-    validate(&registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
+    let registry =
+        readable(registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
 
     Ok(Some(registry))
 }
@@ -1842,12 +1863,23 @@ fn refuse_a_name_nothing_would_have_accepted(
     }
 }
 
+/// A registry from outside this Perch, made readable: every claimed Group
+/// declared, every `checks` key under its declared spelling, then validated. The
+/// pair and never one — `validate` asks `declared_group` about the `checks` key,
+/// so validating before normalizing refuses a shape the normalizer repairs. The
+/// refusal is undecorated, because a `load` and an Import name different files.
+pub fn readable(registry: Registry) -> Result<Registry> {
+    let registry = with_every_claimed_group_declared(registry);
+    validate(&registry)?;
+    Ok(registry)
+}
+
 /// Declares any Group an Account claims but nothing declared.
 ///
 /// One nothing declares falls out of `perch list`, which walks the declared
 /// Groups and then the Accounts in none (ADR the-listing-owns-the-set). A claim
 /// differing only in case joins rather than becoming a second key.
-pub(crate) fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
+fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
     let claimed: Vec<String> = registry
         .accounts
         .iter()
@@ -2061,12 +2093,12 @@ mod tests {
 
         registry.settle(Some("CAFÉ@EXAMPLE.COM".into()));
         assert!(
-            registry.is_active("café@example.com"),
+            registry.is_active(&Settled(()), "café@example.com"),
             "and which Account is active is the same question, asked the same \
              way — a dozen call sites compared these by exact bytes, which is \
              the one place in Perch an address was not case-folded"
         );
-        assert!(!registry.is_active("someone@example.com"));
+        assert!(!registry.is_active(&Settled(()), "someone@example.com"));
 
         registry.forget("CAFÉ@example.com");
         assert!(registry.accounts.is_empty(), "and it is the one that goes");
@@ -2581,8 +2613,7 @@ mod tests {
             .checks
             .insert("Work".to_string(), Checked { switched_at: at });
 
-        let mut registry = with_every_claimed_group_declared(registry);
-        validate(&registry).expect("one Group, one Check");
+        let mut registry = readable(registry).expect("one Group, one Check");
         assert_eq!(
             registry.checks.keys().collect::<Vec<_>>(),
             vec!["work"],
@@ -2592,6 +2623,36 @@ mod tests {
         registry.forget_group("work");
         validate(&registry).expect("and it goes when the Group it paces goes");
         assert!(registry.checks.is_empty(), "{:?}", registry.checks);
+    }
+
+    /// The order is the whole of the contract: `validate` asks `declared_group`
+    /// about the `checks` key, so a registry judged before it is normalized is
+    /// refused over the very Group the normalizer is about to declare.
+    #[test]
+    fn a_registry_is_normalized_before_it_is_validated_and_never_after() {
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut registry = Registry::default();
+        // A Group an Account claims and nothing declared, which is the shape
+        // `with_every_claimed_group_declared` exists to repair.
+        registry.upsert(Account {
+            identity: Identity {
+                email: "someone@example.com".into(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: Some("work".to_string()),
+            utilization: None,
+        });
+        registry
+            .checks
+            .insert("work".to_string(), Checked { switched_at: at });
+
+        validate(&registry).expect_err("judged as it arrived, the key names no declared Group");
+        readable(registry).expect("through the door, the Group is declared before it is asked for");
     }
 
     /// The fold happens before `validate`, so the collision it refuses is one
@@ -2768,7 +2829,10 @@ mod tests {
         let json = serde_json::to_string(&registry).unwrap();
         let back: Registry = serde_json::from_str(&json).unwrap();
         assert_eq!(back, registry);
-        assert_eq!(back.active_account().unwrap().plan.as_deref(), Some("pro"));
+        assert_eq!(
+            back.active_account(&Settled(())).unwrap().plan.as_deref(),
+            Some("pro")
+        );
     }
 
     #[test]

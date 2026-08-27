@@ -71,7 +71,7 @@ pub enum Answer {
 /// The Profile asked about is not a Live Profile: nothing is running against the
 /// Credential a write would go under.
 ///
-/// A witness on the terms [`crate::switch::Settled`] sets out. Its field is
+/// A witness on the terms [`crate::registry::Settled`] sets out. Its field is
 /// private, so the only way to hold one is to have matched an [`Answer`].
 pub struct Idle(());
 

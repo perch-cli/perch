@@ -550,6 +550,40 @@ pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
     }
 }
 
+/// Whether the Watcher may act unasked within a Scope, and what is missing where
+/// it may not. Two statements and never one: being interchangeable is a
+/// declaration somebody makes and letting the Watcher act is a grant, and neither
+/// implies the other. The arms are written in the order the two are said in, so a
+/// reader answering only the first cannot answer them out of order.
+pub enum MayAct {
+    /// Both said.
+    May,
+    /// Nothing has declared the Accounts in this Scope interchangeable, so there
+    /// is nowhere to Switch to whatever the grant says. Carries the grant, because
+    /// a Scope missing both is told about both.
+    Undeclared { granted: bool },
+    /// Declared, and nobody has told the Watcher it may act here.
+    Ungranted,
+}
+
+impl MayAct {
+    /// Whether both were said, for a reader with nothing to say about which was not.
+    pub fn may(&self) -> bool {
+        matches!(self, MayAct::May)
+    }
+}
+
+/// Asked in one place, so no two readers of it can come to disagree about whether
+/// a Scope is being watched.
+pub fn may_act_within(registry: &Registry, scope: &Scope) -> MayAct {
+    let granted = registry.settings(scope).watcher_may_act;
+    match (may_cycle_within(registry, scope), granted) {
+        (false, granted) => MayAct::Undeclared { granted },
+        (true, false) => MayAct::Ungranted,
+        (true, true) => MayAct::May,
+    }
+}
+
 /// The Accounts a Cycle may not choose, counted once each, or empty where every
 /// Account is a candidate. Shared with the Reserve, which counts the same set —
 /// and every way out of [`is_a_candidate`] is counted here, or a Scope held back
@@ -890,6 +924,57 @@ pub(crate) mod tests {
 
     fn work() -> Scope {
         Scope::Group("work".to_string())
+    }
+
+    /// The fixture surprises: a Group is the declaration, so only the Ungrouped
+    /// Scope can be `Undeclared` and the two Settings have to be set apart.
+    fn standing(interchangeable: bool, granted: bool) -> (Registry, Scope) {
+        let mut registry = holding(vec![account("one@example.com", vec![])]);
+        registry.ungrouped.interchangeable = interchangeable;
+        registry.ungrouped.settings.watcher_may_act = granted;
+        (registry, Scope::Ungrouped)
+    }
+
+    #[test]
+    fn a_scope_told_both_things_is_the_only_one_the_watcher_may_act_within() {
+        let (registry, scope) = standing(true, true);
+        assert!(may_act_within(&registry, &scope).may());
+    }
+
+    #[test]
+    fn the_declaration_is_answered_before_the_grant_where_both_are_missing() {
+        let (registry, scope) = standing(false, false);
+        assert!(matches!(
+            may_act_within(&registry, &scope),
+            MayAct::Undeclared { granted: false }
+        ));
+    }
+
+    #[test]
+    fn a_grant_without_the_declaration_is_still_undeclared_and_says_so() {
+        let (registry, scope) = standing(false, true);
+        assert!(matches!(
+            may_act_within(&registry, &scope),
+            MayAct::Undeclared { granted: true }
+        ));
+    }
+
+    #[test]
+    fn the_declaration_without_the_grant_is_ungranted() {
+        let (registry, scope) = standing(true, false);
+        assert!(matches!(
+            may_act_within(&registry, &scope),
+            MayAct::Ungranted
+        ));
+    }
+
+    #[test]
+    fn a_group_carries_the_declaration_so_only_its_grant_is_ever_missing() {
+        let registry = holding(vec![account("one@example.com", vec![])]);
+        assert!(matches!(
+            may_act_within(&registry, &work()),
+            MayAct::Ungranted
+        ));
     }
 
     fn ranked_emails(registry: &Registry) -> Vec<&str> {

@@ -82,16 +82,14 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     // Named one at a time rather than as a struct update, because who is active
     // is not a field anybody may set: an Import lands on nobody, which is a
     // transition of its own (ADR a-switch-is-written-down-first).
-    let mut restored = registry::with_every_claimed_group_declared(export.registry.clone());
+    let mut restored = export.registry.clone();
     restored.settle(None);
     restored.checks = BTreeMap::new();
 
-    // `load`'s own check in `load`'s own order, of what will be written rather
-    // than of what arrived: otherwise an Import refuses a machine every command
-    // would go on to read, over a field cleared three lines up.
-    registry::validate(&restored)
-        .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))?;
-    Ok(restored)
+    // Cleared before it is judged rather than after, so what is asked about is
+    // what will be written rather than what arrived.
+    registry::readable(restored)
+        .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))
 }
 
 /// One Profile an Import has written into, and whether the Import is what

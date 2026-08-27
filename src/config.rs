@@ -230,19 +230,16 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
         return None;
     }
 
-    // The declaration before the grant, which is the order it has to be said
-    // in. `may_cycle_within` rather than a second reading of `interchangeable`:
-    // it is the one place answering what a Group is exempt from.
-    let mut needed = Vec::new();
-    if !crate::cycle::may_cycle_within(registry, scope) {
-        needed.push(Setting::Interchangeable);
-    }
-    if !registry.settings(scope).watcher_may_act {
-        needed.push(Setting::WatcherMayAct);
-    }
-    if needed.is_empty() {
-        return None;
-    }
+    // The declaration before the grant, which is the order it has to be said in
+    // and the order the arms carry.
+    let needed: Vec<Setting> = match crate::cycle::may_act_within(registry, scope) {
+        crate::cycle::MayAct::May => return None,
+        crate::cycle::MayAct::Undeclared { granted: true } => vec![Setting::Interchangeable],
+        crate::cycle::MayAct::Undeclared { granted: false } => {
+            vec![Setting::Interchangeable, Setting::WatcherMayAct]
+        }
+        crate::cycle::MayAct::Ungranted => vec![Setting::WatcherMayAct],
+    };
 
     // Named from the vocabulary rather than spelled here, for the reason at the
     // top of this module.

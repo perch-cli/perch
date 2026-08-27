@@ -16,11 +16,11 @@ use crate::error::{PerchError, Result};
 use crate::host::{self, Host};
 use crate::live;
 use crate::lock;
+use crate::lock::Asking;
 use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
-use crate::registry::{self, Account, Active, Quarantine, Registry, Scope};
-use crate::watch::{Lost, StillOurs};
+use crate::registry::{self, Account, Active, Quarantine, Registry, Scope, Settled};
 
 /// What the Capture found — the part of a Switch worth saying out loud, because
 /// it is what protects the Account being left behind.
@@ -479,36 +479,18 @@ pub struct NotLanded {
     pub is_live: bool,
 }
 
-/// No Landing is in flight, so the registry a reader is about to ask tells the
-/// truth about who is active. A witness (ADR an-ordering-is-a-type), and the
-/// negative of a [`Landing`], so nothing is promoted. Two things earn it:
-/// [`resolve_a_landing`] settles a Landing it found, and [`nothing_in_flight`]
-/// finds there was none to settle.
-pub struct Settled(());
-
-/// The same witness, for a reader that has a Landing to *check* rather than one
-/// to settle: a `perch watcher run` says what it is about to watch off a
-/// registry it has not locked, and a Landing in flight is the state where it has
-/// nothing to say yet, because [`Active::whose`] answers with the Account being
-/// *left*. `None` is the whole of what it can answer about a Landing.
-pub fn nothing_in_flight(registry: &Registry) -> Option<Settled> {
-    match registry.active() {
-        Active::Landing { .. } => None,
-        Active::Nobody | Active::Settled(_) => Some(Settled(())),
-    }
-}
-
 /// A Landing settled, or the walk that settles one stopped part way.
 ///
 /// A stop is its own answer (ADR an-invariant-gets-a-door): the walk's other
 /// empty answer is *nothing on the machine says whose the live Credential is*,
 /// and a stop reported that way refuses a Landing nothing is wrong with.
-pub enum Resolved {
+pub enum Resolved<E> {
     /// Settled, and written down.
     Settled(Settled),
     /// Nothing was read past the stop and nothing was written, so the Landing is
-    /// still in flight and whatever next takes this path settles it.
-    Stopped(Lost),
+    /// still in flight and whatever next takes this path settles it. Uninhabited
+    /// where the ask cannot answer no, which is every command somebody typed.
+    Stopped(E),
 }
 
 /// Settles a registry that holds a Landing, so what follows runs against a
@@ -516,14 +498,19 @@ pub enum Resolved {
 /// Switch path does, and cheap where there is nothing to settle: one enum arm
 /// and no I/O, which is every command on every ordinary machine. `still_ours`
 /// is a Watcher's; every other caller's is [`crate::commands::a_settled_landing`].
-pub fn resolve_a_landing(
+pub fn resolve_a_landing<E>(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
-    still_ours: StillOurs<'_>,
-) -> Result<Resolved> {
+    still_ours: Asking<'_, E>,
+) -> Result<Resolved<E>> {
     let Active::Landing { leaving, arriving } = registry.active().clone() else {
-        return Ok(Resolved::Settled(Settled(())));
+        // Nothing to settle is the commonest way to earn the witness, and the
+        // only one that reads no store.
+        let Some(settled) = registry::nothing_in_flight(registry) else {
+            unreachable!("the arm above is the whole of what a Landing in flight is")
+        };
+        return Ok(Resolved::Settled(settled));
     };
 
     // Ahead of Claude Code's locks rather than under them: a Watcher already
@@ -575,9 +562,9 @@ pub fn resolve_a_landing(
             }
         };
 
-        registry.settle(settled_on);
+        let settled = registry.settle(settled_on);
         holds.around_a_registry_write(|perch| registry::save(host, perch, registry))?;
-        Ok(Resolved::Settled(Settled(())))
+        Ok(Resolved::Settled(settled))
     })
 }
 
@@ -586,11 +573,11 @@ pub fn resolve_a_landing(
 /// The one door the ask reaches this file through: on a Mac with a locked
 /// keychain each read is a prompt, the walk below makes one per Account, and a
 /// Watcher told to stop part way through makes no more of them.
-fn asking_first<T>(
+fn asking_first<T, E>(
     holds: &mut lock::Holds<'_, '_, '_>,
-    still_ours: StillOurs<'_>,
+    still_ours: Asking<'_, E>,
     read: impl FnOnce() -> T,
-) -> std::result::Result<T, Lost> {
+) -> std::result::Result<T, E> {
     still_ours()?;
     Ok(holds.around(read))
 }
@@ -609,15 +596,15 @@ enum Whose {
 /// Which Account the live Credential belongs to. It takes the holds rather than
 /// being wrapped in one `around`, because the walk spends a keychain prompt per
 /// Account and the config-file lock goes stale after ten seconds.
-fn whose_the_live_credential_is(
+fn whose_the_live_credential_is<E>(
     host: &dyn Host,
     holds: &mut lock::Holds<'_, '_, '_>,
-    still_ours: StillOurs<'_>,
+    still_ours: Asking<'_, E>,
     registry: &Registry,
     leaving: Option<&str>,
     arriving: &str,
     live: Option<&str>,
-) -> std::result::Result<Whose, Lost> {
+) -> std::result::Result<Whose, E> {
     // Nothing live is nothing a later Capture could destroy, so this reading has
     // nothing at stake: a `claude /logout` mid-Switch is what it looks like.
     let Some(live) = live else {

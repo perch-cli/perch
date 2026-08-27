@@ -415,44 +415,20 @@ fn claimed_groups(held: &Map<String, Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Brings the registry on this machine forward, once, before anything reads it.
+/// What a registry that has just come forward says for itself.
 ///
-/// Shape 1's sequence without shape 1's door (ADR one-door-to-the-registry),
-/// which adopts a login where there is no registry. Reached from `main` because
-/// every path that writes takes the lock before the read `load` would do it in.
-pub fn bring_forward(host: &dyn Host) -> Result<()> {
-    let path = crate::registry::registry_path(host)?;
-    let Some(was) = behind(host, &path) else {
-        return Ok(());
-    };
-
-    let mut perch = crate::registry::lock(host)?;
-    // Asked again under the lock rather than trusted from outside it: between
-    // the two reads, another Perch may have brought the same file forward.
-    if behind(host, &path).is_none() {
-        return Ok(());
-    }
-    let renamed = host
-        .read_file(&path)
-        .map(|held| renames(&held))
-        .unwrap_or_default();
-    let Some(mut registry) = crate::registry::load(host)? else {
-        return Ok(());
-    };
-    // Through `save` rather than by writing what `forward` returned: it stamps
-    // the version, refuses what a later `load` could not read, and replaces the
-    // file in one step, so a migration that fails leaves the old shape intact.
-    crate::registry::save(host, &mut perch, &mut registry)?;
-
-    host.note(&format!(
+/// Here rather than beside the sequence that writes it: what a step could not
+/// carry and what it renamed are facts about the step, and the step is this
+/// module's.
+pub(crate) fn brought_forward_note(was: u64, renamed: &[Renamed]) -> String {
+    format!(
         "This machine's registry was written by an older Perch (version {was}), \
          and has been brought forward to version {}.{} No older Perch reads the \
          file now.{}",
         crate::registry::CURRENT_VERSION,
         what_the_step_could_not_carry(was),
-        what_was_renamed(&renamed),
-    ));
-    Ok(())
+        what_was_renamed(renamed),
+    )
 }
 
 /// What a step left behind, for the note, or nothing where it left nothing.
@@ -519,7 +495,7 @@ pub fn what_was_renamed_said(renamed: &[Renamed]) -> Option<String> {
 /// Asked of the step rather than of a range of its own: `save` stamps the current
 /// version on whatever it is given, so a document nothing moved must not be one
 /// this offers up — that would relabel a shape that never changed.
-fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
+pub(crate) fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
     let contents = host.read_file(path).ok()?;
     let was = crate::error::claimed_version(&contents)?;
     forward_from(&contents, Some(was))

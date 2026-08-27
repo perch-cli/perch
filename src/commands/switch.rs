@@ -17,7 +17,7 @@ use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::Installed;
-use crate::registry::{Account, Registry, Scope};
+use crate::registry::{Account, Registry, Scope, Settled};
 use crate::switch::{self, Captured, Switched};
 use crate::target::{self, Target};
 use crate::utilization;
@@ -41,20 +41,18 @@ struct Decision {
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    // Before anything is decided, because everything after this reads which
-    // Account is active and a registry holding a Landing does not know
-    // (ADR a-switch-is-written-down-first).
-    crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
+    let settled = crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
 
-    let Decision { incoming, chosen } = decide(&registry, args.target.as_deref(), host.now(), out)?;
-    let outgoing = registry.active_account().cloned();
+    let Decision { incoming, chosen } =
+        decide(&registry, &settled, args.target.as_deref(), host.now(), out)?;
+    let outgoing = registry.active_account(&settled).cloned();
 
     // Read once, for the whole command: both the question below and the Switch
     // after it name the Claude Code they were reading in anything they refuse
     // (ADR an-assumption-is-probed).
     let installed = Installed::probed(host)?;
 
-    already_there(host, &installed, &registry, &incoming)?;
+    already_there(host, &installed, &registry, &settled, &incoming)?;
 
     // Everything the Switch owes the registry is written by `switch_to`, which
     // is the only way to reach what the Switch found. `Reason::Asked` is all
@@ -86,6 +84,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 /// Account is arrived at, and the Switch that follows is the same one.
 fn decide(
     registry: &Registry,
+    settled: &Settled,
     target: Option<&str>,
     now: chrono::DateTime<chrono::Utc>,
     out: &mut dyn Write,
@@ -108,7 +107,7 @@ fn decide(
         }
         // Never outside the Group the current Account is in, so a work
         // subscription running dry does not land on a personal Account.
-        None => cycle::scope_for(registry, leaving(registry)?)?,
+        None => cycle::scope_for(registry, leaving(registry, settled)?)?,
     };
 
     // Nothing is set aside: a Cycle somebody asked for is one they get, and the
@@ -143,8 +142,8 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Accou
 
 /// The Account a bare `perch switch` would be leaving, which is the one whose
 /// Group decides where it may look.
-fn leaving(registry: &Registry) -> Result<&Account> {
-    registry.active_account().ok_or_else(|| {
+fn leaving<'a>(registry: &'a Registry, settled: &Settled) -> Result<&'a Account> {
+    registry.active_account(settled).ok_or_else(|| {
         crate::commands::no_active_account(registry, ", so there is no Group to Cycle within")
     })
 }
@@ -158,9 +157,10 @@ fn already_there(
     host: &dyn Host,
     installed: &Installed,
     registry: &Registry,
+    settled: &Settled,
     incoming: &Account,
 ) -> Result<()> {
-    if !registry.is_active(incoming.email()) {
+    if !registry.is_active(settled, incoming.email()) {
         return Ok(());
     }
     if !switch::already_landed(host, installed, incoming)? {

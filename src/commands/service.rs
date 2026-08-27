@@ -447,12 +447,12 @@ fn any_scope_may_act(host: &dyn Host) -> Option<bool> {
         return None;
     };
 
-    // Both statements, because a grant alone is not enough for the Ungrouped Accounts
-    // (ADR a-group-is-a-declaration): read from `watcher-may-act` alone this would be
-    // yes on a Scope with nowhere to Switch to.
-    Some(registry.scopes().iter().any(|scope| {
-        registry.settings(scope).watcher_may_act && cycle::may_cycle_within(&registry, scope)
-    }))
+    Some(
+        registry
+            .scopes()
+            .iter()
+            .any(|scope| cycle::may_act_within(&registry, scope).may()),
+    )
 }
 
 /// Runs what the platform's service manager has to be told, in order.

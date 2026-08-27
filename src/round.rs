@@ -3,7 +3,7 @@
 //! `watch` holds what a figure *means* and reaches neither the network nor the
 //! filesystem; `commands::watch` holds what a round *does* and reaches both.
 //! Between them sit the decisions naming an `observe::Attempt`, a
-//! `switch::Settled` and a `cycle` candidate — the lowest module reaching all
+//! `registry::Settled` and a `cycle` candidate — the lowest module reaching all
 //! three is this one, and it is what the round was given an interface for
 //! (ADR code-lives-where-it-reaches). Nothing here reaches the machine either,
 //! so every answer below can be argued with in a unit test.
@@ -11,11 +11,12 @@
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::live::Idle;
+use crate::lock::Lost;
 use crate::name::{self, UNGROUPED};
 use crate::observe::{self, Attempt};
+use crate::registry::Settled;
 use crate::registry::{Account, Registry, Scope};
-use crate::switch::Settled;
-use crate::watch::{Considered, Cooled, Fullest, Lost, Policy, Round};
+use crate::watch::{Considered, Cooled, Fullest, Policy, Round};
 
 /// The Account being watched, the Scope that said it may be, and the rules it is
 /// watched under.
@@ -35,8 +36,8 @@ pub struct Watching {
 /// Asked every round rather than only at the start, because the answer can stop being
 /// yes underneath it, and every failure it gives is the same "not arranged yet". The
 /// [`Settled`] is why it cannot be asked too early (ADR an-ordering-is-a-type).
-pub fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
-    let account = registry.active_account().cloned().ok_or_else(|| {
+pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
+    let account = registry.active_account(settled).cloned().ok_or_else(|| {
         PerchError::NotFound(
             "Perch holds no active Account, so there is nothing to watch. \
              `perch switch <target>` makes one active."
@@ -46,44 +47,43 @@ pub fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
 
     let scope = registry.scope_of(&account);
 
-    // Two independent statements before anything moves unasked, and a Group is the
-    // first (ADR a-group-is-a-declaration). In this order, because the declaration
-    // comes first.
-    if !cycle::may_cycle_within(registry, &scope) {
-        return Err(PerchError::NotInterchangeable(format!(
-            "{} is in no Group, and nothing has said the Accounts in no Group \
-             are interchangeable at all — so there is nowhere for the watcher \
-             to Switch it to. Nothing is being watched.\n\
-             `perch config set {UNGROUPED} interchangeable true` says they are, \
-             and `perch config set {UNGROUPED} watcher-may-act true` then says \
-             the watcher may act on them. Both, because being interchangeable \
-             is a declaration somebody makes and letting the watcher act is a \
-             grant, and neither implies the other.\n\
-             Putting it in a Group with `perch group move {} <group>` is the \
-             narrower statement, and is what Groups are for.",
-            registry.named_for_the_user(account.email()),
-            account.email(),
-        )));
+    // The refusals are this module's to word; which of the two applies is asked
+    // where every other reader of it asks (ADR a-setting-names-its-scope).
+    match cycle::may_act_within(registry, &scope) {
+        cycle::MayAct::Undeclared { .. } => {
+            return Err(PerchError::NotInterchangeable(format!(
+                "{} is in no Group, and nothing has said the Accounts in no Group \
+                 are interchangeable at all — so there is nowhere for the watcher \
+                 to Switch it to. Nothing is being watched.\n\
+                 `perch config set {UNGROUPED} interchangeable true` says they are, \
+                 and `perch config set {UNGROUPED} watcher-may-act true` then says \
+                 the watcher may act on them. Both, because being interchangeable \
+                 is a declaration somebody makes and letting the watcher act is a \
+                 grant, and neither implies the other.\n\
+                 Putting it in a Group with `perch group move {} <group>` is the \
+                 narrower statement, and is what Groups are for.",
+                registry.named_for_the_user(account.email()),
+                account.email(),
+            )));
+        }
+        cycle::MayAct::Ungranted => {
+            return Err(PerchError::Invalid(format!(
+                "{} has not been told the watcher may act on it, so nothing is \
+                 being watched. Anything that changes underneath you only ever \
+                 does so because you said it could.\n\
+                 `perch config set {} watcher-may-act true` says it may.",
+                scope.described(),
+                scope.word(),
+            )));
+        }
+        cycle::MayAct::May => {}
     }
 
-    // The Scope's own grant, and nowhere else it could come from
-    // (ADR a-setting-names-its-scope).
-    let settings = registry.settings(&scope);
-    if !settings.watcher_may_act {
-        return Err(PerchError::Invalid(format!(
-            "{} has not been told the watcher may act on it, so nothing is \
-             being watched. Anything that changes underneath you only ever \
-             does so because you said it could.\n\
-             `perch config set {} watcher-may-act true` says it may.",
-            scope.described(),
-            scope.word(),
-        )));
-    }
-
+    let policy = Policy::of(&registry.settings(&scope));
     Ok(Watching {
         account,
         scope,
-        policy: Policy::of(&settings),
+        policy,
     })
 }
 
@@ -242,11 +242,11 @@ mod tests {
     use chrono::TimeZone;
 
     use crate::host::FakeHost;
+    use crate::live;
     use crate::observe::Outcome;
     use crate::probe::Installed;
     use crate::registry::{Quarantine, WindowUtilization};
     use crate::watch::Recently;
-    use crate::{live, switch};
 
     const WATCHED: &str = "watched@example.com";
 
@@ -292,7 +292,7 @@ mod tests {
 
     /// The witness `permitted` takes and reads nothing of.
     fn settled(registry: &Registry) -> Settled {
-        switch::nothing_in_flight(registry).expect("nothing is in flight")
+        crate::registry::nothing_in_flight(registry).expect("nothing is in flight")
     }
 
     fn asking(registry: &Registry) -> Result<Watching> {

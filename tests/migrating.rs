@@ -173,7 +173,7 @@ fn the_account_the_registry_was_left_on_is_still_the_active_one() {
 fn the_registry_is_written_back_in_the_shape_this_build_reads() {
     let host = machine_holding(V0_2_0);
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let written = on_disk(&host);
     assert!(
@@ -217,7 +217,7 @@ fn a_name_this_build_refuses_is_renamed_on_disk_and_the_note_says_which() {
     }
     let host = machine_holding(&serde_json::Value::Object(held).to_string());
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let said = host.notes().join("\n");
     assert!(
@@ -254,7 +254,7 @@ fn a_name_this_build_refuses_is_renamed_on_disk_and_the_note_says_which() {
 fn the_migration_says_so_once() {
     let host = machine_holding(V0_2_0);
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let said = host.notes().join("\n");
     assert!(
@@ -263,7 +263,7 @@ fn the_migration_says_so_once() {
     );
 
     host.forget_notes();
-    perch::migration::bring_forward(&host).expect("there is nothing left to do");
+    perch::commands::bring_the_registry_forward(&host).expect("there is nothing left to do");
     assert!(
         host.notes().is_empty(),
         "and says nothing on a run that migrated nothing: {:?}",
@@ -274,10 +274,10 @@ fn the_migration_says_so_once() {
 #[test]
 fn a_registry_this_build_wrote_is_not_rewritten() {
     let host = machine_holding(V0_2_0);
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
     let settled = on_disk(&host);
 
-    perch::migration::bring_forward(&host).expect("and again");
+    perch::commands::bring_the_registry_forward(&host).expect("and again");
 
     assert_eq!(on_disk(&host), settled, "byte for byte");
 }
@@ -288,7 +288,7 @@ fn a_registry_this_build_wrote_is_not_rewritten() {
 fn a_machine_with_no_registry_is_left_alone() {
     let host = logged_in_machine();
 
-    perch::migration::bring_forward(&host).expect("there is nothing there");
+    perch::commands::bring_the_registry_forward(&host).expect("there is nothing there");
 
     assert!(
         host.read_file(Path::new(REGISTRY_PATH)).is_err(),
@@ -376,7 +376,7 @@ fn a_registry_that_is_not_json_is_still_malformed() {
 fn a_command_run_against_an_old_registry_leaves_a_current_one_behind() {
     let host = machine_holding(V0_1_1);
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
     let (outcome, printed) = run_list(&host, false);
 
     outcome.expect("the listing works");
@@ -411,7 +411,7 @@ fn an_account_claiming_its_group_in_another_case_is_renamed_with_it() {
     }
     let host = machine_holding(&serde_json::Value::Object(held).to_string());
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let registry = registry::load(&host)
         .expect("and every command can read it afterwards")
@@ -454,7 +454,7 @@ fn the_ungrouped_scopes_cooldown_is_not_moved_onto_a_group_called_ungrouped() {
     }
     let host = machine_holding(&serde_json::Value::Object(held).to_string());
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let written: serde_json::Value =
         serde_json::from_str(&on_disk(&host)).expect("a document came back");
@@ -494,7 +494,7 @@ fn an_ungrouped_cooldown_comes_forward_under_the_spelling_a_check_writes() {
     }
     let host = machine_holding(&serde_json::Value::Object(held).to_string());
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let written: serde_json::Value =
         serde_json::from_str(&on_disk(&host)).expect("a document came back");
@@ -560,7 +560,7 @@ fn a_group_only_an_account_claims_is_renamed_rather_than_left_to_brick_the_machi
     }
     let host = machine_holding(&serde_json::Value::Object(held).to_string());
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let (outcome, printed) = run_list(&host, false);
     outcome.expect("and every command works afterwards, the repairs among them");
@@ -606,7 +606,7 @@ fn two_v1_cooldowns_landing_on_one_key_keep_the_later_switch() {
     }
     let host = machine_holding(&serde_json::Value::Object(held).to_string());
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let written: serde_json::Value =
         serde_json::from_str(&on_disk(&host)).expect("a document came back");
@@ -765,7 +765,7 @@ fn every_name_a_published_perch_accepted_comes_forward_into_one_that_loads() {
         for (group, alias) in [(name.as_str(), "the-alias"), ("the-group", name.as_str())] {
             let host = machine_holding(&a_v1_registry_naming(group, alias));
 
-            perch::migration::bring_forward(&host).unwrap_or_else(|refused| {
+            perch::commands::bring_the_registry_forward(&host).unwrap_or_else(|refused| {
                 panic!(
                     "a Group `{group}` and an Alias `{alias}` are \
                      names a published Perch accepted, and the step forward refused them: \
@@ -919,7 +919,7 @@ fn they_come_forward_as_two(groups: (&str, &str), aliases: (&str, &str)) {
         groups.0, groups.1, aliases.0, aliases.1
     );
 
-    perch::migration::bring_forward(&host).unwrap_or_else(|refused| {
+    perch::commands::bring_the_registry_forward(&host).unwrap_or_else(|refused| {
         panic!("{said}: a published Perch wrote them, and the step forward refused them: {refused}")
     });
 
@@ -1108,7 +1108,7 @@ fn every_name_a_version_2_perch_accepted_comes_forward_into_one_that_loads() {
         for (group, alias) in [(name.as_str(), "the-alias"), ("the-group", name.as_str())] {
             let host = machine_holding(&a_v2_registry_naming(group, alias));
 
-            perch::migration::bring_forward(&host).unwrap_or_else(|refused| {
+            perch::commands::bring_the_registry_forward(&host).unwrap_or_else(|refused| {
                 panic!(
                     "a Group `{group}` and an Alias `{alias}` are names a version 2 Perch \
                      accepted, and the step forward refused them: {refused}"
@@ -1161,7 +1161,7 @@ fn the_note_for_a_rename_names_the_character_that_caused_it() {
     held.insert("groups".to_string(), serde_json::Value::Object(groups));
     let host = machine_holding(&serde_json::Value::Object(held).to_string());
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let said = host.notes().join("\n");
     assert!(
@@ -1242,7 +1242,7 @@ fn every_name_a_version_3_perch_accepted_comes_forward_into_one_that_loads() {
         for (group, alias) in [(name.as_str(), "the-alias"), ("the-group", name.as_str())] {
             let host = machine_holding(&a_v3_registry_naming(group, alias));
 
-            perch::migration::bring_forward(&host).unwrap_or_else(|refused| {
+            perch::commands::bring_the_registry_forward(&host).unwrap_or_else(|refused| {
                 panic!(
                     "a Group `{group}` and an Alias `{alias}` are names a version 3 Perch \
                      accepted, and the step forward refused them: {refused}"
@@ -1268,7 +1268,7 @@ fn every_name_a_version_3_perch_accepted_comes_forward_into_one_that_loads() {
 fn a_version_3_name_of_symbols_comes_forward_named_for_its_kind() {
     let host = machine_holding(&a_v3_registry_naming("🚀", "the-alias"));
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let said = host.notes().join("\n");
     assert!(
@@ -1298,7 +1298,7 @@ fn a_version_3_name_of_symbols_comes_forward_named_for_its_kind() {
 fn a_version_3_name_of_a_word_and_a_symbol_keeps_the_word() {
     let host = machine_holding(&a_v3_registry_naming("dev★", "the-alias"));
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let written: serde_json::Value =
         serde_json::from_str(&on_disk(&host)).expect("a document came back");
@@ -1345,7 +1345,7 @@ fn a_version_3_rename_that_would_collide_takes_the_suffix() {
     held["groups"]["dev"] = settings;
     let host = machine_holding(&held.to_string());
 
-    perch::migration::bring_forward(&host).expect("it comes forward");
+    perch::commands::bring_the_registry_forward(&host).expect("it comes forward");
 
     let written: serde_json::Value =
         serde_json::from_str(&on_disk(&host)).expect("a document came back");
