@@ -11,7 +11,8 @@
 
 use std::io::Write;
 
-use crate::commands::{Presumed, said_yes, say, say_json};
+use crate::ask;
+use crate::commands::{say, say_json};
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Platform};
 use crate::upgrade::{self, Channel, Replacement, Wanted};
@@ -267,7 +268,12 @@ fn agree_to_going_back(
              back to {installed} is the repair."
         ),
     )?;
-    said_yes(host, out, "Install the older Release? [y/N] ", Presumed::No)
+    ask::said_yes(
+        host,
+        out,
+        "Install the older Release? [y/N] ",
+        ask::Presumed::No,
+    )
 }
 
 /// Runs the Channel's own command, having said what it is.

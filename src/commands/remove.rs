@@ -12,7 +12,8 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{Presumed, refuse_while_anything_is_running, said_yes, say, still_ours};
+use crate::ask;
+use crate::commands::{refuse_while_anything_is_running, say, still_ours};
 use crate::credentials;
 use crate::cycle;
 use crate::error::{PerchError, Result};
@@ -215,7 +216,12 @@ fn agreed(
 
     let named = registry.named_for_the_user(account.email());
     say(out, &what_it_would_leave(registry, account, consequence))?;
-    said_yes(host, out, &format!("Remove {named}? [y/N]: "), Presumed::No)
+    ask::said_yes(
+        host,
+        out,
+        &format!("Remove {named}? [y/N]: "),
+        ask::Presumed::No,
+    )
 }
 
 /// What the machine looks like afterwards, in the terms the user is deciding in.

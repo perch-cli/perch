@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 use crate::adopt;
 use zeroize::Zeroizing;
 
-use crate::commands::{ask_passphrase, ask_secret, refuse_without_a_terminal, say, still_ours};
+use crate::ask;
+use crate::commands::{say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::host::Host;
@@ -25,7 +26,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Before the passphrase, because all three are refusals somebody should meet
     // before typing one twice — and before the registry is read, since reading it
     // adopts the login on a fresh machine (ADR a-login-perch-does-not-need).
-    refuse_without_a_terminal(host, "perch holdings export")?;
+    ask::needs_a_terminal(host, "perch holdings export")?;
     refuse_a_directory_that_is_not_there(host, path)?;
     refuse_an_occupied_path(host, path)?;
     refuse_a_path_perchs_home_would_take(host, path)?;
@@ -184,7 +185,7 @@ fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<S
          without one.",
     )?;
 
-    let Some(typed) = ask_passphrase(host, out, "Passphrase: ")? else {
+    let Some(typed) = ask::a_passphrase(host, out, "Passphrase: ")? else {
         return Err(PerchError::Invalid(
             "No passphrase was typed, and an Export cannot be written without \
              one. Nothing was written."
@@ -192,7 +193,7 @@ fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<S
         ));
     };
 
-    if ask_secret(host, out, "Again: ")?.unwrap_or_default() != typed {
+    if ask::a_secret(host, out, "Again: ")?.unwrap_or_default() != typed {
         return Err(PerchError::Invalid(
             "Those two do not match. Nothing was written, because a passphrase \
              mistyped here is a file nobody discovers is unreadable until the \

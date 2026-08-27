@@ -11,7 +11,8 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{ask, say};
+use crate::ask;
+use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
@@ -260,7 +261,7 @@ fn resolve_group(
     // command: the login has already happened, and losing the Account over a
     // typo would be a poor trade. Every reason a name can be refused is asked.
     loop {
-        let answer = match ask(host, out, &question)? {
+        let answer = match ask::line(host, out, &question)? {
             Some(answer) => answer.trim().to_string(),
             // End of input after a login that worked, for the same reason.
             None => {
