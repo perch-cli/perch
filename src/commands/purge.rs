@@ -44,11 +44,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     let mut perch = registry::lock(host)?;
     let (mut registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
 
-    // Once per command, which is [`Installed`]'s own rule, and tolerated where it
-    // fails: liveness is answered by Markers rather than by the version, and the
-    // machine somebody is giving up on is one whose Claude Code may be gone.
-    let installed =
-        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
+    let installed = Installed::probed_or_absent(host);
 
     purge::refuse_while_anything_is_running(host, &registry, &installed)?;
 

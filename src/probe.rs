@@ -72,12 +72,18 @@ impl<'h> Installed<'h> {
     }
 
     /// When the question could not be asked, or is not the thing being tested.
-    /// `said` is what a refusal will quote. `perch remove` uses it because a
-    /// machine whose Claude Code is gone is the machine somebody is giving an
-    /// Account up on, and refusing for want of a version would hold their
-    /// Credential hostage to a program neither of them needs.
+    /// `said` is what a refusal will quote.
     pub fn unknown(said: &str) -> Installed<'static> {
         Installed::Said(said.to_string())
+    }
+
+    /// The version, or `(not installed)` where Claude Code will not answer.
+    ///
+    /// A Remove, a Purge, an Import and an Export run on a machine whose Claude
+    /// Code may be gone, and refusing for want of a version would hold a
+    /// Credential hostage to a program neither of them needs.
+    pub fn probed_or_absent(host: &dyn Host) -> Installed<'static> {
+        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"))
     }
 
     /// What a refusal quotes.
@@ -1885,6 +1891,32 @@ mod tests {
         let installed = Installed::asked_when_needed(&host).expect("`claude` is on PATH");
 
         assert_eq!(installed.version(), "unknown");
+    }
+
+    #[test]
+    fn a_machine_with_no_claude_code_is_answered_rather_than_refused() {
+        assert_eq!(
+            Installed::probed_or_absent(&FakeHost::new()).version(),
+            "(not installed)"
+        );
+    }
+
+    #[test]
+    fn a_machine_that_has_one_is_answered_with_what_it_says() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "")
+            .with_exec(
+                "/usr/bin/claude",
+                &["--version"],
+                Execution {
+                    status: 0,
+                    stdout: "2.1.221 (Claude Code)".to_string(),
+                    stderr: String::new(),
+                },
+            );
+
+        assert_eq!(Installed::probed_or_absent(&host).version(), "2.1.221");
     }
 
     fn versions_read_by(host: &FakeHost) -> usize {
