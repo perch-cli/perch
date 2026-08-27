@@ -3,7 +3,7 @@
 //! `watch` holds what a figure *means* and reaches neither the network nor the
 //! filesystem; `commands::watch` holds what a round *does* and reaches both.
 //! Between them sit the decisions naming an `observe::Attempt`, a
-//! `switch::Settled` and a `cycle` candidate — the lowest module reaching all
+//! `registry::Settled` and a `cycle` candidate — the lowest module reaching all
 //! three is this one, and it is what the round was given an interface for
 //! (ADR code-lives-where-it-reaches). Nothing here reaches the machine either,
 //! so every answer below can be argued with in a unit test.
@@ -13,8 +13,8 @@ use crate::error::{PerchError, Result};
 use crate::live::Idle;
 use crate::name::{self, UNGROUPED};
 use crate::observe::{self, Attempt};
+use crate::registry::Settled;
 use crate::registry::{Account, Registry, Scope};
-use crate::switch::Settled;
 use crate::watch::{Considered, Cooled, Fullest, Lost, Policy, Round};
 
 /// The Account being watched, the Scope that said it may be, and the rules it is
@@ -35,8 +35,8 @@ pub struct Watching {
 /// Asked every round rather than only at the start, because the answer can stop being
 /// yes underneath it, and every failure it gives is the same "not arranged yet". The
 /// [`Settled`] is why it cannot be asked too early (ADR an-ordering-is-a-type).
-pub fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
-    let account = registry.active_account().cloned().ok_or_else(|| {
+pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
+    let account = registry.active_account(settled).cloned().ok_or_else(|| {
         PerchError::NotFound(
             "Perch holds no active Account, so there is nothing to watch. \
              `perch switch <target>` makes one active."
@@ -241,11 +241,11 @@ mod tests {
     use chrono::TimeZone;
 
     use crate::host::FakeHost;
+    use crate::live;
     use crate::observe::Outcome;
     use crate::probe::Installed;
     use crate::registry::{Quarantine, WindowUtilization};
     use crate::watch::Recently;
-    use crate::{live, switch};
 
     const WATCHED: &str = "watched@example.com";
 
@@ -291,7 +291,7 @@ mod tests {
 
     /// The witness `permitted` takes and reads nothing of.
     fn settled(registry: &Registry) -> Settled {
-        switch::nothing_in_flight(registry).expect("nothing is in flight")
+        crate::registry::nothing_in_flight(registry).expect("nothing is in flight")
     }
 
     fn asking(registry: &Registry) -> Result<Watching> {

@@ -516,6 +516,13 @@ impl Active {
         }
     }
 
+    /// Whether this address is the one a reader would call active, which during
+    /// a Landing is the Account being *left*. Ungated, for a renderer that shows
+    /// the Landing beside the answer rather than declining to answer.
+    pub fn is_active(&self, email: &str) -> bool {
+        self.whose().is_some_and(|active| same_name(active, email))
+    }
+
     /// Whether this address is named here in any role, case-folded like every
     /// other way the registry is asked about a name.
     pub fn names(&self, email: &str) -> bool {
@@ -578,6 +585,25 @@ impl Active {
     /// registry of a machine that has never Switched has always looked like.
     fn is_nobody(&self) -> bool {
         matches!(self, Active::Nobody)
+    }
+}
+
+/// No Landing is in flight, so the registry a reader is about to ask tells the
+/// truth about who is active. A witness (ADR an-ordering-is-a-type), and the
+/// negative of a Landing, so nothing is promoted. Two things earn it:
+/// [`Registry::settle`] records what a walk settled a Landing on, and
+/// [`nothing_in_flight`] finds there was none to settle.
+pub struct Settled(());
+
+/// The witness for a reader that has a Landing to *check* rather than one to
+/// settle: a `perch watcher run` says what it is about to watch off a registry it
+/// has not locked, and a Landing in flight is the state where it has nothing to
+/// say yet, because [`Active::whose`] answers with the Account being *left*.
+/// `None` is the whole of what it can answer about a Landing.
+pub fn nothing_in_flight(registry: &Registry) -> Option<Settled> {
+    match registry.active() {
+        Active::Landing { .. } => None,
+        Active::Nobody | Active::Settled(_) => Some(Settled(())),
     }
 }
 
@@ -675,7 +701,7 @@ impl Registry {
             .find(|account| same_name(account.email(), email))
     }
 
-    pub fn active_account(&self) -> Option<&Account> {
+    pub fn active_account(&self, _settled: &Settled) -> Option<&Account> {
         self.active.whose().and_then(|email| self.account(email))
     }
 
@@ -716,8 +742,9 @@ impl Registry {
     ///
     /// An address rather than an [`Active`], which is what makes "settled" true
     /// of what it leaves: handed the enum it would accept a Landing.
-    pub fn settle(&mut self, on: Option<String>) {
+    pub fn settle(&mut self, on: Option<String>) -> Settled {
         self.active = Active::settled_on(on);
+        Settled(())
     }
 
     /// Whether this address is the one the registry records as active.
@@ -725,10 +752,8 @@ impl Registry {
     /// Case-folded, like every other way the registry is asked about a name:
     /// `upsert` stores the incoming spelling, so an Identity re-read with
     /// different capitalization would leave an exact `==` answering wrongly.
-    pub fn is_active(&self, email: &str) -> bool {
-        self.active
-            .whose()
-            .is_some_and(|active| same_name(active, email))
+    pub fn is_active(&self, _settled: &Settled, email: &str) -> bool {
+        self.active.is_active(email)
     }
 
     /// Every Group name in use. A Group an Account claims is always declared
@@ -2026,12 +2051,12 @@ mod tests {
 
         registry.settle(Some("CAFÉ@EXAMPLE.COM".into()));
         assert!(
-            registry.is_active("café@example.com"),
+            registry.is_active(&Settled(()), "café@example.com"),
             "and which Account is active is the same question, asked the same \
              way — a dozen call sites compared these by exact bytes, which is \
              the one place in Perch an address was not case-folded"
         );
-        assert!(!registry.is_active("someone@example.com"));
+        assert!(!registry.is_active(&Settled(()), "someone@example.com"));
 
         registry.forget("CAFÉ@example.com");
         assert!(registry.accounts.is_empty(), "and it is the one that goes");
@@ -2762,7 +2787,10 @@ mod tests {
         let json = serde_json::to_string(&registry).unwrap();
         let back: Registry = serde_json::from_str(&json).unwrap();
         assert_eq!(back, registry);
-        assert_eq!(back.active_account().unwrap().plan.as_deref(), Some("pro"));
+        assert_eq!(
+            back.active_account(&Settled(())).unwrap().plan.as_deref(),
+            Some("pro")
+        );
     }
 
     #[test]
