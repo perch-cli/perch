@@ -571,7 +571,13 @@ pub fn understand_credential(
         )
     })?;
 
-    let Some(access_token) = oauth.access_token else {
+    // Into wiping types before the refusal below can return: serde's `String`
+    // dropped on that path leaves a live refresh token in freed heap, which
+    // outlives the process in a core dump or a hibernation image.
+    let access_token = oauth.access_token.map(Zeroizing::new);
+    let refresh_token = oauth.refresh_token.map(Zeroizing::new);
+
+    let Some(access_token) = access_token else {
         return Err(refusal(
             assumption::CREDENTIAL_SHAPE,
             "the claudeAiOauth block has no accessToken",
@@ -581,8 +587,8 @@ pub fn understand_credential(
 
     Ok(Credential {
         raw,
-        access_token: Zeroizing::new(access_token),
-        refresh_token: oauth.refresh_token.map(Zeroizing::new),
+        access_token,
+        refresh_token,
         subscription_type: oauth.subscription_type,
         expires_at: oauth.expires_at,
     })
