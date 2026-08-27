@@ -893,6 +893,15 @@ pub(crate) fn settled(host: &dyn Host, path: &Path) -> Settled {
 /// side compared as spelling. Lexical, so `link/..` is where the link sits,
 /// which is what a shell answers and what somebody typing a path means.
 pub(crate) fn flattened(path: &Path) -> PathBuf {
+    // Nearly every path Perch handles has neither, and rebuilding one that has
+    // neither is a `Vec` of components and a `PathBuf` grown a component at a
+    // time to arrive back at the input.
+    if !path
+        .components()
+        .any(|part| matches!(part, Component::CurDir | Component::ParentDir))
+    {
+        return path.to_path_buf();
+    }
     let mut kept: Vec<Component<'_>> = Vec::new();
     for component in path.components() {
         match component {
@@ -969,19 +978,16 @@ pub(crate) fn is_the_same_place(host: &dyn Host, one: &Path, other: &Path) -> bo
 /// at and the rest of the path put back on the end. `None` when none of them is
 /// a link, which is what ends the walk above.
 fn deepest_link_on(host: &dyn Host, path: &Path) -> Option<PathBuf> {
-    let mut beneath = PathBuf::new();
-    let mut at = path.to_path_buf();
-    loop {
-        if let Ok(Some(target)) = host.link_target(&at) {
-            return Some(against(&at, target).join(&beneath));
-        }
-        let name = at.file_name()?;
-        beneath = Path::new(name).join(&beneath);
-        at = at.parent()?.to_path_buf();
-        if at.as_os_str().is_empty() {
-            return None;
+    // `ancestors` yields the path itself first and then each parent, borrowed —
+    // where walking with `parent()` built a `PathBuf` per level and a second one
+    // re-growing the tail, which is the tail copied once per level.
+    for at in path.ancestors().take_while(|at| !at.as_os_str().is_empty()) {
+        if let Ok(Some(target)) = host.link_target(at) {
+            let beneath = path.strip_prefix(at).ok()?;
+            return Some(against(at, target).join(beneath));
         }
     }
+    None
 }
 
 /// The whole of writing beside a file and moving the result over it, including
