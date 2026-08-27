@@ -311,22 +311,20 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
         policy.ceiling(),
         crate::watch::COOLDOWN_MINUTES,
     );
-    // Being allowed to act is not the whole of whether it does: among the
-    // Accounts in no Group there is nowhere to Switch to until `interchangeable`
-    // says so, and `perch watcher run` refuses outright and names both.
-    let interchangeable = crate::cycle::may_cycle_within(registry, scope);
-    let watcher = match (settings.watcher_may_act, interchangeable) {
-        (true, true) => format!("may switch unattended {acting}"),
+    let watcher = match crate::cycle::may_act_within(registry, scope) {
+        crate::cycle::MayAct::May => format!("may switch unattended {acting}"),
         // The Setting's own value, not `off`: `on`/`off` is not a value
         // `interchangeable` takes, so a reader typing back what they were shown
         // would be refused.
-        (true, false) => format!(
+        crate::cycle::MayAct::Undeclared { granted: true } => format!(
             "off — `{}` is {}, so there is nowhere to Switch to (would act \
              {acting})",
             crate::config::Setting::Interchangeable.as_str(),
             registry.ungrouped.interchangeable
         ),
-        (false, _) => format!("off (would act {acting})"),
+        crate::cycle::MayAct::Undeclared { granted: false } | crate::cycle::MayAct::Ungranted => {
+            format!("off (would act {acting})")
+        }
     };
     say(out, &strategy)?;
     say(out, &labeled("Watcher", &watcher))
