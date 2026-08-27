@@ -15,6 +15,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::Host;
 use crate::name;
 use crate::registry::{self, Account, Registry};
@@ -225,7 +226,7 @@ fn the_live_store(
     ) {
         return Ok(None);
     }
-    let live = registry::the_default_profile(host)?;
+    let live = holdings::the_default_profile(host)?;
     // An Identity that is absent, or that will not be read, is not evidence
     // against — only one naming somebody else is.
     let somebody_else = matches!(

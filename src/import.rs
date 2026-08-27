@@ -15,6 +15,7 @@ use zeroize::Zeroizing;
 use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::export::Export;
+use crate::holdings;
 use crate::host::Host;
 use crate::live;
 use crate::login;
@@ -249,7 +250,7 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
     // registry an Import requires to be empty — so it points at a file the
     // Account it is about is never in.
     for account in &export.registry.accounts {
-        if registry::slug(account.email()).is_empty() {
+        if holdings::slug(account.email()).is_empty() {
             return Err(PerchError::Invalid(format!(
                 "The Export holds an Account recorded as `{}`, which has no \
                  character a Profile directory can be named after — so Perch \
@@ -267,7 +268,7 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
     let mut landing: std::collections::HashMap<String, &registry::Account> =
         std::collections::HashMap::new();
     for account in &export.registry.accounts {
-        if let Some(clash) = landing.insert(registry::slug(account.email()), account) {
+        if let Some(clash) = landing.insert(holdings::slug(account.email()), account) {
             return Err(PerchError::Conflict(format!(
                 "{} and {} share the Profile they would be kept in, so importing \
                  both would mean each one's Credential replacing the other's.\n\
@@ -646,7 +647,7 @@ mod tests {
                 "{platform:?}"
             );
             assert!(
-                !host.path_exists(&registry::profile_dir_for(&host, "two@example.com").unwrap()),
+                !host.path_exists(&holdings::profile_dir_for(&host, "two@example.com").unwrap()),
                 "an Account the Export holds no Credential for gets no Profile"
             );
         }
@@ -657,7 +658,7 @@ mod tests {
     #[test]
     fn a_credential_that_cannot_be_stored_takes_back_the_ones_that_were() {
         let host = crate::host::FakeHost::new().with_platform(crate::host::Platform::Other);
-        let second = registry::profile_dir_for(&host, "two@example.com")
+        let second = holdings::profile_dir_for(&host, "two@example.com")
             .unwrap()
             .join(".credentials.json");
         let host = host.with_unwritable_file(&second, "No space left on device");
@@ -670,7 +671,7 @@ mod tests {
             .expect_err("the second store will not take it");
 
         assert!(refused.to_string().contains("partial restore"), "{refused}");
-        let first = registry::profile_dir_for(&host, "one@example.com").unwrap();
+        let first = holdings::profile_dir_for(&host, "one@example.com").unwrap();
         assert!(
             !host.path_exists(&first),
             "the Profile made for the first Account is gone with it"
@@ -702,7 +703,7 @@ mod tests {
             "and not one this machine is required not to have: {said}"
         );
         assert!(
-            !host.path_exists(&registry::profile_dir_for(&host, "one@example.com").unwrap()),
+            !host.path_exists(&holdings::profile_dir_for(&host, "one@example.com").unwrap()),
             "and the Profile of the Account listed before it was never made"
         );
     }

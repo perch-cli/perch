@@ -17,6 +17,7 @@ use crate::adopt;
 use crate::commands::say;
 use crate::cycle;
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::{Host, Waited};
 use crate::live;
 use crate::lock::{self, Lost};
@@ -40,7 +41,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // The same lock a loop takes: a Check firing while a Service runs is the double-
     // Switch it exists for. Held rather than refused, and `20` tells a scheduler to
     // come back.
-    let watching_alone = match lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
+    let watching_alone = match lock::take_all(host, vec![holdings::watcher_lock_spec(host)?]) {
         Ok(held) => held,
         Err(PerchError::Busy(why)) => {
             say(out, &watch::held_line(&why, None, host.now()))?;
@@ -238,7 +239,7 @@ fn take_the_watch<'a>(
     holding: &mut Holding,
 ) -> Result<Option<crate::lock::Held<'a>>> {
     loop {
-        match crate::lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
+        match crate::lock::take_all(host, vec![holdings::watcher_lock_spec(host)?]) {
             Ok(held) => return Ok(Some(held)),
             Err(PerchError::Busy(why)) => {
                 let (waiting_for, spoken) = held_before_a_round(&why, host.now());

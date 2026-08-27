@@ -422,7 +422,7 @@ fn a_name_is_reached_however_it_is_capitalized() {
          `already_landed` has always compared by"
     );
 
-    // And over the whole of Unicode, not the ASCII half: `registry::slug`
+    // And over the whole of Unicode, not the ASCII half: `holdings::slug`
     // lowercases everything, so `CAFÉ@` and `café@` already share one Profile
     // and `perch add` already refuses the second as a collision.
     let mut registry = registry;

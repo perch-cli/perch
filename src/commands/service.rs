@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use crate::commands::{say, say_json};
 use crate::cycle;
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
+use crate::holdings;
 use crate::host::{Host, Platform};
 use crate::service::{self, Driven, Manager, Standing, Unit};
 use crate::{registry, upgrade};
@@ -408,7 +409,7 @@ fn still_held_by_the_service_manager(host: &dyn Host) -> bool {
 /// Asked of the watcher lock rather than of the process table, which a renamed binary
 /// defeats, and read by trying to take it and giving it straight back.
 fn watcher_is_running(host: &dyn Host) -> bool {
-    let Ok(spec) = registry::watcher_lock_spec(host) else {
+    let Ok(spec) = holdings::watcher_lock_spec(host) else {
         return false;
     };
     // Asked rather than requested: `take_all` answers this too, but only after

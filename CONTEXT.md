@@ -63,6 +63,9 @@ Everything Perch holds on this machine: every Profile, every Credential Perch
 holds, the registry naming them and what each Group carries. The counterpart to
 an Installation, which is what a Channel left. What an Export writes, an Import
 puts back and a Purge gives up, and the reason none of the three takes a Target.
+Where each piece sits is derived rather than recorded — from `$PERCH_HOME`, and
+under it from the address the registry already keys on — so nothing has to agree
+with a second statement of it.
 _Avoid_: state, data, footprint, registry
 
 **Purge**:

@@ -131,7 +131,7 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
 
     // The Default Profile as Perch means it, which is what this asserts about:
     // the directory the installed Claude Code falls back to, never a Profile.
-    let store = perch::registry::the_default_profile(&host).expect("home is known");
+    let store = perch::holdings::the_default_profile(&host).expect("home is known");
 
     match probe::probe(&host, store) {
         Ok(Verdict::Recognized(findings)) => {

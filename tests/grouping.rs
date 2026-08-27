@@ -802,7 +802,7 @@ fn renaming_a_group_perch_does_not_hold_is_refused_the_way_every_mistyped_group_
 #[test]
 fn listing_the_groups_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = three_accounts_in_one_group();
-    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+    let held = perch::holdings::lock(&host).expect("the other `perch` has it");
 
     let (result, printed) = run_group(&host, perch::commands::group::GroupCommand::List);
 

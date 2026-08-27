@@ -13,6 +13,7 @@ use std::io::Write;
 use crate::adopt;
 use crate::commands::{ask, say};
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::Host;
 use crate::login::{self, Produced};
 use crate::name;
@@ -137,7 +138,7 @@ fn settle_into_a_profile(
     pending: Produced,
     group: Option<String>,
 ) -> Result<(Account, Store)> {
-    let dir = registry::profile_dir_for(host, &pending.identity.email)?;
+    let dir = holdings::profile_dir_for(host, &pending.identity.email)?;
     let store = profile::create(host, &dir, pending.credential.as_str())?;
 
     // The Identity travels with the Credential it describes: the file the login
@@ -173,7 +174,7 @@ fn refuse_an_account_perch_already_holds(
     let Some(existing) = registry
         .accounts
         .iter()
-        .find(|held| registry::same_profile(held.email(), &identity.email))
+        .find(|held| holdings::same_profile(held.email(), &identity.email))
     else {
         return Ok(());
     };

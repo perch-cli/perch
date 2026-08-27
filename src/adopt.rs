@@ -5,6 +5,7 @@
 //! Purge undoes it, and the next command after one adopts again.
 
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::Host;
 use crate::login;
 use crate::probe::{self, Findings, Store, Verdict};
@@ -24,7 +25,7 @@ pub fn ensure_adopted(host: &dyn Host) -> Result<Registry> {
     // The adoption itself writes, so it is done with the other Perches shut out
     // — two of them adopting at once would each build the first Profile and one
     // would overwrite the other's registry wholesale.
-    let mut perch = registry::lock(host)?;
+    let mut perch = holdings::lock(host)?;
     load_or_adopt(host, &mut perch)
 }
 
@@ -32,10 +33,10 @@ pub fn ensure_adopted(host: &dyn Host) -> Result<Registry> {
 /// is dropped.
 ///
 /// The hold comes back rather than staying inside because the span that has to
-/// be exclusive is the whole load → change → save (see [`registry::lock`]).
+/// be exclusive is the whole load → change → save (see [`holdings::lock`]).
 pub fn ensure_adopted_exclusively(host: &dyn Host) -> Result<(crate::lock::Held<'_>, Registry)> {
     login::reap_abandoned(host);
-    let mut held = registry::lock(host)?;
+    let mut held = holdings::lock(host)?;
     let registry = load_or_adopt(host, &mut held)?;
     Ok((held, registry))
 }
@@ -50,7 +51,7 @@ fn load_or_adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<R
 }
 
 fn adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<Registry> {
-    let findings = match probe::probe(host, registry::the_default_profile(host)?)? {
+    let findings = match probe::probe(host, holdings::the_default_profile(host)?)? {
         Verdict::Recognized(findings) => findings,
         Verdict::NoLogin { version, .. } => {
             // Nothing to adopt, and nothing worth writing: an empty Profile
@@ -72,7 +73,7 @@ fn store_as_first_profile(
     perch: &mut crate::lock::Held<'_>,
     findings: &Findings,
 ) -> Result<Registry> {
-    let dir = registry::profile_dir_for(host, &findings.identity.email)?;
+    let dir = holdings::profile_dir_for(host, &findings.identity.email)?;
     let store = profile::create(host, &dir, findings.credential.as_str())?;
 
     // Undone if it fails, because a Profile nothing records is worse than none:

@@ -118,7 +118,7 @@ pub fn write_the_export(
 /// wrote its offer there deletes it moments later, and `perch holdings export`
 /// writes the same file at the same path with no Purge in sight yet.
 fn refuse_a_path_perchs_home_would_take(host: &dyn Host, path: &Path) -> Result<()> {
-    let home = crate::registry::perch_home(host)?;
+    let home = crate::holdings::perch_home(host)?;
     if !crate::host::is_inside(host, path, &home) {
         return Ok(());
     }

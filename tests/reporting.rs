@@ -410,7 +410,7 @@ fn status_with_no_active_account_names_the_remedy_that_applies() {
 #[test]
 fn status_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = machine_with_two_accounts();
-    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+    let held = perch::holdings::lock(&host).expect("the other `perch` has it");
 
     let (result, printed) = run_status(&host, false);
 
@@ -424,7 +424,7 @@ fn status_reads_alongside_another_perch_rather_than_waiting_on_it() {
 #[test]
 fn status_that_refreshes_waits_for_the_other_perch_because_it_writes() {
     let host = machine_with_two_accounts();
-    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+    let _held = perch::holdings::lock(&host).expect("the other `perch` has it");
 
     let (result, _) = run_status_refresh(&host, false);
 

@@ -685,7 +685,7 @@ fn a_question_somebody_takes_their_time_over_does_not_cost_the_lock() {
     assert!(printed.contains("Removed"), "{printed}");
     assert!(registry_of(&host).account(EMAIL).is_none());
     assert!(
-        perch::registry::lock(&host).is_ok(),
+        perch::holdings::lock(&host).is_ok(),
         "and the lock was given back rather than left behind"
     );
 }
@@ -698,7 +698,7 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
         // Past the staleness window, which is what makes the lock claimable.
         .with_a_terminal_that_takes(120_000)
         .once_while_waiting(|host| {
-            let lock = perch::registry::lock_spec(host).expect("home is known");
+            let lock = perch::holdings::lock_spec(host).expect("home is known");
             host.remove_dir_all(&lock.dir).expect("it was abandoned");
             host.create_dir_exclusive(&lock.dir)
                 .expect("the other `perch` takes it");

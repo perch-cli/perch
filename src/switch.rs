@@ -13,6 +13,7 @@ use zeroize::Zeroizing;
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::{self, Host};
 use crate::live;
 use crate::lock;
@@ -321,7 +322,7 @@ fn perform(
         return failed(error);
     }
 
-    let store = match registry::the_default_profile(host) {
+    let store = match holdings::the_default_profile(host) {
         Ok(ground) => ground,
         Err(error) => return failed(error),
     };
@@ -418,7 +419,7 @@ pub fn make_live(
     // need not be this Account's and nothing afterwards could tell.
     refuse_a_shared_profile(account, registry).map_err(nothing_moved)?;
 
-    let store = registry::the_default_profile(host).map_err(nothing_moved)?;
+    let store = holdings::the_default_profile(host).map_err(nothing_moved)?;
     let leaving = registry.active().whose().map(str::to_string);
 
     let mut is_live = false;
@@ -519,7 +520,7 @@ pub fn resolve_a_landing<E>(
         return Ok(Resolved::Stopped(lost));
     }
 
-    let store = registry::the_default_profile(host)?;
+    let store = holdings::the_default_profile(host)?;
 
     // Under Claude Code's own locks, and the save is inside them too, so the
     // window they close is the whole of read-decide-record. A Rotation Perch
@@ -666,7 +667,7 @@ fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> Stri
 /// there, so an Identity read on its own says a Switch has already landed onto a
 /// machine that is logged out.
 pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account) -> Result<bool> {
-    let store = registry::the_default_profile(host)?;
+    let store = holdings::the_default_profile(host)?;
     // An Identity Perch cannot understand is a file naming nobody, so nothing
     // has landed, and `perch switch <the active Account>` is the command that
     // rewrites it. Propagated, it would refuse the repair it exists for.
@@ -1145,7 +1146,7 @@ mod tests {
 
         for case in cases {
             let host = FakeHost::new();
-            let mut perch = registry::lock(&host).expect("the registry lock is free");
+            let mut perch = holdings::lock(&host).expect("the registry lock is free");
             let mut registry = two_accounts();
             let failed = case.outcome.is_err();
 
@@ -1181,7 +1182,7 @@ mod tests {
             ("a Quarantine", quarantined()),
         ] {
             let host = FakeHost::new();
-            let mut perch = registry::lock(&host).expect("the registry lock is free");
+            let mut perch = holdings::lock(&host).expect("the registry lock is free");
             let mut registry = two_accounts();
             let (said, code) = (error.to_string(), error.exit_code());
 
@@ -1199,7 +1200,7 @@ mod tests {
     #[test]
     fn a_check_that_moved_and_then_failed_still_records_the_check() {
         let host = FakeHost::new();
-        let mut perch = registry::lock(&host).expect("the registry lock is free");
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
         let mut registry = two_accounts();
         registry
             .declare_group("work")
@@ -1241,7 +1242,7 @@ mod tests {
     #[test]
     fn a_check_that_moved_nothing_records_no_check() {
         let host = FakeHost::new();
-        let mut perch = registry::lock(&host).expect("the registry lock is free");
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
         let mut registry = two_accounts();
         registry
             .declare_group("work")
@@ -1295,7 +1296,7 @@ mod tests {
             .account("some-one@example.com")
             .expect("it was just added")
             .clone();
-        let mut perch = crate::registry::lock(&host).expect("nobody holds it");
+        let mut perch = crate::holdings::lock(&host).expect("nobody holds it");
 
         let stopped = make_live(
             &host,
@@ -1321,9 +1322,9 @@ mod tests {
     #[test]
     fn a_quarantine_that_cannot_be_written_does_not_replace_the_failure_either() {
         let host = FakeHost::new();
-        let path = registry::registry_path(&host).expect("there is a home to write under");
+        let path = holdings::registry_path(&host).expect("there is a home to write under");
         let host = host.with_a_disk_that_fills_writing(&path);
-        let mut perch = registry::lock(&host).expect("the registry lock is free");
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
         let mut registry = two_accounts();
 
         let handed_back = landing(Err(quarantined()), false)

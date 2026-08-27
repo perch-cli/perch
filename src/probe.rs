@@ -1085,7 +1085,7 @@ impl Identity {
 /// installed Claude Code, and how confident are we? The store is handed in
 /// rather than derived, because which directory counts as the Default Profile is
 /// a question about Perch's own layout, and this module is below the one that can
-/// answer it ([`crate::registry::the_default_profile`]).
+/// answer it ([`crate::holdings::the_default_profile`]).
 pub fn probe(host: &dyn Host, store: Store) -> Result<Verdict> {
     let installed = Installed::probed(host)?;
     let version = installed.version().to_string();

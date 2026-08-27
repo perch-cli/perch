@@ -14,6 +14,7 @@ use std::io::Write;
 use crate::adopt;
 use crate::commands;
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::Host;
 use crate::registry::{self, Registry};
 use crate::switch;
@@ -58,8 +59,8 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // has to find, a machine without one is a refusal that should cost the
     // filesystem nothing.
     let launch = what_to_launch(host, &args.command)?;
-    let profile = registry::profile_dir_for(host, &found.email)?;
-    let default_profile = registry::the_default_profile(host)?;
+    let profile = holdings::profile_dir_for(host, &found.email)?;
+    let default_profile = holdings::the_default_profile(host)?;
 
     // Claimed before anything is linked: until the Marker exists nothing on the
     // machine knows this Run is happening, and a `perch remove` elsewhere would

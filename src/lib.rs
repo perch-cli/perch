@@ -6,7 +6,8 @@
 //! Claude Code's internals, [`keychain`] is the only place that knows about
 //! `/usr/bin/security`, [`credentials`] is the only place that knows a
 //! Credential can be in more than one kind of store, [`anthropic`] is the only
-//! place that knows an endpoint, and [`registry`] is Perch's own state.
+//! place that knows an endpoint, [`registry`] is Perch's own state and
+//! [`holdings`] is the only place that says where it sits.
 
 pub mod adopt;
 pub mod anthropic;
@@ -17,6 +18,7 @@ pub mod credentials;
 pub mod cycle;
 pub mod error;
 pub mod export;
+pub mod holdings;
 pub mod host;
 pub mod import;
 pub mod json;

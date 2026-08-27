@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::commands::{Presumed, ask, ask_a_word, export, said_yes, say, still_ours};
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::{Host, Platform};
 use crate::probe::Installed;
 use crate::purge::{self, Purged};
@@ -44,7 +45,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // Asked before the lock is taken, because taking it would create the very
     // directory this is looking for: Perch's home is made on the way to the lock
     // artifact that lives inside it.
-    let home = registry::perch_home(host)?;
+    let home = holdings::perch_home(host)?;
     if !host.path_exists(&home) {
         return Err(PerchError::NothingToDo(format!(
             "{} is not there, so Perch is holding nothing on this machine and \
@@ -53,7 +54,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         )));
     }
 
-    let mut perch = registry::lock(host)?;
+    let mut perch = holdings::lock(host)?;
     let (mut registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
 
     let installed = Installed::probed_or_absent(host);
