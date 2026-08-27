@@ -1481,7 +1481,12 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         .map_err(|err| {
             PerchError::Malformed {
                 path: path.display().to_string(),
-                detail: err.to_string(),
+                // A migration re-serializes onto one line, so its positions name
+                // nowhere in the file the note below says to edit.
+                detail: match forwarded.is_some() {
+                    true => without_a_position(&err.to_string()),
+                    false => err.to_string(),
+                },
             }
             .with_note(&the_file_to_edit(path))
         })?;
@@ -1493,6 +1498,16 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     validate(&registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
 
     Ok(Some(registry))
+}
+
+/// A serde message with the line and column it ends in taken off.
+///
+/// For a document the reader has no copy of: a position they cannot go and look
+/// at is a place to look that is not there, and the value serde names is what
+/// they search the file they *do* have for.
+fn without_a_position(said: &str) -> String {
+    said.rsplit_once(" at line ")
+        .map_or_else(|| said.to_string(), |(what, _)| what.to_string())
 }
 
 /// The refusal for a registry claiming a version no Perch has stamped, or none
@@ -3454,6 +3469,36 @@ mod tests {
                 "and the refusal still names it: {said}"
             );
         }
+    }
+
+    /// A migration re-serializes the document onto one line before this parse
+    /// sees it, so serde's line and column are positions in a string nobody has
+    /// a copy of — while the note beside them names the file on disk and says to
+    /// edit it there. Sent to line 1 column 57 of a file that is nine lines
+    /// long, the reader is looking for a place that is not there.
+    #[test]
+    fn a_registry_brought_forward_is_not_refused_at_a_position_in_no_file() {
+        let contents = serde_json::to_string_pretty(&serde_json::json!({
+            "version": 2,
+            "accounts": [],
+            "groups": { "work": { "strategy": "round-robin" } },
+        }))
+        .expect("a document");
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(&path, &contents);
+
+        let refused = load(&host).expect_err("this build cannot read it");
+
+        let said = refused.to_string();
+        assert!(
+            !said.contains("at line"),
+            "no position, the reader having no copy of the shape it is in: {said}"
+        );
+        assert!(
+            said.contains("round-robin"),
+            "and the value they search their own file for is still named: {said}"
+        );
     }
 
     #[test]
