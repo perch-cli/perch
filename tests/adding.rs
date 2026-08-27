@@ -320,6 +320,22 @@ fn declining_the_offered_group_leaves_the_account_in_none() {
     );
 }
 
+/// `none` and `ungrouped` are one word for one Scope, and every command refuses
+/// both as a name. This prompt took only the first, so the second fell through
+/// to the name rules and was refused with the sentence saying it addresses the
+/// Accounts in no Group — which is what the answer meant.
+#[test]
+fn the_other_word_for_no_group_is_taken_at_the_prompt_too() {
+    let host = ready_to_add().with_answers(&["ungrouped"]);
+
+    run_add(&host, AddArgs::default()).0.unwrap();
+
+    assert_eq!(
+        registry_of(&host).account(SECOND_EMAIL).unwrap().group,
+        None
+    );
+}
+
 #[test]
 fn a_machine_with_no_terminal_is_told_to_name_the_group_rather_than_guessed_for() {
     let host = ready_to_add().without_terminal();

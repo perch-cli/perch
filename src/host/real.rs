@@ -1381,7 +1381,16 @@ fn waited_out(millis: u64) {
         let capped = i32::try_from(left.as_millis()).unwrap_or(i32::MAX);
         // SAFETY: one initialized `pollfd`, naming a descriptor this process
         // owns, and a count matching the array it is handed.
-        if unsafe { libc::poll(&mut watched, 1, capped) } != 0 {
+        let answered = unsafe { libc::poll(&mut watched, 1, capped) };
+        if answered > 0 {
+            return;
+        }
+        // `EINTR` is the cut-short this rounds again on. Any other failure is
+        // one nothing here can mend, and rounding on it would spin — so the
+        // wait that is still owed is slept out instead.
+        if answered < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+        {
+            std::thread::sleep(left);
             return;
         }
     }

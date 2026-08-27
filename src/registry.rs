@@ -632,6 +632,9 @@ impl Account {
 }
 
 impl Registry {
+    /// The Account an address names, folded as a Profile is derived: `CAFÉ@…`
+    /// and `café@…` share one Profile and `perch add` refuses the second, so
+    /// asking in ASCII here would disagree with the directory on disk.
     pub fn account(&self, email: &str) -> Option<&Account> {
         self.accounts
             .iter()

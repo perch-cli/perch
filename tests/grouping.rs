@@ -307,6 +307,36 @@ fn a_group_name_already_spoken_for_is_refused() {
     );
 }
 
+/// `no_such_group` answers five commands and `perch group add` is not one of
+/// them, so an Alias standing where a Group name was expected was answered with
+/// how to free the Alias for a declaration nobody was making — on `perch list`,
+/// a read-only question.
+#[test]
+fn a_read_only_question_about_an_alias_is_not_told_to_free_it() {
+    let host = machine_with_two_accounts();
+    set_alias(&host, "spare", SECOND_EMAIL)
+        .0
+        .expect("the name is free");
+
+    let refusal = run_list_in(&host, "spare", false)
+        .0
+        .expect_err("an Alias is not a Scope to narrow a listing to")
+        .to_string();
+
+    assert!(
+        refusal.contains("no Group can be called that"),
+        "it says why the word is not a Group: {refusal}"
+    );
+    assert!(
+        !refusal.contains("--unset"),
+        "and not how to free an Alias for a declaration nobody asked for: {refusal}"
+    );
+    assert!(
+        !refusal.contains("perch group add"),
+        "nor how to declare a name that cannot be one: {refusal}"
+    );
+}
+
 #[test]
 fn a_group_name_that_would_be_ambiguous_is_refused_with_its_own_code() {
     let host = logged_in_machine();

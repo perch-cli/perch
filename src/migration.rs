@@ -322,7 +322,7 @@ fn renames_in(held: &Map<String, Value>, wrote_it: &name::Rules) -> Vec<Renamed>
             let beside = standing
                 .iter()
                 .any(|(_, held)| told_them_apart(wrote_it, held, &was));
-            if crate::name::validate(kind, &was).is_ok() && !beside {
+            if crate::name::current().accepts(&was) && !beside {
                 standing.push((kind, was));
                 continue;
             }

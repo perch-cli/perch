@@ -12,10 +12,9 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::say;
+use crate::commands::{refuse_while_anything_is_running, say};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::live;
 use crate::lock::Held;
 use crate::login::{self, Produced};
 use crate::name;
@@ -56,7 +55,12 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // to is one no browser round trip was going to repair.
     let installed = Installed::probed(host)?;
     let landing_in_the_default_profile = will_land_in_the_default_profile(&registry, &account);
-    refuse_while_anything_is_running(host, &account, landing_in_the_default_profile, &installed)?;
+    refuse_while_anything_is_running(
+        host,
+        &account,
+        landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
+        &installed,
+    )?;
 
     let produced = login::perform(
         host,
@@ -95,7 +99,12 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // writes both Profiles. Whether the Default Profile is one of them is
     // re-read for the same reason: another terminal may have switched away.
     let landing_in_the_default_profile = will_land_in_the_default_profile(&registry, &account);
-    refuse_while_anything_is_running(host, &account, landing_in_the_default_profile, &installed)?;
+    refuse_while_anything_is_running(
+        host,
+        &account,
+        landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
+        &installed,
+    )?;
 
     settle_into_its_own_profile(host, &account, &produced)?;
 
@@ -159,31 +168,6 @@ fn the_repair_stands(error: PerchError) -> PerchError {
         "The repair itself finished: the Account has a working Credential in \
          its own Profile again, and only the report could not be printed.",
     )
-}
-
-/// The Profiles this repair writes into, refused while a client is holding one.
-///
-/// Both, because repairing the Account you are on writes the Default Profile as
-/// well — and both twice, once before the login so a Profile Perch may not write
-/// to costs no browser round trip (ADR a-profile-is-live-by-evidence).
-fn refuse_while_anything_is_running(
-    host: &dyn Host,
-    account: &Account,
-    landing_in_the_default_profile: bool,
-    installed: &Installed,
-) -> Result<()> {
-    let mut places = vec![live::Place::of_the_profile(host, account)?];
-    if landing_in_the_default_profile {
-        // Its Credential is the one a running client is holding, and this would
-        // replace it rather than renew it.
-        places.push(live::Place::new(
-            WHY_THE_DEFAULT_PROFILE,
-            registry::the_default_profile(host)?.config_dir,
-        ));
-    }
-
-    live::ask(host, &places).idle_or(installed, &live::NOTHING_WAS_CHANGED)?;
-    Ok(())
 }
 
 /// Refuses a login that authenticated somebody else.

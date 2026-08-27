@@ -209,6 +209,11 @@ struct Filesystem {
     dirs: RefCell<BTreeSet<PathBuf>>,
     modified: RefCell<BTreeMap<PathBuf, DateTime<Utc>>>,
     unreadable: RefCell<BTreeMap<PathBuf, String>>,
+    /// Paths that say when they were written and will not hand over their
+    /// contents. A file's own mode refuses the `open` while its directory
+    /// answers the `stat`, so `unreadable` — which refuses both — cannot stand
+    /// in for the root-owned file a `sudo claude` leaves.
+    unopenable: RefCell<BTreeMap<PathBuf, String>>,
     /// Paths whose bytes are not text, which the fake cannot hold as one.
     not_text: RefCell<BTreeSet<PathBuf>>,
     unwritable: RefCell<BTreeMap<PathBuf, String>>,
@@ -373,6 +378,7 @@ impl FakeHost {
                 dirs: RefCell::new(BTreeSet::new()),
                 modified: RefCell::new(BTreeMap::new()),
                 unreadable: RefCell::new(BTreeMap::new()),
+                unopenable: RefCell::new(BTreeMap::new()),
                 not_text: RefCell::new(BTreeSet::new()),
                 unwritable: RefCell::new(BTreeMap::new()),
                 unwritable_after: RefCell::new(BTreeMap::new()),
@@ -541,6 +547,15 @@ impl FakeHost {
 
     /// A file that is there but cannot be read — the wrong permissions, most
     /// often. Distinct from a file that is simply absent.
+    /// A file that says when it was written and will not be opened.
+    pub fn with_a_file_that_will_not_open(self, path: impl AsRef<Path>, detail: &str) -> Self {
+        self.fs
+            .unopenable
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        self
+    }
+
     pub fn with_unreadable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
         self.fs
             .unreadable
@@ -1291,7 +1306,7 @@ impl FakeHost {
     /// of whoever is writing it, and the arrangement is about the disk and the
     /// directory rather than about a filename.
     fn intended(&self, path: &Path) -> PathBuf {
-        let suffix = format!(".perch-tmp.{}", self.process_id());
+        let suffix = super::temp_suffix(self.process_id());
         match path
             .as_os_str()
             .to_str()
@@ -1422,6 +1437,13 @@ impl port::Files for FakeHost {
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         self.record(Effect::ReadFile(path.to_path_buf()));
         let at = self.through_links(path)?;
+        // Its own mode refuses the open where the directory answered the stat,
+        // so this is a file `modified_at` still dates.
+        for named in [path, at.as_path()] {
+            if let Some(detail) = self.fs.unopenable.borrow().get(named) {
+                return Err(HostError::Other(detail.clone()));
+            }
+        }
         // The real read is `read_to_string`, so bytes that are not UTF-8 come
         // back as `InvalidData` rather than as contents. The fake holds files
         // as `String` and could not otherwise reach that answer at all.
@@ -1497,7 +1519,7 @@ impl port::Files for FakeHost {
         // Whatever else was at the path is taken away first, a link included,
         // because the real one leads with `remove_file` and then `create_new`.
         // Left behind, one path would be both a regular file and a symbolic link.
-        self.fs.links.borrow_mut().remove(path);
+        self.fs.links.borrow_mut().remove(&lands_at);
         // A disk that fills partway leaves what fitted behind and then fails,
         // which is the order the real host does it in: open, `write_all`,
         // `sync_all`.
@@ -1575,7 +1597,9 @@ impl port::Files for FakeHost {
     /// so this gates on the runtime Platform as `file_mode` does.
     fn make_private(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::MadePrivate(path.to_path_buf()));
-        if self.platform() != Platform::Windows && self.fs.links.borrow().contains_key(path) {
+        if self.platform() != Platform::Windows
+            && self.fs.links.borrow().contains_key(&self.lands_at(path))
+        {
             return Err(HostError::Io(std::io::Error::other(format!(
                 "{} is a symbolic link, and narrowing one would set the mode of \
                  whatever it points at",
@@ -1689,7 +1713,6 @@ impl port::Files for FakeHost {
     }
 
     fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
-        self.record(Effect::Took(path.to_path_buf()));
         // Told apart from the path being taken: `AlreadyExists` is contention
         // and anything else is the filesystem refusing, and `lock::take` waits
         // the first out and reports the second.
@@ -1699,7 +1722,7 @@ impl port::Files for FakeHost {
         // A link in the way counts, whether or not it still resolves: `mkdir`
         // does not follow the last component, so it fails `EEXIST` at a symlink
         // whatever it points at. `path_exists` answers the Reconcile's question.
-        if self.fs.links.borrow().contains_key(path) || self.path_exists(path) {
+        if self.fs.links.borrow().contains_key(&self.lands_at(path)) || self.path_exists(path) {
             return Err(HostError::AlreadyExists {
                 path: path.to_path_buf(),
             });
@@ -1723,6 +1746,10 @@ impl port::Files for FakeHost {
         let lands_at = self.lands_at(path);
         self.fs.dirs.borrow_mut().insert(lands_at.clone());
         self.mark_written(&lands_at);
+        // Recorded where the lock was taken, and not before the refusals above
+        // it: `Effect::Took` is the fake's word for an acquired lock, and
+        // `lock::take` asks up to eight times for one it never gets.
+        self.record(Effect::Took(path.to_path_buf()));
         Ok(())
     }
 
@@ -2021,6 +2048,10 @@ impl port::Links for FakeHost {
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        // Where the link lands rather than where it was addressed, as `link`
+        // keyed it and `link_target` reads it back: a Profile a Reconcile has
+        // been over has a linked directory in front of every name after it.
+        let path = &self.lands_at(path);
         // A hard link is another name for the file and says nothing about
         // itself, so neither real adapter can recognize one: unix asks
         // `is_symlink` and Windows asks for a reparse point, and both refuse.

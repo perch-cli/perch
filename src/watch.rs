@@ -564,9 +564,9 @@ pub type StillOurs<'a> = &'a mut dyn FnMut() -> std::result::Result<(), Lost>;
 
 /// What a round decided.
 ///
-/// Six outcomes, five of which change nothing — and they are five different reasons for
-/// nothing happening, which is what a person reading the log needs: each of them
-/// resolves itself in a different way.
+/// One arm moved an Account and every other is a reason nothing did — which is what a
+/// person reading the log needs, because each of them resolves itself in a different
+/// way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     /// The Account is not full enough to want moving off.
@@ -621,9 +621,8 @@ pub enum Outcome {
 impl Outcome {
     /// What a single check reports to whatever scheduled it.
     ///
-    /// Five codes rather than one per outcome, because three of the six leave a
-    /// scheduler the same thing to do. Which of the three it was is on the decision
-    /// line.
+    /// Fewer codes than outcomes: those leaving a scheduler the same thing to do share
+    /// one, and which of them it was is on the decision line.
     pub fn exit_code(&self) -> i32 {
         match self {
             Outcome::Switched { .. } => EXIT_OK,
@@ -669,7 +668,7 @@ impl Outcome {
 /// What a round makes of a liveness ask that did not come back Idle: an outcome it can
 /// report, or a failure it has to raise.
 ///
-/// Every variant answered by name, with no catch-all — a fourth way for the ask to fail
+/// Every variant answered by name, with no catch-all — a third way for the ask to fail
 /// breaks the build here until the round says which of the two it is.
 pub fn refused_or_raised(not_idle: NotIdle, installed: &Installed) -> Result<Outcome> {
     match not_idle {
@@ -798,8 +797,8 @@ impl Round {
         }
     }
 
-    /// What this round has to add to the figure, and for most rounds nothing. The four
-    /// refusals add their whole sentence (ADR a-refusal-is-a-promise).
+    /// What this round has to add to the figure, and for most rounds nothing. A round
+    /// that refused adds its whole sentence (ADR a-refusal-is-a-promise).
     ///
     /// The em dash is the mark of the second kind: prose follows it, and it is on a
     /// line only where something other than the ordinary happened.
@@ -846,8 +845,9 @@ impl Round {
     }
 }
 
-/// A refusal's sentence, attached to the figure it explains. One shape for all four, so
-/// a log is one column of stamps and words with the same mark wherever prose begins.
+/// A refusal's sentence, attached to the figure it explains. One shape wherever it is
+/// reached, so a log is one column of stamps and words with the same mark wherever
+/// prose begins.
 fn explaining(said: &str) -> String {
     format!(" — {}", one_line(said))
 }

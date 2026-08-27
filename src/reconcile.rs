@@ -156,6 +156,14 @@ fn make(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
             Err(err) => refusals.push(format!("{} could not be made ({err})", kind.describe())),
         }
     }
+    // Two Runs against one Profile establish the same share, and the one that
+    // loses meets `EEXIST` at an entry that is now exactly what it wanted.
+    // Asked after the refusals, so nothing here is a link this pass could make.
+    if let Ok(Some(points_at)) = host.link_target(at)
+        && points_to(&points_at, target)
+    {
+        return Ok(());
+    }
     Err(refused(at, &refusals.join(", and "), no_link_here(host)))
 }
 
@@ -197,6 +205,13 @@ fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         let Ok(Some(points_at)) = host.link_target(&at) else {
             continue;
         };
+        // Wherever it points, and asked before the target is: a Profile's
+        // Credential Store is derived from its directory, so a link at one of
+        // these names is an Account holding a Credential that is not its own.
+        if held_back(&at) {
+            unlink(host, &at)?;
+            continue;
+        }
         // The target as it was recorded, unresolved: this asks what the link
         // says rather than where it lands, and a target that is gone — which is
         // the case this sweep is for — resolves to nothing at all.
@@ -205,13 +220,7 @@ fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
             reason = "what a link records, which is text and not a place"
         )]
         let into_the_shared_state = plain(&points_at).starts_with(plain(shared));
-        if !into_the_shared_state {
-            continue;
-        }
-        // A link at a held-back name goes whether or not its target is there:
-        // the denylist is enforced where links are made, so nothing else would
-        // ever look at one and it would stay for good.
-        if held_back(&at) || !host.path_exists(&at) {
+        if into_the_shared_state && !host.path_exists(&at) {
             unlink(host, &at)?;
         }
     }
@@ -300,6 +309,34 @@ mod tests {
                 "{crosses} follows the person into a Run"
             );
         }
+    }
+
+    /// Two Runs against one Profile establish the same share: both read the
+    /// entry as absent, both link, and the second meets `EEXIST` at an entry
+    /// that by then is exactly the share it was making.
+    #[test]
+    fn a_share_another_run_established_first_is_not_a_refusal() {
+        let target = Path::new("/Users/someone/.claude/CLAUDE.md");
+        let at = Path::new("/Users/someone/.config/perch/profiles/one/CLAUDE.md");
+        let host = crate::host::FakeHost::new()
+            .with_file(target, "remember this")
+            .with_link(Link::Symbolic, target, at);
+
+        make(&host, target, at).expect("the share the other Run made is the one this wanted");
+    }
+
+    /// And a link somebody else put at that name pointing somewhere else is
+    /// still the refusal it was: only the outcome this pass wanted counts.
+    #[test]
+    fn a_link_to_somewhere_else_in_the_way_is_still_refused() {
+        let target = Path::new("/Users/someone/.claude/CLAUDE.md");
+        let at = Path::new("/Users/someone/.config/perch/profiles/one/CLAUDE.md");
+        let host = crate::host::FakeHost::new()
+            .with_file(target, "remember this")
+            .with_file("/Users/someone/elsewhere.md", "not it")
+            .with_link(Link::Symbolic, "/Users/someone/elsewhere.md", at);
+
+        make(&host, target, at).expect_err("that is not the share this Run wanted");
     }
 
     /// The dangerous one is the temp file: every atomic write puts one holding

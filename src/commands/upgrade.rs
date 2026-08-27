@@ -92,7 +92,10 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
                 )));
             }
             std::cmp::Ordering::Less => {
-                agree_to_going_back(host, wanted, installed, args.yes, out)?;
+                if !agree_to_going_back(host, wanted, installed, args.yes, out)? {
+                    say(out, "Nothing was installed.")?;
+                    return Ok(crate::error::EXIT_OK);
+                }
             }
             std::cmp::Ordering::Greater => {}
         }
@@ -252,7 +255,7 @@ fn check(
     )
 }
 
-/// Agreement to install a Release older than the one running.
+/// Whether there is agreement to install a Release older than the one running.
 ///
 /// Named as a downgrade and told what it costs rather than asked "are you sure":
 /// a Perch refuses a registry a newer one wrote, so going back far enough leaves
@@ -263,9 +266,9 @@ fn agree_to_going_back(
     installed: &str,
     yes: bool,
     out: &mut dyn Write,
-) -> Result<()> {
+) -> Result<bool> {
     if yes {
-        return Ok(());
+        return Ok(true);
     }
     if !host.is_interactive() {
         return Err(PerchError::Invalid(format!(
@@ -285,12 +288,7 @@ fn agree_to_going_back(
              back to {installed} is the repair."
         ),
     )?;
-    match said_yes(host, out, "Install the older Release? [y/N] ", Presumed::No)? {
-        true => Ok(()),
-        false => Err(PerchError::NothingToDo(
-            "Nothing was installed.".to_string(),
-        )),
-    }
+    said_yes(host, out, "Install the older Release? [y/N] ", Presumed::No)
 }
 
 /// npm would be replacing `perch.exe` while it is the running process, and

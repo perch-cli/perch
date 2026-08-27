@@ -270,7 +270,7 @@ fn resolve_group(
 
         let chosen = match answer.as_str() {
             "" => offered.clone(),
-            named if name::means_no_group(named) => None,
+            named if name::means_the_ungrouped_scope(named) => None,
             named => Some(named.to_string()),
         };
 

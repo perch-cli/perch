@@ -555,6 +555,27 @@ fn a_link_at_a_held_back_name_is_taken_away_even_though_its_target_is_there() {
     );
 }
 
+/// A `$HOME` reached through a link is one spelling of the Default Profile, and
+/// the link at a held-back name records the other. Gated on the text of the two,
+/// the sweep passed it over and `credentials::read` then followed it and handed
+/// back the Default Profile's Credential as this Account's.
+#[test]
+fn a_link_at_a_held_back_name_goes_however_its_target_is_spelled() {
+    let host = machine().with_link(
+        Link::Symbolic,
+        "/export/home/someone/.claude/.credentials.json",
+        profile(".credentials.json"),
+    );
+
+    run_reconcile(&host).expect("the link is swept up");
+
+    assert!(
+        host.link_at(profile(".credentials.json")).is_none(),
+        "a Profile's Credential Store is derived from its directory, so a link \
+         at that name is an Account holding a Credential that is not its own"
+    );
+}
+
 /// What refuses a `remove_link` is the directory holding it — a Profile left
 /// root-owned by a `sudo claude` is how that happens — and Developer Mode has
 /// nothing to say about it, so it must not be the remedy named.

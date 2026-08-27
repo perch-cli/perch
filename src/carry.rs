@@ -83,11 +83,13 @@ pub fn carry(
         return;
     };
 
-    let Some(source) = most_recently_used(host, registry, email, default_profile, &destination)
+    // The first that reads, rather than the best alone: a `sudo claude` leaves a
+    // root-owned `.claude.json` that is newest by mtime, and giving up on it
+    // costs a dialog on every Run for ever where the next candidate would serve.
+    let Some(theirs) = most_recently_used(host, registry, email, default_profile, &destination)
+        .iter()
+        .find_map(|source| read(host, source))
     else {
-        return;
-    };
-    let Some(theirs) = read(host, &source) else {
         return;
     };
 
@@ -181,17 +183,17 @@ fn project_entry(
     json::changed_value_at(against, PROJECTS, &projects).or(patched)
 }
 
-/// The identity file a Run copies from: the most recently used one holding
-/// state that may cross into this Profile. Never the Profile being launched,
-/// which is written by every Run and would outrank the person's own directory
-/// from the first Run onwards, freezing what crosses there.
+/// The identity files a Run may copy from, most recently used first. Never the
+/// Profile being launched, which is written by every Run and would outrank the
+/// person's own directory from the first Run onwards, freezing what crosses
+/// there.
 fn most_recently_used(
     host: &dyn Host,
     registry: &Registry,
     email: &str,
     default_profile: &Store,
     destination: &Path,
-) -> Option<PathBuf> {
+) -> Vec<PathBuf> {
     let group = registry
         .account(email)
         .and_then(|account| account.group.clone());
@@ -221,8 +223,8 @@ fn most_recently_used(
     candidates.sort_by(|a, b| b.used.cmp(&a.used).then(b.is_default.cmp(&a.is_default)));
     candidates
         .into_iter()
-        .next()
         .map(|candidate| candidate.identity_file)
+        .collect()
 }
 
 /// One place state might be copied from, and what decides between them.
