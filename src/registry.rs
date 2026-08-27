@@ -1597,16 +1597,20 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // dangling one is not a refusal downstream — it is the `expect` in every
     // command that resolves a Target.
 
-    // Keyed rather than scanned: both questions below are asked of every Alias,
-    // and two names are one name exactly where `name::folded` agrees.
-    let held: std::collections::HashSet<String> = registry
-        .accounts
-        .iter()
-        .map(|account| name::folded(account.email()))
-        .collect();
+    // One pass, answering both questions asked of the Accounts: this one, and
+    // their own collision check at the bottom. `validate` runs on every `load`
+    // and every `save`, so folding twice is 2n `String`s a command need not pay.
+    let mut held: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
+    let mut twice = None;
+    for account in &registry.accounts {
+        if let Some(already) = held.insert(name::folded(account.email()), account.email()) {
+            twice.get_or_insert((already, account.email()));
+        }
+    }
     let mut named: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
     for (alias, email) in &registry.aliases {
-        if !held.contains(name::folded(email).as_str()) {
+        let folded = name::folded(email);
+        if !held.contains_key(&folded) {
             return Err(PerchError::Invalid(format!(
                 "The registry gives the Alias `{alias}` to {email}, which is not \
                  an Account Perch holds.",
@@ -1615,7 +1619,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
         // One Account, one Alias. With two, `alias_of` returns whichever the map
         // yields first, so `perch list` shows one while `perch switch` answers to
         // both — the same undecided answer as two names differing only in case.
-        if let Some(already) = named.insert(name::folded(email), alias) {
+        if let Some(already) = named.insert(folded, alias) {
             return Err(PerchError::Invalid(format!(
                 "The registry gives {email} both the Alias `{already}` and the \
                  Alias `{alias}`, and an Account answers to one Alias at a time \
@@ -1671,7 +1675,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // One entry per Account. `upsert` replaces the matching entry, so two for
     // one address is a hand edit — after which `account` acts on the first,
     // `perch list` renders two rows, and a Cycle counts it twice.
-    if let Some((already, again)) = first_collision(registry.accounts.iter().map(Account::email)) {
+    if let Some((already, again)) = twice {
         return Err(PerchError::Invalid(format!(
             "The registry holds two Accounts spelled `{already}` and `{again}`, \
              which are one Account — so which entry a command reads, and which \
