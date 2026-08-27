@@ -139,11 +139,11 @@ fn report(host: &dyn Host, findings: &Findings) {
         findings.credential.subscription_type.as_deref(),
     );
 
+    // One remark rather than two: that the Profile is the first and that it is
+    // active are the same piece of news about the same machine.
     host.note(&format!(
-        "Adopted the Claude Code login as your first Profile: {description}"
-    ));
-    host.note(&format!(
-        "It is now the active Account. Claude Code {}.",
+        "Adopted the Claude Code login as your first Profile, now active: \
+         {description}. Claude Code {}.",
         findings.version
     ));
 }

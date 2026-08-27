@@ -219,10 +219,8 @@ impl Rule {
         PerchError::Invalid(match self {
             Rule::Empty => format!("{} cannot be empty.", kind.names()),
             Rule::Unshowable(set) => format!(
-                "{} are drawn as they are held, and this one carries {} — so two \
-                 names nothing on screen tells apart are one row in every listing, \
-                 and a character a terminal acts on moves the column and colors the \
-                 row.",
+                "{} are drawn as they are held, and this one carries {}: two names \
+                 nothing on screen tells apart would be one row in every listing.",
                 kind.names(),
                 name.chars()
                     .find(|c| crate::host::within(set, *c))
@@ -234,19 +232,12 @@ impl Rule {
             ),
             Rule::NotAnIdentifier => format!(
                 "`{name}` carries {}, and {} are made of letters, digits, `_` and \
-                 `-`. Every alphabet: `café` and `日本` are names. A Target is typed \
-                 at a shell prompt, often on a machine other than the one that \
-                 named it, so a name of symbols is one somebody has to produce from \
-                 a keyboard to reach it.",
+                 `-` — every alphabet, so `café` and `日本` are names.",
                 said(name.chars().find(|c| !a_name_may_carry(*c))),
                 kind.names()
             ),
             Rule::OpensWrong => format!(
-                "`{name}` opens with {}, and {} open with a letter, a digit or `_`. \
-                 A name opening with `-` is a Target `perch run` could never be \
-                 given, its program going after the `--` that would rescue one \
-                 anywhere else, and a name opening with a mark draws onto whatever \
-                 was already on the line.",
+                "`{name}` opens with {}, and {} open with a letter, a digit or `_`.",
                 said(name.chars().next().filter(|c| !a_name_may_open_with(*c))),
                 kind.names()
             ),

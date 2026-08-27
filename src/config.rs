@@ -205,8 +205,7 @@ impl Setting {
             Setting::WatcherMarginPercent => format!(
                 "`perch watcher run` will only move {within} to an Account at \
                  {}% or under — that many points below the threshold of {}%. A \
-                 round with nowhere that empty to go says so rather than moving \
-                 you onto an Account nearly as full as the one you are on. \
+                 round with nowhere that empty to go says so and moves nothing. \
                  {ONLY_WHILE_IT_RUNS}",
                 settings
                     .watcher_threshold_percent
@@ -292,9 +291,9 @@ fn gated(registry: &Registry, scope: &Scope) -> String {
 /// service that has been switched on (ADR a-watcher-knob-is-arithmetic). All
 /// three ways of running one are named, or this would be a Setting somebody
 /// with a Service had no reason to read (ADR the-machine-runs-the-watcher).
-const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running — the loop in \
-     the terminal you started it in, a Service `perch watcher install` set up, \
-     or a `perch watcher check` your scheduler runs. Nothing here starts one.";
+const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running — `perch \
+     watcher run`, a Service `perch watcher install` set up, or a `perch watcher \
+     check` on a schedule. Nothing here starts one.";
 
 fn strategy(value: &str) -> Result<Strategy> {
     Strategy::ALL

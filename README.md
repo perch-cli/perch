@@ -50,8 +50,7 @@ the machine, so nothing has to be logged into again.
 
 ```
 $ perch status
-Adopted the Claude Code login as your first Profile: you@example.com (Acme, pro)
-It is now the active Account. Claude Code 2.1.221.
+Adopted the Claude Code login as your first Profile, now active: you@example.com (Acme, pro). Claude Code 2.1.221.
 
 Account       you@example.com
 Organization  Acme

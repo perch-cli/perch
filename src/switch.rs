@@ -644,22 +644,18 @@ fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> Stri
     );
     match leaving {
         Some(leaving) => format!(
-            "{said}, nor the one it holds for {leaving}, nor any other it holds — \
-             so Perch cannot tell whether that Switch moved anything.\n\
-             It may be {arriving}'s, Rotated since the Switch finished. It may be \
-             {leaving}'s, Rotated since the Switch failed to start. Nothing on \
-             the machine tells the two apart, and writing over the wrong one \
-             destroys the only good copy — so nothing was changed.\n\
+            "{said}, nor the one it holds for {leaving}, nor any other it holds. \
+             It may be {arriving}'s, Rotated since the Switch finished, or \
+             {leaving}'s, Rotated since it failed to start — so nothing was \
+             changed.\n\
              `perch relogin {arriving}` finishes that Switch and `perch relogin \
-             {leaving}` abandons it: either one replaces whatever is live with a \
-             fresh login for the Account you meant."
+             {leaving}` abandons it."
         ),
         None => format!(
             "{said}, nor any other it holds, and Perch was on no Account before it \
-             — so nothing on the machine says whose the live Credential is.\n\
-             Nothing was changed, because writing over it would destroy the only \
-             good copy there is. `perch relogin {arriving}` replaces whatever is \
-             live with a fresh login for {arriving}, which is the way through."
+             — so nothing says whose it is, and nothing was changed.\n\
+             `perch relogin {arriving}` replaces whatever is live with a fresh \
+             login for {arriving}."
         ),
     }
 }
@@ -699,11 +695,9 @@ pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result
     Err(PerchError::Conflict(format!(
         "{} and {} share one Profile, so they share one Credential — their \
          addresses differ only in characters a Profile directory does not keep \
-         apart.\n\
-         Perch cannot act as either of them: whichever Credential that Profile \
-         holds is the one a client would run as, whatever Perch says it is, and \
-         nothing afterwards could tell the two apart. `perch remove` one of \
-         them, then `perch add` it again.",
+         apart. Perch cannot act as either of them, because nothing afterwards \
+         could tell which it acted as.\n\
+         `perch remove` one of them, then `perch add` it again.",
         account.email(),
         sharer.email(),
     )))
@@ -921,14 +915,11 @@ fn the_identity_is_not_corroborated(outgoing: &Account, named: &str) -> String {
     format!(
         "The Identity beside the live Credential names {named}, but the live \
          Credential is not the one Perch holds for {named} either — and Perch is \
-         on {outgoing}, so it cannot tell whose Rotation this is.\n\
-         It may be {outgoing}'s, made after a Switch that could not finish \
-         writing the Identity: writing over it would destroy the only good copy, \
-         so nothing was changed.\n\
-         It may be {named}'s, Rotated since.\n\
-         Either way, `perch relogin {outgoing}` is the way through: a Capture \
-         files the live Credential under the Account Perch is on, so that is the \
-         one whose fresh login replaces what is there."
+         on {outgoing}, so it cannot tell whose Rotation this is. It may be \
+         {outgoing}'s, made after a Switch that could not finish writing the \
+         Identity, or {named}'s, Rotated since — so nothing was changed.\n\
+         `perch relogin {outgoing}` is the way through: a Capture files the live \
+         Credential under the Account Perch is on."
     )
 }
 
@@ -941,14 +932,12 @@ fn the_live_credential_is_unaccounted_for(account: &Account) -> String {
     format!(
         "{email} is the Account Perch is on and the Account asked for, so this is \
          the repair for a Switch that stopped before it finished — but the live \
-         Credential is not the one Perch holds for {email}, and Perch cannot tell \
-         which of two things that is.\n\
-         It may be {email}'s own, Rotated since: writing over it would destroy \
-         the only good copy, so nothing was changed.\n\
-         It may be a login somebody made outside Perch: `perch add` holds that \
-         one as an Account of its own before anything replaces it.\n\
-         Either way, `perch relogin {email}` finishes the repair — it replaces \
-         whatever is live with a fresh login for {email}."
+         Credential is not the one Perch holds for {email}. It may be {email}'s \
+         own, Rotated since, or a login somebody made outside Perch — so nothing \
+         was changed.\n\
+         `perch relogin {email}` finishes the repair. To keep a login made \
+         outside Perch instead, `perch add` holds it as an Account of its own \
+         first."
     )
 }
 

@@ -23,6 +23,18 @@ use crate::registry::{self, Account, Registry};
 /// anything, and this is the one command nothing undoes.
 const THE_WORD: &str = "purge";
 
+/// What to do about a Purge that stopped over the Export it offered. Said in
+/// one place because both ways out of the offer end here, and the two are one
+/// instruction.
+const RUN_IT_AGAIN: &str = "Nothing was purged. Run `perch holdings purge` again \
+     — answering `n` to the offer purges without one.";
+
+/// What agreeing to a Purge costs, said in one place: both of the sentences the
+/// question can open with end on it, and two copies would sooner or later be
+/// two different promises about the same act.
+const NOTHING_UNDOES_IT: &str = "Nothing undoes it: only a fresh login brings an \
+     Account back, and it comes back as a new one.";
+
 /// `yes` answers both questions ahead of time: purge, and write no Export.
 pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // Before anything is read, because it is a refusal about this terminal
@@ -85,14 +97,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
             return match exported {
                 Some(path) => say(
                     out,
-                    &format!(
-                        "Nothing was purged. The Export at {} was written before \
-                         you declined and still stands — it holds a working \
-                         Credential for every Account, so keep it somewhere you \
-                         would keep those, or delete it. `perch holdings purge` \
-                         will not write over it.",
-                        path.display(),
-                    ),
+                    &format!("Nothing was purged. {}", the_export_is_at(&path)),
                 ),
                 None => say(out, "Nothing was purged."),
             };
@@ -137,15 +142,23 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
 /// `perch holdings export` refuses a path that is taken.
 fn still_standing(error: PerchError, exported: Option<&std::path::Path>) -> PerchError {
     match exported {
-        Some(path) => error.with_note(&format!(
-            "The Export at {} was written before this stopped and still stands \
-             — it holds a working Credential for every Account, so keep it \
-             somewhere you would keep those, or delete it. `perch holdings \
-             purge` will not write over it.",
-            path.display(),
-        )),
+        Some(path) => error.with_note(&the_export_is_at(path)),
         None => error,
     }
+}
+
+/// Where an Export this run wrote is, and what it holds.
+///
+/// One sentence in one place: a Purge names the file when it is declined, when
+/// it fails and when it finishes, and those three differ only in what they say
+/// happened around it.
+fn the_export_is_at(path: &Path) -> String {
+    format!(
+        "The Export is at {} — it holds a working Credential for every Account, \
+         so keep it somewhere you would keep those. `perch holdings purge` will \
+         not write over it.",
+        path.display(),
+    )
 }
 
 /// Refuses a Purge nobody is there to agree to.
@@ -227,8 +240,7 @@ fn what_will_go(
             profiles => format!(
                 "Perch holds {} under {} that it cannot name{}. A Purge empties \
                  every one of their Credential Stores and deletes {} itself. \
-                 Nothing undoes it: only a fresh login brings an Account back, \
-                 and it comes back as a new one.{and_the_service}",
+                 {NOTHING_UNDOES_IT}{and_the_service}",
                 crate::commands::profiles(profiles),
                 home.display(),
                 // Only where the registry is the reason: one that parsed and
@@ -246,8 +258,7 @@ fn what_will_go(
     format!(
         "Perch holds {}: {}.\n\
          A Purge deletes every one of their Profiles, every Credential Perch \
-         holds for them, and {} itself. Nothing undoes it: only a fresh login \
-         brings an Account back, and it comes back as a new one.\n\
+         holds for them, and {} itself. {NOTHING_UNDOES_IT}\n\
          Claude Code goes on running as whatever it is logged in as — the live \
          Credential is not Perch's to take away.{and_the_service}",
         crate::commands::accounts(accounts.len()),
@@ -291,24 +302,15 @@ fn offer_an_export(
         // Not read as a change of mind: somebody who has just asked for an Export
         // and named nowhere to put it is likelier to have hit the wrong key than
         // to have decided to give up every Credential without a copy.
-        return Err(PerchError::Invalid(
-            "No path was typed, so no Export was written.\n\
-             Nothing was purged. Run `perch holdings purge` again — answering \
-             `n` to the offer purges without one."
-                .to_string(),
-        ));
+        return Err(PerchError::Invalid(format!(
+            "No path was typed, so no Export was written.\n{RUN_IT_AGAIN}"
+        )));
     };
     // The Export's own refusals are about the Export, and every one of them is
     // true. None says what the person typing `perch holdings purge` is waiting to
     // hear, which is whether the Purge happened.
-    export::write_the_export(host, perch, registry, &path, landed, installed, out).map_err(
-        |error| {
-            error.with_note(
-                "Nothing was purged. Run `perch holdings purge` again — answering \
-             `n` to the offer purges without an Export.",
-            )
-        },
-    )?;
+    export::write_the_export(host, perch, registry, &path, landed, installed, out)
+        .map_err(|error| error.with_note(RUN_IT_AGAIN))?;
     Ok(())
 }
 
@@ -436,14 +438,7 @@ fn report(
     // one wrote: the path is the only thing left that names the Holdings, and
     // the run that destroyed them is where it matters most.
     if let Some(path) = exported {
-        say(
-            out,
-            &format!(
-                "The Export is at {} — it holds a working Credential for every \
-                 Account, so keep it somewhere you would keep those.",
-                path.display(),
-            ),
-        )?;
+        say(out, &the_export_is_at(path))?;
     }
 
     Ok(())

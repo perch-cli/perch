@@ -57,11 +57,9 @@ pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
                  to Switch it to. Nothing is being watched.\n\
                  `perch config set {UNGROUPED} interchangeable true` says they are, \
                  and `perch config set {UNGROUPED} watcher-may-act true` then says \
-                 the watcher may act on them. Both, because being interchangeable \
-                 is a declaration somebody makes and letting the watcher act is a \
-                 grant, and neither implies the other.\n\
+                 the watcher may act. Both are needed.\n\
                  Putting it in a Group with `perch group move {} <group>` is the \
-                 narrower statement, and is what Groups are for.",
+                 narrower way.",
                 registry.named_for_the_user(account.email()),
                 account.email(),
             )));
@@ -69,8 +67,7 @@ pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
         cycle::MayAct::Ungranted => {
             return Err(PerchError::Invalid(format!(
                 "{} has not been told the watcher may act on it, so nothing is \
-                 being watched. Anything that changes underneath you only ever \
-                 does so because you said it could.\n\
+                 being watched.\n\
                  `perch config set {} watcher-may-act true` says it may.",
                 scope.described(),
                 scope.word(),
