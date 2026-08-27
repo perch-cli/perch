@@ -260,6 +260,33 @@ fn for_how_long(span: Duration) -> String {
 /// move you again.
 pub const COOLDOWN_MINUTES: u32 = 15;
 
+/// Which watcher a round belongs to.
+///
+/// One difference, and it is here rather than scattered through the round: who
+/// decides when the next reading is. The cooldown is not the other half of it —
+/// both read it off the registry, because a loop is a process a Service restarts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Watcher {
+    /// `perch watcher run`: rounds separated by a wait this process takes.
+    Loop,
+    /// `perch watcher check`: one round and out, and how long until the next is
+    /// whatever scheduled them.
+    Check,
+}
+
+impl Watcher {
+    /// How long before the watcher reads again, where that is the watcher's to say.
+    ///
+    /// Given the wait rather than the [`Backoff`] it came off, so the only way to have
+    /// one is to have just been charged for it.
+    pub fn asking_again(self, waiting_for: u64) -> Option<u64> {
+        match self {
+            Watcher::Loop => Some(waiting_for),
+            Watcher::Check => None,
+        }
+    }
+}
+
 /// The rule a Scope gives the watcher: the two numbers saying when a move is wanted
 /// and what is worth moving to, which are the pacing questions that are anyone's.
 ///

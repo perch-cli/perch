@@ -8,6 +8,8 @@
 //! (ADR code-lives-where-it-reaches). Nothing here reaches the machine either,
 //! so every answer below can be argued with in a unit test.
 
+use chrono::{DateTime, Utc};
+
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::live::Idle;
@@ -16,7 +18,10 @@ use crate::name::{self, UNGROUPED};
 use crate::observe::{self, Attempt};
 use crate::registry::Settled;
 use crate::registry::{Account, Registry, Scope};
-use crate::watch::{Considered, Cooled, Fullest, Policy, Round};
+use crate::watch::{
+    self, Backoff, Considered, Cooled, Fullest, Outcome, Policy, Recently, Round, Watcher,
+    nothing_was_switched,
+};
 
 /// The Account being watched, the Scope that said it may be, and the rules it is
 /// watched under.
@@ -81,6 +86,98 @@ pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
         account,
         scope,
         policy,
+    })
+}
+
+/// What a round read, before anything has decided what it means.
+///
+/// Every field is a reading rather than a judgment — the figures that came back, the
+/// Account as the Refresh left it, the rules it is watched under, and what paces it.
+pub struct Reading<'a> {
+    /// The Account the figures were just written to, which is what a Fullest is taken
+    /// from. Not [`Watching::account`], which is the copy read before the Refresh.
+    pub account: &'a Account,
+    pub report: &'a observe::Report,
+    pub policy: &'a Policy,
+    pub recently: &'a Recently,
+    pub now: DateTime<Utc>,
+}
+
+/// What one reading comes to, decided here and nowhere else.
+///
+/// `act` is handed a [`Cooled`], which is the only way to have one — so a round
+/// that may not act cannot call it, and what decides that is this function rather
+/// than the order of statements around it.
+pub fn decide(
+    reading: Reading<'_>,
+    watcher: Watcher,
+    backoff: &mut Backoff,
+    act: impl FnOnce(&Cooled<'_>) -> Result<Outcome>,
+) -> Result<Round> {
+    let threshold = reading.policy.threshold;
+
+    // Before the reading is judged, because a round that stopped read nothing and a
+    // hold charged for it would pace the Back-off off a question nobody was asked.
+    if let Some(lost) = reading.report.stopped {
+        return Ok(Round {
+            fullest: None,
+            threshold,
+            outcome: nothing_was_switched(lost),
+        });
+    }
+
+    // A hold said against the wait it earned. `waiting_for` is passed in rather than
+    // charged here, because not every hold is a question nobody answered.
+    let held = |why: String, waiting_for: u64| Round {
+        fullest: None,
+        threshold,
+        outcome: Outcome::Held {
+            why,
+            retrying_in: watcher.asking_again(waiting_for),
+        },
+    };
+
+    // Never on a figure it did not just read.
+    if let Some(refused) = refused_the_reading(&reading.report.attempts) {
+        let waiting_for = match refused.paced {
+            true => backoff.could_not_read(),
+            false => watch::REFRESH_INTERVAL_MILLIS,
+        };
+        return Ok(held(refused.why, waiting_for));
+    }
+
+    let Some(fullest) = Fullest::of(reading.account) else {
+        // Read, and carrying no Quota Window Perch could make anything of. Unreachable,
+        // and answered anyway: acting on an Account whose fullness is unknown is the
+        // one thing this round may never do.
+        return Ok(held(
+            "Anthropic answered without a Quota Window Perch could read, so \
+             there was no figure to decide on."
+                .to_string(),
+            backoff.could_not_read(),
+        ));
+    };
+    // A figure, so whatever was wrong is over. Said here rather than at the end of the
+    // round: a round that finds nowhere to go has read perfectly well.
+    backoff.read();
+
+    // Two asks that hand on what they earned, and the figure comes back out of each.
+    let (fullest, outcome) = match fullest.crossed(threshold) {
+        Err(under) => (under, Outcome::Waiting),
+        Ok(crossed) => match crossed.cooled(reading.recently, reading.now) {
+            // Before the candidates are read, so a round that may not act spends
+            // nothing finding out where it would have gone.
+            Err(cooling) => (
+                crossed.fullest().clone(),
+                Outcome::Cooling { why: cooling.why },
+            ),
+            Ok(cooled) => (cooled.fullest().clone(), act(&cooled)?),
+        },
+    };
+    Ok(Round {
+        fullest: Some(fullest),
+        threshold,
+        outcome,
     })
 }
 
@@ -272,6 +369,236 @@ mod tests {
         registry.upsert(ungrouped(WATCHED, 90.0));
         registry.settle(Some(WATCHED.to_string()));
         registry
+    }
+
+    fn read(email: &str, used_percent: f64) -> (Account, observe::Report) {
+        (
+            ungrouped(email, used_percent),
+            observe::Report {
+                attempts: vec![Attempt {
+                    email: email.to_string(),
+                    named: email.to_string(),
+                    outcome: Outcome::Observed,
+                }],
+                asked: true,
+                ..observe::Report::default()
+            },
+        )
+    }
+
+    fn at(threshold: u8) -> Policy {
+        Policy {
+            threshold,
+            margin: 10,
+        }
+    }
+
+    /// Why a hold held, or `None` where the round decided something else.
+    fn waits_because(outcome: watch::Outcome) -> Option<String> {
+        match outcome {
+            watch::Outcome::Held { why, .. } => Some(why),
+            _ => None,
+        }
+    }
+
+    /// What every arm that may not act is handed. Being called is the failure, so
+    /// this says so rather than each test carrying a flag to check afterwards.
+    fn never_acts(_: &Cooled<'_>) -> Result<watch::Outcome> {
+        panic!("this reading may not act")
+    }
+
+    /// What the one arm that may act does, so the round's outcome is its outcome.
+    fn switched() -> watch::Outcome {
+        watch::Outcome::Switched {
+            to: "somewhere@example.com".to_string(),
+            unread: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_figure_under_the_threshold_waits_and_never_reaches_the_act() {
+        let (account, report) = read(WATCHED, 50.0);
+
+        let round = decide(
+            Reading {
+                account: &account,
+                report: &report,
+                policy: &at(80),
+                recently: &Recently::nothing(),
+                now: now(),
+            },
+            Watcher::Loop,
+            &mut Backoff::none(),
+            // Nothing may act on an Account it may stay on.
+            never_acts,
+        )
+        .expect("a reading under the threshold decides");
+
+        assert!(matches!(round.outcome, watch::Outcome::Waiting));
+        assert_eq!(round.fullest.expect("it read one").used_percent, 50.0);
+    }
+
+    /// The Cooldown is read at the top of every round, so this is the arm that keeps a
+    /// Watcher its Service just restarted from Switching again immediately.
+    #[test]
+    fn a_figure_over_the_threshold_inside_the_cooldown_cools_without_acting() {
+        let (account, report) = read(WATCHED, 90.0);
+        let mut recently = Recently::nothing();
+        recently.switched(now() - chrono::Duration::minutes(1));
+
+        let round = decide(
+            Reading {
+                account: &account,
+                report: &report,
+                policy: &at(80),
+                recently: &recently,
+                now: now(),
+            },
+            Watcher::Loop,
+            &mut Backoff::none(),
+            // It spends nothing finding out where it would have gone.
+            never_acts,
+        )
+        .expect("a reading inside the cooldown decides");
+
+        assert!(matches!(round.outcome, watch::Outcome::Cooling { .. }));
+        assert_eq!(
+            round
+                .fullest
+                .expect("the figure comes back out")
+                .used_percent,
+            90.0,
+            "a hold still says what it was holding on"
+        );
+    }
+
+    #[test]
+    fn a_figure_over_the_threshold_and_out_of_the_cooldown_is_the_one_reading_that_acts() {
+        let (account, report) = read(WATCHED, 90.0);
+        let acted = std::cell::Cell::new(false);
+
+        let round = decide(
+            Reading {
+                account: &account,
+                report: &report,
+                policy: &at(80),
+                recently: &Recently::nothing(),
+                now: now(),
+            },
+            Watcher::Loop,
+            &mut Backoff::none(),
+            |_cooled| {
+                acted.set(true);
+                Ok(switched())
+            },
+        )
+        .expect("a reading that may act decides");
+
+        assert!(acted.get(), "this is the one arm that acts");
+        assert_eq!(round.outcome, switched(), "and the outcome is what it did");
+    }
+
+    /// A round that stopped read nothing, so a hold charged for it would pace the
+    /// Back-off off a question nobody was asked.
+    #[test]
+    fn a_round_that_lost_the_watch_decides_on_no_figure_and_charges_nothing() {
+        let (account, mut report) = read(WATCHED, 90.0);
+        report.stopped = Some(Lost::HandedOver);
+        let mut backoff = Backoff::none();
+
+        let round = decide(
+            Reading {
+                account: &account,
+                report: &report,
+                policy: &at(80),
+                recently: &Recently::nothing(),
+                now: now(),
+            },
+            Watcher::Loop,
+            &mut backoff,
+            never_acts,
+        )
+        .expect("a round that stopped is still a round");
+
+        assert!(round.fullest.is_none(), "it read no figure to decide on");
+        assert_eq!(
+            backoff.could_not_read(),
+            Backoff::none().could_not_read(),
+            "and nothing was charged against a question it never asked"
+        );
+    }
+
+    /// The whole of what a `Watcher` decides, asked of the one arm that names a wait.
+    #[test]
+    fn a_check_says_no_next_reading_where_a_loop_says_when() {
+        let (account, mut report) = read(WATCHED, 90.0);
+        report.attempts[0].outcome = Outcome::Throttled;
+
+        /// A hold is what both arms are; the wait is the half that differs.
+        fn waits(outcome: watch::Outcome) -> Option<Option<u64>> {
+            match outcome {
+                watch::Outcome::Held { retrying_in, .. } => Some(retrying_in),
+                _ => None,
+            }
+        }
+
+        let held = |watcher| {
+            decide(
+                Reading {
+                    account: &account,
+                    report: &report,
+                    policy: &at(80),
+                    recently: &Recently::nothing(),
+                    now: now(),
+                },
+                watcher,
+                &mut Backoff::none(),
+                never_acts,
+            )
+            .expect("a reading nothing could be made of is still a round")
+            .outcome
+        };
+
+        assert_eq!(
+            waits(held(Watcher::Loop)),
+            Some(Some(watch::REFRESH_INTERVAL_MILLIS)),
+            "a loop takes the wait itself, so it says how long"
+        );
+        assert_eq!(
+            waits(held(Watcher::Check)),
+            Some(None),
+            "a check exits, so whatever scheduled it decides"
+        );
+    }
+
+    /// Read, and carrying no Quota Window Perch could make anything of. Nothing in
+    /// production produces it — Anthropic answering at all means a window — and the
+    /// arm exists because acting on an Account whose fullness is unknown is the one
+    /// thing a round may never do. Only a unit test can put a round in front of it.
+    #[test]
+    fn a_reading_with_no_window_in_it_holds_rather_than_acting_on_an_unknown_fullness() {
+        let mut account = cycle::tests::account(WATCHED, vec![]);
+        account.group = None;
+        let (_, report) = read(WATCHED, 90.0);
+        let mut backoff = Backoff::none();
+
+        let round = decide(
+            Reading {
+                account: &account,
+                report: &report,
+                policy: &at(80),
+                recently: &Recently::nothing(),
+                now: now(),
+            },
+            Watcher::Loop,
+            &mut backoff,
+            never_acts,
+        )
+        .expect("a reading with nothing in it is still a round");
+
+        assert!(round.fullest.is_none(), "there was no figure to decide on");
+        let held = waits_because(round.outcome).expect("an unknown fullness is a hold");
+        assert!(held.contains("Quota Window"), "{held}");
     }
 
     fn declared(mut registry: Registry) -> Registry {

@@ -27,7 +27,7 @@ use crate::registry::{self, Registry};
 use crate::round::{self, Verdict, Watching};
 use crate::switch::{self, NotSwitched, Resolved};
 use crate::watch::{
-    self, Backoff, Cooled, Fullest, Holding, Outcome, Recently, Round, Speak, nothing_was_switched,
+    self, Backoff, Cooled, Holding, Outcome, Recently, Speak, Watcher, nothing_was_switched,
 };
 
 /// One round, for whatever scheduled it.
@@ -362,33 +362,6 @@ fn opening(host: &dyn Host) -> Result<String> {
     ))
 }
 
-/// Which watcher a round belongs to.
-///
-/// One difference, and it is here rather than scattered through the round: who
-/// decides when the next reading is. The cooldown is not the other half of it —
-/// both read it off the registry, because a loop is a process a Service restarts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Watcher {
-    /// `perch watcher run`: rounds separated by a wait this process takes.
-    Loop,
-    /// `perch watcher check`: one round and out, and how long until the next is
-    /// whatever scheduled them.
-    Check,
-}
-
-impl Watcher {
-    /// How long before the watcher reads again, where that is the watcher's to say.
-    ///
-    /// Given the wait rather than the [`Backoff`] it came off, so the only way to have
-    /// one is to have just been charged for it.
-    fn asking_again(self, waiting_for: u64) -> Option<u64> {
-        match self {
-            Watcher::Loop => Some(waiting_for),
-            Watcher::Check => None,
-        }
-    }
-}
-
 /// One round: read, decide, and act if acting is what was decided.
 ///
 /// The registry lock is taken here and given back when this returns rather than held
@@ -462,88 +435,40 @@ fn one_round(
         host.note(not_kept);
     }
 
-    // Before the reading is judged, because a round that stopped read nothing and a
-    // hold charged for it would pace the Back-off off a question nobody was asked.
-    if let Some(lost) = report.stopped {
-        return Ok(Verdict::Decided(Round {
-            fullest: None,
-            threshold: watching.policy.threshold,
-            outcome: nothing_was_switched(lost),
-        }));
-    }
-
-    // A hold said against the wait it earned. `waiting_for` is passed in rather than
-    // charged here, because not every hold is a question nobody answered.
-    let held = |why: String, waiting_for: u64| {
-        Ok(Verdict::Decided(Round {
-            fullest: None,
-            threshold: watching.policy.threshold,
-            outcome: Outcome::Held {
-                why,
-                retrying_in: watcher.asking_again(waiting_for),
-            },
-        }))
-    };
-
-    // Never on a figure it did not just read.
-    if let Some(refused) = round::refused_the_reading(&report.attempts) {
-        let waiting_for = match refused.paced {
-            true => backoff.could_not_read(),
-            false => watch::REFRESH_INTERVAL_MILLIS,
-        };
-        return held(refused.why, waiting_for);
-    }
+    // The Account the Refresh just wrote to, taken out before the closure below needs
+    // the registry back: what a figure is read off is this, and `watching.account` is
+    // the copy from before the read.
     let account = registry
         .account(&email)
-        .expect("the Account just refreshed is one Perch holds");
-    let Some(fullest) = Fullest::of(account) else {
-        // Read, and carrying no Quota Window Perch could make anything of. Unreachable,
-        // and answered anyway: acting on an Account whose fullness is unknown is the
-        // one thing this round may never do.
-        return held(
-            "Anthropic answered without a Quota Window Perch could read, so \
-             there was no figure to decide on."
-                .to_string(),
-            backoff.could_not_read(),
-        );
-    };
-    // A figure, so whatever was wrong is over. Said here rather than at the end of the
-    // round: a round that finds nowhere to go has read perfectly well.
-    backoff.read();
+        .expect("the Account just refreshed is one Perch holds")
+        .clone();
 
-    // Two asks that hand on what they earned: [`act`] is reachable only through a
-    // [`Cooled`], and a `Cooled` only through a [`Crossed`]. The figure comes back out
-    // of each.
-    let (fullest, outcome) = match fullest.crossed(watching.policy.threshold) {
-        Err(under) => (under, Outcome::Waiting),
-        Ok(crossed) => match crossed.cooled(&recently, host.now()) {
-            // Before the candidates are read, so a round that may not act spends
-            // nothing finding out where it would have gone.
-            Err(cooling) => (
-                crossed.fullest().clone(),
-                Outcome::Cooling { why: cooling.why },
-            ),
-            Ok(cooled) => {
-                let fullest = cooled.fullest().clone();
-                let outcome = act(
-                    host,
-                    &mut perch,
-                    &mut registry,
-                    &watching,
-                    watcher,
-                    &cooled,
-                    &installed,
-                    watching_alone,
-                )?;
-                (fullest, outcome)
-            }
+    let decided = round::decide(
+        round::Reading {
+            account: &account,
+            report: &report,
+            policy: &watching.policy,
+            recently: &recently,
+            now: host.now(),
         },
-    };
-    Ok(Verdict::Decided(Round {
-        fullest: Some(fullest),
-        threshold: watching.policy.threshold,
-        outcome,
-    }))
+        watcher,
+        backoff,
+        // Reached only through a `Cooled`, which is the whole of what the decision
+        // above is for: the one irreversible thing a round does is behind it.
+        |cooled| {
+            act(
+                host,
+                &mut perch,
+                &mut registry,
+                &watching,
+                watcher,
+                cooled,
+                &installed,
+                watching_alone,
+            )
+        },
+    )?;
+    Ok(Verdict::Decided(decided))
 }
 
 /// The Account is full enough to move off, so this is the whole of what the watcher
