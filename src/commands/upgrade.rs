@@ -14,7 +14,7 @@ use std::io::Write;
 use crate::commands::{Presumed, said_yes, say, say_json};
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Platform};
-use crate::upgrade::{self, Channel};
+use crate::upgrade::{self, Channel, Replacement, Wanted};
 
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct UpgradeArgs {
@@ -68,20 +68,15 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     // Before anything is resolved and before anybody is asked to agree to
     // anything: this refusal holds whatever the Release turns out to be, and
     // nobody should agree to something that is refused either way.
-    if matches!(channel, Channel::Homebrew { .. }) {
-        refuse_a_release_homebrew_cannot_take(&args.release)?;
-    }
-    if matches!(channel, Channel::Npm) {
-        refuse_npm_replacing_a_running_perch(host, &args.release)?;
-    }
+    channel.refuse_what_it_cannot_take(host, &args.release)?;
 
     let wanted = match &args.release {
-        Some(typed) => Some(upgrade::version_typed(typed)?),
-        None => newest_or_let_the_channel_say(host, &channel)?,
+        Some(typed) => Wanted::Named(upgrade::version_typed(typed)?),
+        None => Wanted::Newest(newest_or_let_the_channel_say(host, &channel)?),
     };
     let installed = upgrade::installed();
 
-    if let Some(wanted) = &wanted {
+    if let Some(wanted) = wanted.version() {
         match upgrade::compare(wanted, installed) {
             std::cmp::Ordering::Equal => {
                 return Err(PerchError::NothingToDo(format!(
@@ -101,23 +96,9 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
         }
     }
 
-    let replaced = match &channel {
-        Channel::Homebrew { prefix } => {
-            let (brew, brew_args) = upgrade::homebrew_command(host, prefix)?;
-            hand_it_over(host, &brew, &brew_args, out)
-        }
-        Channel::Npm => {
-            // The version as Perch reads it rather than as typed: npm has never
-            // had the leading `v`, so `v0.2.0` is a package nobody published.
-            let named = args.release.as_ref().and(wanted.as_deref());
-            let (npm, npm_args) = upgrade::npm_command(host, named)?;
-            hand_it_over(host, &npm, &npm_args, out)
-        }
-        // The one Channel with nothing to hand the work to, so its Release is
-        // the answer `newest_or_let_the_channel_say` never goes without.
-        Channel::Installer => {
-            replace_it_ourselves(host, wanted.as_deref().unwrap_or_default(), out)
-        }
+    let replaced = match channel.replacing(host, &wanted)? {
+        Replacement::HandedTo { program, args } => hand_it_over(host, &program, &args, out),
+        Replacement::Ourselves { tag } => replace_it_ourselves(host, &tag, out),
     }?;
 
     // The Channel moved the binary and neither `brew` nor `npm` has heard of a
@@ -291,44 +272,6 @@ fn agree_to_going_back(
     said_yes(host, out, "Install the older Release? [y/N] ", Presumed::No)
 }
 
-/// npm would be replacing `perch.exe` while it is the running process, and
-/// Windows holds that file open — so the command is printed, to be run from a
-/// shell where Perch is not. Spelled from the literals rather than from a
-/// resolved `npm`: whether one is on PATH does not bear on this.
-fn refuse_npm_replacing_a_running_perch(host: &dyn Host, release: &Option<String>) -> Result<()> {
-    if host.platform() != Platform::Windows {
-        return Ok(());
-    }
-    let named = release.as_deref().map(upgrade::version_typed).transpose()?;
-    // Nothing done rather than done: `NothingToDo` is already the code for a
-    // request understood and a machine left as it was.
-    Err(PerchError::NothingToDo(format!(
-        "This Installation came from npm, and npm cannot replace `perch.exe` \
-         while it is running. Nothing was upgraded.\n\
-         Run this from a terminal where Perch is not running:\n\
-         \n    npm {}\n",
-        upgrade::npm_arguments(named.as_deref()).join(" ")
-    )))
-}
-
-/// Homebrew installs what the formula says, so `--release` there is a request
-/// that cannot be honored.
-///
-/// Refused rather than quietly ignored: installing the newest instead is the
-/// failure somebody finds out about by reading `perch version` afterwards.
-fn refuse_a_release_homebrew_cannot_take(release: &Option<String>) -> Result<()> {
-    match release {
-        None => Ok(()),
-        Some(named) => Err(PerchError::Invalid(format!(
-            "This Installation came from Homebrew, which installs whatever the \
-             formula names and cannot be pointed at {named}.\n\
-             `brew upgrade perch` takes the newest. To hold a particular \
-             Release, install it with the installer script instead — it takes \
-             `PERCH_VERSION`."
-        ))),
-    }
-}
-
 /// Runs the Channel's own command, having said what it is.
 ///
 /// Said first, because handing the terminal to `brew` for two minutes without
@@ -356,7 +299,7 @@ fn hand_it_over(
 ///
 /// No execute bit, because the script is never run by name: `sh` and
 /// `powershell` are handed it as a file, which also works on a `noexec` mount.
-fn replace_it_ourselves(host: &dyn Host, wanted: &str, out: &mut dyn Write) -> Result<i32> {
+fn replace_it_ourselves(host: &dyn Host, tag: &str, out: &mut dyn Write) -> Result<i32> {
     let (name, script) = upgrade::installer_for(host.platform());
     // Spelled with `/` for the reason `upgrade::beneath` is written down at:
     // what this path is handed to follows the platform the Host reports, and
@@ -369,10 +312,9 @@ fn replace_it_ourselves(host: &dyn Host, wanted: &str, out: &mut dyn Write) -> R
     host.write_private_file(&at, script)
         .map_err(|err| PerchError::Other(format!("could not write {}: {err}", at.display())))?;
 
-    let tag = upgrade::tag_of(wanted);
     say(out, &format!("installing {tag} over this Installation"))?;
 
-    let ran = run_the_installer(host, &at, &tag);
+    let ran = run_the_installer(host, &at, tag);
 
     // Cleared whichever way it went: what is left behind otherwise is a script
     // a later Perch cannot tell from one it is about to use.

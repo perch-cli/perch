@@ -93,6 +93,129 @@ impl Channel {
             _ => None,
         }
     }
+
+    /// Refuses a Release this Channel cannot be pointed at.
+    ///
+    /// Asked before anything is resolved and before anybody is asked to agree
+    /// to anything: both refusals hold whatever the Release turns out to be.
+    pub fn refuse_what_it_cannot_take(
+        &self,
+        host: &dyn Host,
+        release: &Option<String>,
+    ) -> Result<()> {
+        match self {
+            Channel::Homebrew { .. } => refuse_a_release_homebrew_cannot_take(release),
+            Channel::Npm => refuse_npm_replacing_a_running_perch(host, release),
+            Channel::Installer => Ok(()),
+        }
+    }
+
+    /// What replacing this Installation takes.
+    ///
+    /// The one place the three differ in what is run, so a fourth Channel is an
+    /// arm here rather than a branch at every site that acts on one.
+    pub fn replacing(&self, host: &dyn Host, wanted: &Wanted) -> Result<Replacement> {
+        match self {
+            Channel::Homebrew { prefix } => {
+                let (program, args) = homebrew_command(host, prefix)?;
+                Ok(Replacement::HandedTo { program, args })
+            }
+            Channel::Npm => {
+                let (program, args) = npm_command(host, wanted.named())?;
+                Ok(Replacement::HandedTo { program, args })
+            }
+            // The one Channel with nothing to hand the work to, so its Release
+            // is the answer `newest_or_let_the_channel_say` never goes without.
+            Channel::Installer => Ok(Replacement::Ourselves {
+                tag: tag_of(wanted.version().unwrap_or_default()),
+            }),
+        }
+    }
+}
+
+/// The Release an Upgrade is heading for, and whether somebody named it.
+///
+/// One value rather than a version beside a flag: npm takes one only where it
+/// was typed, and two `Option`s at a call let that rule read off the wrong one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Wanted {
+    /// Somebody typed `--release`, in the spelling Perch reads.
+    Named(String),
+    /// Nobody did, so it is whatever is newest — `None` where GitHub could not
+    /// be asked and the Channel resolves its own.
+    Newest(Option<String>),
+}
+
+impl Wanted {
+    /// The Release however it was arrived at, or `None` where nothing settled
+    /// one. What the comparison against what is installed is made on.
+    pub fn version(&self) -> Option<&str> {
+        match self {
+            Wanted::Named(version) => Some(version),
+            Wanted::Newest(newest) => newest.as_deref(),
+        }
+    }
+
+    /// The Release only where somebody named it, which is what npm is pointed
+    /// at: `npm update` goes to the newest itself, so a resolved version nobody
+    /// asked for pins an Installation that was not pinned.
+    fn named(&self) -> Option<&str> {
+        match self {
+            Wanted::Named(version) => Some(version),
+            Wanted::Newest(_) => None,
+        }
+    }
+}
+
+/// What replacing this Installation takes, as the Channel that made it answers.
+///
+/// Described rather than performed, as `service::Driven` is: what reaches the
+/// machine is `commands::upgrade`'s, and this module reaches none of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Replacement {
+    /// The Channel's own command, run in Perch's place.
+    HandedTo { program: PathBuf, args: Vec<String> },
+    /// The tag the installer is told to fetch, it being the one Channel with
+    /// nothing to hand the work to.
+    Ourselves { tag: String },
+}
+
+/// Homebrew installs what the formula says, so `--release` there is a request
+/// that cannot be honored.
+///
+/// Refused rather than quietly ignored: installing the newest instead is the
+/// failure somebody finds out about by reading `perch version` afterwards.
+fn refuse_a_release_homebrew_cannot_take(release: &Option<String>) -> Result<()> {
+    match release {
+        None => Ok(()),
+        Some(named) => Err(PerchError::Invalid(format!(
+            "This Installation came from Homebrew, which installs whatever the \
+             formula names and cannot be pointed at {named}.\n\
+             `brew upgrade perch` takes the newest. To hold a particular \
+             Release, install it with the installer script instead — it takes \
+             `PERCH_VERSION`."
+        ))),
+    }
+}
+
+/// npm would be replacing `perch.exe` while it is the running process, and
+/// Windows holds that file open — so the command is printed, to be run from a
+/// shell where Perch is not. Spelled from the literals rather than from a
+/// resolved `npm`: whether one is on PATH does not bear on this.
+fn refuse_npm_replacing_a_running_perch(host: &dyn Host, release: &Option<String>) -> Result<()> {
+    if host.platform() != Platform::Windows {
+        return Ok(());
+    }
+    let named = release.as_deref().map(version_typed).transpose()?;
+    // Nothing done rather than done: `NothingToDo` is already the code for a
+    // request understood and a machine left as it was.
+    Err(PerchError::NothingToDo(format!(
+        "This Installation came from npm, and npm cannot replace `perch.exe` \
+         while it is running. Nothing was upgraded.\n\
+         Run this from a terminal where Perch is not running:\n\
+         \n    npm {}\n",
+        npm_arguments(named.as_deref()).join(" ")
+    )))
 }
 
 /// Where the installer script puts the binary on this machine.
@@ -431,7 +554,7 @@ pub fn version_report(host: &dyn Host) -> String {
 /// The `brew` beside the Cellar rather than the first one on `PATH`
 /// (ADR a-crate-must-not-cost-a-seam): a machine with two Homebrew prefixes has
 /// two `brew`s, and only the one that owns this Installation can replace it.
-pub fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<String>)> {
+fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<String>)> {
     let brew = match prefix.as_os_str().is_empty() {
         true => crate::probe::on_path(host, "brew"),
         // Asked for rather than assumed, so a prefix whose `bin/brew` has gone
@@ -456,7 +579,7 @@ pub fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<
 /// `npm update` only ever goes to the newest, so naming one is `npm install`
 /// with the version attached — a different command rather than a flag on the
 /// same one.
-pub fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, Vec<String>)> {
+fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, Vec<String>)> {
     let npm = crate::probe::on_path(host, "npm").ok_or_else(|| {
         PerchError::NotFound(
             "this Installation came from npm, and no `npm` was found to hand it \
@@ -473,7 +596,7 @@ pub fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, V
 /// Its own function because Windows prints this command rather than running it,
 /// and does so before any `npm` has been found: two spellings of `perch-cli`
 /// are two that come to disagree.
-pub fn npm_arguments(version: Option<&str>) -> Vec<String> {
+fn npm_arguments(version: Option<&str>) -> Vec<String> {
     match version {
         Some(version) => vec![
             "install".to_string(),
@@ -787,5 +910,125 @@ mod tests {
         let enormous = "99999999999999999999.0.0";
         assert_eq!(compare(enormous, "0.2.0"), Ordering::Greater);
         assert_eq!(compare("0.2.0", enormous), Ordering::Less);
+    }
+
+    /// A `brew` beside the prefix and an `npm` on `PATH`, so the two commands
+    /// resolve rather than refusing for want of a program.
+    fn with_programs(platform: Platform) -> crate::host::FakeHost {
+        machine(platform)
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/npm", "")
+            .with_file("/opt/homebrew/bin/brew", "")
+    }
+
+    fn homebrew() -> Channel {
+        Channel::Homebrew {
+            prefix: PathBuf::from("/opt/homebrew"),
+        }
+    }
+
+    #[test]
+    fn homebrew_refuses_a_release_and_takes_the_newest_without_one() {
+        let host = machine(Platform::MacOs);
+        let refused = homebrew()
+            .refuse_what_it_cannot_take(&host, &Some("0.3.0".to_string()))
+            .expect_err("Homebrew installs what the formula names");
+
+        assert!(refused.to_string().contains("PERCH_VERSION"), "{refused}");
+        assert!(homebrew().refuse_what_it_cannot_take(&host, &None).is_ok());
+    }
+
+    #[test]
+    fn npm_refuses_only_on_the_platform_that_holds_the_file_open() {
+        let refused = Channel::Npm
+            .refuse_what_it_cannot_take(&machine(Platform::Windows), &None)
+            .expect_err("Windows holds `perch.exe` open");
+
+        assert!(
+            refused.to_string().contains("npm update -g perch-cli"),
+            "{refused}"
+        );
+        assert!(
+            Channel::Npm
+                .refuse_what_it_cannot_take(&machine(Platform::MacOs), &None)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_installer_is_the_channel_that_can_be_pointed_at_a_release() {
+        assert!(
+            Channel::Installer
+                .refuse_what_it_cannot_take(&machine(Platform::Other), &Some("0.3.0".to_string()))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn npm_takes_a_version_only_where_somebody_named_one() {
+        let host = with_programs(Platform::Other);
+
+        let named = Channel::Npm
+            .replacing(&host, &Wanted::Named("0.3.0".to_string()))
+            .expect("`npm` is on PATH");
+        let unnamed = Channel::Npm
+            .replacing(&host, &Wanted::Newest(Some("0.3.0".to_string())))
+            .expect("`npm` is on PATH");
+
+        assert_eq!(
+            named,
+            Replacement::HandedTo {
+                program: PathBuf::from("/usr/bin/npm"),
+                args: npm_arguments(Some("0.3.0")),
+            }
+        );
+        // The resolved Release is not attached: `npm update` goes to the newest
+        // itself, and pinning one nobody asked for pins the Installation.
+        assert_eq!(
+            unnamed,
+            Replacement::HandedTo {
+                program: PathBuf::from("/usr/bin/npm"),
+                args: npm_arguments(None),
+            }
+        );
+    }
+
+    #[test]
+    fn homebrew_hands_the_work_to_the_brew_beside_its_own_cellar() {
+        assert_eq!(
+            homebrew()
+                .replacing(&with_programs(Platform::MacOs), &Wanted::Newest(None))
+                .expect("a `brew` sits beside the prefix"),
+            Replacement::HandedTo {
+                program: PathBuf::from("/opt/homebrew/bin/brew"),
+                args: vec!["upgrade".to_string(), "perch".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn the_installer_is_run_by_perch_against_the_tag_it_settled_on() {
+        assert_eq!(
+            Channel::Installer
+                .replacing(
+                    &machine(Platform::Other),
+                    &Wanted::Newest(Some("0.3.0".to_string()))
+                )
+                .expect("nothing has to be found to run the installer"),
+            Replacement::Ourselves {
+                tag: "v0.3.0".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn a_wanted_release_is_read_the_same_way_whichever_settled_it() {
+        assert_eq!(Wanted::Named("0.3.0".to_string()).version(), Some("0.3.0"));
+        assert_eq!(
+            Wanted::Newest(Some("0.3.0".to_string())).version(),
+            Some("0.3.0")
+        );
+        assert_eq!(Wanted::Newest(None).version(), None);
+        assert_eq!(Wanted::Newest(Some("0.3.0".to_string())).named(), None);
     }
 }
