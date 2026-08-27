@@ -726,14 +726,10 @@ fn refuse_if_live(
 
     Err(Outcome::Failed {
         why: format!(
-            "{} and a client is running against it ({}), so renewing it would \
-             log that session out. The cached figure is what you see.",
+            "{} and a client is running against {}, so renewing it would log \
+             that session out. The cached figure is what you see.",
             because.clause(),
-            running
-                .iter()
-                .map(|client| format!("pid {} in {}", client.pid, client.whose))
-                .collect::<Vec<_>>()
-                .join(", ")
+            live::clause(&running)
         ),
         spent: because.spent(),
     })
