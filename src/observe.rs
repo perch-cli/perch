@@ -27,6 +27,55 @@ use crate::profile;
 use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
 use crate::watch::{Lost, StillOurs};
 
+/// Whose the allowance a refresh spends is (ADR a-watcher-knob-is-arithmetic).
+///
+/// Named at the call rather than worked out here: the Watcher holds the watch
+/// itself, and a lock cannot say whether the caller is its holder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spending {
+    /// A Watcher's own round. It is the one pacing this Account, so nothing
+    /// stands between it and the read.
+    ItsOwn,
+    /// A command somebody typed. Where a Watcher is running, the active
+    /// Account's figure is already being kept at the Watcher's interval, and a
+    /// second reader spends what the Watcher decides with.
+    BesideTheWatcher,
+}
+
+impl Spending {
+    /// Whether this read is one the Watcher has already made: it holds the
+    /// watch, this is the Account it Refreshes, and what it last read is younger
+    /// than the interval it reads at.
+    fn already_read(self, host: &dyn Host, registry: &Registry, email: &str) -> bool {
+        if self != Spending::BesideTheWatcher {
+            return false;
+        }
+        if !registry
+            .active()
+            .whose()
+            .is_some_and(|on| name::same_name(on, email))
+        {
+            return false;
+        }
+        let Some(observed) = registry
+            .account(email)
+            .and_then(Account::observed_utilization)
+        else {
+            return false;
+        };
+        let age = (host.now() - observed.observed_at).num_milliseconds();
+        if !(0..crate::watch::REFRESH_INTERVAL_MILLIS as i64).contains(&age) {
+            return false;
+        }
+        // A lock that cannot be asked about is no Watcher: refusing a read over a
+        // question Perch could not answer is the worse of the two mistakes.
+        registry::watcher_lock_spec(host)
+            .ok()
+            .and_then(|watch| lock::is_held(host, &watch))
+            .unwrap_or(false)
+    }
+}
+
 /// How one Account's turn ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
@@ -50,6 +99,10 @@ pub enum Outcome {
     /// and not a refusal: nothing was read because nothing more was allowed to
     /// be, and the round says it stopped rather than pacing a Back-off.
     Stopped(Lost),
+    /// A Watcher read this Account less than one of its intervals ago, so the
+    /// cache holds what a request would have returned and the allowance is left
+    /// to the reader that has to decide on it.
+    JustRead,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +163,13 @@ impl Attempt {
                 self.named,
                 Refused::Throttled
             )),
+            Outcome::JustRead => Some(format!(
+                "{}: a Watcher is reading this Account every {}, and read it \
+                 less than that ago. The figure it read is what you see, and \
+                 the allowance is left to the Watcher to decide on.",
+                self.named,
+                crate::watch::how_often(),
+            )),
             Outcome::Failed { why, .. } => Some(format!("{}: {why}", self.named)),
             // `refresh` breaks on this rather than recording it, so no `Attempt`
             // carries one; the arm is here because the type allows it.
@@ -150,6 +210,7 @@ impl Attempt {
                 ("quarantined", Some(why.as_str()), detail.clone())
             }
             Outcome::Stopped(_) => ("stopped", None, None),
+            Outcome::JustRead => ("just_read", None, None),
         };
         json!({
             "email": self.email,
@@ -226,6 +287,7 @@ pub fn refresh(
     registry: &mut Registry,
     emails: &[String],
     installed: &Result<Installed>,
+    spending: Spending,
     still_ours: StillOurs<'_>,
 ) -> Report {
     let mut report = Report::asked_for();
@@ -242,6 +304,18 @@ pub fn refresh(
         if let Err(lost) = still_ours() {
             report.stopped = Some(lost);
             break;
+        }
+
+        // Before the Account is read out, and before the hold below is spent: a read
+        // the Watcher has already made is one this command declines to make again,
+        // rather than one it makes and throws away.
+        if spending.already_read(host, registry, email) {
+            report.attempts.push(Attempt {
+                named: registry.named_for_the_user(email),
+                email: email.clone(),
+                outcome: Outcome::JustRead,
+            });
+            continue;
         }
 
         let Some(account) = registry.account(email).cloned() else {
@@ -1002,6 +1076,7 @@ mod tests {
             &mut registry,
             &emails,
             &installed,
+            Spending::ItsOwn,
             &mut || {
                 renewals += 1;
                 Ok(())
@@ -1045,6 +1120,7 @@ mod tests {
             &[email.to_string()],
             &installed,
             // The turn is entered, and the stop lands inside it.
+            Spending::ItsOwn,
             &mut || {
                 asked += 1;
                 match asked {
@@ -1096,6 +1172,7 @@ mod tests {
             &mut registry,
             &emails,
             &installed,
+            Spending::ItsOwn,
             &mut || {
                 asked += 1;
                 match asked {
@@ -1162,6 +1239,7 @@ mod tests {
                 &mut registry,
                 &emails,
                 &installed,
+                Spending::ItsOwn,
                 &mut || {
                     asked += 1;
                     match asked {

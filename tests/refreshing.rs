@@ -28,6 +28,9 @@ use perch::host::prelude::*;
 
 const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
 
+/// The lock a Watcher holds while it is the one watching this machine.
+const WATCH_LOCK: &str = "/Users/someone/.config/perch/.watch.lock";
+
 /// A Credential with an hour left on it at the clock every fixture here runs at — one
 /// nothing needs to renew.
 const FRESH: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-fresh","refreshToken":"sk-ant-ort01-fresh","expiresAt":1785848400000,"subscriptionType":"pro"}}"#;
@@ -113,6 +116,49 @@ fn refreshing_reads_current_utilization_and_shows_it_as_read_just_now() {
     assert!(printed.contains("5-hour"), "{printed}");
     assert!(printed.contains("42%"), "{printed}");
     assert!(printed.contains("as of just now"), "{printed}");
+}
+
+#[test]
+fn a_watcher_reading_this_account_keeps_the_allowance_a_typed_refresh_would_spend() {
+    let host = ready();
+    run_status_refresh(&host, false)
+        .0
+        .expect("the first read works");
+    // A Watcher takes the watch. It Refreshes this Account every 2m30s, and the figure
+    // above was read at the clock this fixture runs at, so it read this one.
+    let host = host.with_dir_held_since(WATCH_LOCK, at(12, 0));
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("a read left to the Watcher is not a failure");
+    assert!(
+        host.http_calls().is_empty(),
+        "the allowance is 28-30 an hour and the Watcher has 24 of them: {printed}"
+    );
+    assert!(
+        printed.contains("Watcher is reading this Account every 2m30s"),
+        "and the reader is told why the figure is the cached one: {printed}"
+    );
+    assert!(printed.contains("42%"), "which is still shown: {printed}");
+}
+
+#[test]
+fn a_typed_refresh_spends_freely_where_no_watcher_is_running() {
+    let host = ready();
+    run_status_refresh(&host, false)
+        .0
+        .expect("the first read works");
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("the read works");
+    assert!(
+        host.http_calls().iter().any(|url| url == USAGE_URL),
+        "with nothing pacing the Account, the whole allowance is the reader's: \
+         {printed}"
+    );
 }
 
 #[test]

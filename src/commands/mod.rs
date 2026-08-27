@@ -206,6 +206,9 @@ pub fn refreshed(
             registry,
             about,
             &crate::probe::Installed::probed(host),
+            // Somebody typed this, so a Watcher running behind it is already
+            // keeping the active Account's figure and this read is left to it.
+            crate::observe::Spending::BesideTheWatcher,
             // Nothing to lose part way: these two hold the registry lock and
             // nothing else, and neither is a Watcher a signal can displace.
             &mut || Ok(()),

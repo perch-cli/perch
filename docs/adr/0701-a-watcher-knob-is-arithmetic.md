@@ -23,6 +23,25 @@ and a half minutes is twenty-four of them, which leaves room for the
 that spent the whole allowance would answer the user's own question with a
 throttle.
 
+**The room is guarded rather than merely left.** Four to six reads an hour is
+thin, and the failure runs the wrong way: a person refreshing the Account they
+are on throttles the Watcher, which then holds its round on a figure it could
+not read and backs off toward twenty minutes — so over-asking degrades the
+unattended Switch the Watcher was installed for, which is the one thing the
+person cannot see happening. So while a Watcher holds the watch, a `--refresh`
+of the Account it is pacing declines to ask where what the Watcher last read is
+younger than the interval it reads at: the cache holds what the request would
+have returned, and the reader is told which Watcher is keeping it. It is a
+decline rather than a refusal, because the figure is served and the command
+exits zero — the same bargain ADR a-figure-carries-its-age already strikes, and
+one it can strike here only because the figure is at most one interval old.
+
+Only that Account, and only under a Watcher. Every other Account has its own
+untouched allowance, and with nothing pacing the machine the whole of it is the
+reader's to spend. The Watcher's own round is exempt by being told so at the
+call: it holds the watch itself, and a lock cannot say whether the caller
+asking about it is its holder.
+
 The same arithmetic read the other way is why only the active Account is
 Refreshed. At twenty-four an hour each, a Group of two would already be at the
 limit and a Group of four past it — so polling the whole Group would make the

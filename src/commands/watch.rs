@@ -523,6 +523,7 @@ fn one_round(
         &mut registry,
         std::slice::from_ref(&email),
         &installed,
+        observe::Spending::ItsOwn,
         &mut || watching_alone.goes_on(),
     );
     // Worth saying and not worth holding a decision over: the figure this round decides
@@ -673,6 +674,10 @@ fn refused_the_reading(attempts: &[Attempt]) -> Option<Refusal> {
         // The round stopped rather than being refused, and `refresh` reports that
         // through `Report::stopped` rather than as an attempt against an Account.
         observe::Outcome::Stopped(_) => None,
+        // A round reads under `Spending::ItsOwn`, which is what this answers, so
+        // the Watcher is never told to stand aside for itself. The arm is here
+        // because the type allows it.
+        observe::Outcome::JustRead => None,
     }
 }
 
@@ -741,6 +746,7 @@ fn act(
         registry,
         &addresses_of(&considered(registry, watching, cooled, &idle)),
         probed,
+        observe::Spending::ItsOwn,
         &mut || watching_alone.goes_on(),
     );
     // Before the choice rather than after it: a burst that stopped part way leaves
