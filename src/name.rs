@@ -587,6 +587,20 @@ mod tests {
         }
     }
 
+    /// Both rows of `spelling`, because only the current one is reachable
+    /// through [`folded`] and a row below it still has to answer for the
+    /// registries it wrote. The two part company at the final sigma, which is
+    /// the whole of what tells them apart.
+    #[test]
+    fn each_fold_brings_a_name_to_its_own_one_spelling() {
+        assert_eq!(Fold::Lowercase.spelling("ΟΔΟΣ"), "οδος");
+        assert_eq!(Fold::OneSigma.spelling("ΟΔΟΣ"), "οδοσ");
+        for fold in [Fold::Lowercase, Fold::OneSigma] {
+            assert_eq!(fold.spelling("Work"), "work");
+            assert_eq!(fold.spelling("CAFÉ"), "café");
+        }
+    }
+
     /// What every map keyed on [`folded`] rests on: two names are one name
     /// exactly where their folded spellings are equal. `K` is U+212A, the
     /// Kelvin sign, which is the crossing case — not ASCII, and folding to a

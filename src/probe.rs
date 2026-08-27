@@ -39,18 +39,22 @@ pub mod assumption {
 /// `PATH` walk and a subprocess, so a command asks once; and a caller with no
 /// version to give has [`Installed::unknown`] rather than a made-up string.
 #[derive(Clone)]
-pub struct Installed<'h> {
-    said: std::cell::OnceCell<String>,
-    /// Where to ask, for the one caller that has not asked yet. `None` once
-    /// `said` is settled, which is every other way one of these is made.
-    ask: Option<&'h dyn Host>,
+pub enum Installed<'h> {
+    /// The version, already read or already given.
+    Said(String),
+    /// Where to ask, for the one caller that has not asked yet, and what it
+    /// answered once it has.
+    Asking {
+        host: &'h dyn Host,
+        said: std::cell::OnceCell<String>,
+    },
 }
 
 impl<'h> Installed<'h> {
     /// Asks the installed Claude Code what it is. Once per command: the answer
     /// cannot change under a process that is already running.
     pub fn probed(host: &dyn Host) -> Result<Installed<'static>> {
-        Ok(Installed::unknown(&claude_version(host)?))
+        Ok(Installed::Said(claude_version(host)?))
     }
 
     /// The same for a process that outlives a command, where asking every round
@@ -61,9 +65,9 @@ impl<'h> Installed<'h> {
         // Claude Code being *there* is still established now, a round with none
         // having nothing to do — and it is a `PATH` walk rather than a fork.
         claude_bin(host)?;
-        Ok(Installed {
+        Ok(Installed::Asking {
+            host,
             said: std::cell::OnceCell::new(),
-            ask: Some(host),
         })
     }
 
@@ -73,31 +77,19 @@ impl<'h> Installed<'h> {
     /// Account up on, and refusing for want of a version would hold their
     /// Credential hostage to a program neither of them needs.
     pub fn unknown(said: &str) -> Installed<'static> {
-        Installed {
-            said: std::cell::OnceCell::from(said.to_string()),
-            ask: None,
-        }
+        Installed::Said(said.to_string())
     }
 
     /// What a refusal quotes.
     pub fn version(&self) -> &str {
-        self.said.get_or_init(|| match self.ask {
+        match self {
+            Installed::Said(said) => said,
             // The binary was found when this was made, so what is left to fail
             // is running it — which is what `unknown` exists to say.
-            Some(host) => claude_version(host).unwrap_or_else(|_| "unknown".to_string()),
-            None => "unknown".to_string(),
-        })
-    }
-}
-
-/// Written by hand because the `Host` beside the answer has no `Debug` and is
-/// not part of it: what this is, is the version.
-impl std::fmt::Debug for Installed<'_> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_tuple("Installed")
-            .field(&self.said.get())
-            .finish()
+            Installed::Asking { host, said } => {
+                said.get_or_init(|| claude_version(*host).unwrap_or_else(|_| "unknown".to_string()))
+            }
+        }
     }
 }
 
