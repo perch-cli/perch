@@ -700,13 +700,7 @@ impl Processes for RealHost {
                 });
             }
 
-            // SAFETY: replacing this process's own dispositions with `SIG_IGN`,
-            // keeping what was there to put back below.
-            let guarding = [libc::SIGINT, libc::SIGQUIT];
-            (
-                guarding,
-                guarding.map(|signal| unsafe { libc::signal(signal, libc::SIG_IGN) }),
-            )
+            Guarded::taken_over_by(libc::SIG_IGN)
         };
 
         // Named here for the reason `run` names it: `Command::status`'s error
@@ -715,18 +709,8 @@ impl Processes for RealHost {
         let ran = command.status();
 
         // However the launch ended, including the one that never started.
-        // `SIG_ERR` is not a disposition but what `signal` answers when it could
-        // not install one, so handing it back installs an invalid handler.
         #[cfg(unix)]
-        // SAFETY: restoring exactly the dispositions `signal` reported above.
-        unsafe {
-            let (guarding, previously) = guarding;
-            for (signal, was) in guarding.into_iter().zip(previously) {
-                if was != libc::SIG_ERR {
-                    libc::signal(signal, was);
-                }
-            }
-        }
+        guarding.restore();
 
         let status = ran.map_err(|err| {
             std::io::Error::new(err.kind(), format!("could not run {program}: {err}"))
@@ -952,6 +936,42 @@ fn one_byte_of_standard_input() -> Result<Option<u8>, HostError> {
     }
 }
 
+/// This process's `SIGINT` and `SIGQUIT` dispositions, taken over and put back.
+///
+/// Two windows guard the same pair with different handlers — a child running in
+/// the foreground group, and a terminal with its echo off — and both owe the
+/// same rule on the way out (ADR an-invariant-gets-a-door).
+#[cfg(unix)]
+struct Guarded {
+    signals: [libc::c_int; 2],
+    previously: [libc::sighandler_t; 2],
+}
+
+#[cfg(unix)]
+impl Guarded {
+    /// Both signals, because Ctrl-\ kills where Ctrl-C interrupts.
+    fn taken_over_by(handler: libc::sighandler_t) -> Guarded {
+        let signals = [libc::SIGINT, libc::SIGQUIT];
+        Guarded {
+            // SAFETY: replacing this process's own dispositions, keeping what
+            // was there to put back.
+            previously: signals.map(|signal| unsafe { libc::signal(signal, handler) }),
+            signals,
+        }
+    }
+
+    /// `SIG_ERR` is not a disposition but what `signal` answers when it could
+    /// not install one, so handing it back installs an invalid handler.
+    fn restore(self) {
+        for (signal, was) in self.signals.into_iter().zip(self.previously) {
+            if was != libc::SIG_ERR {
+                // SAFETY: restoring exactly what `signal` reported above.
+                unsafe { libc::signal(signal, was) };
+            }
+        }
+    }
+}
+
 /// Whether the terminal was echoing before Perch turned it off, and so whether
 /// an interrupted read owes it an `ECHO` back on. A static, because the only
 /// thing that can act between the two `tcsetattr` calls is a signal handler and
@@ -1002,15 +1022,8 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
 
     WAS_ECHOING.store(showing.c_lflag & libc::ECHO != 0, Relaxed);
     // Installed before the echo goes off, so there is no instant where it is off
-    // and nothing would put it back. Both signals, because Ctrl-\ kills too.
-    // SAFETY: four async-signal-safe calls and a store to an atomic.
-    let guarding = [libc::SIGINT, libc::SIGQUIT];
-    let previously = guarding.map(|signal| unsafe {
-        libc::signal(
-            signal,
-            show_again_and_stop as *const () as libc::sighandler_t,
-        )
-    });
+    // and nothing would put it back.
+    let guarding = Guarded::taken_over_by(show_again_and_stop as *const () as libc::sighandler_t);
 
     let mut hiding = showing;
     hiding.c_lflag &= !libc::ECHO;
@@ -1025,17 +1038,11 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
         Err(HostError::Io(std::io::Error::last_os_error()))
     };
 
-    // SAFETY: restoring what `tcgetattr` and `signal` reported, however the
-    // read ended. `SIG_ERR` is what `signal` answers when it could not install
-    // one, so that arm leaves the original disposition alone.
+    // SAFETY: restoring the mode `tcgetattr` reported, however the read ended.
     unsafe {
         libc::tcsetattr(terminal, libc::TCSAFLUSH, &showing);
-        for (signal, was) in guarding.into_iter().zip(previously) {
-            if was != libc::SIG_ERR {
-                libc::signal(signal, was);
-            }
-        }
     }
+    guarding.restore();
     typed
 }
 
