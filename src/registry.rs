@@ -1522,9 +1522,17 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // What each Alias points *at*, which the loop above does not look at. A
     // dangling one is not a refusal downstream — it is the `expect` in every
     // command that resolves a Target.
-    let mut named: Vec<(&str, &str)> = Vec::new();
+
+    // Keyed rather than scanned: both questions below are asked of every Alias,
+    // and two names are one name exactly where `name::folded` agrees.
+    let held: std::collections::HashSet<String> = registry
+        .accounts
+        .iter()
+        .map(|account| name::folded(account.email()))
+        .collect();
+    let mut named: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
     for (alias, email) in &registry.aliases {
-        if registry.account(email).is_none() {
+        if !held.contains(name::folded(email).as_str()) {
             return Err(PerchError::Invalid(format!(
                 "The registry gives the Alias `{alias}` to {email}, which is not \
                  an Account Perch holds.",
@@ -1533,7 +1541,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
         // One Account, one Alias. With two, `alias_of` returns whichever the map
         // yields first, so `perch list` shows one while `perch switch` answers to
         // both — the same undecided answer as two names differing only in case.
-        if let Some((already, _)) = named.iter().find(|(_, held)| same_name(held, email)) {
+        if let Some(already) = named.insert(name::folded(email), alias) {
             return Err(PerchError::Invalid(format!(
                 "The registry gives {email} both the Alias `{already}` and the \
                  Alias `{alias}`, and an Account answers to one Alias at a time \
@@ -1541,7 +1549,6 @@ pub fn validate(registry: &Registry) -> Result<()> {
                  anything.",
             )));
         }
-        named.push((alias, email));
     }
 
     // The other pointer into the Accounts, and both ends of a Landing, because
@@ -1684,17 +1691,15 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
 }
 
 /// The first pair of names in a sequence that [`same_name`] cannot tell apart,
-/// earlier one first.
-///
-/// Quadratic, deliberately: it is a registry, and the alternative is a map keyed
-/// on a lowercased copy of every name.
+/// earlier one first. Keyed on [`name::folded`], which two names are one name
+/// exactly where they agree on; the alternative is asking `same_name` of
+/// everything already seen, which is a scan per name.
 fn first_collision<'a>(names: impl Iterator<Item = &'a str>) -> Option<(&'a str, &'a str)> {
-    let mut seen: Vec<&str> = Vec::new();
+    let mut seen: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
     for name in names {
-        if let Some(already) = seen.iter().find(|held| same_name(held, name)) {
+        if let Some(already) = seen.insert(name::folded(name), name) {
             return Some((already, name));
         }
-        seen.push(name);
     }
     None
 }

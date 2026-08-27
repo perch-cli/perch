@@ -87,6 +87,14 @@ pub fn same_name(one: &str, other: &str) -> bool {
     current().one_name(one, other)
 }
 
+/// The one spelling [`same_name`] holds every other spelling of a name to.
+///
+/// Two names are one name exactly where this is equal, so a map keyed on it
+/// answers in a lookup what asking `same_name` of everything held is a scan for.
+pub fn folded(name: &str) -> String {
+    current().fold.spelling(name)
+}
+
 /// A Group name offered as a default, made from something that was never chosen
 /// to be one — an organization name, which commonly has spaces in it.
 ///
@@ -295,6 +303,15 @@ pub enum Fold {
 }
 
 impl Fold {
+    /// The spelling this fold brings a name to, which is the fold as a value:
+    /// [`Fold::one_name`] is two of these compared.
+    fn spelling(self, name: &str) -> String {
+        match self {
+            Fold::Lowercase => name.to_lowercase(),
+            Fold::OneSigma => one_sigma(name).collect(),
+        }
+    }
+
     /// Whether two names are one name under this fold. [`Fold::Lowercase`] is
     /// `str::to_lowercase` rather than a per-character spelling of it: the two
     /// part company at the final sigma and at `İ`, which are the characters a
@@ -567,6 +584,27 @@ mod tests {
         }
         for (one, other) in [("work", "works"), ("café", "cafe"), ("", "a")] {
             assert!(!same_name(one, other), "{one} and {other} are two names");
+        }
+    }
+
+    /// What every map keyed on [`folded`] rests on: two names are one name
+    /// exactly where their folded spellings are equal. `K` is U+212A, the
+    /// Kelvin sign, which is the crossing case — not ASCII, and folding to a
+    /// spelling that is.
+    #[test]
+    fn one_name_and_one_folded_spelling_are_the_same_question() {
+        let corpus = [
+            "work", "Work", "WORK", "café", "CAFÉ", "cafe", "ΟΔΟΣ", "οδος", "οδοσ", "İ", "i",
+            "straße", "STRAßE", "\u{212A}", "k", "日本", "", "-", "2fa",
+        ];
+        for one in corpus {
+            for other in corpus {
+                assert_eq!(
+                    same_name(one, other),
+                    folded(one) == folded(other),
+                    "{one:?} and {other:?}"
+                );
+            }
         }
     }
 
