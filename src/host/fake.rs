@@ -545,22 +545,16 @@ impl FakeHost {
         self
     }
 
-    /// A file that is there but cannot be read — the wrong permissions, most
-    /// often. Distinct from a file that is simply absent.
     /// A file that says when it was written and will not be opened.
     pub fn with_a_file_that_will_not_open(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .unopenable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        refusing(&self.fs.unopenable, path, detail);
         self
     }
 
+    /// A file that is there but cannot be read — the wrong permissions, most
+    /// often. Distinct from a file that is simply absent.
     pub fn with_unreadable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .unreadable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        refusing(&self.fs.unreadable, path, detail);
         self
     }
 
@@ -570,10 +564,7 @@ impl FakeHost {
     /// plain file wedging the path: `remove_dir_all` and the listing both fail
     /// EACCES, and only one of those is worth ending a command over.
     pub fn with_unlistable_dir(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .unlistable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        refusing(&self.fs.unlistable, path, detail);
         self
     }
 
@@ -582,33 +573,24 @@ impl FakeHost {
     /// changes the permissions of mid-hold — rather than one that was so from
     /// the start.
     pub fn set_unreadable(&self, path: impl AsRef<Path>, detail: &str) {
-        self.fs
-            .unreadable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        refusing(&self.fs.unreadable, path, detail);
     }
 
     pub fn forget_unreadable(&self, path: impl AsRef<Path>) {
-        self.fs.unreadable.borrow_mut().remove(path.as_ref());
+        allowing(&self.fs.unreadable, path);
     }
 
     /// A path that cannot be written to, so a test can fail one step of a
     /// multi-step write and see what is left behind.
     pub fn with_unwritable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .unwritable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        refusing(&self.fs.unwritable, path, detail);
         self
     }
 
     /// The same pair, for a path that becomes unwritable partway through a
     /// command rather than before it.
     pub fn set_unwritable(&self, path: impl AsRef<Path>, detail: &str) {
-        self.fs
-            .unwritable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        refusing(&self.fs.unwritable, path, detail);
     }
 
     /// Whatever stopped a path being written to has been put right — the
@@ -617,7 +599,7 @@ impl FakeHost {
     /// second one is a question a reader has to answer before writing the
     /// fixture.
     pub fn writable_again(&self, path: impl AsRef<Path>) {
-        self.fs.unwritable.borrow_mut().remove(path.as_ref());
+        allowing(&self.fs.unwritable, path);
     }
 
     /// A path that takes `writes` more writes and refuses every one after them.
@@ -642,17 +624,14 @@ impl FakeHost {
     /// forbid it, a lock some other process holds on Windows. What a Credential
     /// Store that cannot be emptied looks like.
     pub fn with_undeletable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .undeletable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        refusing(&self.fs.undeletable, path, detail);
         self
     }
 
     /// The same for a path that would not go: what a command that stopped part
     /// way is run again against, once whatever held the path has let go.
     pub fn deletable_again(&self, path: impl AsRef<Path>) {
-        self.fs.undeletable.borrow_mut().remove(path.as_ref());
+        allowing(&self.fs.undeletable, path);
     }
 
     /// A file that comes back different from how it was written — the same
@@ -1375,6 +1354,22 @@ fn a_prefix_of(text: &str, bytes: usize) -> String {
         .take_while(|(at, _)| *at < bytes)
         .map(|(_, c)| c)
         .collect()
+}
+
+/// One path a fixture has arranged to refuse, and the sentence saying why.
+///
+/// Every refusal the fake can be given is a path and a detail in a map of its
+/// own, so the door is the same one however many maps there are.
+fn refusing(refused: &RefCell<BTreeMap<PathBuf, String>>, path: impl AsRef<Path>, detail: &str) {
+    refused
+        .borrow_mut()
+        .insert(path.as_ref().to_path_buf(), detail.to_string());
+}
+
+/// The same path allowed again, for a fixture whose subject is a failure that
+/// clears partway through a command rather than one that was there all along.
+fn allowing(refused: &RefCell<BTreeMap<PathBuf, String>>, path: impl AsRef<Path>) {
+    refused.borrow_mut().remove(path.as_ref());
 }
 
 impl port::Clock for FakeHost {
