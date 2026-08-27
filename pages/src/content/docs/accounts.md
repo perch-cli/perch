@@ -14,8 +14,7 @@ your first Profile, so nothing is lost and nothing has to be logged into again.
 
 ```
 $ perch status
-Adopted the Claude Code login as your first Profile: you@example.com (Acme, pro)
-It is now the active Account. Claude Code 2.1.221.
+Adopted the Claude Code login as your first Profile, now active: you@example.com (Acme, pro). Claude Code 2.1.221.
 
 Account       you@example.com
 Organization  Acme
@@ -84,6 +83,10 @@ prompt, often on a second machine months later, so a name of symbols is one
 somebody has to work out how to produce before any command can reach it, and a
 name opening with `-` is one `perch run` could never be given at all: its program
 goes after the `--` that would rescue such a name anywhere else.
+
+A character that draws as nothing is refused for a second reason. Two names the
+screen cannot tell apart would be one row in every listing, and a character a
+terminal acts on moves the column and colors the row.
 
 Two names differing only in case are one name, so `work` and `Work` collide the
 way `work` and `work` do. Three words are refused outright, and

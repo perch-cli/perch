@@ -889,13 +889,12 @@ fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -
                 spent: true,
                 why: format!(
                     "Anthropic renewed this Account without Rotating its refresh \
-                 token, so no refresh token was retired and this is not a \
-                 Quarantine: {error}\n\
-                 A store that refused the write is still holding what it held \
-                 before, and there this is worth trying again. A store that \
-                 took the write and read it back as something else is said \
-                 above — that copy was removed rather than left for Claude Code \
-                 to find, and there a `perch relogin` is the way back."
+                 token, so nothing was retired and this is not a Quarantine: \
+                 {error}\n\
+                 A store that refused the write still holds what it held \
+                 before, so this is worth trying again. One that took the write \
+                 and read it back wrong is said above, and there a `perch \
+                 relogin` is the way back."
                 ),
             }
         }

@@ -167,11 +167,9 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
 
         PerchError::Invalid(format!(
             "Perch is installed at {}, and nothing about that path says which \
-             Channel put it there.\n\
-             Homebrew and npm keep their binaries somewhere Perch recognizes, \
-             and the installer script puts one in {expected}. A binary anywhere \
-             else was placed by hand — most likely unpacked from the Release \
-             page — and Perch will not write over a file it did not put there.\n\
+             Channel put it there — Homebrew and npm keep theirs somewhere Perch \
+             recognizes, and the installer script puts one in {expected}. Perch \
+             will not write over a binary it did not put there.\n\
              Re-run the installer from https://github.com/{} to move to a \
              managed Installation, or say which Channel this is with \
              `--channel homebrew|npm|installer`.",

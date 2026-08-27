@@ -143,6 +143,7 @@ Again:
 Exported 3 Accounts to /Users/someone/perch-backup.age.
 Type `purge` to give the machine back: purge
 Purged 3 Accounts, and /Users/someone/.config/perch is gone.
+The Export is at /Users/someone/perch-backup.age — it holds a working Credential for every Account, so keep it somewhere you would keep those. `perch holdings purge` will not write over it.
 ```
 
 The question is where a Purge says what it will take and what it will leave, so
