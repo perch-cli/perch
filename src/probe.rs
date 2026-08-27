@@ -1086,12 +1086,12 @@ fn where_it_is_wrong(err: &serde_json::Error) -> String {
 }
 
 pub(crate) fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
-    PerchError::ProbeRefused {
+    PerchError::ProbeRefused(Box::new(crate::error::ProbeRefusal {
         assumption: assumption.to_string(),
         detail: detail.to_string(),
         version: version.to_string(),
         note: None,
-    }
+    }))
 }
 
 #[cfg(test)]
@@ -1285,8 +1285,8 @@ mod tests {
         let bare = FakeHost::new().without_env("USER");
         let error = keychain_account_name(&bare).unwrap_err();
         assert!(
-            matches!(error, PerchError::ProbeRefused { ref assumption, .. }
-                if assumption == assumption::ACCOUNT_NAME),
+            matches!(&error, PerchError::ProbeRefused(refusal)
+                if refusal.assumption == assumption::ACCOUNT_NAME),
             "{error}"
         );
     }
@@ -1315,8 +1315,8 @@ mod tests {
 
         let error = claude_bin(&host).unwrap_err();
         assert!(
-            matches!(error, PerchError::ProbeRefused { ref assumption, .. }
-                if assumption == assumption::INSTALLED),
+            matches!(&error, PerchError::ProbeRefused(refusal)
+                if refusal.assumption == assumption::INSTALLED),
             "{error}"
         );
         assert!(error.to_string().contains("PERCH_CLAUDE_BIN"), "{error}");
@@ -1506,8 +1506,8 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(error, PerchError::ProbeRefused { ref assumption, .. }
-                if assumption == assumption::IDENTITY_BLOCK),
+            matches!(&error, PerchError::ProbeRefused(refusal)
+                if refusal.assumption == assumption::IDENTITY_BLOCK),
             "{error}"
         );
     }
@@ -1816,12 +1816,13 @@ mod tests {
         let refused = claude_version(&host).expect_err("nothing answers `--version`");
 
         match refused {
-            PerchError::ProbeRefused {
-                assumption,
-                detail,
-                version,
-                ..
-            } => {
+            PerchError::ProbeRefused(refusal) => {
+                let crate::error::ProbeRefusal {
+                    assumption,
+                    detail,
+                    version,
+                    ..
+                } = *refusal;
                 assert_eq!(assumption, assumption::INSTALLED);
                 assert!(
                     detail.contains("could not run `claude --version`"),

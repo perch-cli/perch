@@ -66,7 +66,7 @@ fn the_installed_claude_code_reports_a_version_perch_can_parse() {
             // No Claude Code here. The only acceptable outcome is a refusal
             // that says so.
             assert!(
-                matches!(error, PerchError::ProbeRefused { .. }),
+                matches!(error, PerchError::ProbeRefused(_)),
                 "a missing Claude Code must be a refusal, not {error}"
             );
             assert!(error.to_string().contains("Claude Code is installed"));
@@ -156,7 +156,7 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
         }
         Err(error) => {
             assert!(
-                matches!(error, PerchError::ProbeRefused { .. }),
+                matches!(error, PerchError::ProbeRefused(_)),
                 "an unrecognized Claude Code must be a refusal naming the assumption: {error}"
             );
         }

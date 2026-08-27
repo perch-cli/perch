@@ -792,7 +792,7 @@ fn capture(
     // about what it holds and is refused, with nothing written.
     let live = match probe::read_credential(host, &prepared.store, &prepared.installed) {
         Ok(live) => live,
-        Err(why @ PerchError::ProbeRefused { .. }) => {
+        Err(why @ PerchError::ProbeRefused(_)) => {
             return Ok(Captured::Unreadable {
                 outgoing: outgoing.email().to_string(),
                 why: why.to_string(),
