@@ -396,10 +396,19 @@ pub fn service_name_for(config_dir: &Path, is_default: bool) -> String {
 
 /// The first eight hex characters of the SHA-256 of the directory path.
 pub fn short_hash(config_dir: &Path) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
     let mut hasher = Sha256::new();
     hasher.update(config_dir.to_string_lossy().as_bytes());
     let digest = hasher.finalize();
-    digest.iter().take(4).map(|b| format!("{b:02x}")).collect()
+    // Two table lookups a byte rather than a `format!` each, which drives the
+    // whole of `core::fmt` to write two characters.
+    let mut hex = String::with_capacity(8);
+    for byte in digest.iter().take(4) {
+        hex.push(HEX[usize::from(byte >> 4)] as char);
+        hex.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    hex
 }
 
 /// The store Claude Code uses right now, honoring `CLAUDE_CONFIG_DIR`. The
