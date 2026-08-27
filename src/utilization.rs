@@ -32,8 +32,12 @@ pub fn cells(text: &Shown) -> usize {
 /// [`cells`]'s mistake from the other side: it would take the right width and
 /// then fill it wrongly.
 pub fn padded(text: &Shown, width: usize) -> String {
-    let mut out = String::with_capacity(width.max(text.as_str().len()));
-    pad_into(&mut out, text, cells(text), width);
+    // Bytes plus the spaces, which is what goes in: a cell is up to four bytes
+    // wide and covers up to two columns, so neither figure alone bounds the
+    // other and reserving either one grows the buffer on half the inputs.
+    let measured = cells(text);
+    let mut out = String::with_capacity(text.as_str().len() + width.saturating_sub(measured));
+    pad_into(&mut out, text, measured, width);
     out
 }
 
@@ -136,11 +140,17 @@ pub fn lines(
 /// observation time, so the script can judge freshness for itself.
 pub fn document(account: &Account, now: DateTime<Utc>) -> serde_json::Value {
     match account.observed_utilization() {
-        Some(cached) => json!({
-            "observed_at": cached.observed_at.to_rfc3339(),
-            "never_observed": false,
-            "windows": windows_json(cached, now),
-        }),
+        Some(cached) => {
+            // Formatted once for the block and every window under it: an Opus
+            // account carries four, so this was five renderings of one instant.
+            let observed_at = cached.observed_at.to_rfc3339();
+            let windows = windows_json(cached, &observed_at, now);
+            json!({
+                "observed_at": observed_at,
+                "never_observed": false,
+                "windows": windows,
+            })
+        }
         None => json!({
             "observed_at": serde_json::Value::Null,
             "never_observed": true,
@@ -149,7 +159,11 @@ pub fn document(account: &Account, now: DateTime<Utc>) -> serde_json::Value {
     }
 }
 
-fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_json::Value> {
+fn windows_json(
+    cached: &CachedUtilization,
+    observed_at: &str,
+    now: DateTime<Utc>,
+) -> Vec<serde_json::Value> {
     cached
         .windows
         .iter()
@@ -158,7 +172,7 @@ fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_jso
                 "window": window.window,
                 "used_percent": window.used_percent,
                 "resets_at": window.resets_at.map(|at| at.to_rfc3339()),
-                "observed_at": cached.observed_at.to_rfc3339(),
+                "observed_at": observed_at,
                 // Not clamped at nought: clamping reports a figure stamped in
                 // the future as maximally fresh, which is what `age_phrase`
                 // refuses to claim in prose about the same cache.
