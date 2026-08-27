@@ -29,6 +29,13 @@ pub const REFRESH_INTERVAL_MILLIS: u64 = 150_000;
 /// because the endpoint coming back does not announce itself.
 pub const LONGEST_WAIT_MILLIS: u64 = REFRESH_INTERVAL_MILLIS * 8;
 
+/// The watcher lock's staleness is this pair added up, and the pair is here: a
+/// number moving without it, or it moving without the number, fails the build
+/// (ADR an-invariant-gets-a-door).
+const _: () = assert!(
+    crate::registry::WATCHER_STALE_MILLIS == (LONGEST_WAIT_MILLIS + REFRESH_INTERVAL_MILLIS) as i64
+);
+
 /// How long the loop rests after a round that found nowhere to go.
 ///
 /// The ordinary interval Refreshes one Account and such a round read every
