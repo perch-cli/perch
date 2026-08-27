@@ -1246,6 +1246,31 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a dangling link under a linked parent is still in the way",
+        asserts: |host, root, adapter, _now| {
+            // Keyed where a link lands rather than where it is addressed, so
+            // asking the raw path finds neither the entry nor — the link
+            // dangling — anything existing at it. `symlink(2)` says EEXIST.
+            let inner = root.join("inner");
+            let through = root.join("through");
+            host.create_dir_exclusive(&inner).expect("the real directory");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &inner, &through)
+                .expect("the parent is reached by a link");
+
+            let share = through.join("settings.json");
+            host.link(Link::Symbolic, &root.join("nothing-is-here"), &share)
+                .expect("a share pointing at nothing is still a link");
+
+            match host.link(Link::Symbolic, &root.join("nor-here"), &share) {
+                Err(HostError::AlreadyExists { .. }) => {}
+                other => panic!("{adapter}: expected AlreadyExists, got {other:?}"),
+            }
+        },
+    },
+    Case {
         named: "removing a link refuses anything that is not one",
         asserts: |host, root, adapter, _now| {
             // The one call whose whole contract is that it takes away only

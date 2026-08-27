@@ -1956,7 +1956,10 @@ impl port::Links for FakeHost {
         if let Some(detail) = self.fs.unwritable.borrow().get(at) {
             return Err(HostError::Other(detail.clone()));
         }
-        if self.fs.links.borrow().contains_key(at) || self.path_exists(at) {
+        // Asked where the link *lands*, as `link_target` and `remove_link` both
+        // read it: a dangling link under a linked parent is found by neither
+        // question put to the raw path, and `symlink(2)` still says `EEXIST`.
+        if self.fs.links.borrow().contains_key(&self.lands_at(at)) || self.path_exists(at) {
             return Err(HostError::AlreadyExists {
                 path: at.to_path_buf(),
             });
