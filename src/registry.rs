@@ -273,18 +273,39 @@ pub const MIN_MARGIN_PERCENT: u8 = 1;
 /// The same number today, and two facts always.
 pub const MAX_PERCENTAGE: u8 = 100;
 
-/// What a percentage accepts, said once so a mistyped `perch config set` and a
-/// hand-edited registry are refused in the same words. Built from the bound, so
-/// the sentence and the number cannot disagree.
-pub fn a_percentage() -> String {
-    format!("a whole number between 0 and {MAX_PERCENTAGE}")
+/// What one percentage Setting accepts, and the sentence saying so.
+///
+/// One value rather than a range and a phrase kept beside each other: both
+/// refusals name the numbers that would have been accepted, and a bound that
+/// moved without its sentence is the mistake nothing would catch.
+pub struct Bounded {
+    low: u8,
+    high: u8,
 }
 
-/// The same for a margin, whose floor is not zero. Built from the bounds for
-/// [`a_percentage`]'s reason.
-pub fn a_margin() -> String {
-    format!("a whole number between {MIN_MARGIN_PERCENT} and {MAX_PERCENTAGE}")
+impl Bounded {
+    /// What it accepts, said once so a mistyped `perch config set` and a
+    /// hand-edited registry are refused in the same words.
+    pub fn said(&self) -> String {
+        format!("a whole number between {} and {}", self.low, self.high)
+    }
+
+    pub fn holds(&self, percent: u8) -> bool {
+        (self.low..=self.high).contains(&percent)
+    }
 }
+
+/// A threshold is a share of a quota, so its floor is nothing at all.
+pub const A_PERCENTAGE: Bounded = Bounded {
+    low: 0,
+    high: MAX_PERCENTAGE,
+};
+
+/// A margin's is not (see [`MIN_MARGIN_PERCENT`]).
+pub const A_MARGIN: Bounded = Bounded {
+    low: MIN_MARGIN_PERCENT,
+    high: MAX_PERCENTAGE,
+};
 
 /// Every Setting there is, all of them set: what one Scope holds
 /// (ADR a-setting-names-its-scope).
@@ -327,20 +348,20 @@ impl Settings {
     /// The refusal names the numbers that would have been accepted, because the
     /// script that mistyped one is the reader.
     pub fn validate(&self, scope: &Scope) -> Result<()> {
-        if self.watcher_threshold_percent > MAX_PERCENTAGE {
+        if !A_PERCENTAGE.holds(self.watcher_threshold_percent) {
             return Err(out_of_range(
                 scope,
                 "watcher-threshold-percent",
                 self.watcher_threshold_percent,
-                &a_percentage(),
+                &A_PERCENTAGE,
             ));
         }
-        if !(MIN_MARGIN_PERCENT..=MAX_PERCENTAGE).contains(&self.watcher_margin_percent) {
+        if !A_MARGIN.holds(self.watcher_margin_percent) {
             return Err(out_of_range(
                 scope,
                 "watcher-margin-percent",
                 self.watcher_margin_percent,
-                &a_margin(),
+                &A_MARGIN,
             ));
         }
         Ok(())
@@ -352,11 +373,12 @@ fn out_of_range(
     scope: &Scope,
     key: &str,
     held: impl std::fmt::Display,
-    accepted: &str,
+    accepted: &Bounded,
 ) -> PerchError {
     PerchError::Invalid(format!(
-        "{} has a `{key}` of {held}, and it takes {accepted}.",
+        "{} has a `{key}` of {held}, and it takes {}.",
         scope.described(),
+        accepted.said(),
     ))
 }
 

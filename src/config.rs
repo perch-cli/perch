@@ -132,10 +132,12 @@ impl Setting {
             Setting::Strategy => settings.strategy = strategy(value)?,
             Setting::WatcherMayAct => settings.watcher_may_act = yes_or_no(self.as_str(), value)?,
             Setting::WatcherThresholdPercent => {
-                settings.watcher_threshold_percent = percentage(self.as_str(), value)?
+                settings.watcher_threshold_percent =
+                    bounded(self.as_str(), value, &registry::A_PERCENTAGE)?
             }
             Setting::WatcherMarginPercent => {
-                settings.watcher_margin_percent = margin(self.as_str(), value)?
+                settings.watcher_margin_percent =
+                    bounded(self.as_str(), value, &registry::A_MARGIN)?
             }
         }
         settings.validate(scope)?;
@@ -338,30 +340,17 @@ fn yes_or_no(key: &str, value: &str) -> Result<bool> {
     }
 }
 
-/// A percentage, refused with the numbers that would have been accepted.
+/// A number inside a Setting's bounds, refused with the ones it accepts.
 ///
-/// The range is the registry's to state (`a_percentage`), so a number too large
-/// for the field and one the field holds but the policy will not are refused in
-/// one sentence: to the script that mistyped, `300` and `101` are one mistake.
-fn percentage(key: &str, value: &str) -> Result<u8> {
+/// The bounds are the registry's to state, so a number too large for the field
+/// and one the field holds but the policy will not are refused in one sentence:
+/// to the script that mistyped, `300` and `101` are one mistake.
+fn bounded(key: &str, value: &str, accepts: &registry::Bounded) -> Result<u8> {
     value
         .parse::<u8>()
         .ok()
-        .filter(|percent| *percent <= registry::MAX_PERCENTAGE)
-        .ok_or_else(|| not_a_value(key, value, &registry::a_percentage()))
-}
-
-/// The same for a margin, whose floor is not zero. Its own so that the person
-/// who typed `0` is told the range that would have been taken, rather than
-/// reaching `validate`'s refusal, which addresses somebody reading a file.
-fn margin(key: &str, value: &str) -> Result<u8> {
-    value
-        .parse::<u8>()
-        .ok()
-        .filter(|percent| {
-            (registry::MIN_MARGIN_PERCENT..=registry::MAX_PERCENTAGE).contains(percent)
-        })
-        .ok_or_else(|| not_a_value(key, value, &registry::a_margin()))
+        .filter(|percent| accepts.holds(*percent))
+        .ok_or_else(|| not_a_value(key, value, &accepts.said()))
 }
 
 /// A value refused for the value it is, said to somebody who just typed it —
@@ -404,9 +393,9 @@ mod tests {
         Scope::Group("work".to_string())
     }
 
-    /// The bound is stated in three places — `Settings::validate`, the parser
-    /// here, and the sentence both of them quote — and a value one takes and
-    /// another refuses is a Setting somebody can write and not keep.
+    /// The bound and its sentence are one value, and the two surfaces read it:
+    /// a number `perch config set` takes and `validate` refuses is a Setting
+    /// somebody can write and not keep.
     #[test]
     fn every_surface_agrees_what_a_percentage_is() {
         let most = registry::MAX_PERCENTAGE;
@@ -414,8 +403,9 @@ mod tests {
 
         let setting = Setting::WatcherThresholdPercent;
         // What `perch config set` accepts.
-        percentage(setting.as_str(), &most.to_string()).expect("the top of the range");
-        percentage(setting.as_str(), &past_it.to_string()).expect_err("and one past it");
+        let accepts = &registry::A_PERCENTAGE;
+        bounded(setting.as_str(), &most.to_string(), accepts).expect("the top of the range");
+        bounded(setting.as_str(), &past_it.to_string(), accepts).expect_err("and one past it");
 
         // And what a registry somebody edited by hand is refused for.
         let scope = work();
@@ -433,7 +423,7 @@ mod tests {
         .validate(&scope)
         .expect_err("and one past it is not");
         assert!(
-            refused.to_string().contains(&registry::a_percentage()),
+            refused.to_string().contains(&accepts.said()),
             "refused in the words every other surface uses: {refused}"
         );
     }
