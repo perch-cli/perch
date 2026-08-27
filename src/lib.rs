@@ -12,6 +12,7 @@
 pub mod adopt;
 pub mod anthropic;
 pub mod carry;
+pub mod column;
 pub mod commands;
 pub mod config;
 pub mod credentials;

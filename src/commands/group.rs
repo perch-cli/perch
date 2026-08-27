@@ -336,10 +336,10 @@ fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
 
 fn labeled(label: &str, value: &str) -> String {
     // Measured in cells rather than `char`s, for the reason
-    // `utilization::padded` was written: a column counted in characters steps
+    // `column::padded` was written: a column counted in characters steps
     // out of line the first time something wide goes through it.
     format!(
         "  {}{value}",
-        crate::utilization::padded(&Shown::of(label), LABEL_WIDTH)
+        crate::column::padded(&Shown::of(label), LABEL_WIDTH)
     )
 }
