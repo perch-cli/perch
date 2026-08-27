@@ -299,6 +299,11 @@ fn by_name<'a>(held: &'a BTreeMap<String, String>, email: &str) -> Option<&'a St
         .map(|(_, value)| value)
 }
 
+/// The first line of an armored `age` file, which is what `age -d` recognizes
+/// the text encoding by — and, for [`would_not_open`], what separates a damaged
+/// Export from a file that was never one.
+const ARMOR_BEGIN: &str = "-----BEGIN AGE ENCRYPTED FILE-----";
+
 /// The `age` file, as the text that goes in it.
 ///
 /// **Armored**, which is `age`'s own text encoding of the same file: the result
@@ -378,7 +383,9 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<(Export, Vec<crate::migr
     // Only the buffer handed back, unlike `seal`, which owns the one it fills:
     // whatever `age::decrypt` grew and freed on the way is inside that crate and
     // not Perch's to wipe. The two directions look symmetrical and are not.
-    let plain = Zeroizing::new(age::decrypt(&identity, sealed.as_bytes()).map_err(would_not_open)?);
+    let plain = Zeroizing::new(
+        age::decrypt(&identity, sealed.as_bytes()).map_err(|err| would_not_open(sealed, err))?,
+    );
 
     // Both versions first, off a shape that is only the versions: a newer Perch
     // writes values this build has no variant for, and serde's words about one
@@ -422,7 +429,7 @@ fn renamed_coming_forward(plain: &[u8]) -> Vec<crate::migration::Renamed> {
 /// it again, stop because no passphrase will open this one, find a machine with
 /// more to spend, or this was never an Export. Apart from [`unseal`] to be
 /// asserted on directly, two arriving only from files costing seconds of scrypt.
-fn would_not_open(err: age::DecryptError) -> PerchError {
+fn would_not_open(sealed: &str, err: age::DecryptError) -> PerchError {
     match err {
         // The only answer that genuinely means "that was the wrong passphrase".
         age::DecryptError::DecryptionFailed => PerchError::Invalid(
@@ -446,10 +453,12 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
              passphrase is not in question — `age -d` opens it where this will \
              not."
         )),
-        // This *is* the Export and it did not come through intact: a header
-        // whose MAC fails, or a payload that stops early. Its own answer, or a
-        // damaged copy of the right file sends somebody looking for another.
-        damaged @ (age::DecryptError::InvalidMac | age::DecryptError::Io(_)) => {
+        // The Export, damaged: a header whose MAC fails or a payload that stops
+        // early. Guarded on the armor line because `age` answers `Io` to any
+        // file too small to hold a header, and only that line tells them apart.
+        damaged @ (age::DecryptError::InvalidMac | age::DecryptError::Io(_))
+            if sealed.trim_start().starts_with(ARMOR_BEGIN) =>
+        {
             PerchError::Invalid(format!(
                 "This is an `age` file and it did not come through intact \
                  ({damaged}). The passphrase is not in question — nothing will \
@@ -654,7 +663,7 @@ mod tests {
         let sealed = seal(&export, PASSPHRASE).expect("it seals");
 
         assert!(
-            sealed.starts_with("-----BEGIN AGE ENCRYPTED FILE-----"),
+            sealed.starts_with(ARMOR_BEGIN),
             "an `age` file, in `age`'s own text encoding: {}",
             &sealed[..sealed.len().min(80)],
         );
@@ -781,7 +790,11 @@ mod tests {
         assert!(refused.to_string().contains("passphrase"), "{refused}");
 
         let refused = unseal("not an age file at all", PASSPHRASE).expect_err("nor does this");
-        assert!(refused.to_string().contains("`age` file"), "{refused}");
+        assert!(refused.to_string().contains("not an `age` file"), "{refused}");
+        assert!(
+            !refused.to_string().contains("intact"),
+            "a file that was never an Export is not a damaged one: {refused}"
+        );
     }
 
     /// Being told to go and find a different file — because this one is "not an
@@ -816,7 +829,7 @@ mod tests {
     /// X25519 recipient, and one sealed above the ceiling.
     #[test]
     fn a_file_that_is_intact_is_never_reported_as_a_wrong_passphrase() {
-        let no_passphrase = would_not_open(age::DecryptError::NoMatchingKeys);
+        let no_passphrase = would_not_open(ARMOR_BEGIN, age::DecryptError::NoMatchingKeys);
         assert!(
             !no_passphrase.to_string().contains("not the passphrase"),
             "an `age` file written to a key is not a passphrase to retype: \
@@ -829,7 +842,7 @@ mod tests {
             "{no_passphrase}"
         );
 
-        let too_much_work = would_not_open(age::DecryptError::ExcessiveWork {
+        let too_much_work = would_not_open(ARMOR_BEGIN, age::DecryptError::ExcessiveWork {
             required: MAX_WORK_FACTOR + 1,
             target: MAX_WORK_FACTOR - 4,
         });
