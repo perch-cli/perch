@@ -1629,7 +1629,7 @@ fn a_stored_credential_that_cannot_be_understood_stops_the_switch_before_it_writ
 #[test]
 fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs() {
     let inside_a_run =
-        perch::registry::profile_dir_for(&machine_with_three_accounts(), SECOND_EMAIL)
+        perch::holdings::profile_dir_for(&machine_with_three_accounts(), SECOND_EMAIL)
             .expect("home is known");
     let host = machine_with_three_accounts()
         .with_env("CLAUDE_CONFIG_DIR", &inside_a_run.to_string_lossy());
@@ -1656,7 +1656,7 @@ fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs
 #[test]
 fn a_switch_typed_inside_a_login_lands_on_the_default_profile_rather_than_the_pending_one() {
     let host = machine_with_two_accounts();
-    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     let host =
         machine_with_two_accounts().with_env("CLAUDE_CONFIG_DIR", &pending.to_string_lossy());
 

@@ -304,7 +304,7 @@ fn a_login_whose_address_names_no_directory_is_refused_rather_than_adopted() {
 #[test]
 fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {
     let host = logged_in_machine().with_unwritable_file(REGISTRY_PATH, "no space left on device");
-    let dir = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
+    let dir = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
     let store = perch::probe::store_for_profile(&host, &dir).expect("USER is set");
 
     let (result, _) = run_status(&host, false);

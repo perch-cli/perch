@@ -10,11 +10,11 @@ use std::io::Write;
 
 use crate::commands::say;
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::Host;
 use crate::live;
 use crate::probe::{self, Credential, Identity, Installed};
 use crate::profile;
-use crate::registry;
 use zeroize::Zeroizing;
 
 /// What a login left behind, taken out of the directory it ran in.
@@ -39,7 +39,7 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // so the directory is made only once nothing before it can refuse.
     let installed = Installed::probed(host)?;
     let claude = probe::claude_bin(host)?;
-    let dir = registry::pending_login_dir(host, host.now())?;
+    let dir = holdings::pending_login_dir(host, host.now())?;
     let store = probe::store_for_profile(host, &dir)?;
 
     // The login writes its Credential in here, so this is as much a place a
@@ -154,7 +154,7 @@ const ABANDONED_AFTER_MINUTES: i64 = 30;
 /// somebody could plausibly still be in, and nothing is running against it.
 /// Silent and best-effort — this is tidying on the way to what was asked for.
 pub fn reap_abandoned(host: &dyn Host) {
-    let Ok(pending) = registry::pending_logins_dir(host) else {
+    let Ok(pending) = holdings::pending_logins_dir(host) else {
         return;
     };
     // Absent is the ordinary case: no login has ever been run here.
@@ -167,7 +167,7 @@ pub fn reap_abandoned(host: &dyn Host) {
         // A directory whose age cannot be established is left alone. Being
         // wrong in this direction costs a stale directory; being wrong in the
         // other costs somebody the login they are in the middle of.
-        let Some(started_at) = registry::pending_login_started_at(&dir) else {
+        let Some(started_at) = holdings::pending_login_started_at(&dir) else {
             continue;
         };
         if started_at > too_old {
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn a_login_that_could_not_be_announced_takes_its_directory_back_out() {
         let host = a_machine_with_claude_code();
-        let dir = registry::pending_login_dir(&host, host.now()).expect("home is known");
+        let dir = holdings::pending_login_dir(&host, host.now()).expect("home is known");
 
         assert!(
             perform(&host, &mut Closed, "why Perch is asking").is_err(),

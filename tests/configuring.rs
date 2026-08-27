@@ -784,7 +784,7 @@ fn a_set_naming_a_group_and_a_word_that_is_no_key_says_what_is_wrong_with_the_wo
 #[test]
 fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = three_accounts_in_one_group();
-    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+    let held = perch::holdings::lock(&host).expect("the other `perch` has it");
 
     let (result, printed) = config_get(&host, &["work", "strategy"]);
 
@@ -796,7 +796,7 @@ fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
 #[test]
 fn setting_one_waits_for_the_other_perch_because_it_writes() {
     let host = three_accounts_in_one_group();
-    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+    let _held = perch::holdings::lock(&host).expect("the other `perch` has it");
 
     let (result, _) = config_set(&host, &["work", "strategy", "soonest-reset"]);
 

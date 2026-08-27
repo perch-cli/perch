@@ -488,7 +488,7 @@ fn list_without_refresh_never_touches_the_network() {
 #[test]
 fn list_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = machine_holding_three_accounts();
-    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+    let held = perch::holdings::lock(&host).expect("the other `perch` has it");
 
     let (everything, listed) = run_list(&host, false);
     let (narrowed, in_the_group) = run_list_in(&host, "work", false);
@@ -503,7 +503,7 @@ fn list_reads_alongside_another_perch_rather_than_waiting_on_it() {
 #[test]
 fn a_listing_that_refreshes_waits_for_the_other_perch_because_it_writes() {
     let host = machine_holding_three_accounts();
-    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+    let _held = perch::holdings::lock(&host).expect("the other `perch` has it");
 
     for (what, result) in [
         ("list --refresh", run_list_refresh(&host, false).0),

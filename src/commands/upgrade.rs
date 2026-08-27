@@ -304,7 +304,7 @@ fn replace_it_ourselves(host: &dyn Host, tag: &str, out: &mut dyn Write) -> Resu
     // `Path::join` would follow the build instead.
     let at = std::path::PathBuf::from(format!(
         "{}/{name}",
-        crate::registry::perch_home(host)?.display()
+        crate::holdings::perch_home(host)?.display()
     ));
 
     host.write_private_file(&at, script)

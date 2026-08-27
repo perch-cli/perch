@@ -588,7 +588,7 @@ fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
     // the Service having got as far as starting.
     let _held = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("the lock is free");
 
@@ -608,7 +608,7 @@ fn status_asks_whether_a_watcher_holds_the_lock_rather_than_waiting_for_it() {
         .expect("installed");
     let _held = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("the lock is free");
     host.forget_effects();
@@ -714,7 +714,7 @@ fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
 
 #[test]
 fn a_watcher_lock_that_will_not_be_taken_at_all_is_not_a_watcher_that_is_running() {
-    let spec = perch::registry::watcher_lock_spec(&linux()).expect("home is known");
+    let spec = perch::holdings::watcher_lock_spec(&linux()).expect("home is known");
     let host = linux().with_unwritable_file(&spec.dir, "the filesystem said no");
     run_service(&host, WatcherCommand::Install)
         .0
@@ -897,7 +897,7 @@ fn a_purge_refuses_while_a_watcher_still_holds_the_watch() {
     );
     let _still_watching = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("nobody else holds it");
 
@@ -1154,7 +1154,7 @@ fn a_windows_task_is_running_when_a_watcher_is_actually_holding_the_watch() {
     );
     let _watching_alone = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("nobody holds it yet");
 
@@ -1263,7 +1263,7 @@ fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
     // having got as far as taking the lock.
     let _held = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("the lock is free");
 
@@ -1341,7 +1341,7 @@ fn a_purge_refuses_under_a_watcher_run_from_a_terminal_with_no_service_installed
     // No `perch watcher install` — this machine has never had one.
     let _still_watching = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("nobody else holds it");
 

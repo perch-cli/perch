@@ -33,7 +33,7 @@ pub const LONGEST_WAIT_MILLIS: u64 = REFRESH_INTERVAL_MILLIS * 8;
 /// number moving without it, or it moving without the number, fails the build
 /// (ADR an-invariant-gets-a-door).
 const _: () = assert!(
-    crate::registry::WATCHER_STALE_MILLIS == (LONGEST_WAIT_MILLIS + REFRESH_INTERVAL_MILLIS) as i64
+    crate::holdings::WATCHER_STALE_MILLIS == (LONGEST_WAIT_MILLIS + REFRESH_INTERVAL_MILLIS) as i64
 );
 
 /// How long the loop rests after a round that found nowhere to go.

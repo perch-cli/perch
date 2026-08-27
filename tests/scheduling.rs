@@ -472,7 +472,7 @@ fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed()
     let failed = result.expect_err("a record that will not take the Switch stops the check");
     // Rendered as the Host built it rather than as the constant spells it: the registry
     // is reached by joining, so the separators are the platform's.
-    let registry = perch::registry::registry_path(&host).expect("home is known");
+    let registry = perch::holdings::registry_path(&host).expect("home is known");
     assert!(
         failed.to_string().contains(&registry.display().to_string()),
         "and what could not be written is named: {failed}"

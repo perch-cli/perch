@@ -367,7 +367,7 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     // And *which* directory the client is in: the active Account is asked about from
     // two, and a refusal naming neither leaves the reader to guess which to quit.
     // Derived rather than spelled, because joining uses the platform's separator.
-    let default_profile = perch::registry::the_default_profile(&host)
+    let default_profile = perch::holdings::the_default_profile(&host)
         .expect("the Default Profile is known")
         .config_dir;
     assert!(
@@ -440,7 +440,7 @@ fn utilization_for_a_live_account_is_read_without_a_renewal() {
     let asked = perch::live::ask(
         &host,
         &[perch::live::Place::at(
-            perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known"),
+            perch::holdings::profile_dir_for(&host, SECOND_EMAIL).expect("home is known"),
         )],
     );
     assert!(

@@ -165,7 +165,7 @@ pub fn client_exiting(status: i32) -> impl Fn(&FakeHost, &Path) -> i32 {
 /// is a Run still going; an hour ago, against a process since replaced, is the
 /// marker a killed Run left behind.
 pub fn a_run_against(host: &FakeHost, email: &str, began: DateTime<Utc>) {
-    let profile = perch::registry::profile_dir_for(host, email).expect("home is known");
+    let profile = perch::holdings::profile_dir_for(host, email).expect("home is known");
     host.set_file(
         probe::session_marker_at(&profile, THIS_PROCESS),
         &probe::session_marker(THIS_PROCESS, began),
@@ -357,7 +357,7 @@ pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
 /// Where an Account's Profile keeps its things, derived the way every command
 /// derives it now that nothing records it (ADR claude-code-chooses-the-store).
 pub fn store_of(host: &FakeHost, email: &str) -> probe::Store {
-    let dir = perch::registry::profile_dir_for(host, email).expect("home is known");
+    let dir = perch::holdings::profile_dir_for(host, email).expect("home is known");
     probe::store_for_profile(host, &dir).expect("USER is set")
 }
 
@@ -381,7 +381,7 @@ pub fn registry_of(host: &FakeHost) -> perch::registry::Registry {
 /// command holds. Taken and given back here, so a fixture arranging a state is
 /// one line rather than three.
 pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
-    let mut perch = perch::registry::lock(host).expect("the registry lock is free");
+    let mut perch = perch::holdings::lock(host).expect("the registry lock is free");
     // Cloned rather than taken by `&mut`: `save` stamps the version into what it
     // is handed, and a fixture's caller keeps reading the copy it built.
     let mut written = registry.clone();

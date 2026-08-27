@@ -42,7 +42,7 @@ fn a_machine_to_give_back() -> FakeHost {
 /// so a test that matched output against the literal above would pass on two of
 /// the three machines Perch is built for.
 fn perch_home_as_written(host: &FakeHost) -> String {
-    perch::registry::perch_home(host)
+    perch::holdings::perch_home(host)
         .expect("home is known")
         .display()
         .to_string()
@@ -698,7 +698,7 @@ fn a_login_in_progress_stops_the_purge_though_no_account_names_it() {
 
     // What another terminal's `perch add` looks like from here: a directory
     // under `pending/`, with a client running against it.
-    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     host.set_file(
         perch::probe::session_marker_at(&pending, 5150),
         &perch::probe::session_marker(5150, host.now()),
@@ -1023,7 +1023,7 @@ fn a_hold_lost_after_the_credentials_were_deleted_does_not_say_nothing_happened(
         // Past the staleness window, on the first delete of three.
         .with_a_keychain_that_asks_first(120_000)
         .once_while_waiting(|host| {
-            let lock = perch::registry::lock_spec(host).expect("home is known");
+            let lock = perch::holdings::lock_spec(host).expect("home is known");
             host.remove_dir_all(&lock.dir).expect("it was abandoned");
             host.create_dir_exclusive(&lock.dir)
                 .expect("the other `perch` takes it");
@@ -1056,7 +1056,7 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_purges_nothing() {
         // Past the staleness window, which is what makes the lock claimable.
         .with_a_terminal_that_takes(120_000)
         .once_while_waiting(|host| {
-            let lock = perch::registry::lock_spec(host).expect("home is known");
+            let lock = perch::holdings::lock_spec(host).expect("home is known");
             host.remove_dir_all(&lock.dir).expect("it was abandoned");
             host.create_dir_exclusive(&lock.dir)
                 .expect("the other `perch` takes it");
@@ -1099,7 +1099,7 @@ fn nothing_is_asked_of_anthropic_by_a_purge() {
 fn a_purge_takes_the_credential_an_abandoned_login_left_as_well() {
     let host = machine_with_two_accounts();
 
-    let abandoned = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let abandoned = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
@@ -1155,7 +1155,7 @@ fn a_home_holding_a_registry_and_nothing_else_is_taken_and_said_as_that() {
 fn a_readable_registry_naming_nobody_is_not_said_to_be_unreadable() {
     let host = machine_with_claude_code().with_answers(&["purge"]);
     host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
-    let landing = perch::registry::pending_logins_dir(&host)
+    let landing = perch::holdings::pending_logins_dir(&host)
         .expect("home is known")
         .join("login-1");
     host.create_dir_all(&landing)
@@ -1180,7 +1180,7 @@ fn a_readable_registry_naming_nobody_is_not_said_to_be_unreadable() {
 fn a_stray_file_under_the_profiles_is_not_counted_as_one() {
     let host = machine_with_claude_code().with_answers(&["purge"]);
     host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
-    let stray = perch::registry::profiles_dir(&host)
+    let stray = perch::holdings::profiles_dir(&host)
         .expect("home is known")
         .join(".DS_Store");
     host.set_file(&stray, "");
@@ -1200,7 +1200,7 @@ fn a_stray_file_under_the_profiles_is_not_counted_as_one() {
 fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
     let host = machine_with_two_accounts();
 
-    let orphan = perch::registry::profiles_dir(&host)
+    let orphan = perch::holdings::profiles_dir(&host)
         .expect("home is known")
         .join("nobody-example-com");
     let store = perch::probe::store_for_profile(&host, &orphan).expect("USER is set");
@@ -1246,7 +1246,7 @@ fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_l
     );
     // Rendered as the Host built it rather than as the constant spells it: home
     // is reached by joining, so the separators are the platform's.
-    let home = perch::registry::perch_home(&host).expect("home is known");
+    let home = perch::holdings::perch_home(&host).expect("home is known");
     assert!(said.contains(&home.display().to_string()), "{said}");
     assert!(
         said.contains("Device or resource busy"),
@@ -1277,7 +1277,7 @@ fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_l
 fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_being_skipped() {
     let host = machine_with_two_accounts();
 
-    let orphan = perch::registry::profiles_dir(&host)
+    let orphan = perch::holdings::profiles_dir(&host)
         .expect("home is known")
         .join("nobody-example-com");
     let store = perch::probe::store_for_profile(&host, &orphan).expect("USER is set");
@@ -1453,7 +1453,7 @@ fn a_registry_that_will_not_parse_does_not_stop_the_purge_that_does_not_read_one
 #[test]
 fn a_sessions_directory_that_will_not_be_read_stops_the_purge_and_says_so() {
     let host = a_machine_to_give_back();
-    let profile = perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
+    let profile = perch::holdings::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
     let sessions = perch::probe::sessions_dir(&profile);
     host.create_dir_all(&sessions)
         .expect("a client has run here before");

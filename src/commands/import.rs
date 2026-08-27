@@ -17,6 +17,7 @@ use zeroize::Zeroizing;
 use crate::commands::{ask_passphrase, refuse_without_a_terminal, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
+use crate::holdings;
 use crate::host::{Host, HostError};
 use crate::import;
 use crate::probe::Installed;
@@ -29,7 +30,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     refuse_without_a_terminal(host, "perch holdings import")?;
     let sealed = read_the_file(host, path)?;
 
-    let mut perch = registry::lock(host)?;
+    let mut perch = holdings::lock(host)?;
     let held = registry::load(host)?;
     import::refuse_a_machine_that_is_not_empty(held.as_ref())?;
 
@@ -41,7 +42,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     if let Some(said) = crate::migration::what_was_renamed_said(&renamed) {
         host.note(&said);
     }
-    let mut restored = import::restored(&export, &registry::registry_path(host)?)?;
+    let mut restored = import::restored(&export, &holdings::registry_path(host)?)?;
 
     // Nothing above this line has written anything, and the passphrase prompt is
     // the one wait here with no bound on it — so the hold taken before it may be

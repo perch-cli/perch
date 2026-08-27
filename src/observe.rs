@@ -18,6 +18,7 @@ use zeroize::Zeroizing;
 use crate::anthropic::{self, QuotaWindows, Refused};
 use crate::commands::say;
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::Host;
 use crate::live;
 use crate::lock::{self, Held};
@@ -69,7 +70,7 @@ impl Spending {
         }
         // A lock that cannot be asked about is no Watcher: refusing a read over a
         // question Perch could not answer is the worse of the two mistakes.
-        registry::watcher_lock_spec(host)
+        holdings::watcher_lock_spec(host)
             .ok()
             .and_then(|watch| lock::is_held(host, &watch))
             .unwrap_or(false)
@@ -581,7 +582,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
         registry::Active::Settled(active) if name::same_name(active, account.email())
     );
     if settled_on_it {
-        let store = registry::the_default_profile(host)?;
+        let store = holdings::the_default_profile(host)?;
         // Two directories, and the only case where they differ: the copy being renewed
         // is the live one, and `perch run <this account>` points a client at a Profile
         // whose refresh token the same Rotation would retire.
@@ -600,7 +601,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
             && registry.active().names(account.email());
         let mut in_use_from = vec![its_own_profile];
         if named_in_a_landing {
-            in_use_from.push(registry::the_default_profile(host)?.config_dir);
+            in_use_from.push(holdings::the_default_profile(host)?.config_dir);
         }
         Ok(Asked {
             in_use_from,
@@ -1063,7 +1064,7 @@ mod tests {
                 (*email).to_string()
             })
             .collect();
-        let mut perch = registry::lock(&host).expect("nobody holds it");
+        let mut perch = holdings::lock(&host).expect("nobody holds it");
         // Every Account fails to be read, which is beside the point: the renewal
         // happens before the first request either way.
         let installed = Err(PerchError::Other("no Claude Code here".to_string()));
@@ -1108,7 +1109,7 @@ mod tests {
         let [primary, _] = crate::credentials::stores_for(&host, &store);
         primary.write(&host, EXPIRED).expect("the store takes it");
 
-        let mut perch = registry::lock(&host).expect("nobody holds it");
+        let mut perch = holdings::lock(&host).expect("nobody holds it");
         let installed = Ok(crate::probe::Installed::unknown("2.1.221"));
 
         let mut asked = 0;
@@ -1161,7 +1162,7 @@ mod tests {
                 (*email).to_string()
             })
             .collect();
-        let mut perch = registry::lock(&host).expect("nobody holds it");
+        let mut perch = holdings::lock(&host).expect("nobody holds it");
         let installed = Ok(crate::probe::Installed::unknown("2.1.221"));
 
         let mut asked = 0;
@@ -1228,7 +1229,7 @@ mod tests {
                     (*email).to_string()
                 })
                 .collect();
-            let mut perch = registry::lock(&host).expect("nobody holds it");
+            let mut perch = holdings::lock(&host).expect("nobody holds it");
             let installed = Err(PerchError::Other("no Claude Code here".to_string()));
 
             let mut asked = 0;

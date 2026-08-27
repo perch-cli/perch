@@ -97,7 +97,7 @@ fn machine() -> FakeHost {
 }
 
 fn profile_of(host: &FakeHost, email: &str) -> PathBuf {
-    perch::registry::profile_dir_for(host, email).expect("home is known")
+    perch::holdings::profile_dir_for(host, email).expect("home is known")
 }
 
 /// The identity file of an Account's Profile, as it stands now.

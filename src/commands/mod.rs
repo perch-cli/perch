@@ -223,12 +223,12 @@ pub fn refreshed(
 /// is no registry and a migration has nothing to adopt. Here rather than inside
 /// `load`, which cannot take a lock it is already being called under.
 pub fn bring_the_registry_forward(host: &dyn Host) -> Result<()> {
-    let path = crate::registry::registry_path(host)?;
+    let path = crate::holdings::registry_path(host)?;
     let Some(was) = crate::migration::behind(host, &path) else {
         return Ok(());
     };
 
-    let mut perch = crate::registry::lock(host)?;
+    let mut perch = crate::holdings::lock(host)?;
     // Asked again under the lock rather than trusted from outside it: between
     // the two reads, another Perch may have brought the same file forward.
     if crate::migration::behind(host, &path).is_none() {
@@ -427,7 +427,7 @@ pub fn refuse_while_anything_is_running(
         // replace it rather than renew it.
         places.push(crate::live::Place::new(
             why,
-            crate::registry::the_default_profile(host)?.config_dir,
+            crate::holdings::the_default_profile(host)?.config_dir,
         ));
     }
 

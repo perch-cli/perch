@@ -13,11 +13,12 @@ use std::path::PathBuf;
 
 use crate::credentials::{self, Forgotten};
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::Host;
 use crate::live;
 use crate::lock;
 use crate::probe::{self, Installed};
-use crate::registry::{self, Account, Registry};
+use crate::registry::{Account, Registry};
 
 /// What a Purge took.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,8 +101,8 @@ pub fn refuse_while_anything_is_running(
 fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
     let mut found = Vec::new();
     for parent in [
-        registry::profiles_dir(host),
-        registry::pending_logins_dir(host),
+        holdings::profiles_dir(host),
+        holdings::pending_logins_dir(host),
     ]
     .into_iter()
     .flatten()
@@ -138,7 +139,7 @@ pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -
     // Resolved before anything is deleted, although it is not needed until the
     // end: every Profile is derived from it, so a machine that cannot say where
     // home is must not lose half its Credentials on the way to finding out.
-    let home = registry::perch_home(host)?;
+    let home = holdings::perch_home(host)?;
 
     // Renewed around every store rather than trusted from the caller's last
     // check, because what happens here is unbounded: one Store per Account, and
@@ -325,7 +326,7 @@ mod tests {
 
             let purged = erase(
                 &host,
-                &mut registry::lock(&host).expect("the lock is free"),
+                &mut holdings::lock(&host).expect("the lock is free"),
                 &registry,
             )
             .expect("nothing refuses");
@@ -348,7 +349,7 @@ mod tests {
                 );
             }
             assert!(
-                !host.path_exists(&registry::perch_home(&host).unwrap()),
+                !host.path_exists(&holdings::perch_home(&host).unwrap()),
                 "{platform:?}"
             );
         }
@@ -370,7 +371,7 @@ mod tests {
 
         let purged = erase(
             &host,
-            &mut registry::lock(&host).expect("the lock is free"),
+            &mut holdings::lock(&host).expect("the lock is free"),
             &registry,
         )
         .expect("nothing refuses");
@@ -397,7 +398,7 @@ mod tests {
 
         let refused = erase(
             &host,
-            &mut registry::lock(&host).expect("the lock is free"),
+            &mut holdings::lock(&host).expect("the lock is free"),
             &registry,
         )
         .expect_err("the keychain will not answer");
@@ -407,7 +408,7 @@ mod tests {
             !host
                 .effects()
                 .contains(&crate::host::fake::Effect::RemovedDir(
-                    registry::perch_home(&host).unwrap()
+                    holdings::perch_home(&host).unwrap()
                 )),
             "and the registry naming what is left was not taken with it"
         );
@@ -423,14 +424,14 @@ mod tests {
 
         let purged = erase(
             &host,
-            &mut registry::lock(&host).expect("the lock is free"),
+            &mut holdings::lock(&host).expect("the lock is free"),
             &registry,
         )
         .expect("`@` names no directory and no store");
 
         assert_eq!(purged.accounts, 3);
         assert_eq!(purged.credentials, 2);
-        assert!(!host.path_exists(&registry::perch_home(&host).unwrap()));
+        assert!(!host.path_exists(&holdings::perch_home(&host).unwrap()));
     }
 
     /// A Purge deletes the Profiles a client would be holding files in, so it is

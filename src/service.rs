@@ -126,7 +126,7 @@ impl Manager {
     pub fn log_path(self, host: &dyn Host) -> Result<Option<PathBuf>> {
         match self {
             Manager::Systemd => Ok(None),
-            _ => Ok(Some(crate::registry::perch_home(host)?.join("watch.log"))),
+            _ => Ok(Some(crate::holdings::perch_home(host)?.join("watch.log"))),
         }
     }
 

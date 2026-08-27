@@ -100,14 +100,14 @@ fn shared(entry: &str) -> String {
 
 /// Where an Account's Profile is, derived the way every command derives it.
 fn profile_of(host: &FakeHost, email: &str) -> PathBuf {
-    perch::registry::profile_dir_for(host, email).expect("home is known")
+    perch::holdings::profile_dir_for(host, email).expect("home is known")
 }
 
 /// The same, spelled for the fixtures that take a path as a string.
 fn profile_string(email: &str) -> String {
     format!(
         "/Users/someone/.config/perch/profiles/{}",
-        perch::registry::slug(email)
+        perch::holdings::slug(email)
     )
 }
 
@@ -852,7 +852,7 @@ fn a_run_marks_its_profile_live_before_it_touches_anything_in_it() {
     // With Shared State to link and a `.claude.json` to Carry, so there is
     // something for the claim to come before.
     let host = machine_with_shared_state();
-    let profile = perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
+    let profile = perch::holdings::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
     let sessions = profile.join("sessions");
 
     run_run(&host, SECOND_EMAIL).0.expect("the client ran");

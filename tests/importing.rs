@@ -145,7 +145,7 @@ fn an_import_whose_registry_went_stale_while_the_passphrase_was_typed_writes_not
         // Past the staleness window, which is what makes the lock claimable.
         .with_a_terminal_that_takes(120_000)
         .once_while_waiting(|host| {
-            let lock = perch::registry::lock_spec(host).expect("home is known");
+            let lock = perch::holdings::lock_spec(host).expect("home is known");
             host.remove_dir_all(&lock.dir).expect("it was abandoned");
             host.create_dir_exclusive(&lock.dir)
                 .expect("the other `perch` takes it");
@@ -899,7 +899,7 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
     let host = a_new_machine_holding(&sealed);
     // What a Purge that could not finish leaves: a Profile directory with a
     // client in it and no registry naming it.
-    let profile = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
+    let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
     a_client_running_against(&host, &profile, 4242);
 
     let (outcome, _) = run_import(&host, AT);
@@ -1008,7 +1008,7 @@ fn an_import_whose_sessions_directory_will_not_be_read_writes_nothing_and_says_s
     let host = a_new_machine_holding(&sealed);
     // What a Purge that could not finish leaves: a Profile directory with no
     // registry naming it, and a `sessions` inside it nobody can read.
-    let profile = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
+    let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
     let sessions = perch::probe::sessions_dir(&profile);
     host.create_dir_all(&sessions).expect("it is left behind");
     let host = host.with_unlistable_dir(&sessions, "permission denied");

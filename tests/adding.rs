@@ -701,8 +701,8 @@ fn a_login_whose_profile_is_already_held_is_refused_even_under_another_address()
     const DOTTED: &str = "team.lead@example.com";
     const PLUSSED: &str = "team+lead@example.com";
     assert_eq!(
-        perch::registry::slug(DOTTED),
-        perch::registry::slug(PLUSSED),
+        perch::holdings::slug(DOTTED),
+        perch::holdings::slug(PLUSSED),
         "the two addresses this test is about flatten to one Profile"
     );
 
@@ -814,7 +814,7 @@ fn what_an_abandoned_login_left_behind_is_reaped_by_the_next_command() {
 
     // What a login that was interrupted after Claude Code wrote its Credential
     // and before Perch cleared up leaves on the machine.
-    let abandoned = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let abandoned = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
@@ -913,7 +913,7 @@ fn a_login_that_exited_badly_repeats_the_status_it_exited_with() {
 #[test]
 fn a_login_whose_identity_file_cannot_be_read_is_refused_by_name() {
     let host = logged_in_machine();
-    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     let store = perch::probe::store_for_profile(&host, &pending).expect("USER is set");
 
     let host = host
@@ -944,7 +944,7 @@ fn a_login_somebody_is_still_driving_is_never_reaped_however_old_it_is() {
         .0
         .expect("the first Account is adopted");
 
-    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     let store = perch::probe::store_for_profile(&host, &pending).expect("USER is set");
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.identity_file, SECOND_IDENTITY_FILE);
@@ -982,7 +982,7 @@ fn a_login_whose_sessions_directory_will_not_be_read_is_never_reaped_either() {
         .0
         .expect("the first Account is adopted");
 
-    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     let sessions = perch::probe::sessions_dir(&pending);
     host.create_dir_all(&sessions).expect("the login made it");
     let host = host.with_unlistable_dir(&sessions, "permission denied");
@@ -1007,7 +1007,7 @@ fn a_store_that_will_not_give_a_credential_up_keeps_the_directory_that_names_it(
         .0
         .expect("the first Account is adopted");
 
-    let abandoned = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let abandoned = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
     let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
     // The Credential in the keychain, and the directory it is named after — on
     // macOS the item is outside the directory, which is the whole hazard.
@@ -1055,7 +1055,7 @@ fn a_pending_login_directory_with_an_unreadable_name_is_never_reaped() {
     let host = logged_in_machine();
     run_list(&host, false).0.expect("the Account is adopted");
 
-    let pending = perch::registry::pending_logins_dir(&host).expect("home is known");
+    let pending = perch::holdings::pending_logins_dir(&host).expect("home is known");
     let unnamed = pending.join("login-not-a-moment");
     host.set_file(unnamed.join("marker"), "left by something else");
 

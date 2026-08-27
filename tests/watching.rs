@@ -1200,7 +1200,7 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
             _ => None,
         })
         .collect();
-    let registry = perch::registry::registry_path(&host).expect("home is known");
+    let registry = perch::holdings::registry_path(&host).expect("home is known");
     assert!(
         written
             .iter()
@@ -1462,7 +1462,7 @@ fn the_run_fixture_marks_the_profile_of_the_account_it_names() {
     let host = watched();
     a_run_against(&host, EMAIL, host.now());
 
-    let profile = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
+    let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
     assert!(
         host.path_exists(&perch::probe::session_marker_at(&profile, THIS_PROCESS)),
         "the marker is in the Account's own Profile"
@@ -1587,7 +1587,7 @@ fn nowhere_to_go_says_which_candidates_could_not_be_read() {
 #[test]
 fn a_check_another_perch_holds_the_registry_against_says_so_where_cron_is_reading() {
     let host = watching(&[86.0], 5.0);
-    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+    let _held = perch::holdings::lock(&host).expect("the other `perch` has it");
 
     let (result, printed) = run_watch_once(&host);
 
@@ -1646,7 +1646,7 @@ fn a_check_that_finds_a_watcher_already_running_holds_rather_than_deciding() {
     let host = watching(&[40.0], 5.0);
     let _watching_alone = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("nobody holds it yet");
 
@@ -1671,7 +1671,7 @@ fn a_loop_that_finds_the_watch_held_says_so_and_comes_back_rather_than_exiting()
     let host = watching(&[40.0], 5.0);
     let _watching_alone = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("nobody holds it yet");
 
@@ -1701,7 +1701,7 @@ fn a_loop_waiting_out_the_watch_asks_at_one_interval_rather_than_a_doubling_one(
     let host = watching(&[40.0], 5.0).with_interrupt_after(4);
     let _watching_alone = perch::lock::take_all(
         &host,
-        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+        vec![perch::holdings::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("nobody holds it yet");
 
@@ -1728,7 +1728,7 @@ fn a_loop_waiting_out_the_watch_asks_at_one_interval_rather_than_a_doubling_one(
 #[test]
 fn a_loop_says_the_watch_is_still_held_on_every_round_it_takes() {
     let host = watching(&[40.0, 41.0, 42.0], 5.0);
-    let lock = perch::registry::watcher_lock_spec(&host)
+    let lock = perch::holdings::watcher_lock_spec(&host)
         .expect("home is known")
         .dir;
 

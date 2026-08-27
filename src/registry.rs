@@ -12,10 +12,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{PerchError, Result};
+use crate::holdings;
 use crate::host::{Host, HostError};
 use crate::lock;
 use crate::name::{self, NameKind, UNGROUPED, means_ungrouped, same_name};
-use crate::probe::{Identity, LockSpec};
+use crate::probe::Identity;
 
 /// The version this build writes.
 ///
@@ -667,7 +668,7 @@ impl Account {
     /// recorded beside it (ADR claude-code-chooses-the-store): two statements of
     /// one fact can disagree.
     pub fn profile_dir(&self, host: &dyn Host) -> Result<PathBuf> {
-        profile_dir_for(host, self.email())
+        holdings::profile_dir_for(host, self.email())
     }
 
     /// Where the installed Claude Code would keep this Account's configuration
@@ -1165,147 +1166,6 @@ impl Registry {
     }
 }
 
-/// `$PERCH_HOME`, or `~/.config/perch` — an error when neither is knowable,
-/// rather than a registry written into the filesystem root.
-///
-/// The same path on every platform rather than `%APPDATA%`, because one rule is
-/// easier to keep in a Host port exposing only a home directory. A preference.
-pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
-    // Set-but-empty is the machine not saying: taken at face value it makes the
-    // registry a relative path, so Perch would read and write the Holdings
-    // wherever it happened to be invoked from.
-    if let Some(overridden) = host
-        .env_var("PERCH_HOME")
-        .filter(|overridden| !overridden.is_empty())
-    {
-        // A relative one is the same harm the empty case is refused for, and it
-        // is the one a Service carries into a unit file to resolve against a
-        // working directory nobody chose.
-        if !names_one_place(host.platform(), &overridden) {
-            return Err(PerchError::Invalid(format!(
-                "PERCH_HOME is set to `{}`, which is not an absolute path — so \
-                 where Perch holds the Holdings would depend on the directory \
-                 each command was run from, and a second one would look like an \
-                 empty machine.\n\
-                 Set it to a full path, or unset it for {}.",
-                overridden,
-                home_dir(host)
-                    .map(|home| home.join(".config").join("perch").display().to_string())
-                    .unwrap_or_else(|_| "~/.config/perch".to_string()),
-            )));
-        }
-        return Ok(PathBuf::from(overridden));
-    }
-    Ok(home_dir(host)?.join(".config").join("perch"))
-}
-
-/// Whether a path names the same place from every working directory.
-///
-/// Asked of the Host's platform rather than of `Path::is_absolute`, which is
-/// compiled for the machine running the code: a fake standing in for Windows
-/// would otherwise answer as the Linux it runs on.
-fn names_one_place(platform: crate::host::Platform, text: &str) -> bool {
-    match platform {
-        crate::host::Platform::Windows => {
-            let mut bytes = text.bytes();
-            // A UNC path, or a drive letter and a separator. A leading `\\` alone
-            // is relative to whichever drive the process is on.
-            text.starts_with(r"\\")
-                || matches!(
-                    (bytes.next(), bytes.next(), bytes.next()),
-                    (Some(letter), Some(b':'), Some(b'\\' | b'/')) if letter.is_ascii_alphabetic()
-                )
-        }
-        crate::host::Platform::MacOs | crate::host::Platform::Other => text.starts_with('/'),
-    }
-}
-
-fn home_dir(host: &dyn Host) -> Result<PathBuf> {
-    host.home_dir()
-        .map_err(|err| PerchError::Other(err.to_string()))
-}
-
-pub fn registry_path(host: &dyn Host) -> Result<PathBuf> {
-    Ok(perch_home(host)?.join("registry.json"))
-}
-
-pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
-    Ok(perch_home(host)?.join("profiles"))
-}
-
-/// The Default Profile, as everything reading or writing the live Credential
-/// means it: the directory Claude Code falls back to, and never a Profile.
-///
-/// `CLAUDE_CONFIG_DIR` is honored, but no directory under Perch's own home is
-/// ever the Default Profile — and both a Run and a login point it at one.
-pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
-    let told = crate::probe::default_store(host)?;
-    let home = perch_home(host)?;
-    if crate::host::is_inside(host, &told.config_dir, &home) {
-        return crate::probe::default_profile_store(host);
-    }
-    Ok(told)
-}
-
-/// The Profile directory for an Account. The email is slugged because the path is
-/// hashed into a keychain service name and has to be stable and printable.
-///
-/// An address that slugs to nothing is refused here, at the one place every store
-/// is derived from.
-pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
-    let profiles = profiles_dir(host)?;
-    let slugged = slug(email);
-    let dir = profiles.join(&slugged);
-
-    // Two ways of asking one question, because the answer is the whole machine:
-    // an empty slug, and a path that is not one directory below `profiles/`.
-    if slugged.is_empty() || dir.parent() != Some(profiles.as_path()) {
-        return Err(PerchError::Invalid(format!(
-            "`{email}` has no character a Profile directory can be named after, \
-             so Perch cannot say where its Credential would be kept.\n\
-             An Account recorded under that address has to be removed from \
-             {} by hand.",
-            registry_path(host)?.display(),
-        )));
-    }
-    Ok(dir)
-}
-
-/// Where a login lives while Perch is running it.
-///
-/// Named after the moment it started, because a Profile is named after the
-/// Account it holds and which Account that is only becomes knowable once the
-/// login has finished (ADR a-login-perch-does-not-need).
-pub fn pending_login_dir(host: &dyn Host, started_at: DateTime<Utc>) -> Result<PathBuf> {
-    Ok(pending_logins_dir(host)?.join(format!("login-{}", started_at.timestamp_millis())))
-}
-
-/// Where every pending login lives, so the ones nobody came back from can be
-/// found again.
-pub fn pending_logins_dir(host: &dyn Host) -> Result<PathBuf> {
-    Ok(perch_home(host)?.join("pending"))
-}
-
-/// When the login that made this directory started, as its name records.
-/// `login-<millis>`, written by [`pending_login_dir`], and the only account of
-/// the directory's age that nothing later moves.
-pub fn pending_login_started_at(dir: &Path) -> Option<DateTime<Utc>> {
-    let millis: i64 = dir
-        .file_name()?
-        .to_str()?
-        .strip_prefix("login-")?
-        .parse()
-        .ok()?;
-    DateTime::from_timestamp_millis(millis)
-}
-
-/// Whether two Accounts derive the same Profile directory. The derivation is
-/// `profiles_dir` joined with the slugged email, so sharing a slug is sharing
-/// a Profile — kept here beside the derivation so the two cannot drift apart.
-pub fn same_profile(one: &str, other: &str) -> bool {
-    slug(one) == slug(other)
-}
-
 /// [`Registry::alias_of`] answered for every Account rather than for one.
 pub struct AliasOf<'a>(std::collections::HashMap<String, &'a str>);
 
@@ -1330,7 +1190,7 @@ impl Sharers {
         let mut twice = std::collections::HashSet::new();
         let mut slugged = String::new();
         for account in &registry.accounts {
-            slug_into(&mut slugged, account.email());
+            holdings::slug_into(&mut slugged, account.email());
             if !once.insert(slugged.clone()) {
                 twice.insert(slugged.clone());
             }
@@ -1340,7 +1200,7 @@ impl Sharers {
 
     /// Whether this Account's Profile is one another Account derives too.
     pub fn hold(&self, email: &str) -> bool {
-        self.0.contains(slug(email).as_str())
+        self.0.contains(holdings::slug(email).as_str())
     }
 }
 
@@ -1348,7 +1208,7 @@ impl Sharers {
 ///
 /// Three commands ask it — a Switch, a Renewal and a Remove — and each spelled
 /// its own scan, two of them comparing addresses by bytes where the third folded
-/// case. Beside [`same_profile`], for the reason that already lives there.
+/// case.
 pub fn sharing_a_profile_with<'a>(
     registry: &'a Registry,
     account: &Account,
@@ -1356,109 +1216,19 @@ pub fn sharing_a_profile_with<'a>(
     // Slugged once rather than once per comparison, and the other side into a
     // buffer this scan keeps: `is_a_candidate` asks this of every Account and
     // is itself asked of every one, so an allocation here is paid n² times.
-    let mine = slug(account.email());
+    let mine = holdings::slug(account.email());
     let mut theirs = String::with_capacity(mine.len());
     registry.accounts.iter().find(|held| {
         !same_name(held.email(), account.email()) && {
-            slug_into(&mut theirs, held.email());
+            holdings::slug_into(&mut theirs, held.email());
             theirs == mine
         }
     })
 }
 
-pub fn slug(email: &str) -> String {
-    let mut slugged = String::with_capacity(email.len());
-    slug_into(&mut slugged, email);
-    slugged
-}
-
-/// The same, into a buffer the caller keeps, so a scan comparing slugs
-/// allocates once rather than once per candidate. Lowercased character by
-/// character rather than through `str::to_lowercase`, which would allocate a
-/// second string: the one mapping the two disagree on is Greek's final sigma,
-/// and `ς` and `σ` are both written `-` here.
-fn slug_into(slugged: &mut String, email: &str) {
-    slugged.clear();
-    slugged.extend(
-        email
-            .chars()
-            .flat_map(char::to_lowercase)
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }),
-    );
-    let end = slugged.trim_end_matches('-').len();
-    slugged.truncate(end);
-    let start = slugged.len() - slugged.trim_start_matches('-').len();
-    slugged.drain(..start);
-}
-
-/// How long a Perch that died holding the registry lock keeps it.
-///
-/// Longer than the Claude Code locks a Switch takes, because it is the outer
-/// lock; short enough that a killed Perch leaves a usable machine within a
-/// minute.
-const REGISTRY_STALE_MILLIS: i64 = 90_000;
-const REGISTRY_UPDATE_MILLIS: i64 = 5_000;
-
-/// The lock one Perch takes so that no other Perch is changing the registry at
-/// the same time.
-///
-/// A directory, taken with the same `mkdir`-or-fail primitive the Claude Code
-/// locks use: the call both asks and answers, with nothing in between.
-pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
-    Ok(LockSpec {
-        name: "the Perch registry lock",
-        held_by: "the other `perch`",
-        dir: perch_home(host)?.join(".registry.lock"),
-        stale_millis: REGISTRY_STALE_MILLIS,
-        update_millis: REGISTRY_UPDATE_MILLIS,
-        lost_means: "Another `perch` has been changing the registry since this \
-                     command read it, so what this one holds in memory is behind \
-                     what is on disk. Nothing of it will be written over theirs.",
-    })
-}
-
-/// How long a Watcher that died holding the watcher lock keeps it.
-///
-/// Derived rather than chosen: the longest a healthy Watcher goes quiet is its
-/// longest wait between rounds plus the round after it. The number is here and
-/// the derivation is asserted in `watch`, where both its terms live.
-pub(crate) const WATCHER_STALE_MILLIS: i64 = 1_350_000;
-
-/// Comfortably inside a round, so the renewal a round makes always touches.
-const WATCHER_UPDATE_MILLIS: i64 = 60_000;
-
-/// The lock that makes a Watcher the only one on this machine
-/// (ADR the-machine-runs-the-watcher).
-///
-/// Two loops each keep their Cooldown in memory, where neither can see the
-/// other's, so running the thing twice undoes the pacing. A Check too.
-pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
-    Ok(LockSpec {
-        name: "the Perch watcher lock",
-        // The Watcher rather than one of its three arrangements: which of them
-        // holds this neither changes what to do about it nor is knowable here.
-        held_by: "another Watcher",
-        dir: perch_home(host)?.join(".watch.lock"),
-        stale_millis: WATCHER_STALE_MILLIS,
-        update_millis: WATCHER_UPDATE_MILLIS,
-        lost_means: "Another Watcher has taken over watching this machine, so \
-                     this one is no longer the only one deciding. It stops \
-                     rather than deciding alongside it.",
-    })
-}
-
-/// Shuts every other Perch out of the registry until the hold is dropped.
-///
-/// The hold spans the command rather than the write, because it is the *read*
-/// that goes stale: a copy saved after somebody else's Switch landed would put
-/// `active` back and send the next Capture to the wrong Profile.
-pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
-    lock::take_all(host, vec![lock_spec(host)?])
-}
-
 /// Reads the registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
-    let path = &registry_path(host)?;
+    let path = &holdings::registry_path(host)?;
     let contents = match host.read_file(path) {
         Ok(contents) => contents,
         Err(HostError::NotFound { .. }) => return Ok(None),
@@ -1925,7 +1695,7 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
         ))
     })?;
 
-    let path = registry_path(host)?;
+    let path = holdings::registry_path(host)?;
     // In place, so the caller's field cannot disagree with the file — and because
     // cloning the Holdings to set one `u32` is a deep copy of every Account and
     // its figures per write, which a Watcher pays every round.
@@ -1954,75 +1724,6 @@ mod tests {
     use super::*;
     use crate::host::prelude::*;
     use chrono::TimeZone;
-
-    #[test]
-    fn an_email_slugs_to_a_stable_directory_name() {
-        assert_eq!(slug("Someone@Example.com"), "someone-example-com");
-    }
-
-    /// The mapping `str::to_lowercase` and `char::to_lowercase` disagree on, and
-    /// the reason a slug may be taken character by character. A registry v0.2.0
-    /// wrote came back refused over the same rule read the other way.
-    #[test]
-    fn an_address_ending_in_a_greek_sigma_slugs_the_same_whichever_case_it_carries() {
-        assert_eq!(
-            slug("XPONO\u{3a3}@example.com"),
-            slug("xpono\u{3c2}@example.com")
-        );
-        assert_eq!(
-            slug("XPONO\u{3a3}@example.com"),
-            slug("xpono\u{3c3}@example.com")
-        );
-        assert_eq!(slug("\u{3a3}\u{3a3}"), "");
-    }
-
-    /// A slug is trimmed at both ends, and the trim is what a buffer reused
-    /// across a scan has to leave behind along with the rest of the last one.
-    #[test]
-    fn a_scan_comparing_slugs_leaves_nothing_of_the_last_one_in_its_buffer() {
-        let mut buffer = String::new();
-        slug_into(&mut buffer, "a-much-longer-address@example.com");
-        slug_into(&mut buffer, "@ab@");
-
-        assert_eq!(buffer, "ab");
-    }
-
-    #[test]
-    fn an_address_that_names_no_directory_is_refused_rather_than_naming_them_all() {
-        let host = crate::host::FakeHost::new();
-        let profiles = profiles_dir(&host).unwrap();
-
-        for degenerate in ["@", "-", "...", "@.-@"] {
-            assert_eq!(slug(degenerate), "", "the case this is about: {degenerate}");
-            let refused =
-                profile_dir_for(&host, degenerate).expect_err("no Profile can be named after this");
-            assert!(refused.to_string().contains(degenerate), "{refused}");
-        }
-
-        assert_eq!(
-            profile_dir_for(&host, "someone@example.com").unwrap(),
-            profiles.join("someone-example-com"),
-            "and an ordinary address is unaffected"
-        );
-    }
-
-    #[test]
-    fn one_perch_changes_the_registry_at_a_time() {
-        let host = crate::host::FakeHost::new();
-
-        let held = lock(&host).expect("the first Perch takes it");
-        let refused = match lock(&host) {
-            Err(refused) => refused,
-            Ok(_) => panic!("the second Perch must wait, then give up"),
-        };
-        assert!(
-            refused.to_string().contains("the Perch registry lock"),
-            "{refused}"
-        );
-
-        drop(held);
-        lock(&host).expect("a lock given back can be taken again");
-    }
 
     #[test]
     fn an_account_is_found_however_its_address_is_capitalized() {
@@ -2374,8 +2075,8 @@ mod tests {
     #[test]
     fn a_registry_load_would_not_read_is_one_save_declines_to_write() {
         let host = crate::host::FakeHost::new();
-        let mut perch = lock(&host).expect("the registry lock is free");
-        let path = registry_path(&host).unwrap();
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
+        let path = holdings::registry_path(&host).unwrap();
         save(&host, &mut perch, &mut Registry::default()).expect("an empty one is fine");
         let before = host.file(&path).expect("it was written");
 
@@ -2410,19 +2111,19 @@ mod tests {
     #[test]
     fn a_command_that_takes_its_time_keeps_the_lock_it_took() {
         let host = crate::host::FakeHost::new();
-        let mut perch = lock(&host).expect("the registry lock is free");
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
 
         // Past the staleness window several times over: the shape of a
         // `perch remove` waiting on somebody who walked away.
         for _ in 0..4 {
-            host.sleep(REGISTRY_STALE_MILLIS as u64 - 10_000);
+            host.sleep(holdings::REGISTRY_STALE_MILLIS as u64 - 10_000);
             save(&host, &mut perch, &mut Registry::default())
                 .expect("it is still Perch's to write");
         }
 
         assert!(perch.still_held());
         assert!(
-            lock(&host).is_err(),
+            holdings::lock(&host).is_err(),
             "and no other Perch could have taken it in the meantime"
         );
     }
@@ -2430,11 +2131,11 @@ mod tests {
     #[test]
     fn a_registry_read_before_somebody_elses_command_is_not_written_over_theirs() {
         let host = crate::host::FakeHost::new();
-        let mut perch = lock(&host).expect("the registry lock is free");
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
 
         // The stall, and another Perch finding the lock abandoned and taking it.
-        host.sleep(REGISTRY_STALE_MILLIS as u64 + 1_000);
-        let theirs = lock(&host).expect("an abandoned lock is taken over");
+        host.sleep(holdings::REGISTRY_STALE_MILLIS as u64 + 1_000);
+        let theirs = holdings::lock(&host).expect("an abandoned lock is taken over");
         save(&host, &mut { theirs }, &mut Registry::default()).expect("theirs is the live hold");
         let before = load(&host).expect("it reads").expect("they wrote one");
 
@@ -2453,52 +2154,6 @@ mod tests {
             load(&host).expect("it reads").expect("a registry is there"),
             before,
             "what the other Perch wrote is what is on disk"
-        );
-    }
-
-    /// On a fresh machine the *lock* is what brings Perch's home into being,
-    /// before any registry has been written into it.
-    #[test]
-    fn the_home_the_lock_creates_is_the_owners_alone() {
-        let host = crate::host::FakeHost::new();
-
-        let _perch = lock(&host).expect("the registry lock is free");
-
-        assert_eq!(
-            host.mode_of(perch_home(&host).unwrap()),
-            Some(crate::host::PRIVATE_DIR_MODE)
-        );
-    }
-
-    #[test]
-    fn a_profile_reached_through_a_link_is_still_not_the_default_profile() {
-        let home = "/Users/someone/.config/perch";
-        let host = crate::host::FakeHost::new()
-            // How somebody comes to have this: a shorter name for the Profiles
-            // directory, and a `CLAUDE_CONFIG_DIR` pointing inside it.
-            .with_link(
-                crate::host::Link::Symbolic,
-                format!("{home}/profiles"),
-                "/Users/someone/claude",
-            )
-            .with_env("CLAUDE_CONFIG_DIR", "/Users/someone/claude/work");
-
-        let store = the_default_profile(&host).expect("a Default Profile is known");
-
-        assert!(
-            !crate::host::is_inside(
-                &host,
-                &store.config_dir,
-                std::path::Path::new("/Users/someone/claude")
-            ),
-            "a Profile is never the Default Profile, whichever name reaches it: {:?}",
-            store.config_dir
-        );
-        assert_eq!(
-            store.config_dir,
-            crate::probe::default_profile_store(&host)
-                .expect("the real Default Profile")
-                .config_dir,
         );
     }
 
@@ -2729,7 +2384,7 @@ mod tests {
             ..Registry::default()
         };
         registry.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
-        let mut perch = lock(&host).expect("the registry lock is free");
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
         let refused = save(&host, &mut perch, &mut registry).expect_err("the write cannot land");
         assert!(
             refused.to_string().contains("No space left on device"),
@@ -2752,13 +2407,13 @@ mod tests {
     fn the_registry_is_written_for_its_owner_alone() {
         let host = crate::host::FakeHost::new();
 
-        let mut perch = lock(&host).expect("the registry lock is free");
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
         save(&host, &mut perch, &mut Registry::default()).expect("it is written");
 
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         assert_eq!(host.mode_of(&path), Some(crate::host::PRIVATE_FILE_MODE));
         assert_eq!(
-            host.mode_of(perch_home(&host).unwrap()),
+            host.mode_of(holdings::perch_home(&host).unwrap()),
             Some(crate::host::PRIVATE_DIR_MODE),
             "a directory others may enter is a directory whose contents others \
              may open"
@@ -3133,91 +2788,6 @@ mod tests {
     }
 
     #[test]
-    fn perch_home_is_taken_from_the_environment_verbatim_when_it_is_set() {
-        let host = crate::host::FakeHost::new()
-            .with_env("HOME", "/Users/someone")
-            .with_env("PERCH_HOME", "/tmp/somewhere-else");
-
-        assert_eq!(
-            perch_home(&host).unwrap(),
-            std::path::PathBuf::from("/tmp/somewhere-else")
-        );
-        assert_eq!(
-            registry_path(&host).unwrap(),
-            std::path::PathBuf::from("/tmp/somewhere-else/registry.json"),
-            "and everything under it moves with it"
-        );
-    }
-
-    #[test]
-    fn without_the_override_perch_keeps_its_registry_under_the_config_directory() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-
-        assert_eq!(
-            perch_home(&host).unwrap(),
-            std::path::PathBuf::from("/Users/someone/.config/perch")
-        );
-    }
-
-    /// The same harm as the empty case, arrived at by naming somewhere rather
-    /// than nowhere: `PERCH_HOME=perch-data` makes every directory its own
-    /// machine, each looking empty to the next and adopting again.
-    #[test]
-    fn a_perch_home_that_names_no_one_place_is_refused_rather_than_followed() {
-        for (platform, relative, absolute) in [
-            (crate::host::Platform::Other, "perch-data", "/srv/perch"),
-            (crate::host::Platform::MacOs, "../perch", "/srv/perch"),
-            (
-                crate::host::Platform::Windows,
-                r"work\perch",
-                r"C:\work\perch",
-            ),
-            (
-                crate::host::Platform::Windows,
-                r"\perch",
-                r"\\host\share\perch",
-            ),
-        ] {
-            let host = crate::host::FakeHost::new()
-                .with_platform(platform)
-                .with_env("HOME", "/Users/someone")
-                .with_env("PERCH_HOME", relative);
-
-            let refused = perch_home(&host).expect_err("{relative} names no one place");
-            assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
-            assert!(
-                refused.to_string().contains(relative),
-                "the refusal names the value: {refused}"
-            );
-
-            let host = crate::host::FakeHost::new()
-                .with_platform(platform)
-                .with_env("HOME", "/Users/someone")
-                .with_env("PERCH_HOME", absolute);
-            assert_eq!(
-                perch_home(&host).unwrap(),
-                std::path::PathBuf::from(absolute),
-                "and one that does is taken as it stands, on {platform:?}"
-            );
-        }
-    }
-
-    /// `export PERCH_HOME=$SOMETHING_UNSET` is the ordinary way to arrive here,
-    /// and a relative registry path is the Holdings following the working
-    /// directory around.
-    #[test]
-    fn a_perch_home_set_to_nothing_is_the_machine_not_saying_rather_than_the_working_directory() {
-        let host = crate::host::FakeHost::new()
-            .with_env("HOME", "/Users/someone")
-            .with_env("PERCH_HOME", "");
-
-        assert_eq!(
-            perch_home(&host).unwrap(),
-            std::path::PathBuf::from("/Users/someone/.config/perch")
-        );
-    }
-
-    #[test]
     fn a_registry_that_cannot_be_read_is_a_failure_rather_than_an_empty_perch() {
         let absent = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
         assert_eq!(
@@ -3225,7 +2795,7 @@ mod tests {
             None
         );
 
-        let path = registry_path(&absent).unwrap();
+        let path = holdings::registry_path(&absent).unwrap();
         let unreadable = crate::host::FakeHost::new()
             .with_env("HOME", "/Users/someone")
             .with_file(&path, "{}")
@@ -3317,7 +2887,7 @@ mod tests {
     #[test]
     fn a_group_an_account_claims_is_declared_by_the_time_anything_reads_it() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"work"}],"groups":{}}"#,
@@ -3344,7 +2914,7 @@ mod tests {
     #[test]
     fn a_check_against_a_group_only_an_account_claims_is_read_rather_than_refused() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"work"}],"groups":{},"checks":{"work":{"switched_at":"2026-01-01T00:00:00Z"}}}"#,
@@ -3362,7 +2932,7 @@ mod tests {
     #[test]
     fn a_check_against_a_group_nobody_claims_is_still_refused() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"}}],"groups":{},"checks":{"ghost":{"switched_at":"2026-01-01T00:00:00Z"}}}"#,
@@ -3376,7 +2946,7 @@ mod tests {
     #[test]
     fn a_group_an_account_claims_in_another_case_joins_the_one_that_is_declared() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"Work"}],"groups":{"work":{"watcher_threshold_percent":65}}}"#,
@@ -3408,7 +2978,7 @@ mod tests {
 
         for (claimed, groups, expected) in claims {
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = registry_path(&host).unwrap();
+            let path = holdings::registry_path(&host).unwrap();
             let aliases = if expected == "already an Alias" {
                 r#","aliases":{"overflow":"someone@example.com"}"#
             } else {
@@ -3466,7 +3036,7 @@ mod tests {
 
         for (version, held, expected) in holdings {
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = registry_path(&host).unwrap();
+            let path = holdings::registry_path(&host).unwrap();
             host.set_file(
                 &path,
                 &format!(r#"{{"version":{version},"accounts":[],{held}}}"#),
@@ -3504,7 +3074,7 @@ mod tests {
 
         for contents in files {
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = registry_path(&host).unwrap();
+            let path = holdings::registry_path(&host).unwrap();
             host.set_file(&path, contents);
 
             let refused = load(&host).expect_err("this build cannot read it");
@@ -3524,7 +3094,7 @@ mod tests {
     fn a_percentage_that_is_not_one_is_refused_rather_than_ranked_on() {
         for figure in ["-50", "150"] {
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = registry_path(&host).unwrap();
+            let path = holdings::registry_path(&host).unwrap();
             host.set_file(
                 &path,
                 &format!(
@@ -3549,7 +3119,7 @@ mod tests {
         // And the ends of the range are figures, not refusals: a window that has
         // just reset and one that is completely spent are both ordinary.
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"utilization":{"observed_at":"2025-01-01T00:00:00Z","windows":[{"window":"5-hour","used_percent":0},{"window":"7-day","used_percent":100}]}}],"groups":{}}"#,
@@ -3560,7 +3130,7 @@ mod tests {
     #[test]
     fn an_alias_for_an_account_perch_does_not_hold_is_refused_and_names_both() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"}}],"aliases":{"overflow":"gone@example.com"}}"#,
@@ -3592,7 +3162,7 @@ mod tests {
 
         for held in holdings {
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = registry_path(&host).unwrap();
+            let path = holdings::registry_path(&host).unwrap();
             host.set_file(
                 &path,
                 &format!(
@@ -3613,7 +3183,7 @@ mod tests {
     #[test]
     fn an_account_address_a_name_could_be_confused_with_is_refused() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[{"identity":{"email":"work"}},{"identity":{"email":"real@example.com"}}],"groups":{"work":{}}}"#,
@@ -3639,7 +3209,7 @@ mod tests {
     #[test]
     fn an_account_address_a_terminal_would_obey_reads_rather_than_bricking() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[{"identity":{"email":"bad\u001brow@example.com"}}]}"#,
@@ -3672,7 +3242,7 @@ mod tests {
                 r#"[{"identity":{"email":"someone@example.com"}},{"identity":{"email":"SOMEONE@example.com"}}]"#
             };
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = registry_path(&host).unwrap();
+            let path = holdings::registry_path(&host).unwrap();
             host.set_file(
                 &path,
                 &format!(r#"{{"version":2,"accounts":{accounts},{held}}}"#),
@@ -3693,7 +3263,7 @@ mod tests {
     #[test]
     fn a_margin_of_nothing_in_the_file_is_refused_by_the_read() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[],"groups":{"work":{"watcher_margin_percent":0}}}"#,
@@ -3710,7 +3280,7 @@ mod tests {
     #[test]
     fn a_number_out_of_range_in_the_file_is_refused_by_the_read_and_names_the_file() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = registry_path(&host).unwrap();
+        let path = holdings::registry_path(&host).unwrap();
         host.set_file(
             &path,
             r#"{"version":2,"accounts":[],"groups":{"work":{"watcher_threshold_percent":101}}}"#,
@@ -3734,7 +3304,7 @@ mod tests {
     #[test]
     fn a_registry_this_build_writes_says_so() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let mut perch = lock(&host).expect("the registry lock is free");
+        let mut perch = holdings::lock(&host).expect("the registry lock is free");
         let mut stale = Registry {
             version: 0,
             ..Registry::default()
