@@ -76,6 +76,21 @@ $ perch alias overflow@example.com --unset
 Aliases and Group names share one namespace, so a name the other half already
 answers to is refused — which is what keeps a Target from ever being ambiguous.
 
+**A name is made of letters, digits, `_` and `-`, and opens with a letter, a
+digit or `_`.** Every alphabet counts, so `café`, `дом` and `日本-dev` are names,
+and `2fa` is one because a digit may open one. Anything else is refused, naming
+the character as it draws and as it is spelled. A Target is typed at a shell
+prompt, often on a second machine months later, so a name of symbols is one
+somebody has to work out how to produce before any command can reach it, and a
+name opening with `-` is one `perch run` could never be given at all: its program
+goes after the `--` that would rescue such a name anywhere else.
+
+Two names differing only in case are one name, so `work` and `Work` collide the
+way `work` and `work` do. Three words are refused outright, and
+[Configuration](configuration.md#scopes) says why: `ungrouped` and `none`, which
+address the Accounts in no Group, and `global`, which is what people reach for
+when they mean every Scope at once.
+
 ## Keeping an Account out of Cycling
 
 `perch disable` keeps an Account out of Cycling without giving it up — for the

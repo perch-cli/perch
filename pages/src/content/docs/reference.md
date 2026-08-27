@@ -98,6 +98,15 @@ Watcher holding the lock exits 20.
   Release exists. Checked before the request, so nothing goes out. That check is
   the only place Perch looks for its own updates; `perch status` never touches
   the network.
+- `$PERCH_INSTALL_DIR` is where the installer script puts the binary, in place
+  of `~/.local/bin` and of `%LOCALAPPDATA%\Perch\bin` on Windows. `perch
+  upgrade` reads it too, because it is what tells an Installation the installer
+  made from a binary somebody unpacked by hand, which Perch refuses to write
+  over.
+- `$PERCH_VERSION` holds the installer script to one Release rather than the
+  newest. Read by the installers rather than by Perch: `perch upgrade --release`
+  sets it when it hands the work back to one, so it is yours to set only when you
+  are running the installer yourself.
 
 A Credential lives wherever the installed Claude Code would put it: the keychain
 on macOS, reached by driving `/usr/bin/security`, and a `.credentials.json`

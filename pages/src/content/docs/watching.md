@@ -50,6 +50,13 @@ words "under it" and "over it" are what `waiting` and `switched` already mean.
 `held` and `refused` are rounds where nothing happened and you cannot see why,
 so each of them says why.
 
+Two more words end a watch rather than pace one. A round that finds another
+Watcher has taken the watch over says `replaced` and stops, because deciding
+alongside somebody else is the thing the lock exists to prevent. One interrupted
+between reading a figure and acting on it says `stopped`. They are told apart on
+purpose: `replaced` is a machine somebody is still watching, and `stopped` is one
+nobody is.
+
 **An em dash is where an explanation begins**, and it is on a line only where
 something other than the ordinary happened. Every refusal has one. So does a
 `switched` line that ranked a candidate on a figure it could not re-read this

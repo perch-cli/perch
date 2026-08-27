@@ -170,6 +170,13 @@ check against your password manager — says that nothing undoes it, and wants
 script can be asked for; without a terminal and without the flag, a purge is
 refused and end of input is never agreement.
 
+**A Service goes too, and goes first.** Where
+[`perch watcher install`](watching.md#having-the-machine-run-it) has left one,
+the Purge says so among the things it is about to take and removes its unit, so
+nothing starts at your next login. First, because nothing may be Switching
+Credentials into Profiles this is deleting. It is the one thing a Purge takes
+that lives outside Perch's own directory.
+
 **Whatever Claude Code is logged in as is left exactly where it is.** The live
 Credential in the Default Profile is Claude Code's own rather than a copy Perch
 holds, and a purge that logged you out of the tool you are using would be doing

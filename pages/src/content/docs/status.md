@@ -283,3 +283,16 @@ Every Account carries `headroom` beside its `utilization`: a `state` of `room`,
 `exhausted` or `never-observed`, and a `percent` that is a number under `room`
 and `null` under the other two. Unrounded, unlike the column — no figure and
 plenty of room are opposite pieces of advice, and neither of them is `0`.
+
+**`refresh` is what a `--refresh` did**, and `null` where none was asked for, so
+"everything was fine" and "nobody asked" are never one answer. Its `accounts`
+carry one entry per Account read, each with an `outcome` of `observed`,
+`throttled`, `failed`, `quarantined` or `stopped`, the `reason` that
+Quarantined it, and a `detail` naming what went wrong underneath.
+
+`kept` says whether the figures that were read reached Perch's own record, and
+`not_kept` is the sentence saying why they did not, `null` where they did. The
+two are separate facts: a refresh can read every Account and still fail to write
+them down, and the next command then shows the figures from before. Without
+`not_kept` a log built from this document recorded the loss with no way to learn
+its cause, which the human path had printed all along.
