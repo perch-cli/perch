@@ -318,17 +318,23 @@ pub fn refresh(
             continue;
         }
 
-        let Some(account) = registry.account(email).cloned() else {
-            continue;
+        // In a block of its own, so the borrow the Account is read out of ends
+        // before `keep` below takes the registry mutably: threaded through the
+        // match, it made a whole Account — Identity and cache — a clone a round.
+        let read = {
+            let Some(account) = registry.account(email) else {
+                continue;
+            };
+            observe(
+                host,
+                perch,
+                registry,
+                account,
+                installed.as_ref(),
+                still_ours,
+            )
         };
-        let outcome = match observe(
-            host,
-            perch,
-            registry,
-            &account,
-            installed.as_ref(),
-            still_ours,
-        ) {
+        let outcome = match read {
             // The same answer as the ask at the top of the turn, reached from
             // inside one: nothing is recorded against the Account, because the
             // round stopped rather than learning anything about it.
