@@ -403,6 +403,35 @@ fn a_terminal_that_goes_away_after_the_repair_still_makes_the_fresh_credential_l
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
+/// `perch switch <the active Account>` is the repair for a Switch that stopped,
+/// so a Landing of an Account to itself is an ordinary state to die in — and one
+/// whose two readings are the same Account. Named apart, the refusal offers one
+/// command as both halves of a choice between them.
+#[test]
+fn a_landing_of_an_account_to_itself_is_refused_naming_one_account_once() {
+    let host = machine_with_two_accounts();
+    a_switch_died_mid_flight(&host, Some(EMAIL), EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, REPAIRED);
+
+    let refused = run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect_err("a Switch cannot tell whose the live Credential is");
+
+    let said = refused.to_string();
+    assert!(
+        !said.contains(&format!("`perch relogin {EMAIL}` finishes")),
+        "one command is not offered as both halves of a choice: {said}"
+    );
+    assert!(
+        !said.contains("was on no Account before it"),
+        "and Perch was on that Account, so it does not say otherwise: {said}"
+    );
+    assert!(
+        said.contains(&format!("`perch relogin {EMAIL}`")),
+        "the one remedy is still named: {said}"
+    );
+}
+
 /// A Landing nothing can account for is the one state that names this command as
 /// the way out of itself (ADR a-switch-is-written-down-first), so it is the one
 /// failure the command may not be stopped by. Either half of the Landing lands:

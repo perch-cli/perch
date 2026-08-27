@@ -626,8 +626,8 @@ fn whose_the_live_credential_is(
 
     // Arriving, then leaving, then everybody else. The two named by the Landing
     // are where the answer nearly always is, and each Account past them costs a
-    // prompt.
-    let named = [Some(arriving), leaving]
+    // prompt — so a Landing naming one Account twice is not read twice.
+    let named = [Some(arriving), a_second_account(leaving, arriving)]
         .into_iter()
         .flatten()
         .filter_map(|email| registry.account(email));
@@ -655,8 +655,8 @@ fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> Stri
         "A Switch to {arriving} was written down and never recorded, and the live \
          Credential is not the one Perch holds for {arriving}"
     );
-    match leaving {
-        Some(leaving) => format!(
+    match (a_second_account(leaving, arriving), leaving) {
+        (Some(leaving), _) => format!(
             "{said}, nor the one it holds for {leaving}, nor any other it holds — \
              so Perch cannot tell whether that Switch moved anything.\n\
              It may be {arriving}'s, Rotated since the Switch finished. It may be \
@@ -667,7 +667,17 @@ fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> Stri
              {leaving}` abandons it: either one replaces whatever is live with a \
              fresh login for the Account you meant."
         ),
-        None => format!(
+        (None, Some(_)) => format!(
+            "{said}, nor any other it holds — and that Switch was {arriving}'s to \
+             itself, so both readings of it name one Account.\n\
+             The live Credential may be {arriving}'s, Rotated since; it may be a \
+             login made outside Perch. Nothing on the machine tells the two \
+             apart, and writing over the wrong one destroys the only good copy — \
+             so nothing was changed.\n\
+             `perch relogin {arriving}` is the way through either way: it \
+             replaces whatever is live with a fresh login for {arriving}."
+        ),
+        (None, None) => format!(
             "{said}, nor any other it holds, and Perch was on no Account before it \
              — so nothing on the machine says whose the live Credential is.\n\
              Nothing was changed, because writing over it would destroy the only \
@@ -675,6 +685,15 @@ fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> Stri
              live with a fresh login for {arriving}, which is the way through."
         ),
     }
+}
+
+/// The Account a Landing was leaving, where that is a *second* Account.
+///
+/// `perch switch <the active Account>` is the documented repair for a Switch
+/// that stopped, so a Landing of an Account to itself is an ordinary state — and
+/// one whose two readings are the same Account, the same remedy and one prompt.
+fn a_second_account<'a>(leaving: Option<&'a str>, arriving: &str) -> Option<&'a str> {
+    leaving.filter(|leaving| !name::same_name(leaving, arriving))
 }
 
 /// Whether the machine already says what a Switch to this Account would make it
