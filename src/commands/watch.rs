@@ -567,20 +567,28 @@ fn act(
     let scope = watching.scope.clone();
     let outgoing = watching.account.clone();
 
+    let installed = match probed.as_ref() {
+        Ok(installed) => installed,
+        // Not reachable: a round reaches this only on a figure it read, and a figure
+        // is read only where the probe answered. Handed on rather than asserted,
+        // because what runs this is a Service nobody is watching.
+        Err(why) => return Err(PerchError::Other(why.to_string())),
+    };
+
     // Asked before the candidates are read: the burst spends an hourly allowance that
     // does not refill early, one read per candidate, and a `perch run` held open in
     // another terminal would spend it every round.
-    let installed = probed
-        .as_ref()
-        .map_err(|why| PerchError::Other(why.to_string()))?
-        .clone();
     let places = [live::Place::of_the_profile(host, &outgoing)?];
     let idle = match live::ask(host, &places) {
         live::Answer::Idle(idle) => idle,
         live::Answer::NotIdle(not_idle) => {
-            return watch::refused_or_raised(not_idle, &installed);
+            return watch::refused_or_raised(not_idle, installed);
         }
     };
+
+    // The set a Refresh cannot move, walked once: what changes under one is the
+    // figures, and those come back out of `refreshed` below.
+    let candidates = round::Candidates::of(registry, watching, cooled, &idle);
 
     // The burst, and the longest thing a round does: one read per candidate, each
     // bounded only at thirty seconds, over as many as the Scope holds. It takes the
@@ -589,7 +597,7 @@ fn act(
         host,
         perch,
         registry,
-        &round::addresses_of(&round::considered(registry, watching, cooled, &idle)),
+        &candidates.addresses(),
         probed,
         observe::Spending::ItsOwn,
         &mut || watching_alone.goes_on(),
@@ -606,11 +614,11 @@ fn act(
     // make this Switch land somewhere worse than it left.
     let unread = read.notes();
 
-    // The margin, applied to the figures as this round has them.
+    // The margin, applied to the figures the burst above has just written.
     let set_aside = watch::set_aside(
         &watching.policy,
         &watching.scope,
-        &round::considered(registry, watching, cooled, &idle),
+        &candidates.refreshed(registry),
     );
 
     let choice = match cycle::choose(
@@ -645,7 +653,7 @@ fn act(
         host,
         perch,
         registry,
-        &installed,
+        installed,
         &choice.account,
         Some(&outgoing),
         switch::Reason::Unasked {

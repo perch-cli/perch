@@ -169,42 +169,71 @@ impl Refusal {
     }
 }
 
-/// The Accounts a Switch could land on, with the figures this round has of them.
+/// The Accounts a Switch could land on this round, walked once.
 ///
-/// Called twice a round, through the same walk both times, and the one funnel that
-/// produces candidate addresses — which is why it takes both witnesses and reads
-/// neither.
-pub fn considered(
-    registry: &Registry,
-    watching: &Watching,
-    _cooled: &Cooled<'_>,
-    _idle: &Idle,
-) -> Vec<Considered> {
-    let sharers = crate::registry::Sharers::across(registry);
-    watching
-        .scope
-        .accounts(registry)
-        .iter()
-        .filter(|account| {
-            // Through the registry's own answer rather than `!=`, which would be
-            // correct only by two facts that are true two modules away.
-            !name::same_name(account.email(), watching.account.email())
-                && cycle::is_a_candidate(&sharers, account)
-        })
-        .map(|account| Considered {
-            email: account.email().to_string(),
-            named: registry.named_for_the_user(account.email()),
-            fullest: Fullest::of(account),
-        })
-        .collect()
+/// Their addresses are what a Refresh takes; their figures are what the Margin is
+/// applied to, and are worth having only once that Refresh has written them — so a
+/// figure comes off [`Candidates::refreshed`] and off nothing else.
+pub struct Candidates(Vec<Candidate>);
+
+/// One of them as the walk settles it, which is everything about a candidate a
+/// Refresh does not move.
+struct Candidate {
+    email: String,
+    named: String,
 }
 
-/// Their addresses, which is all a Refresh takes.
-pub fn addresses_of(considered: &[Considered]) -> Vec<String> {
-    considered
-        .iter()
-        .map(|candidate| candidate.email.clone())
-        .collect()
+impl Candidates {
+    /// The walk, and the one funnel that produces candidate addresses — which is why
+    /// it takes both witnesses and reads neither.
+    pub fn of(
+        registry: &Registry,
+        watching: &Watching,
+        _cooled: &Cooled<'_>,
+        _idle: &Idle,
+    ) -> Candidates {
+        let sharers = crate::registry::Sharers::across(registry);
+        Candidates(
+            watching
+                .scope
+                .accounts(registry)
+                .iter()
+                .filter(|account| {
+                    // Through the registry's own answer rather than `!=`, which would be
+                    // correct only by two facts that are true two modules away.
+                    !name::same_name(account.email(), watching.account.email())
+                        && cycle::is_a_candidate(&sharers, account)
+                })
+                .map(|account| Candidate {
+                    email: account.email().to_string(),
+                    named: registry.named_for_the_user(account.email()),
+                })
+                .collect(),
+        )
+    }
+
+    /// Their addresses, which is all a Refresh takes.
+    pub fn addresses(&self) -> Vec<String> {
+        self.0
+            .iter()
+            .map(|candidate| candidate.email.clone())
+            .collect()
+    }
+
+    /// The same candidates, carrying the figures a Refresh has just written.
+    ///
+    /// One gone from the registry between the walk and here carries none, which is
+    /// what the Margin sets aside — the same answer a candidate never read gets.
+    pub fn refreshed(self, registry: &Registry) -> Vec<Considered> {
+        self.0
+            .into_iter()
+            .map(|candidate| Considered {
+                fullest: registry.account(&candidate.email).and_then(Fullest::of),
+                email: candidate.email,
+                named: candidate.named,
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -392,22 +421,61 @@ mod tests {
         (crossed, idle)
     }
 
-    #[test]
-    fn the_account_being_watched_is_never_among_its_own_candidates() {
+    /// A Scope holding the Account being watched and one spare, with the walk
+    /// already made — which is the state a round is in when it Refreshes.
+    fn walked() -> (Registry, Candidates) {
         let mut registry = granted(declared(watching_one()));
         registry.upsert(ungrouped("spare@example.com", 10.0));
         let watching = asking(&registry).expect("declared and granted");
         let (crossed, idle) = witnesses(&watching.account);
+        let cooled = crossed
+            .cooled(&Recently::nothing(), now())
+            .expect("nothing has Switched, so nothing is cooling");
 
-        let candidates = considered(
-            &registry,
-            &watching,
-            &crossed
-                .cooled(&Recently::nothing(), now())
-                .expect("nothing has Switched, so nothing is cooling"),
-            &idle,
+        let candidates = Candidates::of(&registry, &watching, &cooled, &idle);
+        (registry, candidates)
+    }
+
+    #[test]
+    fn the_account_being_watched_is_never_among_its_own_candidates() {
+        let (_, candidates) = walked();
+
+        assert_eq!(candidates.addresses(), vec!["spare@example.com"]);
+    }
+
+    /// The load-bearing half of the ordering: the walk happens before the burst
+    /// and the Margin is applied to what the burst wrote, so a figure that moved
+    /// in between is the one a candidate is judged on.
+    #[test]
+    fn the_figure_a_candidate_is_judged_on_is_the_one_read_after_the_walk() {
+        let (mut registry, candidates) = walked();
+        registry
+            .account_mut("spare@example.com")
+            .expect("the spare is held")
+            .utilization = ungrouped("spare@example.com", 70.0).utilization;
+
+        let refreshed = candidates.refreshed(&registry);
+
+        assert_eq!(
+            refreshed
+                .first()
+                .expect("the spare is still a candidate")
+                .fullest
+                .as_ref()
+                .map(|fullest| fullest.used_percent),
+            Some(70.0),
+            "the walk saw 10, and the Refresh wrote 70"
         );
+    }
 
-        assert_eq!(addresses_of(&candidates), vec!["spare@example.com"]);
+    #[test]
+    fn a_candidate_gone_between_the_walk_and_the_reading_carries_no_figure() {
+        let (mut registry, candidates) = walked();
+        registry.forget("spare@example.com");
+
+        assert!(
+            candidates.refreshed(&registry)[0].fullest.is_none(),
+            "no figure is what the Margin sets aside"
+        );
     }
 }
