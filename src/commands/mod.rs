@@ -252,19 +252,22 @@ pub fn bring_the_registry_forward(host: &dyn Host) -> Result<()> {
 
 /// The Landing settled, for the four Switch paths somebody types.
 ///
-/// Nobody takes a typed command off the person who typed it, so the ask answers
-/// `Ok`, the walk runs to an answer, and the witness is discarded: none of the
-/// four has a step left that a stop would be in front of.
+/// Nobody takes a typed command off the person who typed it, so the ask it
+/// passes cannot answer no — and `Resolved`'s stop arm carries what it answered
+/// with, which for [`std::convert::Infallible`] is nothing there is a value of.
 pub fn a_settled_landing(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
     registry: &mut crate::registry::Registry,
 ) -> Result<crate::registry::Settled> {
-    match crate::switch::resolve_a_landing(host, perch, registry, &mut || Ok(()))? {
+    match crate::switch::resolve_a_landing::<std::convert::Infallible>(
+        host,
+        perch,
+        registry,
+        &mut || Ok(()),
+    )? {
         crate::switch::Resolved::Settled(settled) => Ok(settled),
-        crate::switch::Resolved::Stopped(_) => {
-            unreachable!("the ask a typed command passes answers `Ok`")
-        }
+        crate::switch::Resolved::Stopped(never) => match never {},
     }
 }
 
