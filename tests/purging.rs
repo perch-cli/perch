@@ -17,7 +17,7 @@ use perch::error::{EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_PROBE_REFUSED, EXIT_PR
 use perch::export;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
-use perch::host::{FakeHost, Platform};
+use perch::host::{FakeHost, Platform, Refusing};
 use perch::registry::{Quarantine, Registry};
 
 const PERCH_HOME: &str = "/Users/someone/.config/perch";
@@ -896,7 +896,7 @@ fn a_purge_that_stopped_part_way_finishes_when_it_is_run_again() {
     let second_profile = format!("{PERCH_HOME}/profiles/overflow-example-com/.credentials.json");
     let host = a_machine_to_give_back()
         .with_answers(&["n", "purge", "n", "purge"])
-        .with_undeletable_file(&second_profile, "read-only");
+        .with_a_path_refusing(&second_profile, Refusing::Delete, "read-only");
 
     let (stopped, printed) = run_purge(&host);
 
@@ -917,7 +917,7 @@ fn a_purge_that_stopped_part_way_finishes_when_it_is_run_again() {
         "and the Accounts it had not reached are untouched"
     );
 
-    host.deletable_again(&second_profile);
+    host.no_longer_refusing(&second_profile, Refusing::Delete);
     let (finished, printed) = run_purge(&host);
 
     finished.expect("running it again finishes it");
@@ -1234,7 +1234,7 @@ fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
 fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_later() {
     let host = a_machine_to_give_back()
         .with_answers(&["n", "purge"])
-        .with_undeletable_file(PERCH_HOME, "Device or resource busy");
+        .with_a_path_refusing(PERCH_HOME, Refusing::Delete, "Device or resource busy");
 
     let (stopped, printed) = run_purge(&host);
 
@@ -1265,7 +1265,7 @@ fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_l
         );
     }
 
-    host.deletable_again(Path::new(PERCH_HOME));
+    host.no_longer_refusing(Path::new(PERCH_HOME), Refusing::Delete);
     let (finished, printed) = run_purge_with(&host, true);
     finished.expect("running it again finishes it");
     assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
@@ -1283,7 +1283,7 @@ fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_b
     let store = perch::probe::store_for_profile(&host, &orphan).expect("USER is set");
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
 
-    let host = host.with_undeletable_file(&store.credentials_file, "read-only");
+    let host = host.with_a_path_refusing(&store.credentials_file, Refusing::Delete, "read-only");
 
     let (stopped, printed) = run_purge_with(&host, true);
 
@@ -1388,7 +1388,8 @@ fn a_directory_perch_cannot_list_stops_the_purge_rather_than_reading_as_empty() 
     let host = a_machine_to_give_back();
     let pending = Path::new(PERCH_HOME).join("pending");
     host.create_dir_all(&pending).expect("the parent is there");
-    let host = host.with_unlistable_dir(&pending, "Permission denied (os error 13)");
+    let host =
+        host.with_a_path_refusing(&pending, Refusing::List, "Permission denied (os error 13)");
 
     let (outcome, printed) = run_purge(&host);
 
@@ -1457,7 +1458,7 @@ fn a_sessions_directory_that_will_not_be_read_stops_the_purge_and_says_so() {
     let sessions = perch::probe::sessions_dir(&profile);
     host.create_dir_all(&sessions)
         .expect("a client has run here before");
-    let host = host.with_unlistable_dir(&sessions, "permission denied");
+    let host = host.with_a_path_refusing(&sessions, Refusing::List, "permission denied");
 
     let (outcome, _printed) = run_purge(&host);
 

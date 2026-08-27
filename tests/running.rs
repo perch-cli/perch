@@ -24,10 +24,10 @@ use chrono::{TimeZone, Utc};
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED};
-use perch::host::FakeHost;
 use perch::host::PRIVATE_DIR_MODE;
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Refusing};
 
 /// The Default Profile: where Shared State lives, and what a Run has to
 /// Reconcile out of.
@@ -752,7 +752,7 @@ fn a_run_answers_for_its_own_profile_and_for_nobody_elses() {
 fn a_run_that_cannot_mark_its_profile_live_does_not_launch() {
     let host = machine();
     let marker = perch::probe::session_marker_at(&profile_of(&host, SECOND_EMAIL), THIS_PROCESS);
-    let host = host.with_unwritable_file(&marker, "permission denied");
+    let host = host.with_a_path_refusing(&marker, Refusing::Write, "permission denied");
 
     let refusal = run_run(&host, SECOND_EMAIL)
         .0

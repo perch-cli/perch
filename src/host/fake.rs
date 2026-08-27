@@ -159,6 +159,19 @@ pub type WhileWaiting = Box<dyn Fn(&FakeHost)>;
 /// the way a single reply is, by URL and by the access token that asked.
 type Traces = BTreeMap<(String, Option<String>), VecDeque<HttpResponse>>;
 
+/// What a path is refusing to do, for the fixture that says so.
+///
+/// `List` is a directory there and unwalkable that still answers when it was last
+/// written — the state a lock left root-owned inside a Profile is in, and the one
+/// `lock::clear_the_abandoned` has to tell from a plain file wedging the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusing {
+    Read,
+    List,
+    Write,
+    Delete,
+}
+
 /// The world, held in the pieces the port names it in. *State and nothing else*
 /// — every method stays on `FakeHost`, so one that has to touch the clock writes
 /// `self.stall.now` and `self.fs.modified` in the same breath. The `RefCell`
@@ -556,68 +569,44 @@ impl FakeHost {
         self
     }
 
-    pub fn with_unreadable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .unreadable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
+    /// A path refusing one of the four things a path can refuse, from the start.
+    ///
+    /// One axis rather than a method per kind: the three moments a test needs — so
+    /// from the start, so partway through, and put right again — are the same three
+    /// whichever refusal it is.
+    pub fn with_a_path_refusing(
+        self,
+        path: impl AsRef<Path>,
+        refusing: Refusing,
+        detail: &str,
+    ) -> Self {
+        self.now_refusing(path, refusing, detail);
         self
     }
 
-    /// A directory that is there and will not be walked, while still answering
-    /// when it was last written. The state a lock left root-owned inside a
-    /// Profile is in, and the one `lock::clear_the_abandoned` has to tell from a
-    /// plain file wedging the path: `remove_dir_all` and the listing both fail
-    /// EACCES, and only one of those is worth ending a command over.
-    pub fn with_unlistable_dir(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .unlistable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
-        self
-    }
-
-    /// The same, and its undoing, for a test whose subject is a path becoming
-    /// unreadable *while* a command is running — a lock artifact somebody
-    /// changes the permissions of mid-hold — rather than one that was so from
-    /// the start.
-    pub fn set_unreadable(&self, path: impl AsRef<Path>, detail: &str) {
-        self.fs
-            .unreadable
+    /// The same, for a test whose subject is a path that starts refusing *while* a
+    /// command is running — a lock artifact somebody changes the permissions of
+    /// mid-hold — rather than one that refused from the start.
+    pub fn now_refusing(&self, path: impl AsRef<Path>, refusing: Refusing, detail: &str) {
+        self.refusals(refusing)
             .borrow_mut()
             .insert(path.as_ref().to_path_buf(), detail.to_string());
     }
 
-    pub fn forget_unreadable(&self, path: impl AsRef<Path>) {
-        self.fs.unreadable.borrow_mut().remove(path.as_ref());
+    /// Whatever the path was refusing over has been put right — the permission fixed,
+    /// the disk freed, the holder let go — so a test can carry on from a failure with
+    /// the world it left rather than a fresh one.
+    pub fn no_longer_refusing(&self, path: impl AsRef<Path>, refusing: Refusing) {
+        self.refusals(refusing).borrow_mut().remove(path.as_ref());
     }
 
-    /// A path that cannot be written to, so a test can fail one step of a
-    /// multi-step write and see what is left behind.
-    pub fn with_unwritable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .unwritable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
-        self
-    }
-
-    /// The same pair, for a path that becomes unwritable partway through a
-    /// command rather than before it.
-    pub fn set_unwritable(&self, path: impl AsRef<Path>, detail: &str) {
-        self.fs
-            .unwritable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
-    }
-
-    /// Whatever stopped a path being written to has been put right — the
-    /// permission fixed, the disk freed — so a test can carry on from a failure
-    /// with the world it left rather than a fresh one. One name, because a
-    /// second one is a question a reader has to answer before writing the
-    /// fixture.
-    pub fn writable_again(&self, path: impl AsRef<Path>) {
-        self.fs.unwritable.borrow_mut().remove(path.as_ref());
+    fn refusals(&self, refusing: Refusing) -> &RefCell<BTreeMap<PathBuf, String>> {
+        match refusing {
+            Refusing::Read => &self.fs.unreadable,
+            Refusing::List => &self.fs.unlistable,
+            Refusing::Write => &self.fs.unwritable,
+            Refusing::Delete => &self.fs.undeletable,
+        }
     }
 
     /// A path that takes `writes` more writes and refuses every one after them.
@@ -637,24 +626,6 @@ impl FakeHost {
             .insert(path.as_ref().to_path_buf(), (writes, detail.to_string()));
         self
     }
-
-    /// A file that is there and will not go — a directory whose permissions
-    /// forbid it, a lock some other process holds on Windows. What a Credential
-    /// Store that cannot be emptied looks like.
-    pub fn with_undeletable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
-        self.fs
-            .undeletable
-            .borrow_mut()
-            .insert(path.as_ref().to_path_buf(), detail.to_string());
-        self
-    }
-
-    /// The same for a path that would not go: what a command that stopped part
-    /// way is run again against, once whatever held the path has let go.
-    pub fn deletable_again(&self, path: impl AsRef<Path>) {
-        self.fs.undeletable.borrow_mut().remove(path.as_ref());
-    }
-
     /// A file that comes back different from how it was written — the same
     /// hazard on the plaintext store, which the same guard covers.
     pub fn with_file_corrupting_writes(self, path: impl AsRef<Path>) -> Self {

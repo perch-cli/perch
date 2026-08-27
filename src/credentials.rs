@@ -227,6 +227,7 @@ fn tighten_if_loose(host: &dyn Host, path: &std::path::Path) {
 mod tests {
     use super::*;
     use crate::host::FakeHost;
+    use crate::host::Refusing;
     use crate::probe;
 
     const CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test"}}"#;
@@ -367,7 +368,8 @@ mod tests {
     fn a_store_that_will_not_say_what_it_holds_is_not_a_store_holding_nothing() {
         let host = FakeHost::new();
         let store = profile_store(&host);
-        let host = host.with_unreadable_file(&store.credentials_file, "Permission denied");
+        let host =
+            host.with_a_path_refusing(&store.credentials_file, Refusing::Read, "Permission denied");
         // On this platform the file is the fallback, so it is the one asked
         // second — and the keychain, asked first, simply has nothing.
         host.set_file(&store.credentials_file, CREDENTIAL);

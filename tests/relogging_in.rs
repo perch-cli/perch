@@ -13,9 +13,9 @@ mod common;
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
-use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Refusing};
 use perch::registry::{Active, Quarantine};
 
 /// What a repairing login produces for the second Account: the same person,
@@ -464,7 +464,7 @@ fn a_store_that_will_not_answer_stops_the_repair_rather_than_being_stepped_past(
         .0
         .expect("adoption holds the login it finds");
     a_switch_died_mid_flight(&host, Some(EMAIL), EMAIL);
-    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+    host.now_refusing(CREDENTIALS_PATH, Refusing::Read, "Permission denied");
 
     let (result, _) = run_relogin(&host, EMAIL);
 
@@ -708,7 +708,7 @@ fn a_repair_that_could_not_be_recorded_says_the_login_worked_and_not_to_switch()
         .expect("the first command adopts the login");
     quarantine(&host, EMAIL);
 
-    let host = host.with_unwritable_file(REGISTRY_PATH, "read-only file system");
+    let host = host.with_a_path_refusing(REGISTRY_PATH, Refusing::Write, "read-only file system");
 
     let (result, _) = run_relogin(&host, EMAIL);
 
@@ -778,7 +778,8 @@ fn a_repair_that_could_not_be_made_live_still_stands_and_says_what_is_left() {
 
     // Neither store of the Default Profile will take it, so the repair lands in
     // the Account's own Profile and goes no further.
-    let host = host.with_unwritable_file(CREDENTIALS_PATH, "no space left on device");
+    let host =
+        host.with_a_path_refusing(CREDENTIALS_PATH, Refusing::Write, "no space left on device");
     host.lock_keychain("could not run /usr/bin/security: No such file or directory");
 
     let (result, printed) = run_relogin(&host, EMAIL);
@@ -820,7 +821,7 @@ fn a_group_named_where_one_account_is_meant_is_refused_as_a_group() {
 fn a_repair_whose_identity_patch_failed_is_live_and_still_recorded_as_active() {
     let host = machine_with_two_accounts().with_login(login_producing(REPAIRED, IDENTITY_FILE));
     quarantine(&host, EMAIL);
-    let host = host.with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let host = host.with_a_path_refusing(IDENTITY_PATH, Refusing::Write, "read-only file");
 
     let (result, _) = run_relogin(&host, EMAIL);
 
@@ -869,7 +870,7 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
     .expect("the second Account is added");
     let host = host.with_login(login_producing(REPAIRED, IDENTITY_FILE));
     quarantine(&host, EMAIL);
-    let host = host.with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+    let host = host.with_a_path_refusing(CREDENTIALS_PATH, Refusing::Write, "read-only file");
 
     let (result, _) = run_relogin(&host, EMAIL);
 
@@ -897,7 +898,7 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
 
     // The command somebody would reach for next, and the one a repair left
     // recorded as active would be destroyed by.
-    host.writable_again(CREDENTIALS_PATH);
+    host.no_longer_refusing(CREDENTIALS_PATH, Refusing::Write);
     run_switch(&host, SECOND_EMAIL)
         .0
         .expect("a Switch still works");

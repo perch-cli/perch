@@ -24,9 +24,9 @@ use common::*;
 use perch::anthropic::{PROFILE_URL, TOKEN_URL, USAGE_URL};
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_INVALID, EXIT_NOT_INTERCHANGEABLE};
-use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Refusing};
 use perch::registry::Active;
 use perch::watch::REFRESH_INTERVAL_MILLIS;
 
@@ -1475,7 +1475,7 @@ fn a_switch_that_changed_something_and_then_failed_stops_the_loop() {
     // The Credential is written and the Identity beside it cannot be, which is
     // ADR a-switch-is-written-down-first's crash between two writes arriving as a
     // failed write.
-    let host = host.with_unwritable_file(IDENTITY_PATH, "read-only file system");
+    let host = host.with_a_path_refusing(IDENTITY_PATH, Refusing::Write, "read-only file system");
 
     let (result, printed) = run_watch(&host);
 
