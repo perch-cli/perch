@@ -32,7 +32,17 @@ pub fn cells(text: &Shown) -> usize {
 /// [`cells`]'s mistake from the other side: it would take the right width and
 /// then fill it wrongly.
 pub fn padded(text: &Shown, width: usize) -> String {
-    format!("{text}{}", " ".repeat(width.saturating_sub(cells(text))))
+    let mut out = String::with_capacity(width.max(text.as_str().len()));
+    pad_into(&mut out, text, cells(text), width);
+    out
+}
+
+/// The same into a buffer the caller keeps, and against a width already
+/// measured: a table measures every cell to decide its column, so the padding
+/// is the second reading of a number the column already knows.
+pub fn pad_into(out: &mut String, text: &Shown, measured: usize, width: usize) {
+    out.push_str(text.as_str());
+    out.extend(std::iter::repeat_n(' ', width.saturating_sub(measured)));
 }
 
 /// How wide the label column is on the surfaces that answer about one Account —
