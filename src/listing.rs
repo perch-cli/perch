@@ -127,7 +127,11 @@ pub fn scopes(registry: &Registry) -> Vec<registry::Scope> {
         .collect();
     every.push(registry::Scope::Ungrouped);
 
-    let Some(active) = registry.active_account() else {
+    let Some(active) = registry
+        .active()
+        .whose()
+        .and_then(|email| registry.account(email))
+    else {
         return every;
     };
     let here = match &active.group {
@@ -160,7 +164,7 @@ pub fn document(
         // than a truer one (ADR perch-says-what-it-did).
         "disabled": account.disabled,
         "quarantined": Quarantine::document(account.quarantine),
-        "active": registry.is_active(account.email()),
+        "active": registry.active().is_active(account.email()),
         "organization": account.identity.organization_name,
         "plan": account.plan,
         // `ok()` rather than `?`, because an address no directory can be named

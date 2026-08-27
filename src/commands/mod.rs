@@ -226,9 +226,9 @@ pub fn a_settled_landing(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
     registry: &mut crate::registry::Registry,
-) -> Result<()> {
+) -> Result<crate::registry::Settled> {
     match crate::switch::resolve_a_landing(host, perch, registry, &mut || Ok(()))? {
-        crate::switch::Resolved::Settled(_) => Ok(()),
+        crate::switch::Resolved::Settled(settled) => Ok(settled),
         crate::switch::Resolved::Stopped(_) => {
             unreachable!("the ask a typed command passes answers `Ok`")
         }

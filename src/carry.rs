@@ -63,14 +63,14 @@ pub fn carry(
     email: &str,
     default_profile: &Store,
     into: &Path,
-    settled: Option<&crate::switch::Settled>,
+    settled: Option<&crate::registry::Settled>,
 ) {
     // During a Landing no Account is active
     // (ADR a-switch-is-written-down-first), so `is_active` answers with the one
     // being *left* and its state would be looked for in the wrong directory.
-    if settled.is_none() {
+    let Some(settled) = settled else {
         return;
-    }
+    };
     // Discounting this process: the Run has already claimed the Profile by the
     // time it Carries, and read as an ordinary client that claim would decline
     // every Carry there is.
@@ -86,10 +86,16 @@ pub fn carry(
     // The first that reads, rather than the best alone: a `sudo claude` leaves a
     // root-owned `.claude.json` that is newest by mtime, and giving up on it
     // costs a dialog on every Run for ever where the next candidate would serve.
-    let Some(theirs) = most_recently_used(host, registry, email, default_profile, &destination)
-        .iter()
-        .find_map(|source| read(host, source))
-    else {
+    let Some(theirs) = most_recently_used(
+        host,
+        registry,
+        settled,
+        email,
+        default_profile,
+        &destination,
+    )
+    .iter()
+    .find_map(|source| read(host, source)) else {
         return;
     };
 
@@ -190,6 +196,7 @@ fn project_entry(
 fn most_recently_used(
     host: &dyn Host,
     registry: &Registry,
+    settled: &crate::registry::Settled,
     email: &str,
     default_profile: &Store,
     destination: &Path,
@@ -213,7 +220,7 @@ fn most_recently_used(
         .accounts
         .iter()
         .filter(|account| may_cross(account, email, group.as_deref()))
-        .filter_map(|account| where_it_works(host, registry, account, default_profile))
+        .filter_map(|account| where_it_works(host, registry, settled, account, default_profile))
         .filter(|candidate| !is_the_destination(candidate))
         .collect();
 
@@ -258,10 +265,11 @@ fn may_cross(account: &Account, email: &str, group: Option<&str>) -> bool {
 fn where_it_works(
     host: &dyn Host,
     registry: &Registry,
+    settled: &crate::registry::Settled,
     account: &Account,
     default_profile: &Store,
 ) -> Option<Candidate> {
-    let active = registry.is_active(account.email());
+    let active = registry.is_active(settled, account.email());
     let identity_file = if active {
         default_profile.identity_file.clone()
     } else {

@@ -325,7 +325,7 @@ fn announcement(registry: &Registry, account: &Account, landing_here: bool) -> S
     }
     // Which of the two it is, said apart, because "the Account you are on" is
     // exactly what Perch cannot claim about half of a Landing.
-    if registry.is_active(account.email()) {
+    if registry.active().is_active(account.email()) {
         return format!(
             "{repairing} It is the Account you are on, so its fresh Credential \
              becomes the live one."

@@ -20,7 +20,7 @@ use crate::host::Host;
 use crate::lock::Held;
 use crate::name;
 use crate::probe::Installed;
-use crate::registry::{self, Account, Registry};
+use crate::registry::{self, Account, Registry, Settled};
 use crate::switch;
 use crate::target;
 
@@ -77,9 +77,8 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     // Removing the active Account lands somewhere first, which reaches
-    // `make_live` — so this is a Switch path, and it resolves a Landing before
-    // anything reads who is active (ADR a-switch-is-written-down-first).
-    crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
+    // `make_live` — so this is a Switch path (ADR a-switch-is-written-down-first).
+    let settled = crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;
@@ -87,7 +86,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
 
     // Before the question rather than after: an Account Perch may not touch is
     // not one to ask about giving up (ADR a-profile-is-live-by-evidence).
-    let consequence = consequence_of(&registry, &account);
+    let consequence = consequence_of(&registry, &settled, &account);
 
     let installed = Installed::probed_or_absent(host);
 
@@ -154,8 +153,8 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     })
 }
 
-fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
-    let is_active = registry.is_active(account.email());
+fn consequence_of(registry: &Registry, settled: &Settled, account: &Account) -> Consequence {
+    let is_active = registry.is_active(settled, account.email());
     Consequence {
         is_active,
         successor: is_active

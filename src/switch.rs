@@ -19,7 +19,7 @@ use crate::lock;
 use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
-use crate::registry::{self, Account, Active, Quarantine, Registry, Scope};
+use crate::registry::{self, Account, Active, Quarantine, Registry, Scope, Settled};
 use crate::watch::{Lost, StillOurs};
 
 /// What the Capture found — the part of a Switch worth saying out loud, because
@@ -479,25 +479,6 @@ pub struct NotLanded {
     pub is_live: bool,
 }
 
-/// No Landing is in flight, so the registry a reader is about to ask tells the
-/// truth about who is active. A witness (ADR an-ordering-is-a-type), and the
-/// negative of a [`Landing`], so nothing is promoted. Two things earn it:
-/// [`resolve_a_landing`] settles a Landing it found, and [`nothing_in_flight`]
-/// finds there was none to settle.
-pub struct Settled(());
-
-/// The same witness, for a reader that has a Landing to *check* rather than one
-/// to settle: a `perch watcher run` says what it is about to watch off a
-/// registry it has not locked, and a Landing in flight is the state where it has
-/// nothing to say yet, because [`Active::whose`] answers with the Account being
-/// *left*. `None` is the whole of what it can answer about a Landing.
-pub fn nothing_in_flight(registry: &Registry) -> Option<Settled> {
-    match registry.active() {
-        Active::Landing { .. } => None,
-        Active::Nobody | Active::Settled(_) => Some(Settled(())),
-    }
-}
-
 /// A Landing settled, or the walk that settles one stopped part way.
 ///
 /// A stop is its own answer (ADR an-invariant-gets-a-door): the walk's other
@@ -523,7 +504,12 @@ pub fn resolve_a_landing(
     still_ours: StillOurs<'_>,
 ) -> Result<Resolved> {
     let Active::Landing { leaving, arriving } = registry.active().clone() else {
-        return Ok(Resolved::Settled(Settled(())));
+        // Nothing to settle is the commonest way to earn the witness, and the
+        // only one that reads no store.
+        let Some(settled) = registry::nothing_in_flight(registry) else {
+            unreachable!("the arm above is the whole of what a Landing in flight is")
+        };
+        return Ok(Resolved::Settled(settled));
     };
 
     // Ahead of Claude Code's locks rather than under them: a Watcher already
@@ -575,9 +561,9 @@ pub fn resolve_a_landing(
             }
         };
 
-        registry.settle(settled_on);
+        let settled = registry.settle(settled_on);
         holds.around_a_registry_write(|perch| registry::save(host, perch, registry))?;
-        Ok(Resolved::Settled(Settled(())))
+        Ok(Resolved::Settled(settled))
     })
 }
 
