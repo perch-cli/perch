@@ -1420,10 +1420,9 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
 /// How long a Watcher that died holding the watcher lock keeps it.
 ///
 /// Derived rather than chosen: the longest a healthy Watcher goes quiet is its
-/// longest wait between rounds plus the round after it. Deliberately long, and
-/// what pays for it is that a Watcher finding the lock held holds and comes back.
-const WATCHER_STALE_MILLIS: i64 =
-    (crate::watch::LONGEST_WAIT_MILLIS + crate::watch::REFRESH_INTERVAL_MILLIS) as i64;
+/// longest wait between rounds plus the round after it. The number is here and
+/// the derivation is asserted in `watch`, where both its terms live.
+pub(crate) const WATCHER_STALE_MILLIS: i64 = 1_350_000;
 
 /// Comfortably inside a round, so the renewal a round makes always touches.
 const WATCHER_UPDATE_MILLIS: i64 = 60_000;
