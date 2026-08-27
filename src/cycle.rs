@@ -50,11 +50,14 @@ pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
 
 /// How full an Account is: by the Quota Window that is fullest.
 #[derive(Debug, Clone, PartialEq)]
-enum Headroom {
+enum Headroom<'a> {
     /// Every Quota Window has at least this much room left.
     Room {
         percent: f64,
-        fullest_window: String,
+        /// Borrowed from the Account it was measured on: two of the three
+        /// callers read only the percentage, and a listing computes one of these
+        /// per row.
+        fullest_window: &'a str,
         /// When the fullest window comes back, if the observation carried it.
         resets_at: Option<DateTime<Utc>>,
         observed_at: DateTime<Utc>,
@@ -66,7 +69,7 @@ enum Headroom {
     Unobserved,
 }
 
-impl Headroom {
+impl Headroom<'_> {
     /// What ranking sorts on, higher being better.
     ///
     /// Four tiers, because `soonest-reset` adds one on top of the three
@@ -185,7 +188,7 @@ pub fn fullest_window_of(account: &Account) -> Option<&WindowUtilization> {
     account.observed_utilization().and_then(fullest_window)
 }
 
-fn headroom_of(account: &Account) -> Headroom {
+fn headroom_of(account: &Account) -> Headroom<'_> {
     let Some(cached) = account.observed_utilization() else {
         return Headroom::Unobserved;
     };
@@ -197,7 +200,7 @@ fn headroom_of(account: &Account) -> Headroom {
     }
     Headroom::Room {
         percent: 100.0 - fullest.used_percent,
-        fullest_window: fullest.window.clone(),
+        fullest_window: &fullest.window,
         resets_at: fullest.resets_at,
         observed_at: cached.observed_at,
     }
@@ -239,7 +242,7 @@ fn frees_at(cached: &CachedUtilization) -> Option<DateTime<Utc>> {
 /// An Account with what ranking made of it.
 struct Ranked<'a> {
     account: &'a Account,
-    headroom: Headroom,
+    headroom: Headroom<'a>,
 }
 
 /// Accounts this Cycle may not land on, whatever the ranking makes of them, and
@@ -435,7 +438,7 @@ pub fn choose(
 ///
 /// Staying put is right only where Perch can see that it is: an Account it has
 /// never observed rules nothing out, and out of the box none has been observed.
-fn measured_against(here: Option<&Headroom>) -> Option<&Headroom> {
+fn measured_against<'h, 'a>(here: Option<&'h Headroom<'a>>) -> Option<&'h Headroom<'a>> {
     here.filter(|here| matches!(here, Headroom::Room { .. }))
 }
 
@@ -475,8 +478,8 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
         .map(|account| headroom_of(account));
     let here = measured_against(here.as_ref());
     // Measured once each rather than inside a comparator that runs O(n log n)
-    // times, since `place` clones a window name per `Headroom` it computes.
-    // Stable, so Accounts that rank identically keep the order they were added.
+    // times: `place` walks every Quota Window an Account carries. Stable, so
+    // Accounts that rank identically keep the order they were added.
     let mut placed: Vec<(&Account, Place)> = accounts
         .into_iter()
         .map(|account| {
@@ -1074,16 +1077,17 @@ pub(crate) mod tests {
 
     #[test]
     fn headroom_is_the_room_left_in_the_fullest_window() {
-        let headroom = headroom_of(&account(
+        let held = account(
             "a@example.com",
             vec![window("5-hour", 4.0), window("7-day", 95.0)],
-        ));
+        );
+        let headroom = headroom_of(&held);
         assert!(
             matches!(
                 headroom,
                 Headroom::Room {
                     percent: 5.0,
-                    ref fullest_window,
+                    fullest_window,
                     ..
                 } if fullest_window == "7-day"
             ),
@@ -1114,16 +1118,16 @@ pub(crate) mod tests {
 
     #[test]
     fn a_full_window_exhausts_an_account_however_empty_its_others_are() {
-        let headroom = headroom_of(&account(
+        let held = account(
             "a@example.com",
             vec![window("5-hour", 0.0), window("7-day", 100.0)],
-        ));
-        assert!(headroom.is_exhausted());
+        );
+        assert!(headroom_of(&held).is_exhausted());
     }
 
     #[test]
     fn an_exhausted_account_frees_up_when_its_last_full_window_resets() {
-        let headroom = headroom_of(&account(
+        let held = account(
             "a@example.com",
             vec![
                 resetting("5-hour", 100.0, 1),
@@ -1131,9 +1135,9 @@ pub(crate) mod tests {
                 // Not full, so its reset has no bearing on the wait.
                 resetting("7-day-opus", 3.0, 100),
             ],
-        ));
+        );
         assert_eq!(
-            headroom,
+            headroom_of(&held),
             Headroom::Exhausted {
                 frees_at: Some(now() + chrono::Duration::hours(50))
             }
@@ -1142,10 +1146,11 @@ pub(crate) mod tests {
 
     #[test]
     fn a_full_window_that_does_not_say_when_it_resets_leaves_the_wait_unknown() {
-        let headroom = headroom_of(&account(
+        let held = account(
             "a@example.com",
             vec![window("5-hour", 100.0), resetting("7-day", 100.0, 3)],
-        ));
+        );
+        let headroom = headroom_of(&held);
         assert_eq!(headroom, Headroom::Exhausted { frees_at: None });
     }
 
