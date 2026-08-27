@@ -406,8 +406,8 @@ impl Cooled<'_> {
 
 /// The one thing carried from one round to the next: when the watcher last Switched.
 ///
-/// Where it is carried is the loop's and the check's one difference — in memory, or off
-/// the registry ([`Recently::recorded`]) for a fresh process every time.
+/// Read off the registry ([`Recently::recorded`]) by the loop and by the check alike, a
+/// Cooldown a restart clears being no Cooldown (ADR a-watcher-knob-is-arithmetic).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Recently {
     switched: Option<DateTime<Utc>>,
@@ -428,10 +428,6 @@ impl Recently {
         Recently {
             switched: checked.map(|checked| checked.switched_at.min(now)),
         }
-    }
-
-    pub fn switched(&mut self, at: DateTime<Utc>) {
-        self.switched = Some(at);
     }
 
     /// Why nothing may move yet, or `None` when something may.
@@ -1389,10 +1385,16 @@ mod tests {
         }
     }
 
+    /// What the registry hands a round that Switched at `at`, which is the only
+    /// way a Cooldown reaches one: `Recently` carries nothing of its own between
+    /// rounds, and a loop and a check both read it back off the record.
+    fn cooling_since(at: DateTime<Utc>) -> Recently {
+        Recently::recorded(Some(&Checked { switched_at: at }), at)
+    }
+
     #[test]
     fn a_cooling_round_names_the_rule_that_held_it() {
-        let mut recently = Recently::nothing();
-        recently.switched(now());
+        let recently = cooling_since(now());
 
         let why = recently
             .resting(now() + Duration::minutes(4))
@@ -1638,14 +1640,13 @@ mod tests {
 
     #[test]
     fn nothing_moves_again_until_the_cooldown_has_run_out() {
-        let mut recently = Recently::nothing();
         assert_eq!(
-            recently.resting(now()),
+            Recently::nothing().resting(now()),
             None,
             "a loop that has just started owes nobody a wait"
         );
 
-        recently.switched(now());
+        let recently = cooling_since(now());
 
         let waiting = recently
             .resting(now() + Duration::minutes(4))
@@ -1678,8 +1679,7 @@ mod tests {
 
     #[test]
     fn a_switch_stamped_in_the_future_is_not_said_to_have_happened_backwards() {
-        let mut recently = Recently::nothing();
-        recently.switched(now() + Duration::minutes(60));
+        let recently = cooling_since(now() + Duration::minutes(60));
 
         let waiting = recently
             .resting(now())
@@ -1783,8 +1783,7 @@ mod tests {
     #[test]
     fn a_crossing_inside_the_cooldown_is_not_cooled_and_says_which_rule_held_it() {
         let crossed = at(86.0).unwrap().crossed(80).unwrap();
-        let mut recently = Recently::nothing();
-        recently.switched(now());
+        let recently = cooling_since(now());
 
         let cooling = crossed
             .cooled(&recently, now() + Duration::minutes(4))
@@ -1797,8 +1796,7 @@ mod tests {
     #[test]
     fn a_crossing_with_the_cooldown_spent_is_cooled_and_still_knows_the_figure() {
         let crossed = at(86.0).unwrap().crossed(80).unwrap();
-        let mut recently = Recently::nothing();
-        recently.switched(now());
+        let recently = cooling_since(now());
 
         let cooled = crossed
             .cooled(&recently, now() + Duration::minutes(15))
