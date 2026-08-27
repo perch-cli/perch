@@ -38,14 +38,37 @@ pub mod assumption {
 /// reading. A value rather than a `&str` for two reasons — reading it is a
 /// `PATH` walk and a subprocess, so a command asks once; and a caller with no
 /// version to give has [`Installed::unknown`] rather than a made-up string.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Installed(String);
+#[derive(Clone)]
+pub enum Installed<'h> {
+    /// The version, already read or already given.
+    Said(String),
+    /// Where to ask, for the one caller that has not asked yet, and what it
+    /// answered once it has.
+    Asking {
+        host: &'h dyn Host,
+        said: std::cell::OnceCell<String>,
+    },
+}
 
-impl Installed {
+impl<'h> Installed<'h> {
     /// Asks the installed Claude Code what it is. Once per command: the answer
     /// cannot change under a process that is already running.
-    pub fn probed(host: &dyn Host) -> Result<Installed> {
-        Ok(Installed(claude_version(host)?))
+    pub fn probed(host: &dyn Host) -> Result<Installed<'static>> {
+        Ok(Installed::Said(claude_version(host)?))
+    }
+
+    /// The same for a process that outlives a command, where asking every round
+    /// forks a Node program to quote a string most rounds never quote. Only the
+    /// version waits: a refusal quotes the Claude Code installed when it was
+    /// raised rather than when the process started.
+    pub fn asked_when_needed(host: &'h dyn Host) -> Result<Installed<'h>> {
+        // Claude Code being *there* is still established now, a round with none
+        // having nothing to do — and it is a `PATH` walk rather than a fork.
+        claude_bin(host)?;
+        Ok(Installed::Asking {
+            host,
+            said: std::cell::OnceCell::new(),
+        })
     }
 
     /// When the question could not be asked, or is not the thing being tested.
@@ -53,13 +76,20 @@ impl Installed {
     /// machine whose Claude Code is gone is the machine somebody is giving an
     /// Account up on, and refusing for want of a version would hold their
     /// Credential hostage to a program neither of them needs.
-    pub fn unknown(said: &str) -> Installed {
-        Installed(said.to_string())
+    pub fn unknown(said: &str) -> Installed<'static> {
+        Installed::Said(said.to_string())
     }
 
     /// What a refusal quotes.
     pub fn version(&self) -> &str {
-        &self.0
+        match self {
+            Installed::Said(said) => said,
+            // The binary was found when this was made, so what is left to fail
+            // is running it — which is what `unknown` exists to say.
+            Installed::Asking { host, said } => {
+                said.get_or_init(|| claude_version(*host).unwrap_or_else(|_| "unknown".to_string()))
+            }
+        }
     }
 }
 
@@ -358,10 +388,19 @@ pub fn service_name_for(config_dir: &Path, is_default: bool) -> String {
 
 /// The first eight hex characters of the SHA-256 of the directory path.
 pub fn short_hash(config_dir: &Path) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
     let mut hasher = Sha256::new();
     hasher.update(config_dir.to_string_lossy().as_bytes());
     let digest = hasher.finalize();
-    digest.iter().take(4).map(|b| format!("{b:02x}")).collect()
+    // Two table lookups a byte rather than a `format!` each, which drives the
+    // whole of `core::fmt` to write two characters.
+    let mut hex = String::with_capacity(8);
+    for byte in digest.iter().take(4) {
+        hex.push(HEX[usize::from(byte >> 4)] as char);
+        hex.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    hex
 }
 
 /// The store Claude Code uses right now, honoring `CLAUDE_CONFIG_DIR`. The
@@ -1086,12 +1125,12 @@ fn where_it_is_wrong(err: &serde_json::Error) -> String {
 }
 
 pub(crate) fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
-    PerchError::ProbeRefused {
+    PerchError::ProbeRefused(Box::new(crate::error::ProbeRefusal {
         assumption: assumption.to_string(),
         detail: detail.to_string(),
         version: version.to_string(),
         note: None,
-    }
+    }))
 }
 
 #[cfg(test)]
@@ -1111,7 +1150,7 @@ mod tests {
     }
 
     /// A version to quote, for the tests that are not about the quoting.
-    fn version_under_test() -> Installed {
+    fn version_under_test() -> Installed<'static> {
         Installed::unknown("2.1.221")
     }
     use crate::host::{Execution, FakeHost, Platform};
@@ -1285,8 +1324,8 @@ mod tests {
         let bare = FakeHost::new().without_env("USER");
         let error = keychain_account_name(&bare).unwrap_err();
         assert!(
-            matches!(error, PerchError::ProbeRefused { ref assumption, .. }
-                if assumption == assumption::ACCOUNT_NAME),
+            matches!(&error, PerchError::ProbeRefused(refusal)
+                if refusal.assumption == assumption::ACCOUNT_NAME),
             "{error}"
         );
     }
@@ -1315,8 +1354,8 @@ mod tests {
 
         let error = claude_bin(&host).unwrap_err();
         assert!(
-            matches!(error, PerchError::ProbeRefused { ref assumption, .. }
-                if assumption == assumption::INSTALLED),
+            matches!(&error, PerchError::ProbeRefused(refusal)
+                if refusal.assumption == assumption::INSTALLED),
             "{error}"
         );
         assert!(error.to_string().contains("PERCH_CLAUDE_BIN"), "{error}");
@@ -1506,8 +1545,8 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(error, PerchError::ProbeRefused { ref assumption, .. }
-                if assumption == assumption::IDENTITY_BLOCK),
+            matches!(&error, PerchError::ProbeRefused(refusal)
+                if refusal.assumption == assumption::IDENTITY_BLOCK),
             "{error}"
         );
     }
@@ -1804,6 +1843,60 @@ mod tests {
         assert!(!rotated.contains("expiresAt"), "{}", rotated.as_str());
     }
 
+    /// The whole of what `asked_when_needed` promises: `claude` is established
+    /// as being there, and its version is read the first time something quotes
+    /// one and only once however often it is quoted after that.
+    #[test]
+    fn a_deferred_version_is_read_when_it_is_first_quoted_and_not_before() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "")
+            .with_exec(
+                "/usr/bin/claude",
+                &["--version"],
+                Execution {
+                    status: 0,
+                    stdout: "2.1.221 (Claude Code)".to_string(),
+                    stderr: String::new(),
+                },
+            );
+
+        let installed = Installed::asked_when_needed(&host).expect("`claude` is on PATH");
+        assert_eq!(
+            versions_read_by(&host),
+            0,
+            "nothing has quoted it, so nothing has been forked"
+        );
+
+        assert_eq!(installed.version(), "2.1.221");
+        assert_eq!(installed.version(), "2.1.221");
+        assert_eq!(versions_read_by(&host), 1, "{:?}", host.effects());
+    }
+
+    /// A `claude` that goes missing between the two is quoted as unknown rather
+    /// than raised: `version` is reached from inside a refusal being built, and
+    /// there is nothing there to hand a second failure to.
+    #[test]
+    fn a_deferred_version_that_will_not_read_is_quoted_as_unknown() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "");
+
+        let installed = Installed::asked_when_needed(&host).expect("`claude` is on PATH");
+
+        assert_eq!(installed.version(), "unknown");
+    }
+
+    fn versions_read_by(host: &FakeHost) -> usize {
+        host.effects()
+            .iter()
+            .filter(|effect| {
+                matches!(effect, crate::host::fake::Effect::Exec { program, args }
+                    if program == "/usr/bin/claude" && args == &["--version".to_string()])
+            })
+            .count()
+    }
+
     /// A `claude` that is there and will not run at all. The refusal names the
     /// assumption rather than the command, because "not installed" is the thing
     /// a user can act on and `exec` failing is not.
@@ -1816,12 +1909,13 @@ mod tests {
         let refused = claude_version(&host).expect_err("nothing answers `--version`");
 
         match refused {
-            PerchError::ProbeRefused {
-                assumption,
-                detail,
-                version,
-                ..
-            } => {
+            PerchError::ProbeRefused(refusal) => {
+                let crate::error::ProbeRefusal {
+                    assumption,
+                    detail,
+                    version,
+                    ..
+                } = *refusal;
                 assert_eq!(assumption, assumption::INSTALLED);
                 assert!(
                     detail.contains("could not run `claude --version`"),

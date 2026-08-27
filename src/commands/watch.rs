@@ -550,9 +550,10 @@ fn one_round(
 
     watcher.pacing(recently, &registry, &watching.scope, host.now());
 
-    // Once per round, and handed to everything in it that wants one: probed where it is
-    // wanted, an acting round walks `PATH` and spawns `claude --version` three times.
-    let installed = probe::Installed::probed(host);
+    // Once per round, and handed to everything in it that wants one. Deferred, so a
+    // round that refuses nothing forks nothing: this loop runs until the session ends,
+    // and every round asking a Node program its version is a cost with no reader.
+    let installed = probe::Installed::asked_when_needed(host);
 
     // The one Account Refreshed, and nearly all of the network this loop spends.
     // Renewed either side of it, as the loop renews either side of the wait: up to six
@@ -897,6 +898,7 @@ fn considered(
     _cooled: &Cooled<'_>,
     _idle: &Idle,
 ) -> Vec<Considered> {
+    let sharers = crate::registry::Sharers::across(registry);
     watching
         .scope
         .accounts(registry)
@@ -905,7 +907,7 @@ fn considered(
             // Through the registry's own answer rather than `!=`, which would be
             // correct only by two facts that are true two modules away.
             !name::same_name(account.email(), watching.account.email())
-                && cycle::is_a_candidate(registry, account)
+                && cycle::is_a_candidate(&sharers, account)
         })
         .map(|account| Considered {
             email: account.email().to_string(),

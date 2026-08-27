@@ -164,11 +164,13 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
 
     // Read off the unit that is actually installed rather than off what one would be
     // written from now, because whether those two have come apart is the question.
+    // Once, because both answers below come out of the same file.
+    let unit = at.as_deref().and_then(|at| host.read_file(at).ok());
     let recorded = installed
-        .then(|| recorded_binary(host, at.as_deref()))
+        .then(|| unit.as_deref().and_then(|text| manager.binary_in(text)))
         .flatten();
     let binary_is_there = recorded.as_deref().map(|at| host.path_exists(at));
-    let log = recorded_log(host, at.as_deref(), installed)?;
+    let log = recorded_log(host, unit.as_deref(), installed)?;
 
     if json {
         return say_json(
@@ -471,25 +473,12 @@ fn watcher_is_running(host: &dyn Host) -> bool {
     crate::lock::is_held(host, &spec).unwrap_or(false)
 }
 
-/// The binary the *installed* unit names, read back out of it.
+/// Where the decision log goes, read back out of the unit that is installed.
 ///
 /// Read rather than recomputed: a value worked out again from the machine would agree
-/// with the machine by construction. The reading is [`service::binary_in`]'s, and what
-/// is left here is the one effect.
-fn recorded_binary(host: &dyn Host, at: Option<&std::path::Path>) -> Option<PathBuf> {
-    let text = host.read_file(at?).ok()?;
-    Manager::of(host).binary_in(&text)
-}
-
-/// Where the decision log goes, asked of the unit that is installed.
-///
-/// [`recorded_binary`]'s rule, applied to the other thing an install bakes in, falling
-/// back to the derivation only where there is nothing to read back.
-fn recorded_log(
-    host: &dyn Host,
-    at: Option<&std::path::Path>,
-    installed: bool,
-) -> Result<Option<PathBuf>> {
+/// with the machine by construction. Falls back to the derivation only where there is
+/// no unit file to read it out of.
+fn recorded_log(host: &dyn Host, unit: Option<&str>, installed: bool) -> Result<Option<PathBuf>> {
     // `None` where there is nothing installed to write one, as `binary` is
     // `null` beside a `binary_exists` of `null`: a path here is a file a script
     // would tail and nothing would ever append to.
@@ -500,9 +489,7 @@ fn recorded_log(
     if !manager.keeps_a_unit_file() {
         return manager.log_path(host);
     }
-    Ok(at
-        .and_then(|at| host.read_file(at).ok())
-        .and_then(|text| manager.log_in(&text)))
+    Ok(unit.and_then(|text| manager.log_in(text)))
 }
 
 /// The line saying a Service will hold because no Scope has granted anything, or `None`

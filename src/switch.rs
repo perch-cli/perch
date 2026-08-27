@@ -279,8 +279,8 @@ fn record_active(
 /// Under them, not before them: the liveness refusal is a statement about a
 /// moment, and taking a lock can take seconds. Once the locks are held nothing
 /// can change the answer, which is the only condition under which asking helps.
-struct Prepared {
-    installed: Installed,
+struct Prepared<'h> {
+    installed: Installed<'h>,
     store: Store,
     credential: Credential,
     /// The `oauthAccount` block to write, ready to splice in.
@@ -726,13 +726,13 @@ pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result
     )))
 }
 
-fn prepare(
+fn prepare<'h>(
     host: &dyn Host,
     incoming: &Account,
     outgoing: Option<&Account>,
-    installed: Installed,
+    installed: Installed<'h>,
     store: Store,
-) -> Result<Prepared> {
+) -> Result<Prepared<'h>> {
     // Before anything is written, and only of the Profile written to. The
     // incoming Account's is only ever read from, and reading takes nothing away
     // from the session using it.
@@ -741,11 +741,15 @@ fn prepare(
             .idle_or(&installed, &live::NOTHING_WAS_CHANGED)?;
     }
 
+    // Derived once and read twice: a derivation is a `PERCH_HOME` lookup, a
+    // slug, a component walk and a SHA-256 of the result.
+    let incoming_store = incoming.store(host)?;
+
     // From whichever of the Profile's two Credential Stores holds one: an
     // Account is switchable to as long as its Credential is somewhere Claude
     // Code would have looked.
-    let held = credentials::read(host, &incoming.store(host)?)?.ok_or_else(|| {
-        PerchError::Quarantined {
+    let held =
+        credentials::read(host, &incoming_store)?.ok_or_else(|| PerchError::Quarantined {
             why: Quarantine::NoCredential,
             said: format!(
                 "Perch holds no Credential for {}, so it is Quarantined — it \
@@ -755,8 +759,7 @@ fn prepare(
                 incoming.email(),
                 registry::how_to_repair(incoming.email()),
             ),
-        }
-    })?;
+        })?;
     let credential = probe::understand_credential(
         held.credential,
         &format!("the Credential Perch holds for {}", incoming.email()),
@@ -764,7 +767,7 @@ fn prepare(
     )?;
 
     Ok(Prepared {
-        identity_block: identity_block_for(host, incoming)?,
+        identity_block: identity_block_for(host, incoming, &incoming_store)?,
         installed,
         store,
         credential,
@@ -792,7 +795,7 @@ fn capture(
     // about what it holds and is refused, with nothing written.
     let live = match probe::read_credential(host, &prepared.store, &prepared.installed) {
         Ok(live) => live,
-        Err(why @ PerchError::ProbeRefused { .. }) => {
+        Err(why @ PerchError::ProbeRefused(_)) => {
             return Ok(Captured::Unreadable {
                 outgoing: outgoing.email().to_string(),
                 why: why.to_string(),
@@ -996,10 +999,9 @@ fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
 /// records, so that block is preferred verbatim; one is composed only for an
 /// Account that has none, such as the login Adoption took over
 /// (ADR a-login-perch-does-not-need).
-fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
-    let kept = incoming.store(host)?.identity_file;
+fn identity_block_for(host: &dyn Host, incoming: &Account, kept_in: &Store) -> Result<String> {
     let held = host
-        .read_file(&kept)
+        .read_file(&kept_in.identity_file)
         .map(Zeroizing::new)
         .ok()
         .and_then(|contents| probe::oauth_account_block(&contents).map(str::to_string));

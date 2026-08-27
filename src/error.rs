@@ -57,22 +57,30 @@ pub const EXIT_QUARANTINED: i32 = 19;
 /// of them resolves itself.
 pub const EXIT_HELD: i32 = 20;
 
+/// What a [`PerchError::ProbeRefused`] carries: which belief about the installed
+/// Claude Code failed, and which Claude Code it was read from.
+#[derive(Debug, thiserror::Error)]
+#[error("Perch declined to act: {assumption} ({detail}), Claude Code {version}{}", note.as_deref().unwrap_or(""))]
+pub struct ProbeRefusal {
+    pub assumption: String,
+    pub detail: String,
+    pub version: String,
+    /// What the sequence around the failure left behind, said after the whole
+    /// sentence. Its own field because `detail` is rendered inside a
+    /// parenthetical: a note appended there lands mid-sentence, and this is the
+    /// refusal a half-finished Switch reports itself as.
+    pub note: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
     /// The probe does not recognize the installed Claude Code well enough to
     /// touch anything. Names the assumption that failed
-    /// (ADR an-assumption-is-probed).
-    #[error("Perch declined to act: {assumption} ({detail}), Claude Code {version}{}", note.as_deref().unwrap_or(""))]
-    ProbeRefused {
-        assumption: String,
-        detail: String,
-        version: String,
-        /// What the sequence around the failure left behind, said after the
-        /// whole sentence. Its own field because `detail` is rendered inside a
-        /// parenthetical: a note appended there lands mid-sentence, and this is
-        /// the variant a half-finished Switch reports itself as.
-        note: Option<String>,
-    },
+    /// (ADR an-assumption-is-probed). Boxed, so the widest variant is not the
+    /// width of every `Result` in the crate: a refusal is the rare path, and
+    /// pays an allocation every other path is spared.
+    #[error("{0}")]
+    ProbeRefused(Box<ProbeRefusal>),
 
     /// The keychain could not be consulted at all. Deliberately distinct from
     /// "not found", which reads as an Account having vanished
@@ -229,8 +237,10 @@ impl PerchError {
     pub fn with_note(mut self, note: &str) -> PerchError {
         // The one variant whose message is not its whole sentence: `detail` is
         // rendered inside a parenthetical, so its note has a field of its own.
-        if let PerchError::ProbeRefused { note: held, .. } = &mut self {
-            held.get_or_insert_default()
+        if let PerchError::ProbeRefused(refusal) = &mut self {
+            refusal
+                .note
+                .get_or_insert_default()
                 .push_str(&format!("\n\n{note}"));
             return self;
         }
@@ -328,12 +338,12 @@ mod tests {
         vec![
             (
                 "ProbeRefused",
-                PerchError::ProbeRefused {
+                PerchError::ProbeRefused(Box::new(ProbeRefusal {
                     assumption: "the credential lives in the keychain".to_string(),
                     detail: "it does not".to_string(),
                     version: "2.1.221".to_string(),
                     note: None,
-                },
+                })),
             ),
             (
                 "KeychainUnavailable",

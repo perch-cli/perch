@@ -145,7 +145,7 @@ fn render_json(
     report: &Report,
 ) -> Result<()> {
     let document = json!({
-        "active": listing::document(host, registry, account, now),
+        "active": listing::document(host, registry, &registry.aliases_by_account(), account, now),
         "landing": registry.active().document(),
         "refresh": report.document(),
     });

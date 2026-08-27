@@ -817,7 +817,7 @@ impl Network for RealHost {
                 execution.stderr.trim()
             )));
         }
-        split_reply(&stdout)
+        split_reply(stdout)
     }
 }
 
@@ -827,10 +827,24 @@ impl Host for RealHost {}
 
 /// The body and the status code out of what `curl` wrote. Apart from the caller
 /// so it can be asserted on, since `FakeHost::http` answers with a
-/// `HttpResponse` already built. A status code that will not parse is said
-/// rather than read as zero, which is a status no server sends about a request
-/// that may never have been made.
-fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
+/// `HttpResponse` already built. Takes the buffer rather than borrowing it: the
+/// body is what curl wrote less its trailing status, so it is that buffer
+/// truncated, where a second one holds a second copy of the whole reply.
+fn split_reply(mut stdout: Zeroizing<String>) -> Result<HttpResponse, HostError> {
+    // Safe because `Zeroizing` wipes the whole capacity rather than the live
+    // length, so the status digits now past the end still go.
+    let (body, status) = status_after(&stdout)?;
+    stdout.truncate(body);
+    Ok(HttpResponse {
+        status,
+        body: stdout,
+    })
+}
+
+/// Where the body ends and what status `curl` appended after it. A status code
+/// that will not parse is said rather than read as zero, which is a status no
+/// server sends about a request that may never have been made.
+fn status_after(stdout: &str) -> Result<(usize, u16), HostError> {
     let (body, code) = stdout
         .rsplit_once('\n')
         .ok_or_else(|| HostError::Other("curl produced no status code".into()))?;
@@ -840,10 +854,7 @@ fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
             code.trim()
         ))
     })?;
-    Ok(HttpResponse {
-        status,
-        body: Zeroizing::new(body.to_string()),
-    })
+    Ok((body.len(), status))
 }
 
 /// One line from standard input, or `None` at end of it. Through the same reader
@@ -1999,29 +2010,32 @@ mod tests {
     /// with a response already built, so no behavior test ever splits a reply.
     #[test]
     fn a_reply_is_split_into_a_body_and_a_status_and_says_so_when_it_cannot_be() {
-        let reply = split_reply("{\"five_hour\":{}}\n200").expect("that is a reply");
+        let split = |wrote: &str| split_reply(Zeroizing::new(wrote.to_string()));
+
+        let reply = split("{\"five_hour\":{}}\n200").expect("that is a reply");
         assert_eq!(reply.status, 200);
         assert_eq!(*reply.body, "{\"five_hour\":{}}");
 
         // A body with newlines in it: the split is the *last* one, because the
         // status is what curl appends.
-        let reply = split_reply("first\nsecond\n429").expect("that is a reply too");
+        let reply = split("first\nsecond\n429").expect("that is a reply too");
         assert_eq!(reply.status, 429);
         assert_eq!(*reply.body, "first\nsecond");
 
         // An empty body still carries a status, which is what a 204 looks like.
-        assert_eq!(split_reply("\n204").expect("a bodyless reply").status, 204);
+        let reply = split("\n204").expect("a bodyless reply");
+        assert_eq!((reply.status, reply.body.as_str()), (204, ""));
 
         // And what curl did not write is said as itself rather than read as a
         // status of zero, which `anthropic::understand` has no arm for.
-        let refused = split_reply("something went wrong\nnot a number")
-            .expect_err("that is not a status code");
+        let refused =
+            split("something went wrong\nnot a number").expect_err("that is not a status code");
         assert!(
             refused.to_string().contains("not a number"),
             "and it quotes what curl actually printed: {refused}"
         );
 
-        let refused = split_reply("no newline at all").expect_err("that is not a reply");
+        let refused = split("no newline at all").expect_err("that is not a reply");
         assert!(refused.to_string().contains("no status code"), "{refused}");
     }
 

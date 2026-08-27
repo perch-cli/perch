@@ -395,19 +395,24 @@ fn windows_in(
     // `is_drift` is asked once per key the reply carries. Only where something
     // was read — a reply naming no window at all is `utilization`'s to say.
     if !windows.is_empty()
-        && let Some(missing) = EVERY_ACCOUNT_HAS
+        && let Some((at, _)) = EVERY_ACCOUNT_HAS_SHOWN
             .iter()
-            .find(|name| !windows.iter().any(|held| held.window == window_name(name)))
+            .enumerate()
+            .find(|(_, shown)| !windows.iter().any(|held| held.window == **shown))
     {
-        return Err(went_missing(missing));
+        return Err(went_missing(EVERY_ACCOUNT_HAS[at]));
     }
 
-    windows.sort_by(|one, other| {
-        rank(&one.window)
-            .cmp(&rank(&other.window))
-            .then_with(|| one.window.cmp(&other.window))
+    // Ranked once each rather than inside a comparator that runs O(n log n)
+    // times, which is what `cycle::ranked` does for the same reason.
+    let mut ranked: Vec<(u8, WindowUtilization)> = windows
+        .into_iter()
+        .map(|window| (rank(&window.window), window))
+        .collect();
+    ranked.sort_by(|(theirs, one), (ours, other)| {
+        theirs.cmp(ours).then_with(|| one.window.cmp(&other.window))
     });
-    Ok(windows)
+    Ok(ranked.into_iter().map(|(_, window)| window).collect())
 }
 
 /// Whether a key names a Quota Window by the period it meters, as every one
@@ -464,6 +469,11 @@ const EXTRA_USAGE: &str = "extra_usage";
 /// being read as absent, and [`windows_in`] refuses a reply that leaves one out —
 /// all three because they are the ones always there to be read.
 const EVERY_ACCOUNT_HAS: [&str; 2] = ["five_hour", "seven_day"];
+
+/// The same two as Perch shows them. Written out rather than derived, because
+/// [`rank`] is asked inside a comparator and `window_name` allocates; that the
+/// two cannot drift apart is a test rather than a call.
+const EVERY_ACCOUNT_HAS_SHOWN: [&str; 2] = ["5-hour", "7-day"];
 
 /// Whether a key names one of [`EVERY_ACCOUNT_HAS`], as the endpoint spells it
 /// rather than as Perch shows it — `five_hour`, never `5-hour`.
@@ -531,14 +541,18 @@ fn reset_time_in(name: &str, value: &Value, said: &mut Vec<String>) -> Option<Da
 /// A window's name as the rest of Perch says it: `five_hour` is the `5-hour`
 /// window, `seven_day_opus` the `7-day-opus` one.
 fn window_name(key: &str) -> String {
-    key.split('_')
-        .map(|part| match part {
+    let mut name = String::with_capacity(key.len());
+    for part in key.split('_') {
+        if !name.is_empty() {
+            name.push('-');
+        }
+        name.push_str(match part {
             "five" => "5",
             "seven" => "7",
             other => other,
-        })
-        .collect::<Vec<&str>>()
-        .join("-")
+        });
+    }
+    name
 }
 
 /// Where a window sits when the figures are shown together: the two every
@@ -547,9 +561,9 @@ fn window_name(key: &str) -> String {
 /// Asked of a window as Perch shows it and answered from [`EVERY_ACCOUNT_HAS`],
 /// which is spelled as the endpoint spells it, so the two cannot drift apart.
 fn rank(window: &str) -> u8 {
-    EVERY_ACCOUNT_HAS
+    EVERY_ACCOUNT_HAS_SHOWN
         .iter()
-        .position(|key| window_name(key) == window)
+        .position(|shown| *shown == window)
         .map_or(EVERY_ACCOUNT_HAS.len() as u8, |at| at as u8)
 }
 
@@ -565,6 +579,15 @@ fn email_in(document: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// What `EVERY_ACCOUNT_HAS_SHOWN` is written out instead of derived for, so
+    /// the two cannot drift apart without this saying so.
+    #[test]
+    fn the_two_windows_every_account_has_are_spelled_the_same_both_ways() {
+        for (key, shown) in EVERY_ACCOUNT_HAS.iter().zip(EVERY_ACCOUNT_HAS_SHOWN) {
+            assert_eq!(window_name(key), shown);
+        }
+    }
     #[test]
     fn a_utilization_outside_nought_to_a_hundred_is_brought_back_into_it() {
         let document: Value = serde_json::from_str(

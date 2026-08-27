@@ -191,6 +191,15 @@ const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
 /// Account the Export carries neither a Credential nor a `.claude.json` for gets
 /// no Profile, is restored anyway, and is not Quarantined here for it.
 pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<Placed> {
+    // Keyed rather than asked of the registry per key: two names are one name
+    // exactly where `name::folded` agrees, which is what `account` scans for.
+    let listed: std::collections::HashSet<String> = export
+        .registry
+        .accounts
+        .iter()
+        .map(|account| name::folded(account.email()))
+        .collect();
+
     // Every Credential in the file belongs to an Account the file lists, or this
     // is not the whole restore it claims to be. `gather` cannot write such an
     // Export, so this is about a file written by something else.
@@ -198,7 +207,7 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
         let unlisted: Vec<&str> = keys
             .keys()
             .map(String::as_str)
-            .filter(|email| export.registry.account(email).is_none())
+            .filter(|email| !listed.contains(name::folded(email).as_str()))
             .collect();
         if !unlisted.is_empty() {
             return Err(PerchError::Malformed {
@@ -218,12 +227,9 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
     // above and by the same fold: `credential_for` answers with the first match,
     // so only one of the two is ever placed, under a report saying it was whole.
     for (what, keys) in every_map(export) {
-        let held: Vec<&str> = keys.keys().map(String::as_str).collect();
-        for (at, key) in held.iter().enumerate() {
-            if let Some(clash) = held[..at]
-                .iter()
-                .find(|earlier| name::same_name(earlier, key))
-            {
+        let mut held: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
+        for key in keys.keys().map(String::as_str) {
+            if let Some(clash) = held.insert(name::folded(key), key) {
                 return Err(PerchError::Malformed {
                     path: "the Export".to_string(),
                     detail: format!(
@@ -260,11 +266,10 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
     // And no two may land in one place: `user+work@` and `user.work@` flatten to
     // one Profile name, and storing over it supersedes the Credential already
     // there, which `perch add` refuses where a login enters.
-    for (at, account) in export.registry.accounts.iter().enumerate() {
-        if let Some(clash) = export.registry.accounts[..at]
-            .iter()
-            .find(|earlier| registry::same_profile(earlier.email(), account.email()))
-        {
+    let mut landing: std::collections::HashMap<String, &registry::Account> =
+        std::collections::HashMap::new();
+    for account in &export.registry.accounts {
+        if let Some(clash) = landing.insert(registry::slug(account.email()), account) {
             return Err(PerchError::Conflict(format!(
                 "{} and {} share the Profile they would be kept in, so importing \
                  both would mean each one's Credential replacing the other's.\n\

@@ -955,6 +955,20 @@ impl Registry {
             .map(|(alias, _)| alias.as_str())
     }
 
+    /// Every Account's Alias at once, for a caller asking about more than one.
+    ///
+    /// [`Registry::alias_of`] scans, the map being keyed by Alias rather than by
+    /// Account, so a listing asking it per row is a scan per row.
+    pub fn aliases_by_account(&self) -> AliasOf<'_> {
+        let mut held: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
+        for (alias, email) in &self.aliases {
+            // First wins, as `alias_of`'s scan does: `validate` refuses two
+            // Aliases for one Account, and `aliases` walks in sorted order.
+            held.entry(name::folded(email)).or_insert(alias.as_str());
+        }
+        AliasOf(held)
+    }
+
     /// An Account as the user names it: by its Alias when it has one, so a
     /// message about it reads the way they would say it.
     pub fn named_for_the_user(&self, email: &str) -> String {
@@ -1234,6 +1248,44 @@ pub fn same_profile(one: &str, other: &str) -> bool {
     slug(one) == slug(other)
 }
 
+/// [`Registry::alias_of`] answered for every Account rather than for one.
+pub struct AliasOf<'a>(std::collections::HashMap<String, &'a str>);
+
+impl<'a> AliasOf<'a> {
+    pub fn account(&self, email: &str) -> Option<&'a str> {
+        self.0.get(name::folded(email).as_str()).copied()
+    }
+}
+
+/// Which Profiles more than one Account derives, settled in one pass.
+///
+/// `is_a_candidate` asks this of every Account and is asked of every one, so
+/// answering it by [`sharing_a_profile_with`]'s scan cost n² for one fact.
+pub struct Sharers(std::collections::HashSet<String>);
+
+impl Sharers {
+    pub fn across(registry: &Registry) -> Sharers {
+        // Counting is sound because `validate` refuses two Accounts under one
+        // folded address, so nobody is counted as sharing with themselves.
+        let mut once: std::collections::HashSet<String> =
+            std::collections::HashSet::with_capacity(registry.accounts.len());
+        let mut twice = std::collections::HashSet::new();
+        let mut slugged = String::new();
+        for account in &registry.accounts {
+            slug_into(&mut slugged, account.email());
+            if !once.insert(slugged.clone()) {
+                twice.insert(slugged.clone());
+            }
+        }
+        Sharers(twice)
+    }
+
+    /// Whether this Account's Profile is one another Account derives too.
+    pub fn hold(&self, email: &str) -> bool {
+        self.0.contains(slug(email).as_str())
+    }
+}
+
 /// The other Account a Profile belongs to as well, where there is one.
 ///
 /// Three commands ask it — a Switch, a Renewal and a Remove — and each spelled
@@ -1364,7 +1416,8 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // The version first, off a shape that is only the version. A newer Perch is
     // exactly the thing that writes a value this build has no variant for, and
     // reading the document first fails on that with serde's own words.
-    match crate::error::claimed_version(&contents) {
+    let claimed = crate::error::claimed_version(&contents);
+    match claimed {
         Some(version) if version > u64::from(CURRENT_VERSION) => {
             return Err(crate::error::written_by_a_newer_perch(
                 &path.display().to_string(),
@@ -1385,7 +1438,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // In memory here and written back by `migration::bring_forward`, because
     // every path that writes holds the lock before it reads. Decorated as every
     // other refusal here is: a step that names a field names no file otherwise.
-    let forwarded = crate::migration::forward(&contents)
+    let forwarded = crate::migration::forward_from(&contents, claimed)
         .map_err(|refused| refused.with_note(&the_file_to_edit(path)))?;
 
     // Strictly, so a key nobody recognizes is a refusal naming it rather than a
@@ -1493,9 +1546,17 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // What each Alias points *at*, which the loop above does not look at. A
     // dangling one is not a refusal downstream — it is the `expect` in every
     // command that resolves a Target.
-    let mut named: Vec<(&str, &str)> = Vec::new();
+
+    // Keyed rather than scanned: both questions below are asked of every Alias,
+    // and two names are one name exactly where `name::folded` agrees.
+    let held: std::collections::HashSet<String> = registry
+        .accounts
+        .iter()
+        .map(|account| name::folded(account.email()))
+        .collect();
+    let mut named: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
     for (alias, email) in &registry.aliases {
-        if registry.account(email).is_none() {
+        if !held.contains(name::folded(email).as_str()) {
             return Err(PerchError::Invalid(format!(
                 "The registry gives the Alias `{alias}` to {email}, which is not \
                  an Account Perch holds.",
@@ -1504,7 +1565,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
         // One Account, one Alias. With two, `alias_of` returns whichever the map
         // yields first, so `perch list` shows one while `perch switch` answers to
         // both — the same undecided answer as two names differing only in case.
-        if let Some((already, _)) = named.iter().find(|(_, held)| same_name(held, email)) {
+        if let Some(already) = named.insert(name::folded(email), alias) {
             return Err(PerchError::Invalid(format!(
                 "The registry gives {email} both the Alias `{already}` and the \
                  Alias `{alias}`, and an Account answers to one Alias at a time \
@@ -1512,7 +1573,6 @@ pub fn validate(registry: &Registry) -> Result<()> {
                  anything.",
             )));
         }
-        named.push((alias, email));
     }
 
     // The other pointer into the Accounts, and both ends of a Landing, because
@@ -1655,17 +1715,15 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
 }
 
 /// The first pair of names in a sequence that [`same_name`] cannot tell apart,
-/// earlier one first.
-///
-/// Quadratic, deliberately: it is a registry, and the alternative is a map keyed
-/// on a lowercased copy of every name.
+/// earlier one first. Keyed on [`name::folded`], which two names are one name
+/// exactly where they agree on; the alternative is asking `same_name` of
+/// everything already seen, which is a scan per name.
 fn first_collision<'a>(names: impl Iterator<Item = &'a str>) -> Option<(&'a str, &'a str)> {
-    let mut seen: Vec<&str> = Vec::new();
+    let mut seen: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
     for name in names {
-        if let Some(already) = seen.iter().find(|held| same_name(held, name)) {
+        if let Some(already) = seen.insert(name::folded(name), name) {
             return Some((already, name));
         }
-        seen.push(name);
     }
     None
 }

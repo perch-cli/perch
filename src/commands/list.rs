@@ -215,50 +215,62 @@ const NOTHING_TO_SAY: &str = "-";
 /// A row of Perch's own words, in the shape the writer takes: a heading row and
 /// the blank one a second Quota Window sits under go through the same door as a
 /// row holding an address somebody else chose.
-fn drawn(columns: [&str; COLUMNS]) -> [Shown; COLUMNS] {
-    columns.map(Shown::of)
+fn drawn(columns: [&str; COLUMNS]) -> Drawn {
+    Drawn::of(columns.map(Shown::of))
+}
+
+/// A row's text with every cell already measured. The width a column takes is
+/// the widest cell in it, so every cell is measured to decide the column —
+/// carrying the reading means the padding is not a second one.
+struct Drawn {
+    cells: [Shown; COLUMNS],
+    measured: [usize; COLUMNS],
+}
+
+impl Drawn {
+    fn of(cells: [Shown; COLUMNS]) -> Drawn {
+        let measured = std::array::from_fn(|column| utilization::cells(&cells[column]));
+        Drawn { cells, measured }
+    }
 }
 
 /// What those columns hold for one Account: the name you reach it by, what it
 /// is interchangeable with, whether it is any use, and how much of it is left.
-fn columns(registry: &Registry, account: &Account) -> [Shown; COLUMNS] {
-    [
+fn columns(alias_of: &registry::AliasOf<'_>, account: &Account) -> Drawn {
+    Drawn::of([
         Shown::of(account.email()),
-        Shown::of(registry.alias_of(account.email()).unwrap_or(NOTHING_TO_SAY)),
+        Shown::of(alias_of.account(account.email()).unwrap_or(NOTHING_TO_SAY)),
         Shown::of(account.group.as_deref().unwrap_or(name::NO_GROUP)),
         Shown::of(&state_of(account)),
         Shown::of(&cycle::headroom_phrase(account)),
-    ]
+    ])
 }
 
-/// Each column as wide as the widest thing in it, [`HEADERS`] included,
-/// measured in the cells a terminal draws them in. The headers are not a
-/// parameter: a column measured against anything else is one padded to a width
-/// its own heading does not fit in.
-fn widths<'a>(rows: impl IntoIterator<Item = &'a [Shown; COLUMNS]> + Clone) -> [usize; COLUMNS] {
-    std::array::from_fn(|column| {
-        rows.clone()
-            .into_iter()
-            .map(|row| utilization::cells(&row[column]))
-            .chain(std::iter::once(utilization::cells(&Shown::of(
-                HEADERS[column],
-            ))))
-            .max()
-            .unwrap_or_default()
-    })
+/// Each column as wide as the widest thing in it, the headings included,
+/// measured in the cells a terminal draws them in. The headings are a parameter
+/// so they are measured with everything else: a column measured against
+/// anything less is one padded to a width its own heading does not fit in.
+fn widths<'a>(rows: impl IntoIterator<Item = &'a Drawn>, headings: &Drawn) -> [usize; COLUMNS] {
+    let mut widths = headings.measured;
+    for row in rows {
+        for (widest, cell) in widths.iter_mut().zip(row.measured) {
+            *widest = (*widest).max(cell);
+        }
+    }
+    widths
 }
 
 /// One row per Account, with the extra Quota Windows carried on rows of their
 /// own so no figure is dropped for want of a column.
 struct Row {
     active: bool,
-    cells: [Shown; COLUMNS],
+    cells: Drawn,
     figures: Vec<String>,
 }
 
 impl Row {
-    fn columns(&self) -> [&Shown; COLUMNS] {
-        self.cells.each_ref()
+    fn columns(&self) -> &Drawn {
+        &self.cells
     }
 
     fn marker(&self) -> char {
@@ -271,11 +283,12 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
     // into one `Utilization` column here, so a width measured per Account put
     // the same window's percentage in a different place on each of them.
     let width = utilization::window_width_across(accounts.iter().copied());
+    let alias_of = registry.aliases_by_account();
     accounts
         .iter()
         .map(|account| Row {
             active: registry.is_active(account.email()),
-            cells: columns(registry, account),
+            cells: columns(&alias_of, account),
             figures: utilization::lines(account, now, width),
         })
         .collect()
@@ -354,17 +367,19 @@ fn render_human(
     // one, every row would carry the same answer to a question the heading has
     // already answered.
     let show_group = matches!(scope, Scope::Everything);
-    let widths = widths(rows.iter().map(|row| &row.cells));
 
     let headings = drawn(HEADERS);
     // A second Quota Window belongs to the Account above it, so it is shown
     // under that Account's first figure and nothing else is repeated.
     let again = drawn([""; COLUMNS]);
+    let widths = widths(rows.iter().map(|row| &row.cells), &headings);
 
+    let mut line = String::new();
     write_row(
         out,
+        &mut line,
         ' ',
-        headings.each_ref(),
+        &headings,
         "Utilization",
         &widths,
         show_group,
@@ -373,9 +388,9 @@ fn render_human(
         for (index, figure) in row.figures.iter().enumerate() {
             let (marker, columns) = match index {
                 0 => (row.marker(), row.columns()),
-                _ => (' ', again.each_ref()),
+                _ => (' ', &again),
             };
-            write_row(out, marker, columns, figure, &widths, show_group)?;
+            write_row(out, &mut line, marker, columns, figure, &widths, show_group)?;
         }
     }
 
@@ -432,25 +447,34 @@ fn reserve_lines(
 
 fn write_row(
     out: &mut dyn Write,
+    line: &mut String,
     marker: char,
-    columns: [&Shown; COLUMNS],
+    columns: &Drawn,
     figure: &str,
     widths: &[usize; COLUMNS],
     show_group: bool,
 ) -> Result<()> {
-    let cells: Vec<String> = columns
+    // One buffer the whole table is drawn through rather than a `String` per
+    // cell, a `Vec` of them, a join and a `format!` of the result: a listing
+    // that paid fourteen allocations a row paid them per Quota Window too.
+    line.clear();
+    line.push(marker);
+    line.push(' ');
+    for (column, ((cell, measured), width)) in columns
+        .cells
         .iter()
+        .zip(columns.measured)
         .zip(widths)
         .enumerate()
-        .filter(|(column, _)| show_group || *column != GROUP_COLUMN)
-        .map(|(_, (value, width))| utilization::padded(value, *width))
-        .collect();
-    writeln!(
-        out,
-        "{}",
-        format!("{marker} {}  {figure}", cells.join("  ")).trim_end()
-    )
-    .map_err(write_failed)
+    {
+        if !show_group && column == GROUP_COLUMN {
+            continue;
+        }
+        utilization::pad_into(line, cell, measured, *width);
+        line.push_str("  ");
+    }
+    line.push_str(figure);
+    writeln!(out, "{}", line.trim_end()).map_err(write_failed)
 }
 
 /// A listing with nothing in it, said as the state it is rather than as an
@@ -482,9 +506,10 @@ fn render_json(
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
+    let alias_of = registry.aliases_by_account();
     let sectioned: Vec<serde_json::Value> = sections
         .iter()
-        .map(|section| section.document(host, registry, now))
+        .map(|section| section.document(host, registry, &alias_of, now))
         .collect();
 
     let document = json!({
@@ -511,8 +536,14 @@ mod tests {
     use super::*;
     use crate::registry::Quarantine;
 
-    fn row(email: &str, alias: &str) -> [Shown; COLUMNS] {
+    fn row(email: &str, alias: &str) -> Drawn {
         drawn([email, alias, "none", NOTHING_TO_SAY, "40%"])
+    }
+
+    /// The headings are what every column's width is floored at, so a case
+    /// about a width states them rather than leaving the floor implicit.
+    fn against_the_headings<'a>(rows: impl IntoIterator<Item = &'a Drawn>) -> [usize; COLUMNS] {
+        widths(rows, &drawn(HEADERS))
     }
 
     fn account_in(disabled: bool, quarantine: Option<Quarantine>) -> Account {
@@ -546,7 +577,7 @@ mod tests {
 
     #[test]
     fn a_column_is_as_wide_as_its_widest_value_or_its_header() {
-        let widths = widths(&[row("a@b.com", "overflow"), row("someone@b.com", "-")]);
+        let widths = against_the_headings(&[row("a@b.com", "overflow"), row("someone@b.com", "-")]);
         assert_eq!(widths[0], "someone@b.com".len());
         assert_eq!(widths[1], "overflow".len());
         assert_eq!(widths[2], "Group".len(), "the header is the floor");
@@ -556,7 +587,7 @@ mod tests {
     fn a_column_is_measured_in_characters_rather_than_bytes() {
         // A name a terminal draws in eight columns pads to eight, not to the
         // eleven bytes it happens to occupy.
-        let widths = widths(&[row("a@b.com", "øverfløw")]);
+        let widths = against_the_headings(&[row("a@b.com", "øverfløw")]);
         assert_eq!(widths[1], 8);
     }
 
@@ -565,16 +596,16 @@ mod tests {
     /// it out of line on every row rather than only its own.
     #[test]
     fn a_column_is_measured_in_the_cells_a_terminal_draws_it_in() {
-        let in_group = |name: &str| -> [[Shown; COLUMNS]; 1] {
-            let mut row = row("a@b.com", "-");
-            row[2] = Shown::of(name);
-            [row]
+        let in_group = |name: &str| -> [Drawn; 1] {
+            let mut cells = row("a@b.com", "-").cells;
+            cells[2] = Shown::of(name);
+            [Drawn::of(cells)]
         };
         assert_eq!(
-            widths(&in_group("作業"))[2],
+            against_the_headings(&in_group("作業"))[2],
             "Group".len(),
             "the header is still the floor"
         );
-        assert_eq!(widths(&in_group("作業作業"))[2], 8);
+        assert_eq!(against_the_headings(&in_group("作業作業"))[2], 8);
     }
 }

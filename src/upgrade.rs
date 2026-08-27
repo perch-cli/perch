@@ -368,19 +368,24 @@ pub fn newest(host: &dyn Host, within_millis: Option<u64>) -> Result<String> {
         )));
     }
 
-    let document: serde_json::Value = serde_json::from_str(&answered.body).map_err(|err| {
+    // A shape that is only the tag, rather than a `Value` of the whole reply:
+    // GitHub answers with an asset per artifact, each carrying an uploader, and
+    // none of it is read.
+    #[derive(serde::Deserialize)]
+    struct Latest {
+        tag_name: Option<String>,
+    }
+
+    let latest: Latest = serde_json::from_str(&answered.body).map_err(|err| {
         PerchError::Other(format!(
             "could not read the answer about which Release is newest: {err}"
         ))
     })?;
-    let tag = document
-        .get("tag_name")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            PerchError::Other("the answer about which Release is newest names no tag".to_string())
-        })?;
+    let tag = latest.tag_name.ok_or_else(|| {
+        PerchError::Other("the answer about which Release is newest names no tag".to_string())
+    })?;
 
-    version_typed(tag)
+    version_typed(&tag)
 }
 
 /// The line `perch version` adds when there is a newer Release, and nothing

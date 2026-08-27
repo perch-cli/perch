@@ -230,23 +230,27 @@ fn only_the_account_you_are_on_is_refreshed() {
     );
 }
 
+/// A version is what a refusal quotes, so a round that refuses nothing has no
+/// reader for one — and this loop runs until the session ends. Over the
+/// threshold, so the round reads the candidates and Switches: the round that
+/// used to ask three times, then once, and now asks not at all.
 #[test]
-fn a_round_asks_once_which_claude_code_is_installed_however_much_it_does() {
-    // Over the threshold, so the round reads the candidates and Switches: the round
-    // that used to ask three times.
+fn a_round_that_refuses_nothing_never_asks_which_claude_code_is_installed() {
     let host = watching(&[95.0], 5.0);
 
     run_watch(&host).0.expect("it was stopped");
 
-    let probes = host
-        .effects()
+    assert_eq!(versions_asked_for(&host), 0, "{:?}", host.effects());
+}
+
+fn versions_asked_for(host: &FakeHost) -> usize {
+    host.effects()
         .iter()
         .filter(|effect| {
             matches!(effect, Effect::Exec { program, args }
                 if program == CLAUDE_BIN && args == &["--version".to_string()])
         })
-        .count();
-    assert_eq!(probes, 1, "{:?}", host.effects());
+        .count()
 }
 
 #[test]

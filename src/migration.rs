@@ -53,8 +53,16 @@ pub fn forward(document: &str) -> Result<Option<String>> {
     // The version off a shape that is only the version, before the whole tree is
     // built: every command reaches this against a registry already current, and
     // a `Value` of every cached Utilization is a costly way to say "nothing".
-    let Some(claimed) = crate::error::claimed_version(document).filter(|at| a_step_moves_it(*at))
-    else {
+    forward_from(document, crate::error::claimed_version(document))
+}
+
+/// The same where the caller has already read the version off the document.
+///
+/// Both readers of a registry have: `load` reads it to refuse a newer Perch, and
+/// `behind` to say which version it is bringing forward. Reading it again here
+/// is a second scan of the whole file to learn what the caller was holding.
+pub fn forward_from(document: &str, claimed: Option<u64>) -> Result<Option<String>> {
+    let Some(claimed) = claimed.filter(|at| a_step_moves_it(*at)) else {
         return Ok(None);
     };
     let Ok(Value::Object(held)) = serde_json::from_str::<Value>(document) else {
@@ -508,7 +516,10 @@ pub fn what_was_renamed_said(renamed: &[Renamed]) -> Option<String> {
 fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
     let contents = host.read_file(path).ok()?;
     let was = crate::error::claimed_version(&contents)?;
-    forward(&contents).ok()?.is_some().then_some(was)
+    forward_from(&contents, Some(was))
+        .ok()?
+        .is_some()
+        .then_some(was)
 }
 
 /// The version [`forward`] leaves behind, which is the one this build reads.

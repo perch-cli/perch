@@ -178,12 +178,13 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
 /// [`cycle::is_a_candidate`]. Not filed under `cycle`, because a Cycle stays
 /// inside its scope and this leaves one when it has to.
 fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Account> {
+    let sharers = crate::registry::Sharers::across(registry);
     let candidates = || {
         registry.accounts.iter().filter(|held| {
             !name::same_name(held.email(), leaving.email())
                 // A sharer is not a candidate, so landing nowhere is what a
                 // Remove does with one: the removal still goes through.
-                && cycle::is_a_candidate(registry, held)
+                && cycle::is_a_candidate(&sharers, held)
         })
     };
     let in_its_group = leaving

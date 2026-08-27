@@ -87,6 +87,14 @@ pub fn same_name(one: &str, other: &str) -> bool {
     current().one_name(one, other)
 }
 
+/// The one spelling [`same_name`] holds every other spelling of a name to.
+///
+/// Two names are one name exactly where this is equal, so a map keyed on it
+/// answers in a lookup what asking `same_name` of everything held is a scan for.
+pub fn folded(name: &str) -> String {
+    current().fold.spelling(name)
+}
+
 /// A Group name offered as a default, made from something that was never chosen
 /// to be one — an organization name, which commonly has spaces in it.
 ///
@@ -295,11 +303,26 @@ pub enum Fold {
 }
 
 impl Fold {
+    /// The spelling this fold brings a name to, which is the fold as a value:
+    /// [`Fold::one_name`] is two of these compared.
+    fn spelling(self, name: &str) -> String {
+        match self {
+            Fold::Lowercase => name.to_lowercase(),
+            Fold::OneSigma => one_sigma(name).collect(),
+        }
+    }
+
     /// Whether two names are one name under this fold. [`Fold::Lowercase`] is
     /// `str::to_lowercase` rather than a per-character spelling of it: the two
     /// part company at the final sigma and at `İ`, which are the characters a
     /// version turns on. [`Fold::OneSigma`] is per character, being the hot path.
     fn one_name(self, one: &str, other: &str) -> bool {
+        // Ahead of both folds, because both agree with it: an ASCII character
+        // lowercases to one ASCII character, and neither character the two rows
+        // part company over is ASCII.
+        if one.is_ascii() && other.is_ascii() {
+            return one.eq_ignore_ascii_case(other);
+        }
         match self {
             Fold::Lowercase => one.to_lowercase() == other.to_lowercase(),
             Fold::OneSigma => one_sigma(one).eq(one_sigma(other)),
@@ -561,6 +584,64 @@ mod tests {
         }
         for (one, other) in [("work", "works"), ("café", "cafe"), ("", "a")] {
             assert!(!same_name(one, other), "{one} and {other} are two names");
+        }
+    }
+
+    /// Both rows of `spelling`, because only the current one is reachable
+    /// through [`folded`] and a row below it still has to answer for the
+    /// registries it wrote. The two part company at the final sigma, which is
+    /// the whole of what tells them apart.
+    #[test]
+    fn each_fold_brings_a_name_to_its_own_one_spelling() {
+        assert_eq!(Fold::Lowercase.spelling("ΟΔΟΣ"), "οδος");
+        assert_eq!(Fold::OneSigma.spelling("ΟΔΟΣ"), "οδοσ");
+        for fold in [Fold::Lowercase, Fold::OneSigma] {
+            assert_eq!(fold.spelling("Work"), "work");
+            assert_eq!(fold.spelling("CAFÉ"), "café");
+        }
+    }
+
+    /// What every map keyed on [`folded`] rests on: two names are one name
+    /// exactly where their folded spellings are equal. `K` is U+212A, the
+    /// Kelvin sign, which is the crossing case — not ASCII, and folding to a
+    /// spelling that is.
+    #[test]
+    fn one_name_and_one_folded_spelling_are_the_same_question() {
+        let corpus = [
+            "work", "Work", "WORK", "café", "CAFÉ", "cafe", "ΟΔΟΣ", "οδος", "οδοσ", "İ", "i",
+            "straße", "STRAßE", "\u{212A}", "k", "日本", "", "-", "2fa",
+        ];
+        for one in corpus {
+            for other in corpus {
+                assert_eq!(
+                    same_name(one, other),
+                    folded(one) == folded(other),
+                    "{one:?} and {other:?}"
+                );
+            }
+        }
+    }
+
+    /// What lets [`Fold::one_name`] answer ASCII without either fold. Exhaustive
+    /// over one character, which is where a case mapping that disagreed would
+    /// have to live: every ASCII character against every other, under both rows.
+    #[test]
+    fn both_folds_answer_ascii_exactly_as_a_bytewise_case_compare_does() {
+        for one in 0u8..=127 {
+            for other in 0u8..=127 {
+                let (one, other) = (String::from(one as char), String::from(other as char));
+                let bytewise = one.eq_ignore_ascii_case(&other);
+                assert_eq!(
+                    one.to_lowercase() == other.to_lowercase(),
+                    bytewise,
+                    "{one:?} and {other:?} under Lowercase"
+                );
+                assert_eq!(
+                    one_sigma(&one).eq(one_sigma(&other)),
+                    bytewise,
+                    "{one:?} and {other:?} under OneSigma"
+                );
+            }
         }
     }
 

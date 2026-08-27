@@ -64,12 +64,13 @@ impl<'a> Section<'a> {
         &self,
         host: &dyn Host,
         registry: &Registry,
+        alias_of: &registry::AliasOf<'_>,
         now: DateTime<Utc>,
     ) -> serde_json::Value {
         let listed: Vec<serde_json::Value> = self
             .accounts
             .iter()
-            .map(|account| document(host, registry, account, now))
+            .map(|account| document(host, registry, alias_of, account, now))
             .collect();
         json!({
             // The same shape the document's own `scope` key carries, because it
@@ -145,13 +146,14 @@ pub fn scopes(registry: &Registry) -> Vec<registry::Scope> {
 pub fn document(
     host: &dyn Host,
     registry: &Registry,
+    alias_of: &registry::AliasOf<'_>,
     account: &Account,
     now: DateTime<Utc>,
 ) -> serde_json::Value {
     json!({
         "email": account.email(),
         "account_uuid": account.identity.account_uuid,
-        "alias": registry.alias_of(account.email()),
+        "alias": alias_of.account(account.email()),
         "group": account.group,
         // Present on every Account, unlike the cell above it: a script made to
         // test for a key's presence to learn a bool has a worse contract rather
@@ -273,7 +275,13 @@ mod tests {
         });
         let account = registry.account("@").expect("hand-edited in");
 
-        let listed = document(&host, &registry, account, chrono::Utc::now());
+        let listed = document(
+            &host,
+            &registry,
+            &registry.aliases_by_account(),
+            account,
+            chrono::Utc::now(),
+        );
 
         assert_eq!(listed["email"], "@");
         assert_eq!(

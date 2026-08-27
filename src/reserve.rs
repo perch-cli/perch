@@ -49,10 +49,11 @@ impl<'a> Reserve<'a> {
     /// the counts add up to the Accounts on screen.
     pub fn of(registry: &'a Registry, scope: &Scope) -> Reserve<'a> {
         let accounts = scope.accounts(registry);
+        let sharers = crate::registry::Sharers::across(registry);
         let candidates: Vec<&Account> = accounts
             .iter()
             .copied()
-            .filter(|account| cycle::is_a_candidate(registry, account))
+            .filter(|account| cycle::is_a_candidate(&sharers, account))
             .collect();
 
         let mut with_headroom = Vec::new();
@@ -74,7 +75,7 @@ impl<'a> Reserve<'a> {
             exhausted,
             unobserved,
             not_candidates: accounts.len() - candidates.len(),
-            out_of_the_running: cycle::out_of_the_running(registry, &accounts),
+            out_of_the_running: cycle::out_of_the_running(&sharers, &accounts),
             candidates,
             with_headroom,
         }
