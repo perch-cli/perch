@@ -300,6 +300,12 @@ impl Fold {
     /// part company at the final sigma and at `İ`, which are the characters a
     /// version turns on. [`Fold::OneSigma`] is per character, being the hot path.
     fn one_name(self, one: &str, other: &str) -> bool {
+        // Ahead of both folds, because both agree with it: an ASCII character
+        // lowercases to one ASCII character, and neither character the two rows
+        // part company over is ASCII.
+        if one.is_ascii() && other.is_ascii() {
+            return one.eq_ignore_ascii_case(other);
+        }
         match self {
             Fold::Lowercase => one.to_lowercase() == other.to_lowercase(),
             Fold::OneSigma => one_sigma(one).eq(one_sigma(other)),
@@ -561,6 +567,29 @@ mod tests {
         }
         for (one, other) in [("work", "works"), ("café", "cafe"), ("", "a")] {
             assert!(!same_name(one, other), "{one} and {other} are two names");
+        }
+    }
+
+    /// What lets [`Fold::one_name`] answer ASCII without either fold. Exhaustive
+    /// over one character, which is where a case mapping that disagreed would
+    /// have to live: every ASCII character against every other, under both rows.
+    #[test]
+    fn both_folds_answer_ascii_exactly_as_a_bytewise_case_compare_does() {
+        for one in 0u8..=127 {
+            for other in 0u8..=127 {
+                let (one, other) = (String::from(one as char), String::from(other as char));
+                let bytewise = one.eq_ignore_ascii_case(&other);
+                assert_eq!(
+                    one.to_lowercase() == other.to_lowercase(),
+                    bytewise,
+                    "{one:?} and {other:?} under Lowercase"
+                );
+                assert_eq!(
+                    one_sigma(&one).eq(one_sigma(&other)),
+                    bytewise,
+                    "{one:?} and {other:?} under OneSigma"
+                );
+            }
         }
     }
 
