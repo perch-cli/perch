@@ -127,9 +127,16 @@ impl std::fmt::Debug for HttpRequest<'_> {
 pub const ORDINARY_BOUND_MILLIS: u64 = 30_000;
 
 impl<'a> HttpRequest<'a> {
-    /// How long this request may take, whether or not it says.
+    /// How long this request may take, whether or not it says. Rounded up to
+    /// whole seconds — `curl` takes no finer unit for `max-time` — and to at
+    /// least one, a bound rounding down to zero meaning *no* bound. At the port
+    /// rather than in the real adapter, so a fake holds a request to the bound a
+    /// machine holds it to rather than to the one that was asked for.
     pub fn bound_millis(&self) -> u64 {
-        self.within_millis.unwrap_or(ORDINARY_BOUND_MILLIS)
+        match self.within_millis {
+            Some(millis) => millis.div_ceil(1_000).max(1) * 1_000,
+            None => ORDINARY_BOUND_MILLIS,
+        }
     }
 
     pub fn get(url: &'a str, headers: &'a [(&'a str, &'a str)]) -> Self {
@@ -1148,6 +1155,31 @@ mod tests {
         assert_eq!(
             settled(&host, Path::new("neither/is/this")).at(),
             Some(Path::new("/Users/someone/work/neither/is/this")),
+        );
+    }
+
+    /// `max-time` is seconds, so a bound of 1,500ms is a machine that waits two
+    /// whole ones. Read off the port by both adapters, a fixture answering in
+    /// 1,800ms is a timeout on neither rather than on the fake alone.
+    #[test]
+    fn a_bound_is_the_whole_seconds_curl_would_actually_wait() {
+        let bound = |millis| {
+            HttpRequest::get("https://example.com", &[])
+                .within(millis)
+                .bound_millis()
+        };
+
+        assert_eq!(bound(1_500), 2_000, "rounded up, never down");
+        assert_eq!(bound(2_000), 2_000, "and a whole second is itself");
+        assert_eq!(
+            bound(1),
+            1_000,
+            "a bound rounding to zero would be no bound"
+        );
+        assert_eq!(
+            HttpRequest::get("https://example.com", &[]).bound_millis(),
+            ORDINARY_BOUND_MILLIS,
+            "a request that says nothing gets the ceiling every request gets"
         );
     }
 

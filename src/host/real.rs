@@ -126,11 +126,12 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<Secret, HostError> {
     // and begin whatever the rest of it spelled.
     super::sendable(request)?;
 
-    // Whole seconds, because that is the only unit `curl` takes here, and at
-    // least one: a bound that rounded down to zero would mean *no* bound.
+    // Off `bound_millis`, which does the rounding `max-time` needs, so the fake
+    // holds a request to the same number this writes rather than to the finer
+    // one that was asked for.
     let (connect, whole) = match request.within_millis {
-        Some(millis) => {
-            let seconds = millis.div_ceil(1000).max(1);
+        Some(_) => {
+            let seconds = request.bound_millis() / 1_000;
             (seconds, seconds)
         }
         None => (CONNECT_TIMEOUT_SECONDS, MAX_TIME_SECONDS),
