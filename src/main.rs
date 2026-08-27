@@ -279,7 +279,7 @@ fn main() {
     // older registry is read correctly either way, so a lock somebody else holds
     // costs the write-back alone and the next run takes it.
     if migrates(&cli.command) {
-        let _ = perch::migration::bring_forward(&host);
+        let _ = perch::commands::bring_the_registry_forward(&host);
     }
 
     let outcome = match cli.command {
