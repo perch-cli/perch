@@ -89,11 +89,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // not one to ask about giving up (ADR a-profile-is-live-by-evidence).
     let consequence = consequence_of(&registry, &account);
 
-    // Once per command, which is [`Installed`]'s own rule, and tolerated where
-    // it fails: the liveness question is answered by Markers rather than by the
-    // version, and giving up a lapsed subscription outlives the uninstall.
-    let installed =
-        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
+    let installed = Installed::probed_or_absent(host);
 
     refuse_while_anything_is_running(
         host,

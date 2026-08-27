@@ -32,11 +32,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    // Once per command, which is [`Installed`]'s own rule, and tolerated where
-    // it fails: the version is only what a refusal quotes, and an Export is what
-    // a decommissioned machine runs.
-    let installed = crate::probe::Installed::probed(host)
-        .unwrap_or_else(|_| crate::probe::Installed::unknown("(not installed)"));
+    let installed = crate::probe::Installed::probed_or_absent(host);
 
     let mut landed = None;
     let written = write_the_export(
