@@ -15,12 +15,12 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::column;
-use crate::commands::say_json;
 use crate::error::Result;
 use crate::host::{Host, Shown};
 use crate::listing;
 use crate::observe::Report;
 use crate::registry::{self, Account, Registry};
+use crate::say;
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy, clap::Args)]
@@ -91,7 +91,7 @@ fn active_email(registry: &Registry) -> Result<String> {
         .and_then(|email| registry.account(email))
     {
         Some(account) => Ok(account.email().to_string()),
-        None => Err(crate::commands::no_active_account(registry, "")),
+        None => Err(registry::no_active_account(registry, "")),
     }
 }
 
@@ -108,7 +108,7 @@ fn render_human(
     // labeled row: the column is for facts about the Account, and this is one
     // about whether Perch can name one.
     if let Some(said) = registry.active().a_switch_in_flight() {
-        crate::commands::say(out, &said)?;
+        say::line(out, &said)?;
     }
 
     column::write_labeled(out, "Account", &Shown::of(account.email()))?;
@@ -155,7 +155,7 @@ fn render_json(
         "refresh": report.document(),
     });
 
-    say_json(out, &document)
+    say::json(out, &document)
 }
 
 /// The document for either way Perch can be on no Account: a Landing that left
@@ -164,7 +164,7 @@ fn render_json(
 /// cannot answer left `null`, where a missing key is a script's `jq` failing
 /// for what reads like a different reason.
 fn nobody_at_all(out: &mut dyn Write, registry: &Registry, refresh: bool) -> Result<()> {
-    say_json(
+    say::json(
         out,
         &json!({
             "active": serde_json::Value::Null,
@@ -192,6 +192,6 @@ fn the_switch_alone(
 ) -> Result<()> {
     match json {
         true => nobody_at_all(out, registry, refresh),
-        false => crate::commands::say(out, said),
+        false => say::line(out, said),
     }
 }

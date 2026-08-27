@@ -12,13 +12,14 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{group, only_the_registry, say};
+use crate::commands::{group, only_the_registry};
 use crate::config::{SETTINGS, Setting};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::name;
 use crate::name::UNGROUPED;
 use crate::registry::{Registry, Scope};
+use crate::say;
 
 /// What was asked of `perch config`, as the words that were typed — carried
 /// rather than resolved, because telling somebody which form they seem to have
@@ -64,7 +65,7 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
         ConfigCommand::Get { words } => {
             let registry = adopt::ensure_adopted(host)?;
             for line in get(&registry, &words)? {
-                say(out, &line)?;
+                say::line(out, &line)?;
             }
             Ok(())
         }
@@ -244,7 +245,7 @@ fn how_set_is_addressed(registry: &Registry, words: &[String]) -> PerchError {
         "`perch config set` was given {}. It takes a Scope, a key and a value — \
          `perch config set <scope> <key> <value>`, where a Scope is a Group or \
          `{UNGROUPED}`. {}",
-        super::words(words.len()),
+        say::words(words.len()),
         the_scopes(registry),
     ))
 }
@@ -257,7 +258,7 @@ fn how_get_is_addressed(words: &[String]) -> PerchError {
         "`perch config get` was given {}. It takes a Scope and a key — `perch \
          config get <scope> <key>` — or a Scope alone to read every Setting it \
          holds. `perch config get` on its own reads every Scope there is.",
-        super::words(words.len()),
+        say::words(words.len()),
     ))
 }
 

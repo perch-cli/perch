@@ -12,7 +12,6 @@ use std::io::Write;
 
 use crate::adopt;
 use crate::ask;
-use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
@@ -22,6 +21,7 @@ use crate::name::{NO_GROUP, NameKind};
 use crate::probe::{Identity, Store};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
+use crate::say;
 
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct AddArgs {
@@ -265,7 +265,7 @@ fn resolve_group(
             Some(answer) => answer.trim().to_string(),
             // End of input after a login that worked, for the same reason.
             None => {
-                say(out, "\nNo answer given, so the Account is in no Group.")?;
+                say::line(out, "\nNo answer given, so the Account is in no Group.")?;
                 return Ok(None);
             }
         };
@@ -282,7 +282,7 @@ fn resolve_group(
                 .and_then(|()| registry.refuse_taken_names(args.alias.as_deref(), Some(name)))
             {
                 Ok(()) => return Ok(chosen),
-                Err(err) => say(out, &format!("{err}"))?,
+                Err(err) => say::line(out, &format!("{err}"))?,
             },
         }
     }
@@ -308,23 +308,23 @@ fn report(
     group: Option<&str>,
 ) -> Result<()> {
     let added = registry.account(email).expect("the Account was just added");
-    let description = crate::commands::described(
+    let description = say::described(
         email,
         added.identity.organization_name.as_deref(),
         added.plan.as_deref(),
     );
 
-    say(out, &format!("\nAdded {description}."))?;
+    say::line(out, &format!("\nAdded {description}."))?;
     if let Some(alias) = alias {
-        say(out, &format!("Alias:  {alias}"))?;
+        say::line(out, &format!("Alias:  {alias}"))?;
     }
     let group = group.unwrap_or(name::NO_GROUP);
-    say(out, &format!("Group:  {group}"))?;
+    say::line(out, &format!("Group:  {group}"))?;
     // What the Scope this Account landed in still cannot do. An Add is what
     // makes a Scope a set of two or more, which is when the two defaults gating
     // a Cycle start to matter.
     match crate::config::what_the_scope_still_needs(registry, &registry.scope_of(added)) {
-        Some(line) => say(out, &line),
+        Some(line) => say::line(out, &line),
         None => Ok(()),
     }
 }

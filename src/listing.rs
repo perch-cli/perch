@@ -181,6 +181,10 @@ pub fn document(
     })
 }
 
+/// What the Accounts in no Group are shown under. Being in no Group is not a
+/// Group, so this never reads like a Group's name.
+pub const IN_NO_GROUP: &str = "In no Group";
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,15 +13,17 @@ use std::io::Write;
 
 use crate::adopt;
 use crate::ask;
-use crate::commands::{refuse_while_anything_is_running, say, still_ours};
+use crate::commands::still_ours;
 use crate::credentials;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock::Held;
 use crate::name;
 use crate::probe::Installed;
 use crate::registry::{self, Account, Registry, Settled};
+use crate::say;
 use crate::switch;
 use crate::target;
 
@@ -82,7 +84,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let settled = crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
-    say(out, &found.matched)?;
+    say::line(out, &found.matched)?;
     let account = registry.held(&found.email)?.clone();
 
     // Before the question rather than after: an Account Perch may not touch is
@@ -91,7 +93,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
 
     let installed = Installed::probed_or_absent(host);
 
-    refuse_while_anything_is_running(
+    live::refuse_while_anything_is_running(
         host,
         &account,
         why_the_default_profile(&consequence),
@@ -99,13 +101,13 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     )?;
 
     if !agreed(host, out, &registry, &account, &consequence, args.yes)? {
-        return say(out, "Nothing was removed.");
+        return say::line(out, "Nothing was removed.");
     }
 
     // Asked again: somebody may have started a client while the question sat
     // there, and an answer about the machine as it was before lunch says nothing
     // about the Profile this is about to delete.
-    refuse_while_anything_is_running(
+    live::refuse_while_anything_is_running(
         host,
         &account,
         why_the_default_profile(&consequence),
@@ -215,7 +217,7 @@ fn agreed(
     }
 
     let named = registry.named_for_the_user(account.email());
-    say(out, &what_it_would_leave(registry, account, consequence))?;
+    say::line(out, &what_it_would_leave(registry, account, consequence))?;
     ask::said_yes(
         host,
         out,
@@ -322,7 +324,7 @@ fn land_on(
     // Which Account, and nothing about its Credential being the live one: a
     // Landing that succeeded always made it so, and the two arms above are where
     // one that did not says which half is behind (ADR perch-says-what-it-did).
-    say(
+    say::line(
         out,
         &format!(
             "{} is the active Account now.",
@@ -423,25 +425,25 @@ fn report(
         Deleted::Credential => String::new(),
         Deleted::NothingWasThere => format!(
             " Neither of its Credential Stores held anything to delete — {}.",
-            crate::commands::a_store_that_held_nothing(host),
+            credentials::a_store_that_held_nothing(host),
         ),
         Deleted::NothingSharedWith(sharer) => format!(
             " The Credential Perch held for it is still there, because {sharer} \
              keeps its own in the same Profile and deleting one would take both."
         ),
     };
-    say(out, &format!("Removed {named}.{credential}"))?;
+    say::line(out, &format!("Removed {named}.{credential}"))?;
     if let Some(alias) = alias {
-        say(out, &format!("The Alias `{alias}` is free to use again."))?;
+        say::line(out, &format!("The Alias `{alias}` is free to use again."))?;
     }
 
     match (&consequence.successor, consequence.remaining) {
         (Some(_), _) => Ok(()),
-        (None, 0) => say(
+        (None, 0) => say::line(
             out,
             "Perch now holds no Accounts and no active Account. `perch add` logs one in.",
         ),
-        (None, remaining) if consequence.is_active => say(
+        (None, remaining) if consequence.is_active => say::line(
             out,
             &format!(
                 "Perch holds no active Account now — `perch switch <target>` \

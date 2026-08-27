@@ -11,12 +11,15 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, only_the_registry, say};
+use crate::commands::only_the_registry;
+use crate::config;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Shown};
+use crate::listing;
 use crate::name;
 use crate::name::NO_GROUP;
 use crate::registry::{Registry, Scope};
+use crate::say;
 use crate::target::{self, AccountTarget};
 
 /// What was asked of `perch group`. The help each of these is described by
@@ -111,7 +114,7 @@ fn remove(registry: &mut Registry, name: &str) -> Result<String> {
     if !held.is_empty() {
         return Err(PerchError::Conflict(format!(
             "The Group `{declared}` still holds {}:\n  {}\nMove them first with `perch group move <target> <group>`, or out of every Group with `perch group move <target> {NO_GROUP}`.",
-            crate::commands::accounts(held.len()),
+            say::accounts(held.len()),
             held.join("\n  ")
         )));
     }
@@ -143,7 +146,7 @@ fn rename(registry: &mut Registry, from: &str, to: &str) -> Result<String> {
         0 => format!("Renamed the Group `{held}` to `{to}`."),
         still_holds => format!(
             "Renamed the Group `{held}` to `{to}`, which still holds {}.",
-            crate::commands::accounts(still_holds)
+            say::accounts(still_holds)
         ),
     })
 }
@@ -248,7 +251,7 @@ fn groups_perch_holds(registry: &Registry) -> String {
 /// will follow are readable without opening the registry.
 fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
     if registry.groups.is_empty() {
-        say(
+        say::line(
             out,
             "No Groups yet. `perch group add <name>` declares one, and\n\
              `perch group move <target> <name>` puts an Account in it.\n",
@@ -258,7 +261,7 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
     // Borrowed rather than collected: nothing here mutates the registry, so the
     // only clone left is the one `Scope::Group` genuinely needs.
     for name in registry.groups.keys() {
-        say(out, name)?;
+        say::line(out, name)?;
         let members = registry.accounts_in(name);
         if members.is_empty() {
             write_line(out, "Accounts", "none yet")?;
@@ -269,14 +272,14 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
             }
         }
         describe_configuration(out, registry, &Scope::Group(name.clone()))?;
-        say(out, "")?;
+        say::line(out, "")?;
     }
 
     // Ungrouped Accounts are not a Group and are not shown as one, but leaving
     // them out would make this read as a list of every Account when it is not.
     let ungrouped = registry.ungrouped_accounts();
     if !ungrouped.is_empty() {
-        say(out, IN_NO_GROUP)?;
+        say::line(out, listing::IN_NO_GROUP)?;
         for (index, account) in ungrouped.iter().enumerate() {
             let label = if index == 0 { "Accounts" } else { "" };
             write_line(out, label, &registry.named_for_the_user(account.email()))?;
@@ -284,7 +287,7 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         // The rule and then what it currently answers, said by the one function
         // all three surfaces that show this Scope ask — a second spelling of it
         // offers `on`/`off`, which is not a value the Setting takes.
-        write_line(out, "Cycling", &cycling_among_ungrouped(registry))?;
+        write_line(out, "Cycling", &config::cycling_among_ungrouped(registry))?;
         // Shown for the same reason a Group's is: the rules Cycling will follow
         // should be readable without opening the registry.
         describe_configuration(out, registry, &Scope::Ungrouped)?;
@@ -326,12 +329,12 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
             format!("off (would act {acting})")
         }
     };
-    say(out, &strategy)?;
-    say(out, &labeled("Watcher", &watcher))
+    say::line(out, &strategy)?;
+    say::line(out, &labeled("Watcher", &watcher))
 }
 
 fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
-    say(out, &labeled(label, value))
+    say::line(out, &labeled(label, value))
 }
 
 fn labeled(label: &str, value: &str) -> String {

@@ -12,11 +12,11 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
 use crate::registry::{self, Registry};
+use crate::say;
 use crate::switch;
 use crate::{carry, probe, reconcile, target};
 
@@ -92,7 +92,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // Flushed before the client is handed the terminal: a command run before
     // this one may have left something in the buffer, and it would be delivered
     // after the output of the thing it was announcing.
-    out.flush().map_err(commands::write_failed)?;
+    out.flush().map_err(say::failed)?;
 
     // The environment of this one process, and the whole of what makes the Run
     // a Run.
@@ -230,7 +230,7 @@ fn quoted_for_a_shell(word: &str) -> String {
 /// it, and `perch relogin` does. Without this the user finds out from a Claude
 /// Code that has already taken the terminal.
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> {
-    crate::commands::refuse_a_quarantined_account(
+    registry::refuse_a_quarantined_account(
         registry,
         email,
         "Nothing was launched — the client would open on an Account it cannot \

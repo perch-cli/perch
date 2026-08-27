@@ -15,7 +15,7 @@ use std::path::Path;
 use zeroize::Zeroizing;
 
 use crate::ask;
-use crate::commands::{say, still_ours};
+use crate::commands::still_ours;
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::holdings;
@@ -23,6 +23,7 @@ use crate::host::{Host, HostError};
 use crate::import;
 use crate::probe::Installed;
 use crate::registry;
+use crate::say;
 
 pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Both before the passphrase, because both are refusals somebody should meet
@@ -122,11 +123,11 @@ fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<Stri
 /// Accounts the file held no Credential for are what this can report.
 fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     let accounts = export.accounts();
-    say(
+    say::line(
         out,
         &format!(
             "Imported {} from {}.",
-            crate::commands::accounts(accounts),
+            say::accounts(accounts),
             path.display(),
         ),
     )?;
@@ -136,7 +137,7 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     // `export.rs` gets the plural right by not naming an Account at all.
     let bare = export.without_a_credential();
     if let Some(repair) = registry::how_to_repair_them(&bare) {
-        say(
+        say::line(
             out,
             &format!(
                 "The Export held no Credential for {}, so the {} restored \

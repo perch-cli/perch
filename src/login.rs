@@ -8,13 +8,13 @@
 
 use std::io::Write;
 
-use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
 use crate::live;
 use crate::probe::{self, Credential, Identity, Installed};
 use crate::profile;
+use crate::say;
 use zeroize::Zeroizing;
 
 /// What a login left behind, taken out of the directory it ran in.
@@ -72,8 +72,8 @@ fn run_the_login(
     // Neither narrates a step Perch took: one is what the browser about to open
     // is for, the other an instruction somebody has to follow before the command
     // can finish (ADR perch-says-what-it-did).
-    say(out, purpose)?;
-    say(
+    say::line(out, purpose)?;
+    say::line(
         out,
         "Quit Claude Code when the login is done to come back here.\n",
     )?;

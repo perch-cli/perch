@@ -12,15 +12,16 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{refuse_while_anything_is_running, say};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock::Held;
 use crate::login::{self, Produced};
 use crate::name;
 use crate::probe::{Identity, Installed};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
+use crate::say;
 use crate::switch;
 use crate::target;
 
@@ -43,7 +44,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     let registry = adopt::ensure_adopted(host)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
-    say(out, &found.matched)?;
+    say::line(out, &found.matched)?;
     let account = registry.held(&found.email)?.clone();
 
     // Asked before the login rather than after, like everything else here: a
@@ -55,7 +56,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // to is one no browser round trip was going to repair.
     let installed = Installed::probed(host)?;
     let landing_in_the_default_profile = will_land_in_the_default_profile(&registry, &account);
-    refuse_while_anything_is_running(
+    live::refuse_while_anything_is_running(
         host,
         &account,
         landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
@@ -99,7 +100,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // writes both Profiles. Whether the Default Profile is one of them is
     // re-read for the same reason: another terminal may have switched away.
     let landing_in_the_default_profile = will_land_in_the_default_profile(&registry, &account);
-    refuse_while_anything_is_running(
+    live::refuse_while_anything_is_running(
         host,
         &account,
         landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
@@ -141,7 +142,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         // The held failure first: a stdout that will not take the line above
         // will not take this one either.
         Ok(()) => said
-            .and_then(|()| say(out, "Its fresh Credential is the live one."))
+            .and_then(|()| say::line(out, "Its fresh Credential is the live one."))
             .map_err(the_repair_stands),
         Err(stopped) if stopped.is_live => Err(stopped.error.with_note(&format!(
             "The repair stands and {} is working again: its fresh Credential is \
@@ -348,14 +349,14 @@ fn report(
     // and it has just stopped being true: an outcome that recites what was wrong
     // with a Credential that no longer exists reads as a state, not an ending.
     if was_quarantined {
-        say(
+        say::line(
             out,
             &format!("\nRepaired {named} — it is no longer Quarantined."),
         )?;
     } else {
         // Which is the news. That the Account now holds a fresh Credential is
         // what every relogin does; that it did not need one is not.
-        say(
+        say::line(
             out,
             &format!("\nLogged {named} in again. It was not Quarantined."),
         )?;
@@ -368,7 +369,7 @@ fn report(
         .account(account.email())
         .expect("the Account was just recorded");
     if held.disabled {
-        say(
+        say::line(
             out,
             "Cycling still will not choose it — it is disabled, which a repair \
              does not undo.",

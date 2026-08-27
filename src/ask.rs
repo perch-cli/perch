@@ -7,23 +7,23 @@
 //!
 //! Perch asks little and asks it the same way everywhere
 //! (ADR perch-does-not-draw). What is *said* rather than asked is
-//! [`crate::commands::say`], and a remark from below is `Host::note`.
+//! [`crate::say`], and a remark from below is `Host::note`.
 
 use std::io::Write;
 
 use zeroize::Zeroizing;
 
-use crate::commands::write_failed;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::say;
 
 /// Puts a question to the person at the terminal and waits for their answer, or
 /// `None` at end of input. Written without a newline and flushed, so the answer
 /// is typed where the question ends: a question the terminal has not been shown
 /// yet is a command that looks hung.
 pub fn line(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Option<String>> {
-    write!(out, "{}", crate::host::Shown::of(question)).map_err(write_failed)?;
-    out.flush().map_err(write_failed)?;
+    write!(out, "{}", crate::host::Shown::of(question)).map_err(say::failed)?;
+    out.flush().map_err(say::failed)?;
     host.read_line()
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))
 }
@@ -74,12 +74,12 @@ pub fn a_secret(
     out: &mut dyn Write,
     question: &str,
 ) -> Result<Option<Zeroizing<String>>> {
-    write!(out, "{}", crate::host::Shown::of(question)).map_err(write_failed)?;
-    out.flush().map_err(write_failed)?;
+    write!(out, "{}", crate::host::Shown::of(question)).map_err(say::failed)?;
+    out.flush().map_err(say::failed)?;
     let answered = host
         .read_secret()
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))?;
-    writeln!(out).map_err(write_failed)?;
+    writeln!(out).map_err(say::failed)?;
     // Already wiped-on-drop when it arrives, because the port says so. Wrapping
     // it again here would claim the wiped buffer is the one the terminal was
     // read into, which is the adapter's to keep rather than this line's.

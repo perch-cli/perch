@@ -14,7 +14,6 @@ use std::io::Write;
 use chrono::{DateTime, Utc};
 
 use crate::adopt;
-use crate::commands::say;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::holdings;
@@ -25,6 +24,7 @@ use crate::observe;
 use crate::probe;
 use crate::registry::{self, Registry};
 use crate::round::{self, Verdict, Watching};
+use crate::say;
 use crate::switch::{self, NotSwitched, Resolved};
 use crate::watch::{
     self, Backoff, Cooled, Holding, Outcome, Recently, Speak, Watcher, nothing_was_switched,
@@ -44,7 +44,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     let watching_alone = match lock::take_all(host, vec![holdings::watcher_lock_spec(host)?]) {
         Ok(held) => held,
         Err(PerchError::Busy(why)) => {
-            say(out, &watch::held_line(&why, None, host.now()))?;
+            say::line(out, &watch::held_line(&why, None, host.now()))?;
             return Ok(crate::error::EXIT_HELD);
         }
         Err(other) => return Err(other),
@@ -64,7 +64,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         // rather than a raise, which would reach a cron mailbox by way of standard
         // error.
         Err(PerchError::Busy(why)) => {
-            say(out, &watch::held_line(&why, None, host.now()))?;
+            say::line(out, &watch::held_line(&why, None, host.now()))?;
             return Ok(crate::error::EXIT_HELD);
         }
         Err(other) => return Err(other),
@@ -77,11 +77,11 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         // Said and exited rather than raised: a Check that was interrupted read no
         // figure, and `20` is what tells a scheduler to come back.
         Verdict::Lost(lost) => {
-            say(out, &watch::stopped_line(lost, host.now()))?;
+            say::line(out, &watch::stopped_line(lost, host.now()))?;
             return Ok(crate::error::EXIT_HELD);
         }
     };
-    say(out, &round.line(host.now()))?;
+    say::line(out, &round.line(host.now()))?;
     Ok(round.outcome.exit_code())
 }
 
@@ -105,7 +105,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     };
     let mut watching_alone = Watch::taken(host, watching_alone);
 
-    say(out, &opening(host)?)?;
+    say::line(out, &opening(host)?)?;
 
     loop {
         // Twice a round, and this is the half that bounds the gap: the window is the
@@ -211,7 +211,7 @@ fn left(out: &mut dyn Write, lost: Lost) -> Result<()> {
 /// One word, because everything else that is true of a stop is true of every stop
 /// without exception (ADR perch-says-what-it-did).
 fn stopped(out: &mut dyn Write) -> Result<()> {
-    say(out, "Stopped.")
+    say::line(out, "Stopped.")
 }
 
 /// What the loop says when it leaves because it is no longer the Watcher.
@@ -219,7 +219,7 @@ fn stopped(out: &mut dyn Write) -> Result<()> {
 /// Not [`stopped`]: this is a stop nobody asked for, and a refusal says why. The lock
 /// is not given back — it is somebody else's now.
 fn handed_over(out: &mut dyn Write) -> Result<()> {
-    say(
+    say::line(
         out,
         "Stopped: another Watcher has taken the watch over, so this one is no \
          longer the only one deciding. Its lock is left where it is, no file of \
@@ -305,17 +305,17 @@ fn say_it(
             retrying_in,
             in_full,
         } => match holding.holding(&why, retrying_in, now) {
-            Speak::InFull => say(out, &in_full),
-            Speak::StillHolding { since } => say(out, &watch::still_holding_line(since, now)),
+            Speak::InFull => say::line(out, &in_full),
+            Speak::StillHolding { since } => say::line(out, &watch::still_holding_line(since, now)),
             Speak::Nothing => Ok(()),
         },
         Spoken::Decided(line) => {
             // The way out of a hold is always said, and said before the decision, so a
             // log reads in the order the things happened.
             if let Some(held_for) = holding.released(now) {
-                say(out, &watch::released_line(held_for, now))?;
+                say::line(out, &watch::released_line(held_for, now))?;
             }
-            say(out, &line)
+            say::line(out, &line)
         }
     }
 }

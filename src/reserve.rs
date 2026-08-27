@@ -12,9 +12,9 @@
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
-use crate::commands::accounts;
 use crate::cycle::{self, HowMuchIsLeft};
 use crate::registry::{Account, Registry, Scope};
+use crate::say;
 use crate::utilization;
 
 /// What a Scope has left to draw on.
@@ -93,7 +93,7 @@ impl<'a> Reserve<'a> {
             Some((_, percent)) => format!(
                 "Reserve: {} of {} {} Headroom, the best {}% left (as of {})",
                 self.with_headroom.len(),
-                accounts(self.candidates.len()),
+                say::accounts(self.candidates.len()),
                 verb(self.with_headroom.len()),
                 utilization::percentage(percent),
                 utilization::age_phrase(
@@ -111,7 +111,7 @@ impl<'a> Reserve<'a> {
             ),
             None => format!(
                 "Reserve: none of {} {} Headroom ({})",
-                accounts(self.candidates.len()),
+                say::accounts(self.candidates.len()),
                 verb(self.candidates.len()),
                 self.why_not(),
             ),

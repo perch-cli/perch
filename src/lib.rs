@@ -40,6 +40,7 @@ pub mod registry;
 pub mod report;
 pub mod reserve;
 pub mod round;
+pub mod say;
 pub mod secret;
 pub mod service;
 pub mod switch;

@@ -16,7 +16,6 @@ use serde_json::json;
 use zeroize::Zeroizing;
 
 use crate::anthropic::{self, QuotaWindows, Refused};
-use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
@@ -27,6 +26,7 @@ use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
+use crate::say;
 
 /// Whose the allowance a refresh spends is (ADR a-watcher-knob-is-arithmetic).
 ///
@@ -246,7 +246,7 @@ impl Report {
     /// write here.
     pub fn write_notes_beside_the_accounts(&self, out: &mut dyn Write) -> Result<()> {
         for note in self.said(Attempt::note_beside_the_account) {
-            say(out, &note)?;
+            say::line(out, &note)?;
         }
         Ok(())
     }

@@ -223,6 +223,29 @@ fn tighten_if_loose(host: &dyn Host, path: &std::path::Path) {
     }
 }
 
+/// Why a Credential Store that Perch went to empty turned out to hold nothing,
+/// said about the store this machine actually has
+/// One function rather than a copy per
+/// caller: the day a third store is added is the day the copies disagree about
+/// where a Credential might still be.
+pub fn a_store_that_held_nothing(host: &dyn Host) -> &'static str {
+    match host.platform() {
+        // The item's account name is derived from `$USER`, so a Profile written
+        // under one login name keeps its Credential where a Perch under another
+        // will not look — the one way an empty store is not an empty Account.
+        Platform::MacOs => {
+            "on macOS a keychain item is filed under `$USER`, so one written \
+             under a different login name is still there"
+        }
+        // The store is a file inside the Profile, so the Profile going is the
+        // Credential going, and there is nowhere else for one to be.
+        _ => {
+            "its Credential Store is a file inside its Profile, and there was no \
+             file there"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
