@@ -912,21 +912,41 @@ fn the_account_just_left_is_returned_to_once_the_cooldown_has_run_out() {
 }
 
 #[test]
-fn the_loop_carries_its_cooldown_in_memory_and_records_nothing() {
-    let host = filling_up_one_after_the_other();
+fn the_loop_records_its_switch_so_a_restart_is_still_paced() {
+    // Two rounds: the first waits at 40, the second crosses at 86 and moves to the
+    // spare. The loop is stopped there, as a Service stopping one would.
+    let host = watching_both(&[40.0, 86.0], &[5.0, 90.0], 2);
 
     let (result, printed) = run_watch(&host);
 
     result.expect("it was stopped");
     assert_eq!(
         printed.matches("switched").count(),
-        2,
+        1,
         "the trace this is read off is one that Switched: {printed}"
     );
     assert!(
-        registry_of(&host).checks.is_empty(),
-        "two people watching in two terminals would otherwise pace each \
-         other's decisions"
+        registry_of(&host).checked("work").is_some(),
+        "a Switch a loop made is on record, or the Service that restarts the \
+         loop clears the cooldown it was under: {printed}"
+    );
+
+    // The same machine, watched again from nothing — which is what `Restart=always`
+    // does thirty seconds after the loop above ended.
+    let host = host.with_interrupt_after(4);
+
+    let (result, again) = run_watch(&host);
+
+    result.expect("it was stopped");
+    assert_eq!(
+        again.matches("switched").count(),
+        0,
+        "a restarted loop is still inside the cooldown the first one started: \
+         {again}"
+    );
+    assert!(
+        again.contains("cooling"),
+        "and says which rule is holding it: {again}"
     );
 }
 
@@ -940,11 +960,55 @@ fn the_margin_refuses_a_barely_emptier_candidate_for_every_group() {
     assert_eq!(
         printed.matches("switched").count(),
         0,
-        "79% is not 70% or better, and no Setting can say otherwise: {printed}"
+        "79% is not 70% or better, which is the margin nobody moved: {printed}"
     );
     assert!(
         printed.contains("nothing over 70% is worth moving to"),
         "and the round says which figure it was judged against: {printed}"
+    );
+}
+
+#[test]
+fn a_narrower_margin_lets_a_group_take_a_candidate_the_default_refuses() {
+    let host = watching_both(&[86.0, 20.0], &[79.0, 86.0], 3);
+    config_set(&host, &["work", "watcher-margin-percent", "1"])
+        .0
+        .expect("a Group says how empty a candidate has to be");
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    assert_eq!(
+        printed.matches("switched").count(),
+        1,
+        "at a margin of one, 79% clears a ceiling of 79%: {printed}"
+    );
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(SECOND_EMAIL),
+        "and the move lands: {printed}"
+    );
+}
+
+#[test]
+fn a_wider_margin_refuses_a_candidate_the_default_would_have_taken() {
+    let host = watching_both(&[86.0, 20.0], &[65.0, 86.0], 3);
+    config_set(&host, &["work", "watcher-margin-percent", "40"])
+        .0
+        .expect("a Group says how empty a candidate has to be");
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    assert_eq!(
+        printed.matches("switched").count(),
+        0,
+        "65% clears the default ceiling of 70% and not a ceiling of 40%: \
+         {printed}"
+    );
+    assert!(
+        printed.contains("nothing over 40% is worth moving to"),
+        "and the round quotes the ceiling the Group asked for: {printed}"
     );
 }
 

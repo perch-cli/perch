@@ -190,6 +190,14 @@ Account whose Credential Anthropic will not accept, one whose Profile is in use
 while every other Account is still read. `--json` carries the same under
 `refresh`, which is `null` when no refresh was asked for.
 
+One read is declined rather than attempted. Anthropic allows roughly 28-30 reads
+an hour of one Account's usage, and a Watcher takes twenty-four of them off the
+Account you are on. So while a Watcher is running, a `--refresh` of that Account
+within its 2m30s interval shows you the figure the Watcher just read and says so,
+rather than spending an allowance the Watcher needs to decide when to move you.
+Every other Account is read as normal, and with no Watcher running the whole
+allowance is yours.
+
 ## JSON
 
 `perch status --json` and `perch list [<scope>] --json` carry the same
@@ -287,8 +295,10 @@ plenty of room are opposite pieces of advice, and neither of them is `0`.
 **`refresh` is what a `--refresh` did**, and `null` where none was asked for, so
 "everything was fine" and "nobody asked" are never one answer. Its `accounts`
 carry one entry per Account read, each with an `outcome` of `observed`,
-`throttled`, `failed`, `quarantined` or `stopped`, the `reason` that
-Quarantined it, and a `detail` naming what went wrong underneath.
+`throttled`, `just_read`, `failed`, `quarantined` or `stopped`, the `reason` that
+Quarantined it, and a `detail` naming what went wrong underneath. `just_read` is
+the one that asked Anthropic nothing: a Watcher had read that Account inside its
+own interval, so the cached figure is what a request would have returned.
 
 `kept` says whether the figures that were read reached Perch's own record, and
 `not_kept` is the sentence saying why they did not, `null` where they did. The

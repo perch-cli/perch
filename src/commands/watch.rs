@@ -57,7 +57,6 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     let verdict = match one_round(
         host,
         Watcher::Check,
-        &mut Recently::nothing(),
         &mut Backoff::none(),
         &mut watching_alone,
     ) {
@@ -94,10 +93,9 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // a Switch.
     host.listen_for_interrupts();
 
-    // The three things carried from one round to the next, all in memory and nowhere
-    // else: what paces this loop, and what it has already said, belong to the loop
-    // rather than to the machine.
-    let mut recently = Recently::nothing();
+    // The two things carried from one round to the next, both in memory and nowhere
+    // else: what the loop is waiting out and what it has already said belong to the
+    // loop. What paces a Switch does not — it is read off the registry each round.
     let mut backoff = Backoff::none();
     let mut holding = Holding::nothing();
 
@@ -117,35 +115,30 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             return left(out, lost);
         }
 
-        let (waiting_for, spoken) = match one_round(
-            host,
-            Watcher::Loop,
-            &mut recently,
-            &mut backoff,
-            &mut watching_alone,
-        ) {
-            Ok(Verdict::Decided(round)) => {
-                let waiting_for = round.waiting_for();
-                let line = round.line(host.now());
-                match round.held_because() {
-                    // The wait this round announced is what the coalescing compares, so
-                    // a back-off that has doubled is said again.
-                    Some(why) => (waiting_for, Spoken::held(why, Some(waiting_for), line)),
-                    None => (waiting_for, Spoken::Decided(line)),
+        let (waiting_for, spoken) =
+            match one_round(host, Watcher::Loop, &mut backoff, &mut watching_alone) {
+                Ok(Verdict::Decided(round)) => {
+                    let waiting_for = round.waiting_for();
+                    let line = round.line(host.now());
+                    match round.held_because() {
+                        // The wait this round announced is what the coalescing compares, so
+                        // a back-off that has doubled is said again.
+                        Some(why) => (waiting_for, Spoken::held(why, Some(waiting_for), line)),
+                        None => (waiting_for, Spoken::Decided(line)),
+                    }
                 }
-            }
-            // The machine is not arranged for watching, which the loop holds on.
-            // Nothing is charged to the back-off: this round asked the registry rather
-            // than Anthropic.
-            Ok(Verdict::NotArranged(why)) => held_before_a_round(&why.to_string(), host.now()),
-            // Out at once rather than round the loop to the ask at the top: this round
-            // asked it already, and the answer to a sticky question does not change.
-            Ok(Verdict::Lost(lost)) => return left(out, lost),
-            // Held like any other round that could not read. Ending the watcher over a
-            // contended registry would let a `perch status --refresh` stop it silently.
-            Err(PerchError::Busy(why)) => held_before_a_round(&why, host.now()),
-            Err(other) => return Err(other),
-        };
+                // The machine is not arranged for watching, which the loop holds on.
+                // Nothing is charged to the back-off: this round asked the registry rather
+                // than Anthropic.
+                Ok(Verdict::NotArranged(why)) => held_before_a_round(&why.to_string(), host.now()),
+                // Out at once rather than round the loop to the ask at the top: this round
+                // asked it already, and the answer to a sticky question does not change.
+                Ok(Verdict::Lost(lost)) => return left(out, lost),
+                // Held like any other round that could not read. Ending the watcher over a
+                // contended registry would let a `perch status --refresh` stop it silently.
+                Err(PerchError::Busy(why)) => held_before_a_round(&why, host.now()),
+                Err(other) => return Err(other),
+            };
 
         say_it(out, &mut holding, spoken, host.now())?;
 
@@ -372,15 +365,14 @@ fn opening(host: &dyn Host) -> Result<String> {
 
 /// Which watcher a round belongs to.
 ///
-/// One difference, and every part of it is here rather than scattered through the
-/// round: where the cooldown is kept, and who decides when the next reading is.
+/// One difference, and it is here rather than scattered through the round: who
+/// decides when the next reading is. The cooldown is not the other half of it —
+/// both read it off the registry, because a loop is a process a Service restarts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Watcher {
-    /// `perch watcher run`: rounds separated by a wait this process takes, so what
-    /// paces it lives in memory and dies with it.
+    /// `perch watcher run`: rounds separated by a wait this process takes.
     Loop,
-    /// `perch watcher check`: one round and out, so what paces it is written to the
-    /// registry for the next invocation to read, and how long until that one is
+    /// `perch watcher check`: one round and out, and how long until the next is
     /// whatever scheduled them.
     Check,
 }
@@ -394,41 +386,6 @@ impl Watcher {
         match self {
             Watcher::Loop => Some(waiting_for),
             Watcher::Check => None,
-        }
-    }
-
-    /// What paces this round, put where the round will read it.
-    ///
-    /// A check takes the Group's record, read under the lock so the cooldown a round is
-    /// held by is the one that was on record when it decided. The loop's is already in
-    /// the caller's hands.
-    fn pacing(
-        self,
-        carried: &mut Recently,
-        registry: &Registry,
-        scope: &Scope,
-        now: DateTime<Utc>,
-    ) {
-        match self {
-            Watcher::Loop => {}
-            Watcher::Check => {
-                *carried = Recently::recorded(registry.checked(scope.word()), now);
-            }
-        }
-    }
-
-    /// Which Switch this watcher is about to make, in the terms the Switch itself keeps
-    /// ([`switch::Reason`]).
-    ///
-    /// Handed to the Switch rather than sequenced around it: what paces the next check
-    /// has to reach the registry in the same save as the Switch it paces.
-    fn reason(self, scope: &Scope, at: DateTime<Utc>) -> switch::Reason {
-        match self {
-            Watcher::Loop => switch::Reason::Loop,
-            Watcher::Check => switch::Reason::Check {
-                scope: scope.clone(),
-                at,
-            },
         }
     }
 }
@@ -510,7 +467,6 @@ fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
 fn one_round(
     host: &dyn Host,
     watcher: Watcher,
-    recently: &mut Recently,
     backoff: &mut Backoff,
     watching_alone: &mut Watch<'_>,
 ) -> Result<Verdict> {
@@ -548,7 +504,10 @@ fn one_round(
     };
     let email = watching.account.email().to_string();
 
-    watcher.pacing(recently, &registry, &watching.scope, host.now());
+    // Read under the lock, so the cooldown a round is held by is the one that was on
+    // record when it decided — and read every round rather than carried, because a
+    // Watcher this Service restarts would otherwise come back owing nobody a wait.
+    let recently = Recently::recorded(registry.checked(watching.scope.word()), host.now());
 
     // Once per round, and handed to everything in it that wants one. Deferred, so a
     // round that refuses nothing forks nothing: this loop runs until the session ends,
@@ -564,6 +523,7 @@ fn one_round(
         &mut registry,
         std::slice::from_ref(&email),
         &installed,
+        observe::Spending::ItsOwn,
         &mut || watching_alone.goes_on(),
     );
     // Worth saying and not worth holding a decision over: the figure this round decides
@@ -626,7 +586,7 @@ fn one_round(
     // of each.
     let (fullest, outcome) = match fullest.crossed(watching.policy.threshold) {
         Err(under) => (under, Outcome::Waiting),
-        Ok(crossed) => match crossed.cooled(recently, host.now()) {
+        Ok(crossed) => match crossed.cooled(&recently, host.now()) {
             // Before the candidates are read, so a round that may not act spends
             // nothing finding out where it would have gone.
             Err(cooling) => (
@@ -641,7 +601,6 @@ fn one_round(
                     &mut registry,
                     &watching,
                     watcher,
-                    recently,
                     &cooled,
                     &installed,
                     watching_alone,
@@ -712,9 +671,10 @@ fn refused_the_reading(attempts: &[Attempt]) -> Option<Refusal> {
             why.because(),
             crate::registry::how_to_repair(&attempt.email),
         ))),
-        // The round stopped rather than being refused, and `refresh` reports that
-        // through `Report::stopped` rather than as an attempt against an Account.
-        observe::Outcome::Stopped(_) => None,
+        // Neither reaches an `Attempt` here: a round that stopped is reported
+        // through `Report::stopped`, and a round reads under `Spending::ItsOwn`,
+        // so the Watcher is never told to stand aside for itself.
+        observe::Outcome::Stopped(_) | observe::Outcome::JustRead => None,
     }
 }
 
@@ -743,7 +703,7 @@ impl Refusal {
 ///
 /// Read here rather than kept warm — the only moment their figures are worth
 /// anything, and the moment they are cheapest to get.
-// Eight, and the eighth is the point: `probed` is what the round already asked the
+// Seven, and the seventh is the point: `probed` is what the round already asked the
 // machine and must not ask again.
 #[allow(clippy::too_many_arguments)]
 fn act(
@@ -752,7 +712,6 @@ fn act(
     registry: &mut Registry,
     watching: &Watching,
     watcher: Watcher,
-    recently: &mut Recently,
     cooled: &Cooled<'_>,
     probed: &Result<probe::Installed>,
     watching_alone: &mut Watch<'_>,
@@ -784,6 +743,7 @@ fn act(
         registry,
         &addresses_of(&considered(registry, watching, cooled, &idle)),
         probed,
+        observe::Spending::ItsOwn,
         &mut || watching_alone.goes_on(),
     );
     // Before the choice rather than after it: a burst that stopped part way leaves
@@ -840,20 +800,12 @@ fn act(
         &installed,
         &choice.account,
         Some(&outgoing),
-        watcher.reason(&scope, acted_at),
+        switch::Reason::Unasked {
+            scope: scope.clone(),
+            at: acted_at,
+        },
     );
     watching_alone.kept_up();
-
-    // Only a Switch that happened starts a cooldown, and a Switch that moved and then
-    // *failed* is one — which is why the question is asked of both ways out rather than
-    // of the successful one.
-    let moved = match &switched {
-        Ok(switched) => switched.moved,
-        Err(not_switched) => not_switched.moved,
-    };
-    if moved {
-        recently.switched(acted_at);
-    }
 
     match switched {
         // Where it went, and nothing about why it won: nobody is at the terminal to be
