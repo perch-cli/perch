@@ -121,6 +121,7 @@ Account in one terminal without changing which is active.
 | `perch holdings export` / `import` | back up everything Perch holds to one encrypted file, and put it back | [guide](pages/src/content/docs/backup.md) |
 | `perch holdings purge` | give the machine back the state it had before Perch | [guide](pages/src/content/docs/backup.md#giving-the-machine-back) |
 | `perch upgrade` | replace this Perch with a newer Release, through the channel that installed it | [guide](pages/src/content/docs/installing.md#upgrading) |
+| `perch version` | which Perch is installed, and a line more when a newer Release exists | [guide](pages/src/content/docs/installing.md#being-told-about-new-releases) |
 
 Every command has `--help`, and the flags, the exit codes and the paths Perch
 writes are in the [reference](pages/src/content/docs/reference.md).
