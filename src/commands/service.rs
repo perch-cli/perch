@@ -15,7 +15,7 @@ use crate::commands::{say, say_json};
 use crate::cycle;
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::host::{Host, Platform};
-use crate::service::{self, Driven, Manager, Unit};
+use crate::service::{self, Driven, Manager, Standing, Unit};
 use crate::{registry, upgrade};
 
 /// Writes the unit, starts it, and says what it did.
@@ -93,11 +93,8 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         ),
     )?;
 
-    // Said rather than refused: refusing would make the order two `perch config set`s
-    // are typed in matter, and a Service with no grant holds harmlessly and takes over
-    // the moment one is given. The only thing missing is somebody knowing that.
-    if let Some(missing) = nothing_may_act(host)? {
-        say(out, &missing)?;
+    if any_scope_may_act(host) == Some(false) {
+        say(out, service::HOLDS_FOR_A_GRANT)?;
     }
     Ok(EXIT_OK)
 }
@@ -149,6 +146,23 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 /// log: that would mean shelling out to `journalctl` three ways (ADR
 /// a-crate-must-not-cost-a-seam).
 pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
+    let standing = asked_of_the_machine(host)?;
+    match json {
+        true => say_json(out, &standing.document())?,
+        false => {
+            for line in standing.lines() {
+                say(out, &line)?;
+            }
+        }
+    }
+    Ok(EXIT_OK)
+}
+
+/// Every question this command puts to the machine, put once.
+///
+/// The answers travel as a [`Standing`] rather than as locals, so the document and
+/// the sentences are two renderings of one reading rather than two readings.
+fn asked_of_the_machine(host: &dyn Host) -> Result<Standing> {
     let manager = Manager::of(host);
     let at = manager.unit_path(host)?;
     let installed = is_installed(host, at.as_deref())?;
@@ -169,89 +183,18 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
     let recorded = installed
         .then(|| unit.as_deref().and_then(|text| manager.binary_in(text)))
         .flatten();
-    let binary_is_there = recorded.as_deref().map(|at| host.path_exists(at));
-    let log = recorded_log(host, unit.as_deref(), installed)?;
 
-    if json {
-        return say_json(
-            out,
-            &serde_json::json!({
-                "installed": installed,
-                "running": running,
-                "watching": watching,
-                "platform": manager.arrangement(),
-                "unit": at.as_ref().map(|at| at.to_string_lossy()),
-                "binary": recorded.as_ref().map(|at| at.to_string_lossy()),
-                "binary_exists": binary_is_there,
-                // The path alone, and `null` where there is no file to open —
-                // on systemd there never is. The sentence a person reads is
-                // beside it rather than in its place.
-                "log": log.as_ref().map(|at| at.to_string_lossy()),
-                "log_said": manager.log_is_at(log.as_deref()),
-            }),
-        )
-        .map(|()| EXIT_OK);
-    }
-
-    if !installed {
-        say(
-            out,
-            &format!(
-                "No Service is installed. `perch watcher install` has this \
-                 machine run the Watcher for you as {}, starting when you log \
-                 in.",
-                manager.described(),
-            ),
-        )?;
-    } else {
-        say(
-            out,
-            &format!(
-                "A Service is installed as {}, and is {}.",
-                manager.described(),
-                match running {
-                    true => "running",
-                    false => "not running",
-                },
-            ),
-        )?;
-        if let Some(at) = &at {
-            say(out, &format!("Its unit is {}.", at.display()))?;
-        }
-        match (&recorded, binary_is_there) {
-            (Some(binary), Some(false)) => say(
-                out,
-                &format!(
-                    "It names {}, which is not there any more — an Upgrade \
-                     moves the binary. `perch watcher install` writes the unit \
-                     again against the one that is.",
-                    binary.display(),
-                ),
-            )?,
-            (Some(binary), _) => say(out, &format!("It runs {}.", binary.display()))?,
-            (None, _) => {}
-        }
-        say(
-            out,
-            &format!("Its decisions go to {}.", manager.log_is_at(log.as_deref()),),
-        )?;
-    }
-
-    // The Service and the Watcher are different questions, and a machine can answer
-    // them differently: one installed and stopped, or a `perch watcher run` somebody
-    // typed.
-    say(
-        out,
-        match watching {
-            true => "A Watcher is running on this machine and holds the watcher lock.",
-            false => "No Watcher is running on this machine.",
-        },
-    )?;
-
-    if let Some(missing) = nothing_may_act(host)? {
-        say(out, &missing)?;
-    }
-    Ok(EXIT_OK)
+    Ok(Standing {
+        manager,
+        installed,
+        running,
+        watching,
+        binary_is_there: recorded.as_deref().map(|at| host.path_exists(at)),
+        log: recorded_log(host, unit.as_deref(), installed)?,
+        binary: recorded,
+        unit: at,
+        any_scope_may_act: any_scope_may_act(host),
+    })
 }
 
 /// Stops the Service and takes its unit back, before a Purge deletes anything.
@@ -492,35 +435,24 @@ fn recorded_log(host: &dyn Host, unit: Option<&str>, installed: bool) -> Result<
     Ok(unit.and_then(|text| manager.log_in(text)))
 }
 
-/// The line saying a Service will hold because no Scope has granted anything, or `None`
-/// where one has.
+/// Whether any Scope has told the Watcher it may act, or `None` where the registry
+/// would not load.
 ///
 /// Asked of the whole registry rather than of the active Account, because a Service
 /// outlives whichever Account happens to be active when it is installed.
-fn nothing_may_act(host: &dyn Host) -> Result<Option<String>> {
-    // Nothing to say about a registry that will not load: whatever is wrong with it is
-    // bigger news than this line, and the command that needs it will say so.
+fn any_scope_may_act(host: &dyn Host) -> Option<bool> {
+    // Whatever is wrong with a registry that will not load is bigger news than this
+    // answer, and the command that needs it will say so.
     let Ok(Some(registry)) = registry::load(host) else {
-        return Ok(None);
+        return None;
     };
 
     // Both statements, because a grant alone is not enough for the Ungrouped Accounts
-    // (ADR a-group-is-a-declaration): read from `watcher-may-act` alone this line would
-    // stay silent.
-    let any = registry.scopes().iter().any(|scope| {
+    // (ADR a-group-is-a-declaration): read from `watcher-may-act` alone this would be
+    // yes on a Scope with nowhere to Switch to.
+    Some(registry.scopes().iter().any(|scope| {
         registry.settings(scope).watcher_may_act && cycle::may_cycle_within(&registry, scope)
-    });
-    if any {
-        return Ok(None);
-    }
-
-    Ok(Some(
-        "No Scope has told the Watcher it may act, so the Service will hold \
-         rather than decide anything. `perch config set <group> watcher-may-act \
-         true` is what starts it deciding, and it takes effect within a couple \
-         of minutes without anything being restarted."
-            .to_string(),
-    ))
+    }))
 }
 
 /// Runs what the platform's service manager has to be told, in order.

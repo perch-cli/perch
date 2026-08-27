@@ -688,6 +688,122 @@ fn unescaped(value: &str) -> String {
         .replace("&amp;", "&")
 }
 
+/// What a Service granted nothing does instead, said after an install and in a
+/// status. Said rather than refused: refusing would make the order two `perch
+/// config set`s are typed in matter, and a Service with no grant holds harmlessly
+/// and takes over the moment one is given.
+pub const HOLDS_FOR_A_GRANT: &str = "No Scope has told the Watcher it may act, so the Service will hold rather \
+     than decide anything. `perch config set <group> watcher-may-act true` is \
+     what starts it deciding, and it takes effect within a couple of minutes \
+     without anything being restarted.";
+
+/// What the machine answers about the Service, gathered once.
+///
+/// Every renderer asks this rather than deciding again, so the lines a person reads
+/// and the document a script parses cannot come to disagree
+/// (ADR the-listing-owns-the-set).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Standing {
+    pub manager: Manager,
+    /// Whether a unit is there at all. Every answer below is read against it: a
+    /// machine with no Service names no binary and is running nothing.
+    pub installed: bool,
+    pub running: bool,
+    /// Whether a Watcher holds the watcher lock — this Service's, or a `perch watcher
+    /// run` somebody typed. A different question from `running`, and a machine can
+    /// answer the two differently.
+    pub watching: bool,
+    pub unit: Option<PathBuf>,
+    /// The binary the installed unit names, and whether it is still there. An Upgrade
+    /// moves a binary and leaves the unit naming where it was.
+    pub binary: Option<PathBuf>,
+    pub binary_is_there: Option<bool>,
+    pub log: Option<PathBuf>,
+    /// Whether any Scope has told the Watcher it may act, or `None` where the registry
+    /// would not load. A Service granted nothing holds rather than deciding anything,
+    /// however healthy every other answer here looks.
+    pub any_scope_may_act: Option<bool>,
+}
+
+impl Standing {
+    /// The keys a script reads. `null` for what a machine has none of: a systemd unit
+    /// has no log file to open, and nothing installed names no binary.
+    pub fn document(&self) -> serde_json::Value {
+        serde_json::json!({
+            "installed": self.installed,
+            "running": self.running,
+            "watching": self.watching,
+            "platform": self.manager.arrangement(),
+            "unit": self.unit.as_ref().map(|at| at.to_string_lossy()),
+            "binary": self.binary.as_ref().map(|at| at.to_string_lossy()),
+            "binary_exists": self.binary_is_there,
+            "log": self.log.as_ref().map(|at| at.to_string_lossy()),
+            "log_said": self.manager.log_is_at(self.log.as_deref()),
+            "any_scope_may_act": self.any_scope_may_act,
+        })
+    }
+
+    /// The same answers as sentences, in the order somebody reads them.
+    pub fn lines(&self) -> Vec<String> {
+        let mut said = match self.installed {
+            false => vec![format!(
+                "No Service is installed. `perch watcher install` has this \
+                 machine run the Watcher for you as {}, starting when you log \
+                 in.",
+                self.manager.described(),
+            )],
+            true => self.what_is_installed(),
+        };
+
+        // The Service and the Watcher are different questions, and a machine can
+        // answer them differently: one installed and stopped, or a `perch watcher run`
+        // somebody typed.
+        said.push(
+            match self.watching {
+                true => "A Watcher is running on this machine and holds the watcher lock.",
+                false => "No Watcher is running on this machine.",
+            }
+            .to_string(),
+        );
+
+        // Said only where the answer is known to be no: a registry that would not load
+        // is bigger news than this line, and the command that needs it will say so.
+        if self.any_scope_may_act == Some(false) {
+            said.push(HOLDS_FOR_A_GRANT.to_string());
+        }
+        said
+    }
+
+    fn what_is_installed(&self) -> Vec<String> {
+        let mut said = vec![format!(
+            "A Service is installed as {}, and is {}.",
+            self.manager.described(),
+            match self.running {
+                true => "running",
+                false => "not running",
+            },
+        )];
+        if let Some(at) = &self.unit {
+            said.push(format!("Its unit is {}.", at.display()));
+        }
+        match (&self.binary, self.binary_is_there) {
+            (Some(binary), Some(false)) => said.push(format!(
+                "It names {}, which is not there any more — an Upgrade moves \
+                 the binary. `perch watcher install` writes the unit again \
+                 against the one that is.",
+                binary.display(),
+            )),
+            (Some(binary), _) => said.push(format!("It runs {}.", binary.display())),
+            (None, _) => {}
+        }
+        said.push(format!(
+            "Its decisions go to {}.",
+            self.manager.log_is_at(self.log.as_deref())
+        ));
+        said
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,6 +817,99 @@ mod tests {
             user_id: Some(501),
             user_name: Some("someone".to_string()),
         }
+    }
+
+    /// A Service installed and running, with everything it names still there —
+    /// which is the machine each case below changes exactly one answer of.
+    fn a_standing() -> Standing {
+        Standing {
+            manager: Manager::Systemd,
+            installed: true,
+            running: true,
+            watching: true,
+            unit: Some(PathBuf::from(
+                "/home/someone/.config/systemd/user/perch-watch.service",
+            )),
+            binary: Some(PathBuf::from("/usr/local/bin/perch")),
+            binary_is_there: Some(true),
+            log: None,
+            any_scope_may_act: Some(true),
+        }
+    }
+
+    fn said(standing: &Standing) -> String {
+        standing.lines().join(" ")
+    }
+
+    /// The drift a Standing exists to close: the grant reached a person and never
+    /// reached a script, so `installed` and `running` were the whole of what
+    /// `--json` said about a Service that would only ever hold.
+    #[test]
+    fn a_service_granted_nothing_says_so_to_a_person_and_to_a_script() {
+        let standing = Standing {
+            any_scope_may_act: Some(false),
+            ..a_standing()
+        };
+
+        assert!(said(&standing).contains("watcher-may-act true"));
+        assert_eq!(
+            standing.document()["any_scope_may_act"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn a_granted_service_is_told_nothing_about_grants() {
+        assert!(!said(&a_standing()).contains("watcher-may-act"));
+        assert_eq!(
+            a_standing().document()["any_scope_may_act"],
+            serde_json::json!(true)
+        );
+    }
+
+    /// A registry that will not load is bigger news than this line, so neither
+    /// renderer claims an answer it does not have.
+    #[test]
+    fn a_registry_that_would_not_load_is_answered_as_unknown_rather_than_as_yes() {
+        let standing = Standing {
+            any_scope_may_act: None,
+            ..a_standing()
+        };
+
+        assert!(!said(&standing).contains("watcher-may-act"));
+        assert_eq!(
+            standing.document()["any_scope_may_act"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn a_machine_with_no_service_is_told_how_to_have_one() {
+        let standing = Standing {
+            installed: false,
+            running: false,
+            watching: false,
+            ..a_standing()
+        };
+
+        assert!(said(&standing).contains("perch watcher install"));
+        assert_eq!(standing.document()["installed"], serde_json::json!(false));
+    }
+
+    /// An Upgrade moves the binary and leaves the unit naming where it was, so
+    /// both renderings have to carry that a Service names something gone.
+    #[test]
+    fn a_unit_naming_a_binary_that_has_moved_says_so_either_way() {
+        let standing = Standing {
+            binary_is_there: Some(false),
+            ..a_standing()
+        };
+
+        assert!(said(&standing).contains("not there any more"));
+        assert_eq!(
+            standing.document()["binary_exists"],
+            serde_json::json!(false)
+        );
     }
 
     /// The same fact twice, and the reason `keeps_a_unit_file` exists at all: a caller
