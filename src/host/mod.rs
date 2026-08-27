@@ -298,7 +298,7 @@ pub fn write_escaped(out: &mut Secret, value: &str) {
 /// `output =` writes a file while a second `url =` fetches one. Perch does not
 /// author most of what goes through here: an access token is read out of a JSON
 /// file it does not own, where `\n` is an ordinary escape.
-pub fn inert(what: &str, value: &str) -> Result<(), HostError> {
+pub fn inert(what: impl std::fmt::Display, value: &str) -> Result<(), HostError> {
     match control_character_in(value) {
         Some(said) => Err(HostError::Other(format!(
             "{what} carries {said}, which the line it would be written on has \
@@ -319,8 +319,8 @@ pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
         // The name as well as the value: `curl_config` writes the pair onto one
         // line, so a newline in either ends the `header` option and starts a
         // second one of the adapter's choosing.
-        inert(&format!("the header name `{name}`"), name)?;
-        inert(&format!("the {name} header"), value)?;
+        inert(format_args!("the header name `{name}`"), name)?;
+        inert(format_args!("the {name} header"), value)?;
     }
     if let Some(body) = request.body {
         inert("the request body", body)?;
