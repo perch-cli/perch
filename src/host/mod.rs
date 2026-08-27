@@ -896,15 +896,16 @@ pub(crate) fn settled(host: &dyn Host, path: &Path) -> Settled {
 }
 
 /// A path read from wherever Perch was run, where it does not name one from the
-/// root. `starts_with` matches components, so a bare `backup.age` shares none
-/// with the directory it is sitting in and every containment question about it
-/// answers "elsewhere".
+/// root: a bare `backup.age` shares no component with the directory it sits in,
+/// so every containment question about it answers "elsewhere". Rooted is asked
+/// of the Host's platform *and* of this build's, because either alone misreads a
+/// path the other spelled — a fake claiming macOS gets `\Users\someone` here.
 fn from_the_root(host: &dyn Host, path: &Path) -> PathBuf {
-    // Asked of the platform the *Host* reports, and joined with `/` by hand, for
-    // `probe::rooted`'s reason: `is_absolute` and `join` read the separator of
-    // the platform this build runs on.
     let typed = path.to_string_lossy();
-    if typed.is_empty() || crate::probe::rooted(&typed, host.platform() == Platform::Windows) {
+    if typed.is_empty()
+        || path.has_root()
+        || crate::probe::rooted(&typed, host.platform() == Platform::Windows)
+    {
         return path.to_path_buf();
     }
     match host.current_dir() {
@@ -1155,6 +1156,34 @@ mod tests {
         assert_eq!(
             settled(&host, Path::new("neither/is/this")).at(),
             Some(Path::new("/Users/someone/work/neither/is/this")),
+        );
+    }
+
+    /// A path's separators come from whichever platform *built* it, and the Host
+    /// reports whichever one a fixture claims — so `probe::rooted` alone reads a
+    /// path `join` spelled as relative, and joins it onto the working directory.
+    /// Through `join` rather than a literal, a literal being the same bytes on
+    /// both platforms and so the case that already worked.
+    #[test]
+    fn a_path_built_from_a_rooted_one_is_never_read_as_relative() {
+        let host = FakeHost::new();
+        let rooted = Path::new("/Users/someone/.config/perch")
+            .join("profiles")
+            .join("work");
+
+        let settled = settled(&host, &rooted);
+
+        assert_eq!(
+            settled.at(),
+            Some(rooted.as_path()),
+            "it names a place from the root, whichever platform spelled it"
+        );
+        assert!(
+            !settled.is_inside(&super::settled(
+                &host,
+                &host.current_dir().expect("the fake says where it is")
+            )),
+            "and it is not read as sitting in the directory Perch was run from"
         );
     }
 
