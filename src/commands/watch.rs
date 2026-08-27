@@ -671,13 +671,10 @@ fn refused_the_reading(attempts: &[Attempt]) -> Option<Refusal> {
             why.because(),
             crate::registry::how_to_repair(&attempt.email),
         ))),
-        // The round stopped rather than being refused, and `refresh` reports that
-        // through `Report::stopped` rather than as an attempt against an Account.
-        observe::Outcome::Stopped(_) => None,
-        // A round reads under `Spending::ItsOwn`, which is what this answers, so
-        // the Watcher is never told to stand aside for itself. The arm is here
-        // because the type allows it.
-        observe::Outcome::JustRead => None,
+        // Neither reaches an `Attempt` here: a round that stopped is reported
+        // through `Report::stopped`, and a round reads under `Spending::ItsOwn`,
+        // so the Watcher is never told to stand aside for itself.
+        observe::Outcome::Stopped(_) | observe::Outcome::JustRead => None,
     }
 }
 

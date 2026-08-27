@@ -144,6 +144,37 @@ fn a_watcher_reading_this_account_keeps_the_allowance_a_typed_refresh_would_spen
 }
 
 #[test]
+fn json_says_a_read_left_to_the_watcher_asked_anthropic_nothing() {
+    let host = ready();
+    run_status_refresh(&host, false)
+        .0
+        .expect("the first read works");
+    let host = host.with_dir_held_since(WATCH_LOCK, at(12, 0));
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, true);
+
+    result.expect("a read left to the Watcher is not a failure");
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    let account = &document["refresh"]["accounts"][0];
+    assert_eq!(account["email"], EMAIL);
+    assert_eq!(
+        account["outcome"], "just_read",
+        "a script can tell a read nobody made from one that failed: {printed}"
+    );
+    assert_eq!(account["reason"], serde_json::Value::Null);
+    assert_eq!(
+        account["detail"],
+        serde_json::Value::Null,
+        "nothing went wrong underneath it: {printed}"
+    );
+    assert_eq!(
+        document["refresh"]["kept"], true,
+        "a read nobody made loses no figure: {printed}"
+    );
+}
+
+#[test]
 fn a_typed_refresh_spends_freely_where_no_watcher_is_running() {
     let host = ready();
     run_status_refresh(&host, false)

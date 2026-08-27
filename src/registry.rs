@@ -2950,18 +2950,40 @@ mod tests {
     #[test]
     fn the_watchers_policy_has_the_default_it_is_documented_with() {
         assert_eq!(Settings::default().watcher_threshold_percent, 80);
+        assert_eq!(Settings::default().watcher_margin_percent, 10);
     }
 
     #[test]
     fn a_number_out_of_range_is_refused_with_the_range() {
-        let cases: [(Settings, &str, &str); 1] = [(
-            Settings {
-                watcher_threshold_percent: 101,
-                ..Settings::default()
-            },
-            "watcher-threshold-percent",
-            "100",
-        )];
+        let cases: [(Settings, &str, &str); 3] = [
+            (
+                Settings {
+                    watcher_threshold_percent: 101,
+                    ..Settings::default()
+                },
+                "watcher-threshold-percent",
+                "100",
+            ),
+            // Zero is the one a margin refuses and a percentage does not: at a
+            // margin of nothing an Account is both full enough to leave and
+            // clear enough to arrive at.
+            (
+                Settings {
+                    watcher_margin_percent: 0,
+                    ..Settings::default()
+                },
+                "watcher-margin-percent",
+                "between 1 and 100",
+            ),
+            (
+                Settings {
+                    watcher_margin_percent: 101,
+                    ..Settings::default()
+                },
+                "watcher-margin-percent",
+                "between 1 and 100",
+            ),
+        ];
 
         let work = Scope::Group("work".to_string());
         for (config, key, accepted) in cases {
@@ -3600,6 +3622,25 @@ mod tests {
                 "and the file to edit: {said}"
             );
         }
+    }
+
+    /// The margin reaches `load` by the same door, so a hand edit is refused where
+    /// no `perch config set` could have written it.
+    #[test]
+    fn a_margin_of_nothing_in_the_file_is_refused_by_the_read() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":2,"accounts":[],"groups":{"work":{"watcher_margin_percent":0}}}"#,
+        );
+
+        let refused = load(&host).expect_err("nothing is not a margin");
+
+        assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
+        let said = refused.to_string();
+        assert!(said.contains("watcher-margin-percent"), "{said}");
+        assert!(said.contains("between 1 and 100"), "{said}");
     }
 
     #[test]

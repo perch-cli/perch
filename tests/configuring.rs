@@ -425,6 +425,17 @@ fn a_scope_sets_how_empty_a_candidate_has_to_be_apart_from_when_it_is_moved() {
     );
 }
 
+#[test]
+fn a_margin_that_is_not_a_number_is_refused_with_the_range_it_takes() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = config_set(&host, &["work", "watcher-margin-percent", "wide"]);
+
+    let error = result.expect_err("`wide` is not a number of points");
+    assert_eq!(error.exit_code(), EXIT_INVALID, "{error}");
+    assert!(error.to_string().contains("between 1 and 100"), "{error}");
+}
+
 /// A margin of nothing is the one value the arithmetic cannot mean: an Account is
 /// left on `>=` the threshold and a candidate set aside on `>` the ceiling, so at
 /// zero one Account is both full enough to leave and clear enough to arrive at.
