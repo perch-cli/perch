@@ -26,9 +26,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // before typing one twice — and before the registry is read, since reading it
     // adopts the login on a fresh machine (ADR a-login-perch-does-not-need).
     refuse_without_a_terminal(host, "perch holdings export")?;
-    refuse_a_directory_that_is_not_there(host, path)?;
-    refuse_an_occupied_path(host, path)?;
-    refuse_a_path_perchs_home_would_take(host, path)?;
+    refuse_the_path(host, path)?;
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
@@ -72,9 +70,7 @@ pub fn write_the_export(
     installed: &crate::probe::Installed,
     out: &mut dyn Write,
 ) -> Result<()> {
-    refuse_a_directory_that_is_not_there(host, path)?;
-    refuse_an_occupied_path(host, path)?;
-    refuse_a_path_perchs_home_would_take(host, path)?;
+    refuse_the_path(host, path)?;
 
     // Before a Credential Store is read: during a Landing the live one may be
     // either Account's, so each Credential would be gathered out of its own
@@ -110,6 +106,15 @@ pub fn write_the_export(
     *landed = Some(path.to_path_buf());
 
     report(out, path, &export)
+}
+
+/// Everything wrong with the path an Export was told to take, asked at both the
+/// doors that write one: [`run`] before adoption, so a refusal costs no Account,
+/// and [`write_the_export`] for the door `perch holdings purge` comes in by.
+fn refuse_the_path(host: &dyn Host, path: &Path) -> Result<()> {
+    refuse_a_directory_that_is_not_there(host, path)?;
+    refuse_an_occupied_path(host, path)?;
+    refuse_a_path_perchs_home_would_take(host, path)
 }
 
 /// Refuses to write the Export inside Perch's own home.
