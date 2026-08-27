@@ -14,6 +14,7 @@ use std::io::Write;
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
+use crate::column;
 use crate::commands::say_json;
 use crate::error::Result;
 use crate::host::{Host, Shown};
@@ -110,18 +111,18 @@ fn render_human(
         crate::commands::say(out, &said)?;
     }
 
-    utilization::write_labeled(out, "Account", &Shown::of(account.email()))?;
+    column::write_labeled(out, "Account", &Shown::of(account.email()))?;
     if let Some(organization) = &account.identity.organization_name {
-        utilization::write_labeled(out, "Organization", &Shown::of(organization))?;
+        column::write_labeled(out, "Organization", &Shown::of(organization))?;
     }
     if let Some(plan) = &account.plan {
-        utilization::write_labeled(out, "Plan", &Shown::of(plan))?;
+        column::write_labeled(out, "Plan", &Shown::of(plan))?;
     }
     // Above the figures, because a Quarantined Account's figures describe quota
     // it cannot spend: the state is the news and the numbers are the detail.
     // Both halves on one line, since one Account means one copy of the repair.
     if let Some(why) = account.quarantine {
-        utilization::write_labeled(
+        column::write_labeled(
             out,
             "Quarantine",
             &Shown::of(&format!(

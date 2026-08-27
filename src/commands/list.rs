@@ -14,6 +14,7 @@ use std::io::Write;
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
+use crate::column;
 use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, group, say, say_json, write_failed};
 use crate::cycle;
 use crate::error::{PerchError, Result};
@@ -229,7 +230,7 @@ struct Drawn {
 
 impl Drawn {
     fn of(cells: [Shown; COLUMNS]) -> Drawn {
-        let measured = std::array::from_fn(|column| utilization::cells(&cells[column]));
+        let measured = std::array::from_fn(|at| column::cells(&cells[at]));
         Drawn { cells, measured }
     }
 }
@@ -470,7 +471,7 @@ fn write_row(
         if !show_group && column == GROUP_COLUMN {
             continue;
         }
-        utilization::pad_into(line, cell, measured, *width);
+        column::pad_into(line, cell, measured, *width);
         line.push_str("  ");
     }
     line.push_str(figure);
