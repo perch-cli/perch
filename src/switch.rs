@@ -279,8 +279,8 @@ fn record_active(
 /// Under them, not before them: the liveness refusal is a statement about a
 /// moment, and taking a lock can take seconds. Once the locks are held nothing
 /// can change the answer, which is the only condition under which asking helps.
-struct Prepared {
-    installed: Installed,
+struct Prepared<'h> {
+    installed: Installed<'h>,
     store: Store,
     credential: Credential,
     /// The `oauthAccount` block to write, ready to splice in.
@@ -726,13 +726,13 @@ pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result
     )))
 }
 
-fn prepare(
+fn prepare<'h>(
     host: &dyn Host,
     incoming: &Account,
     outgoing: Option<&Account>,
-    installed: Installed,
+    installed: Installed<'h>,
     store: Store,
-) -> Result<Prepared> {
+) -> Result<Prepared<'h>> {
     // Before anything is written, and only of the Profile written to. The
     // incoming Account's is only ever read from, and reading takes nothing away
     // from the session using it.

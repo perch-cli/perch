@@ -38,14 +38,33 @@ pub mod assumption {
 /// reading. A value rather than a `&str` for two reasons — reading it is a
 /// `PATH` walk and a subprocess, so a command asks once; and a caller with no
 /// version to give has [`Installed::unknown`] rather than a made-up string.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Installed(String);
+#[derive(Clone)]
+pub struct Installed<'h> {
+    said: std::cell::OnceCell<String>,
+    /// Where to ask, for the one caller that has not asked yet. `None` once
+    /// `said` is settled, which is every other way one of these is made.
+    ask: Option<&'h dyn Host>,
+}
 
-impl Installed {
+impl<'h> Installed<'h> {
     /// Asks the installed Claude Code what it is. Once per command: the answer
     /// cannot change under a process that is already running.
-    pub fn probed(host: &dyn Host) -> Result<Installed> {
-        Ok(Installed(claude_version(host)?))
+    pub fn probed(host: &dyn Host) -> Result<Installed<'static>> {
+        Ok(Installed::unknown(&claude_version(host)?))
+    }
+
+    /// The same for a process that outlives a command, where asking every round
+    /// forks a Node program to quote a string most rounds never quote. Only the
+    /// version waits: a refusal quotes the Claude Code installed when it was
+    /// raised rather than when the process started.
+    pub fn asked_when_needed(host: &'h dyn Host) -> Result<Installed<'h>> {
+        // Claude Code being *there* is still established now, a round with none
+        // having nothing to do — and it is a `PATH` walk rather than a fork.
+        claude_bin(host)?;
+        Ok(Installed {
+            said: std::cell::OnceCell::new(),
+            ask: Some(host),
+        })
     }
 
     /// When the question could not be asked, or is not the thing being tested.
@@ -53,13 +72,32 @@ impl Installed {
     /// machine whose Claude Code is gone is the machine somebody is giving an
     /// Account up on, and refusing for want of a version would hold their
     /// Credential hostage to a program neither of them needs.
-    pub fn unknown(said: &str) -> Installed {
-        Installed(said.to_string())
+    pub fn unknown(said: &str) -> Installed<'static> {
+        Installed {
+            said: std::cell::OnceCell::from(said.to_string()),
+            ask: None,
+        }
     }
 
     /// What a refusal quotes.
     pub fn version(&self) -> &str {
-        &self.0
+        self.said.get_or_init(|| match self.ask {
+            // The binary was found when this was made, so what is left to fail
+            // is running it — which is what `unknown` exists to say.
+            Some(host) => claude_version(host).unwrap_or_else(|_| "unknown".to_string()),
+            None => "unknown".to_string(),
+        })
+    }
+}
+
+/// Written by hand because the `Host` beside the answer has no `Debug` and is
+/// not part of it: what this is, is the version.
+impl std::fmt::Debug for Installed<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("Installed")
+            .field(&self.said.get())
+            .finish()
     }
 }
 
@@ -1111,7 +1149,7 @@ mod tests {
     }
 
     /// A version to quote, for the tests that are not about the quoting.
-    fn version_under_test() -> Installed {
+    fn version_under_test() -> Installed<'static> {
         Installed::unknown("2.1.221")
     }
     use crate::host::{Execution, FakeHost, Platform};
@@ -1802,6 +1840,60 @@ mod tests {
              that caused the renewal, which renews again on every command",
         );
         assert!(!rotated.contains("expiresAt"), "{}", rotated.as_str());
+    }
+
+    /// The whole of what `asked_when_needed` promises: `claude` is established
+    /// as being there, and its version is read the first time something quotes
+    /// one and only once however often it is quoted after that.
+    #[test]
+    fn a_deferred_version_is_read_when_it_is_first_quoted_and_not_before() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "")
+            .with_exec(
+                "/usr/bin/claude",
+                &["--version"],
+                Execution {
+                    status: 0,
+                    stdout: "2.1.221 (Claude Code)".to_string(),
+                    stderr: String::new(),
+                },
+            );
+
+        let installed = Installed::asked_when_needed(&host).expect("`claude` is on PATH");
+        assert_eq!(
+            versions_read_by(&host),
+            0,
+            "nothing has quoted it, so nothing has been forked"
+        );
+
+        assert_eq!(installed.version(), "2.1.221");
+        assert_eq!(installed.version(), "2.1.221");
+        assert_eq!(versions_read_by(&host), 1, "{:?}", host.effects());
+    }
+
+    /// A `claude` that goes missing between the two is quoted as unknown rather
+    /// than raised: `version` is reached from inside a refusal being built, and
+    /// there is nothing there to hand a second failure to.
+    #[test]
+    fn a_deferred_version_that_will_not_read_is_quoted_as_unknown() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "");
+
+        let installed = Installed::asked_when_needed(&host).expect("`claude` is on PATH");
+
+        assert_eq!(installed.version(), "unknown");
+    }
+
+    fn versions_read_by(host: &FakeHost) -> usize {
+        host.effects()
+            .iter()
+            .filter(|effect| {
+                matches!(effect, crate::host::fake::Effect::Exec { program, args }
+                    if program == "/usr/bin/claude" && args == &["--version".to_string()])
+            })
+            .count()
     }
 
     /// A `claude` that is there and will not run at all. The refusal names the

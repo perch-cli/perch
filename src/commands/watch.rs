@@ -550,9 +550,10 @@ fn one_round(
 
     watcher.pacing(recently, &registry, &watching.scope, host.now());
 
-    // Once per round, and handed to everything in it that wants one: probed where it is
-    // wanted, an acting round walks `PATH` and spawns `claude --version` three times.
-    let installed = probe::Installed::probed(host);
+    // Once per round, and handed to everything in it that wants one. Deferred, so a
+    // round that refuses nothing forks nothing: this loop runs until the session ends,
+    // and every round asking a Node program its version is a cost with no reader.
+    let installed = probe::Installed::asked_when_needed(host);
 
     // The one Account Refreshed, and nearly all of the network this loop spends.
     // Renewed either side of it, as the loop renews either side of the wait: up to six
