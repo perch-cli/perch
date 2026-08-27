@@ -1416,7 +1416,8 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // The version first, off a shape that is only the version. A newer Perch is
     // exactly the thing that writes a value this build has no variant for, and
     // reading the document first fails on that with serde's own words.
-    match crate::error::claimed_version(&contents) {
+    let claimed = crate::error::claimed_version(&contents);
+    match claimed {
         Some(version) if version > u64::from(CURRENT_VERSION) => {
             return Err(crate::error::written_by_a_newer_perch(
                 &path.display().to_string(),
@@ -1437,7 +1438,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // In memory here and written back by `migration::bring_forward`, because
     // every path that writes holds the lock before it reads. Decorated as every
     // other refusal here is: a step that names a field names no file otherwise.
-    let forwarded = crate::migration::forward(&contents)
+    let forwarded = crate::migration::forward_from(&contents, claimed)
         .map_err(|refused| refused.with_note(&the_file_to_edit(path)))?;
 
     // Strictly, so a key nobody recognizes is a refusal naming it rather than a
