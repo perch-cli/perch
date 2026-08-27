@@ -86,12 +86,8 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
                 Some(path) => say(
                     out,
                     &format!(
-                        "Nothing was purged. The Export at {} was written before \
-                         you declined and still stands — it holds a working \
-                         Credential for every Account, so keep it somewhere you \
-                         would keep those, or delete it. `perch holdings purge` \
-                         will not write over it.",
-                        path.display(),
+                        "Nothing was purged. {}",
+                        still_standing_line(&path, "before you declined")
                     ),
                 ),
                 None => say(out, "Nothing was purged."),
@@ -130,20 +126,25 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     })
 }
 
-/// Adds the whereabouts of an Export this run wrote to a failure after it.
+/// Where an Export this run wrote is, and what it holds; `since` is the one
+/// word the ways of stopping differ by.
 ///
-/// Every way a Purge can stop past the offer leaves an armored file holding a
-/// working Credential for every Account at a path nothing else mentions — and
-/// `perch holdings export` refuses a path that is taken.
+/// Every way a Purge stops past the offer leaves an armored file holding a
+/// working Credential for every Account at a path nothing else mentions.
+fn still_standing_line(path: &std::path::Path, since: &str) -> String {
+    format!(
+        "The Export at {} was written {since} and still stands — it holds a \
+         working Credential for every Account, so keep it somewhere you would \
+         keep those, or delete it. `perch holdings purge` will not write over \
+         it.",
+        path.display(),
+    )
+}
+
+/// The same, added to a failure that came after the Export was written.
 fn still_standing(error: PerchError, exported: Option<&std::path::Path>) -> PerchError {
     match exported {
-        Some(path) => error.with_note(&format!(
-            "The Export at {} was written before this stopped and still stands \
-             — it holds a working Credential for every Account, so keep it \
-             somewhere you would keep those, or delete it. `perch holdings \
-             purge` will not write over it.",
-            path.display(),
-        )),
+        Some(path) => error.with_note(&still_standing_line(path, "before this stopped")),
         None => error,
     }
 }
