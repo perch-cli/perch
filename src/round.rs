@@ -46,44 +46,43 @@ pub fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
 
     let scope = registry.scope_of(&account);
 
-    // Two independent statements before anything moves unasked, and a Group is the
-    // first (ADR a-group-is-a-declaration). In this order, because the declaration
-    // comes first.
-    if !cycle::may_cycle_within(registry, &scope) {
-        return Err(PerchError::NotInterchangeable(format!(
-            "{} is in no Group, and nothing has said the Accounts in no Group \
-             are interchangeable at all — so there is nowhere for the watcher \
-             to Switch it to. Nothing is being watched.\n\
-             `perch config set {UNGROUPED} interchangeable true` says they are, \
-             and `perch config set {UNGROUPED} watcher-may-act true` then says \
-             the watcher may act on them. Both, because being interchangeable \
-             is a declaration somebody makes and letting the watcher act is a \
-             grant, and neither implies the other.\n\
-             Putting it in a Group with `perch group move {} <group>` is the \
-             narrower statement, and is what Groups are for.",
-            registry.named_for_the_user(account.email()),
-            account.email(),
-        )));
+    // The refusals are this module's to word; which of the two applies is asked
+    // where every other reader of it asks (ADR a-setting-names-its-scope).
+    match cycle::may_act_within(registry, &scope) {
+        cycle::MayAct::Undeclared { .. } => {
+            return Err(PerchError::NotInterchangeable(format!(
+                "{} is in no Group, and nothing has said the Accounts in no Group \
+                 are interchangeable at all — so there is nowhere for the watcher \
+                 to Switch it to. Nothing is being watched.\n\
+                 `perch config set {UNGROUPED} interchangeable true` says they are, \
+                 and `perch config set {UNGROUPED} watcher-may-act true` then says \
+                 the watcher may act on them. Both, because being interchangeable \
+                 is a declaration somebody makes and letting the watcher act is a \
+                 grant, and neither implies the other.\n\
+                 Putting it in a Group with `perch group move {} <group>` is the \
+                 narrower statement, and is what Groups are for.",
+                registry.named_for_the_user(account.email()),
+                account.email(),
+            )));
+        }
+        cycle::MayAct::Ungranted => {
+            return Err(PerchError::Invalid(format!(
+                "{} has not been told the watcher may act on it, so nothing is \
+                 being watched. Anything that changes underneath you only ever \
+                 does so because you said it could.\n\
+                 `perch config set {} watcher-may-act true` says it may.",
+                scope.described(),
+                scope.word(),
+            )));
+        }
+        cycle::MayAct::May => {}
     }
 
-    // The Scope's own grant, and nowhere else it could come from
-    // (ADR a-setting-names-its-scope).
-    let settings = registry.settings(&scope);
-    if !settings.watcher_may_act {
-        return Err(PerchError::Invalid(format!(
-            "{} has not been told the watcher may act on it, so nothing is \
-             being watched. Anything that changes underneath you only ever \
-             does so because you said it could.\n\
-             `perch config set {} watcher-may-act true` says it may.",
-            scope.described(),
-            scope.word(),
-        )));
-    }
-
+    let policy = Policy::of(&registry.settings(&scope));
     Ok(Watching {
         account,
         scope,
-        policy: Policy::of(&settings),
+        policy,
     })
 }
 
