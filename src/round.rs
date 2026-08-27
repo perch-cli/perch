@@ -11,11 +11,12 @@
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::live::Idle;
+use crate::lock::Lost;
 use crate::name::{self, UNGROUPED};
 use crate::observe::{self, Attempt};
 use crate::registry::Settled;
 use crate::registry::{Account, Registry, Scope};
-use crate::watch::{Considered, Cooled, Fullest, Lost, Policy, Round};
+use crate::watch::{Considered, Cooled, Fullest, Policy, Round};
 
 /// The Account being watched, the Scope that said it may be, and the rules it is
 /// watched under.

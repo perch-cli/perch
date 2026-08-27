@@ -14,9 +14,9 @@ use serde_json::{Value, json};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::host::{Host, HttpRequest, HttpResponse};
+use crate::lock::{Lost, StillOurs};
 use crate::registry::WindowUtilization;
 use crate::secret::Secret;
-use crate::watch::{Lost, StillOurs};
 
 /// Where an Account's Quota Windows are read from. Roughly 28-30 requests per
 /// rolling hour per Account, and it does not refill early
