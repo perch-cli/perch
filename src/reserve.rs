@@ -47,13 +47,16 @@ impl<'a> Reserve<'a> {
     /// (ADR a-figure-carries-its-age). Every candidate is classified exactly
     /// once into one of [`HowMuchIsLeft`]'s three answers, which is what makes
     /// the counts add up to the Accounts on screen.
-    pub fn of(registry: &'a Registry, scope: &Scope) -> Reserve<'a> {
+    pub fn of(
+        registry: &'a Registry,
+        sharers: &crate::registry::Sharers,
+        scope: &Scope,
+    ) -> Reserve<'a> {
         let accounts = scope.accounts(registry);
-        let sharers = crate::registry::Sharers::across(registry);
         let candidates: Vec<&Account> = accounts
             .iter()
             .copied()
-            .filter(|account| cycle::is_a_candidate(&sharers, account))
+            .filter(|account| cycle::is_a_candidate(sharers, account))
             .collect();
 
         let mut with_headroom = Vec::new();
@@ -75,7 +78,7 @@ impl<'a> Reserve<'a> {
             exhausted,
             unobserved,
             not_candidates: accounts.len() - candidates.len(),
-            out_of_the_running: cycle::out_of_the_running(&sharers, &accounts),
+            out_of_the_running: cycle::out_of_the_running(sharers, &accounts),
             candidates,
             with_headroom,
         }
@@ -223,7 +226,12 @@ mod tests {
     }
 
     fn reserve_of(registry: &Registry) -> Vec<String> {
-        Reserve::of(registry, &work()).lines(now())
+        Reserve::of(
+            registry,
+            &crate::registry::Sharers::across(registry),
+            &work(),
+        )
+        .lines(now())
     }
 
     #[test]
@@ -346,7 +354,12 @@ mod tests {
             broken,
         ]);
 
-        let document = Reserve::of(&registry, &work()).document();
+        let document = Reserve::of(
+            &registry,
+            &crate::registry::Sharers::across(&registry),
+            &work(),
+        )
+        .document();
 
         assert_eq!(document["candidates"], 4);
         assert_eq!(document["with_headroom"], 2);
@@ -377,7 +390,12 @@ mod tests {
             account("also-unread@example.com", vec![]),
         ]);
 
-        let document = Reserve::of(&registry, &work()).document();
+        let document = Reserve::of(
+            &registry,
+            &crate::registry::Sharers::across(&registry),
+            &work(),
+        )
+        .document();
 
         assert_eq!(document["candidates"], 2);
         assert_eq!(document["never_observed"], 2);

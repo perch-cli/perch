@@ -367,7 +367,7 @@ pub fn choose(
 
     if ranked.iter().all(|ranked| ranked.headroom.is_exhausted()) {
         return Err(PerchError::NoCandidate(everyone_is_exhausted(
-            registry, scope, &accounts, &ranked, now,
+            registry, &sharers, scope, &accounts, &ranked, now,
         )));
     }
 
@@ -461,12 +461,16 @@ fn worth_leaving_for(
 /// [`choose`] needs only the winner and a listing needs the whole order, so the
 /// two share this measurement rather than each sorting on its own idea of which
 /// Account is better (ADR the-listing-owns-the-set).
-pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
+pub fn ranked<'a>(
+    registry: &'a Registry,
+    sharers: &registry::Sharers,
+    scope: &Scope,
+    now: DateTime<Utc>,
+) -> Vec<&'a Account> {
     let strategy = strategy(registry, scope);
     let accounts = scope.accounts(registry);
     // The Account a Cycle would be leaving, measured exactly as `choose`
     // measures it, and only where it is a candidate carrying a figure.
-    let sharers = registry::Sharers::across(registry);
     let leaving = registry.active().whose();
     let here = leaving
         .and_then(|active| {
@@ -474,7 +478,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
                 .iter()
                 .find(|account| name::same_name(account.email(), active))
         })
-        .filter(|account| is_a_candidate(&sharers, account))
+        .filter(|account| is_a_candidate(sharers, account))
         .map(|account| headroom_of(account));
     let here = measured_against(here.as_ref());
     // Measured once each rather than inside a comparator that runs O(n log n)
@@ -485,7 +489,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
         .map(|account| {
             (
                 account,
-                place(&sharers, account, leaving, here, strategy, now),
+                place(sharers, account, leaving, here, strategy, now),
             )
         })
         .collect();
@@ -659,6 +663,7 @@ fn nobody_is_a_candidate(
 /// somewhere useless.
 fn everyone_is_exhausted(
     registry: &Registry,
+    sharers: &registry::Sharers,
     scope: &Scope,
     accounts: &[&Account],
     ranked: &[Ranked],
@@ -732,7 +737,7 @@ fn everyone_is_exhausted(
     // What the filter took out before any of this was measured. Without it the
     // refusal sends somebody off to wait for a quota reset about a Group whose
     // two Accounts with full Headroom are merely disabled.
-    let set_aside = out_of_the_running(&registry::Sharers::across(registry), accounts);
+    let set_aside = out_of_the_running(sharers, accounts);
     let (every, also) = match set_aside.is_empty() {
         true => (String::new(), String::new()),
         false => (
@@ -888,10 +893,15 @@ pub(crate) mod tests {
     }
 
     fn ranked_emails(registry: &Registry) -> Vec<&str> {
-        ranked(registry, &work(), now())
-            .into_iter()
-            .map(Account::email)
-            .collect()
+        ranked(
+            registry,
+            &registry::Sharers::across(registry),
+            &work(),
+            now(),
+        )
+        .into_iter()
+        .map(Account::email)
+        .collect()
     }
 
     #[test]

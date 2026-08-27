@@ -94,8 +94,13 @@ impl Scope {
     /// started in, so there is no single ranking over everything Perch holds:
     /// the listing is each Scope's own ranking one after another, which is why
     /// the Group is a column rather than a sort key nobody can see.
-    fn sections<'a>(&self, registry: &'a Registry, now: DateTime<Utc>) -> Vec<Section<'a>> {
-        let of = |scope| Section::of(registry, scope, now);
+    fn sections<'a>(
+        &self,
+        registry: &'a Registry,
+        sharers: &'a registry::Sharers,
+        now: DateTime<Utc>,
+    ) -> Vec<Section<'a>> {
+        let of = |scope| Section::of(registry, sharers, scope, now);
         match self {
             Scope::Everything => listing::scopes(registry).into_iter().map(of).collect(),
             Scope::Group(name) => vec![of(registry::Scope::Group(name.clone()))],
@@ -186,7 +191,11 @@ fn render(
     json: bool,
     report: &Report,
 ) -> Result<()> {
-    let sections = scope.sections(registry, now);
+    // Once for the whole listing rather than twice per section: which Profiles
+    // two Accounts share is a fact about the registry, and every Scope's ranking
+    // and every Scope's Reserve were each walking the Accounts to re-derive it.
+    let sharers = registry::Sharers::across(registry);
+    let sections = scope.sections(registry, &sharers, now);
     if json {
         render_json(host, out, registry, &scope, &sections, now, report)
     } else {

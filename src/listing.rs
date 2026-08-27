@@ -27,19 +27,29 @@ pub struct Section<'a> {
     scope: registry::Scope,
     ranked: bool,
     accounts: Vec<&'a Account>,
+    /// Which Profiles two Accounts share, which is a fact about the whole
+    /// registry rather than about this Scope — so a listing settles it once and
+    /// every section reads it, rather than each of them walking the Accounts.
+    sharers: &'a registry::Sharers,
 }
 
 impl<'a> Section<'a> {
-    pub fn of(registry: &'a Registry, scope: registry::Scope, now: DateTime<Utc>) -> Section<'a> {
+    pub fn of(
+        registry: &'a Registry,
+        sharers: &'a registry::Sharers,
+        scope: registry::Scope,
+        now: DateTime<Utc>,
+    ) -> Section<'a> {
         let ranked = cycle::may_cycle_within(registry, &scope);
         let accounts = match ranked {
-            true => cycle::ranked(registry, &scope, now),
+            true => cycle::ranked(registry, sharers, &scope, now),
             false => scope.accounts(registry),
         };
         Section {
             scope,
             ranked,
             accounts,
+            sharers,
         }
     }
 
@@ -57,7 +67,8 @@ impl<'a> Section<'a> {
     /// set and saying what it has left between them are the same claim, so they
     /// are declined together rather than by two answers that could differ.
     pub fn reserve<'r>(&self, registry: &'r Registry) -> Option<Reserve<'r>> {
-        self.ranked.then(|| Reserve::of(registry, &self.scope))
+        self.ranked
+            .then(|| Reserve::of(registry, self.sharers, &self.scope))
     }
 
     pub fn document(
@@ -225,10 +236,18 @@ mod tests {
         registry
     }
 
-    fn every_section(registry: &Registry) -> Vec<Section<'_>> {
+    /// What a listing settles once and hands to every section.
+    fn sharing(registry: &Registry) -> registry::Sharers {
+        registry::Sharers::across(registry)
+    }
+
+    fn every_section<'a>(
+        registry: &'a Registry,
+        sharers: &'a registry::Sharers,
+    ) -> Vec<Section<'a>> {
         scopes(registry)
             .into_iter()
-            .map(|scope| Section::of(registry, scope, cycle::tests::now()))
+            .map(|scope| Section::of(registry, sharers, scope, cycle::tests::now()))
             .collect()
     }
 
@@ -248,7 +267,7 @@ mod tests {
     fn the_sections_hold_every_account_the_registry_holds() {
         let registry = holdings();
         assert_eq!(
-            named(flattened(&every_section(&registry))),
+            named(flattened(&every_section(&registry, &sharing(&registry)))),
             named(registry.accounts.iter().collect()),
         );
     }
@@ -334,16 +353,18 @@ mod tests {
             !registry.ungrouped.interchangeable,
             "nobody has said so yet"
         );
-        let held = Section::of(&registry, registry::Scope::Ungrouped, now);
+        let sharers = sharing(&registry);
+        let held = Section::of(&registry, &sharers, registry::Scope::Ungrouped, now);
         assert_eq!(held.order(), "held");
         assert!(held.reserve(&registry).is_none(), "and no Reserve with it");
 
-        let declared = Section::of(&registry, group(), now);
+        let declared = Section::of(&registry, &sharers, group(), now);
         assert_eq!(declared.order(), "ranked", "a Group is that declaration");
         assert!(declared.reserve(&registry).is_some());
 
         registry.ungrouped.interchangeable = true;
-        let now_a_set = Section::of(&registry, registry::Scope::Ungrouped, now);
+        let sharers = sharing(&registry);
+        let now_a_set = Section::of(&registry, &sharers, registry::Scope::Ungrouped, now);
         assert_eq!(now_a_set.order(), "ranked");
         assert!(now_a_set.reserve(&registry).is_some());
     }
