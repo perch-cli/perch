@@ -236,10 +236,10 @@ impl Drawn {
 
 /// What those columns hold for one Account: the name you reach it by, what it
 /// is interchangeable with, whether it is any use, and how much of it is left.
-fn columns(registry: &Registry, account: &Account) -> Drawn {
+fn columns(alias_of: &registry::AliasOf<'_>, account: &Account) -> Drawn {
     Drawn::of([
         Shown::of(account.email()),
-        Shown::of(registry.alias_of(account.email()).unwrap_or(NOTHING_TO_SAY)),
+        Shown::of(alias_of.account(account.email()).unwrap_or(NOTHING_TO_SAY)),
         Shown::of(account.group.as_deref().unwrap_or(name::NO_GROUP)),
         Shown::of(&state_of(account)),
         Shown::of(&cycle::headroom_phrase(account)),
@@ -283,11 +283,12 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
     // into one `Utilization` column here, so a width measured per Account put
     // the same window's percentage in a different place on each of them.
     let width = utilization::window_width_across(accounts.iter().copied());
+    let alias_of = registry.aliases_by_account();
     accounts
         .iter()
         .map(|account| Row {
             active: registry.is_active(account.email()),
-            cells: columns(registry, account),
+            cells: columns(&alias_of, account),
             figures: utilization::lines(account, now, width),
         })
         .collect()
@@ -505,9 +506,10 @@ fn render_json(
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
+    let alias_of = registry.aliases_by_account();
     let sectioned: Vec<serde_json::Value> = sections
         .iter()
-        .map(|section| section.document(host, registry, now))
+        .map(|section| section.document(host, registry, &alias_of, now))
         .collect();
 
     let document = json!({

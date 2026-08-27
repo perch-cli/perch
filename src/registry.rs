@@ -955,6 +955,20 @@ impl Registry {
             .map(|(alias, _)| alias.as_str())
     }
 
+    /// Every Account's Alias at once, for a caller asking about more than one.
+    ///
+    /// [`Registry::alias_of`] scans, the map being keyed by Alias rather than by
+    /// Account, so a listing asking it per row is a scan per row.
+    pub fn aliases_by_account(&self) -> AliasOf<'_> {
+        let mut held: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
+        for (alias, email) in &self.aliases {
+            // First wins, as `alias_of`'s scan does: `validate` refuses two
+            // Aliases for one Account, and `aliases` walks in sorted order.
+            held.entry(name::folded(email)).or_insert(alias.as_str());
+        }
+        AliasOf(held)
+    }
+
     /// An Account as the user names it: by its Alias when it has one, so a
     /// message about it reads the way they would say it.
     pub fn named_for_the_user(&self, email: &str) -> String {
@@ -1232,6 +1246,15 @@ pub fn pending_login_started_at(dir: &Path) -> Option<DateTime<Utc>> {
 /// a Profile — kept here beside the derivation so the two cannot drift apart.
 pub fn same_profile(one: &str, other: &str) -> bool {
     slug(one) == slug(other)
+}
+
+/// [`Registry::alias_of`] answered for every Account rather than for one.
+pub struct AliasOf<'a>(std::collections::HashMap<String, &'a str>);
+
+impl<'a> AliasOf<'a> {
+    pub fn account(&self, email: &str) -> Option<&'a str> {
+        self.0.get(name::folded(email).as_str()).copied()
+    }
 }
 
 /// Which Profiles more than one Account derives, settled in one pass.
