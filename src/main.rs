@@ -9,6 +9,7 @@ use perch::commands::enable::{self, EnableCommand};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::holdings::{self, HoldingsCommand};
 use perch::commands::list::{self, ListArgs};
+use perch::commands::probe::{self, ProbeArgs};
 use perch::commands::relogin::{self, ReloginArgs};
 use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
@@ -20,6 +21,7 @@ use perch::commands::watcher::{self, WatcherCommand};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
 use perch::report;
+use perch::trail;
 
 #[derive(Parser)]
 #[command(
@@ -121,6 +123,19 @@ enum Command {
     /// could Cycle between — where you would land before you switch. Renders
     /// from cache unless you ask it to fetch.
     List(ListArgs),
+
+    /// Everything Perch can see of this machine, in one paste.
+    ///
+    /// What a bug report needs and nobody should have to gather by hand: which
+    /// Perch and which Claude Code, what the Holdings hold, which of Perch's
+    /// assumptions still hold, and what has been run here lately. Names and
+    /// paths come out as placeholders unless `--raw` says otherwise, because
+    /// what this is for is being pasted somewhere else.
+    ///
+    /// Reads and judges, and repairs nothing. It reaches no network, brings no
+    /// registry forward and adds no line to the Trail, so running it never
+    /// changes the machine it is describing. Exits `0` whatever it finds.
+    Probe(ProbeArgs),
 
     /// Log an Account in again, in place.
     ///
@@ -247,11 +262,23 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
 
 /// Whether this command comes after a registry migration.
 ///
-/// Two do not, for one reason: each is what somebody runs when the machine is
-/// already misbehaving, and each promises at `--help` to touch nothing Perch
-/// holds. Neither reads the registry, so the next command carries it forward.
+/// Three do not: each is what somebody runs when the machine is already
+/// misbehaving, and each promises at `--help` to touch nothing Perch holds. A
+/// version carried forward on the way past a Probe is a finding it destroyed.
 fn migrates(command: &Command) -> bool {
-    !matches!(command, Command::Version | Command::Upgrade(_))
+    !matches!(
+        command,
+        Command::Version | Command::Upgrade(_) | Command::Probe(_)
+    )
+}
+
+/// Whether this command writes itself down.
+///
+/// One does not: a Probe renders the Trail, and a line of its own would push
+/// what somebody wanted to see out of the window every time they re-ran it
+/// (ADR a-trail-is-evidence).
+fn leaves_a_trail(command: &Command) -> bool {
+    !matches!(command, Command::Probe(_))
 }
 
 fn main() {
@@ -281,6 +308,10 @@ fn main() {
     if migrates(&cli.command) {
         let _ = perch::commands::bring_the_registry_forward(&host);
     }
+
+    // After the parse, so a line that was never a command is not written down,
+    // and before the dispatch, so a command that hangs has said it started.
+    let invocation = leaves_a_trail(&cli.command).then(|| trail::began(&host, &typed));
 
     let outcome = match cli.command {
         Command::Add(args) => ok(add::run(&host, args, &mut out)),
@@ -313,6 +344,7 @@ fn main() {
         Command::Group { action } => ok(group::run(&host, action, &mut out)),
         Command::Holdings { action } => ok(holdings::run(&host, action, &mut out)),
         Command::List(args) => ok(list::run(&host, args, &mut out)),
+        Command::Probe(args) => probe::run(&host, args, &mut out),
         Command::Relogin(args) => ok(relogin::run(&host, args, &mut out)),
         Command::Remove(args) => ok(remove::run(&host, args, &mut out)),
         // The one command whose exit code is not Perch's own: what the client
@@ -331,6 +363,9 @@ fn main() {
     };
 
     let code = ended_as(outcome, &mut out);
+    if let Some(invocation) = &invocation {
+        trail::ended(&host, invocation, code);
+    }
 
     let _ = out.flush();
     std::process::exit(code);
@@ -339,6 +374,23 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The two exemptions a Probe carries, which are one idea: it changes
+    /// nothing about the machine it is describing.
+    #[test]
+    fn a_probe_neither_migrates_the_registry_nor_writes_itself_down() {
+        let probe = Cli::try_parse_from(["perch", "probe"])
+            .expect("the line parses")
+            .command;
+        assert!(!migrates(&probe));
+        assert!(!leaves_a_trail(&probe));
+
+        let list = Cli::try_parse_from(["perch", "list"])
+            .expect("the line parses")
+            .command;
+        assert!(migrates(&list));
+        assert!(leaves_a_trail(&list), "every other command is written down");
+    }
 
     #[test]
     fn a_command_that_worked_is_nought_and_one_that_failed_is_its_own_code() {

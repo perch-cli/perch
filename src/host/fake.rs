@@ -36,6 +36,8 @@ pub enum Effect {
     WroteFile(PathBuf),
     /// A file created for its owner alone: a Credential, or nothing.
     WrotePrivateFile(PathBuf),
+    /// One line added to the end of a file for its owner alone: a Trail line.
+    AppendedPrivateLine(PathBuf),
     /// A file that was there already and has been narrowed to its owner.
     MadePrivate(PathBuf),
     CreatedDir(PathBuf),
@@ -1525,6 +1527,48 @@ impl port::Files for FakeHost {
             self.make_dirs(parent, PRIVATE_DIR_MODE)?;
         }
         super::replace_via_tmp(self, path, contents, PRIVATE_FILE_MODE)
+    }
+
+    /// Straight into the map rather than through [`super::replace_via_tmp`],
+    /// which is the sentence this call makes: what is already at the path stays,
+    /// and the line goes after it. A file already there keeps the mode it has,
+    /// as an `open` does — the mode is what a file is *created* at.
+    fn append_private_line(&self, path: &Path, line: &str) -> Result<u64, HostError> {
+        self.record(Effect::AppendedPrivateLine(path.to_path_buf()));
+        let intended = self.intended(path);
+        if let Some(detail) = self.fs.unwritable.borrow().get(&intended) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        if let Some((left, detail)) = self.fs.unwritable_after.borrow_mut().get_mut(&intended) {
+            match *left {
+                0 => return Err(HostError::Other(detail.clone())),
+                _ => *left -= 1,
+            }
+        }
+        let lands_at = self.lands_at(path);
+        if let Some(parent) = lands_at.parent() {
+            self.make_dirs(parent, PRIVATE_DIR_MODE)?;
+        }
+        if self.fs.dirs.borrow().contains(&lands_at) {
+            return Err(HostError::Other(format!(
+                "{}: Is a directory (os error 21)",
+                lands_at.display()
+            )));
+        }
+        let width = {
+            let mut files = self.fs.files.borrow_mut();
+            let held = files.entry(lands_at.clone()).or_default();
+            held.push_str(line);
+            held.push('\n');
+            held.len() as u64
+        };
+        self.fs
+            .modes
+            .borrow_mut()
+            .entry(lands_at.clone())
+            .or_insert(PRIVATE_FILE_MODE);
+        self.mark_written(&lands_at);
+        Ok(width)
     }
 
     fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError> {

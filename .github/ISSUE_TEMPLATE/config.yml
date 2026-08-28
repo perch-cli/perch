@@ -1,0 +1,21 @@
+# Blank issues are off because every issue here is either a bug or a security
+# report, and the bug form asks for a `perch probe` a blank issue would not.
+# Everything else is a conversation, and Discussions is where a conversation can
+# end without being closed.
+blank_issues_enabled: false
+contact_links:
+  - name: Idea or feature request
+    url: https://github.com/perch-cli/perch/discussions/categories/ideas
+    about: Something Perch should do and does not. Say what you were trying to get done.
+
+  - name: Question about using Perch
+    url: https://github.com/perch-cli/perch/discussions/categories/q-a
+    about: Ask here, and the answer usually becomes a fix to the guide.
+
+  - name: Security vulnerability
+    url: https://github.com/perch-cli/perch/security/advisories/new
+    about: Report privately. Perch holds Claude Code credentials, so never open a public issue for one.
+
+  - name: The guide
+    url: https://perch-cli.github.io/perch/
+    about: Installing, switching, groups, the watcher, backups, and every environment variable.
