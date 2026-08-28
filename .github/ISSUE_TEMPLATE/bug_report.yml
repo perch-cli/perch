@@ -1,0 +1,154 @@
+name: Bug report
+description: Something Perch did that it should not have, or did not do that it should.
+title: "[Bug]: "
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One problem per issue, and please search the open issues first.
+
+        **Run `perch probe` and paste it below.** It gathers what this form would
+        otherwise ask you to type by hand, with names and paths replaced by
+        placeholders.
+
+        **Do not paste a credential.** Perch handles Claude Code tokens, and they sit in a
+        keychain entry, in a file inside a Profile directory, and in an `Authorization`
+        header. `--json` output carries email addresses and organization names as well.
+        Redact before you paste.
+
+        A **security problem** goes to
+        [private vulnerability reporting](https://github.com/perch-cli/perch/security/advisories/new)
+        rather than to a public issue. An **idea or feature request** goes to
+        [Discussions](https://github.com/perch-cli/perch/discussions/categories/ideas).
+
+        If a registry will not load, or a migration, an import or an export refused: keep
+        the files as they are. Do not delete or hand-edit anything under
+        `~/.config/perch` before you file, and say which Perch wrote it if you know.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched the open and closed issues, and this is not one of them.
+          required: true
+        - label: I removed credentials, tokens, and anything else private from what I pasted.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Perch is this about?
+      options:
+        - Switching and Cycling, including which Account gets picked
+        - The Watcher, and switching while nobody is looking
+        - Adding, relogging in, or removing an Account
+        - Utilization figures, their age, or --refresh
+        - Running a client against one Account (perch run)
+        - Holdings — export, import, or purge
+        - The registry, or a migration between versions
+        - Groups, Aliases, and Settings (perch config)
+        - Install, upgrade, or packaging
+        - The --json shape, or an exit code
+        - The guide, the README, or --help
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you ran
+      description: The commands, in order, starting from a state you can describe.
+      placeholder: |
+        1. perch add --group work --alias overflow
+        2. perch switch overflow
+        3. perch status
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      placeholder: A switch to overflow@example.com, and status showing it as active.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: >-
+        Quote the message exactly, and give the exit code: `echo $?` in a shell,
+        `$LASTEXITCODE` in PowerShell. Perch says why it refused, and that sentence is
+        usually the fastest way in.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - Perch lost or damaged something it holds — a Profile, a Credential, the registry
+        - I cannot get to an Account I need
+        - It fails often, or a figure it shows is wrong
+        - Occasional, or there is a way around it
+        - Wording, formatting, or something the docs get wrong
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Perch version
+      description: The first line of `perch version`.
+      placeholder: perch 0.2.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: probe
+    attributes:
+      label: perch probe
+      description: >-
+        Run `perch probe` and paste the whole thing. It gathers the platform, how
+        Perch was installed, the Claude Code it runs against, where its files
+        are, what it holds, and what has been run here lately. Email addresses,
+        Alias and Group names and your home directory come out as placeholders,
+        so it is safe to paste — check it over anyway, and use `--raw` only if a
+        maintainer asks.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: >-
+        The command and what it printed, redacted. `--json` is more use than a screenshot
+        where the command has it. Paste the relevant part rather than the whole session.
+      render: shell
+
+  - type: upload
+    id: attachments
+    attributes:
+      label: Screenshots, recordings, or files
+      description: >-
+        A recording is worth a lot for anything to do with the Watcher or a prompt. Never
+        attach a registry, a Profile directory, or an Export without redacting it first.
+    validations:
+      required: false
+      accept: ".png,.jpg,.jpeg,.gif,.webp,.svg,.mp4,.mov,.webm,.log,.txt,.json"
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Anything that got you moving again
+      description: What you ran to unblock yourself, if anything did.

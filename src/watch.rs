@@ -632,6 +632,27 @@ pub enum Outcome {
 }
 
 impl Outcome {
+    /// What a Watcher writes to the Trail: the one outcome that moved something
+    /// (ADR a-trail-is-evidence). Said as words, so the Account goes through the
+    /// redaction a typed Target does. A round turned away recurs every interval
+    /// for as long as the condition lasts, some 576 a day against a live client,
+    /// so those stay in the Watcher's own log rather than flooding this.
+    pub fn what_it_moved(&self) -> Option<Vec<String>> {
+        match self {
+            Outcome::Switched { to, .. } => Some(vec![
+                "watcher".to_string(),
+                "switched to".to_string(),
+                to.clone(),
+            ]),
+            Outcome::Waiting
+            | Outcome::Cooling { .. }
+            | Outcome::Nowhere { .. }
+            | Outcome::Refused { .. }
+            | Outcome::Held { .. }
+            | Outcome::HandedOver { .. }
+            | Outcome::Stopped { .. } => None,
+        }
+    }
     /// What a single check reports to whatever scheduled it.
     ///
     /// Fewer codes than outcomes: those leaving a scheduler the same thing to do share

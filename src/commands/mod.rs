@@ -11,6 +11,7 @@ pub mod group;
 pub mod holdings;
 pub mod import;
 pub mod list;
+pub mod probe;
 pub mod purge;
 pub mod relogin;
 pub mod remove;

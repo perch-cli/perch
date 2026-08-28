@@ -578,6 +578,13 @@ pub trait Files {
     /// two calls take, which is the whole of what the mode is for.
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
 
+    /// Appends one line to a file nobody but its owner can read, creating it and
+    /// the directory above it at that mode, and answers the file's size with the
+    /// line in it. Opened for append rather than written through
+    /// [`Files::write_private_file`], which two commands at once would each land
+    /// a whole copy of over the other (ADR a-trail-is-evidence). Not synced.
+    fn append_private_line(&self, path: &Path, line: &str) -> Result<u64, HostError>;
+
     /// Creates a directory, and any above it, that nobody but its owner may
     /// enter. Like `mkdir -p`, a directory that is already there keeps the mode
     /// it has: this sets a mode at creation and is not a `chmod` in disguise.

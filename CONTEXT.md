@@ -499,3 +499,24 @@ and `naming` are mechanics no single command owns. What separates one from a
 vocabulary through its own API — and never whether it reaches for a fake, which
 both sides do.
 _Avoid_: functional test, end-to-end test, feature test, acceptance test
+
+**Probe**:
+What Perch can see of this machine, gathered in one place: which Perch and which
+Claude Code, what the Holdings hold, which of Perch's assumptions still hold, and
+the Trail's recent lines. Judges only where Perch already has grounds to — every
+finding traces to a refusal Perch would actually make, and carries the exit code
+it would refuse with — so a Probe never asserts a rule that exists nowhere else.
+Takes no Target, reaches no network, and touches nothing: it brings no registry
+forward and adds no line to the Trail: what repairs the machine it is describing
+destroys what it was asked to describe.
+_Avoid_: doctor, diagnostic, health check, debug
+
+**Trail**:
+What this Perch was asked and what it decided, two lines per invocation, kept on
+this machine alone. Evidence rather than one of the Holdings: losing it costs
+nothing a person cannot have again by running the commands again, so it carries
+no version, is never migrated, and travels in no Export
+(ADR a-trail-is-evidence). Holds no Credential. Written raw, since the registry
+beside it already holds the same names in plaintext, and rendered redacted, since
+what a Probe is for is being pasted somewhere else.
+_Avoid_: log, history, audit log, journal

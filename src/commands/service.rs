@@ -163,7 +163,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
 ///
 /// The answers travel as a [`Standing`] rather than as locals, so the document and
 /// the sentences are two renderings of one reading rather than two readings.
-fn asked_of_the_machine(host: &dyn Host) -> Result<Standing> {
+pub fn asked_of_the_machine(host: &dyn Host) -> Result<Standing> {
     let manager = Manager::of(host);
     let at = manager.unit_path(host)?;
     let installed = is_installed(host, at.as_deref())?;

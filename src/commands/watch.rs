@@ -26,6 +26,7 @@ use crate::registry::{self, Registry};
 use crate::round::{self, Verdict, Watching};
 use crate::say;
 use crate::switch::{self, NotSwitched, Resolved};
+use crate::trail;
 use crate::watch::{
     self, Backoff, Cooled, Holding, Outcome, Recently, Speak, Watcher, nothing_was_switched,
 };
@@ -468,6 +469,11 @@ fn one_round(
             )
         },
     )?;
+    // The one place both a loop and a Check reach, so a round is written down
+    // once however it was started.
+    if let Some(moved) = decided.outcome.what_it_moved() {
+        trail::acted(host, &moved);
+    }
     Ok(Verdict::Decided(decided))
 }
 

@@ -483,6 +483,13 @@ impl Files for RealHost {
         super::replace_via_tmp(self, path, contents, PRIVATE_FILE_MODE)
     }
 
+    fn append_private_line(&self, path: &Path, line: &str) -> Result<u64, HostError> {
+        if let Some(parent) = path.parent() {
+            create_private_dir_all(parent)?;
+        }
+        append_private_line(path, line, PRIVATE_FILE_MODE)
+    }
+
     fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError> {
         create_private_dir_all(path)
     }
@@ -1212,6 +1219,48 @@ fn create_file_with_mode(path: &Path, contents: &str, _mode: u32) -> Result<(), 
     file.write_all(contents.as_bytes())?;
     file.sync_all()?;
     Ok(())
+}
+
+/// Adds a line to the end of a file, creating it at `mode` if it is not there.
+/// `O_APPEND`, so taking the offset and writing is one operation the kernel does
+/// not interleave. The newline goes out *in* that write rather than after it:
+/// two calls are two appends, and a Watcher landing between them merges its line
+/// into somebody else's and leaves a blank one behind.
+#[cfg(unix)]
+fn append_private_line(path: &Path, line: &str, mode: u32) -> Result<u64, HostError> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .mode(mode)
+        .open(path)?;
+    file.write_all(with_its_newline(line).as_bytes())?;
+    Ok(file.metadata()?.len())
+}
+
+/// One buffer holding the line and the newline that ends it, reserved at the
+/// width it takes so the copy is the only one.
+fn with_its_newline(line: &str) -> String {
+    let mut record = String::with_capacity(line.len() + 1);
+    record.push_str(line);
+    record.push('\n');
+    record
+}
+
+/// The same where permission bits mean nothing, the file being covered by the
+/// profile's own ACL.
+#[cfg(not(unix))]
+fn append_private_line(path: &Path, line: &str, _mode: u32) -> Result<u64, HostError> {
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)?;
+    file.write_all(with_its_newline(line).as_bytes())?;
+    Ok(file.metadata()?.len())
 }
 
 /// Makes a link, where a symbolic link is a symbolic link and a junction is
@@ -2092,6 +2141,40 @@ mod tests {
     #[test]
     fn the_running_process_is_alive() {
         assert!(process_alive(std::process::id()));
+    }
+
+    /// The write the Trail makes, on a real filesystem rather than a fake: the
+    /// directory above it, the mode it is created at, and the width it answers
+    /// with — a second line landing after the first rather than over it.
+    #[cfg(unix)]
+    #[test]
+    fn a_line_lands_after_the_last_one_in_a_file_only_its_owner_may_read() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!("perch-append-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let at = root.join("under").join("trail.log");
+        let host = RealHost::new();
+
+        let first = host.append_private_line(&at, "one").expect("a first line");
+        let second = host.append_private_line(&at, "two").expect("a second");
+
+        assert_eq!(first, 4, "the line and the newline that ends it");
+        assert_eq!(second, 8, "and the next one lands after it");
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), "one\ntwo\n");
+        assert_eq!(
+            std::fs::metadata(&at).unwrap().permissions().mode() & 0o777,
+            PRIVATE_FILE_MODE
+        );
+
+        // A file where the directory above would have to go, which is the
+        // failure the Trail answers by writing nothing.
+        assert!(
+            host.append_private_line(&at.join("deeper"), "three")
+                .is_err()
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The holder here is what Windows Defender amounts to: a handle on the

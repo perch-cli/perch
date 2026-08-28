@@ -119,6 +119,56 @@ struct Case {
 const CASES: &[Case] = &[
     // ---- reading and writing --------------------------------------------
     Case {
+        named: "an appended line goes after what is already there, and creates the file",
+        asserts: |host, root, adapter, _now| {
+            let at = root.join("under").join("trail.log");
+
+            let first = host.append_private_line(&at, "{\"n\":1}").expect("a line");
+            let then = host.append_private_line(&at, "{\"n\":2}").expect("another");
+
+            assert_eq!(
+                host.read_file(&at).expect("the file is there"),
+                "{\"n\":1}\n{\"n\":2}\n",
+                "{adapter}: an append replaced what it should have followed, or \
+                 lost the newline that makes a line a line"
+            );
+            // The width is the *file's*, which is what a caller rotates on: an
+            // adapter answering the line's own length would never reach a cap.
+            assert_eq!(
+                (first, then),
+                (8, 16),
+                "{adapter}: the size once the line is in"
+            );
+            // A record is what one append leaves, so the size after each is a
+            // whole number of lines: a newline written as a second append is a
+            // second chance for a concurrent writer to land between the two.
+            assert!(
+                [first, then].iter().all(|width| width % 8 == 0),
+                "{adapter}: the line and the newline that ends it are one write"
+            );
+            if modes_mean_something() {
+                assert_eq!(
+                    host.file_mode(&at).expect("a mode"),
+                    Some(PRIVATE_FILE_MODE),
+                    "{adapter}: a Trail holds what a person typed and is the \
+                     owner's alone"
+                );
+            }
+        },
+    },
+    Case {
+        named: "a line will not be appended where a directory sits",
+        asserts: |host, root, adapter, _now| {
+            let at = root.join("a-directory-where-a-line-would-go");
+            host.create_private_dir_all(&at).expect("a directory");
+
+            assert!(
+                host.append_private_line(&at, "{\"n\":1}").is_err(),
+                "{adapter}: a directory took a line and answered a width"
+            );
+        },
+    },
+    Case {
         named: "a file that is not there reports NotFound",
         asserts: |host, root, adapter, _now| {
             let missing = root.join("nothing-here");

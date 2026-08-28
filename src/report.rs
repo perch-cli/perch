@@ -41,7 +41,7 @@ fn asked_for(set: Option<&std::ffi::OsStr>) -> bool {
 pub(crate) fn this_is_a_bug() -> String {
     format!(
         "This is a bug in Perch {} ({} {}). Please report it, with everything \
-         above, at {ISSUES}",
+         above and the output of `perch probe`, at {ISSUES}",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -71,6 +71,9 @@ mod tests {
         assert!(said.contains(env!("CARGO_PKG_VERSION")), "{said}");
         assert!(said.contains(ISSUES), "{said}");
         assert!(said.contains("RUST_BACKTRACE=1"), "{said}");
+        // A panic is when nobody knows what state the machine was in, which is
+        // the one command that answers that.
+        assert!(said.contains("perch probe"), "{said}");
     }
 
     #[test]
