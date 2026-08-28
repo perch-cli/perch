@@ -1,0 +1,5 @@
+# Auto-requests a review and gates nothing. `require_code_owner_review` stays
+# off: GitHub refuses a self-approval, so a sole code owner who required it
+# could not merge their own work (ADR a-gate-lives-outside-the-tree).
+
+* @mschieller

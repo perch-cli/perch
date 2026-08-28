@@ -237,9 +237,10 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # The gate. A tag alone cannot put Perch on a public registry: this
-    # environment carries a required reviewer, so the last step before the
-    # widest channel is a person saying yes.
+    # A pause, not an approval. The reviewer is whoever tagged, self-review is
+    # permitted and an admin can bypass, so what this stops is a tag pushed in
+    # the wrong minute reaching a public registry unlooked-at, not an attacker.
+    # Restricted to `v*` tags (ADR a-gate-lives-outside-the-tree).
     environment: release
     permissions:
       contents: read
