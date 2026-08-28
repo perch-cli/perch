@@ -1,0 +1,54 @@
+name: Label agent-filed
+
+# `perch triage` files under the reporter's own GitHub account, and GitHub honors
+# an issue form's `labels:` only for a submission through the form. It drops them
+# from an API call by anyone without push access, which is every reporter running
+# `gh` (ADR a-triage-hands-over-evidence). So a report filed that way arrives
+# bare, and the labels the form declares are applied here instead, on arrival, by
+# a token holding the rights the reporter does not.
+#
+# The form is the one place the list lives: this reads it rather than repeating
+# it, so a label added there needs no edit here.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  # `Filed by` is the field only the agent-filed form has, so its heading is what
+  # tells one of those reports from a hand-written issue. Anybody can write that
+  # heading into any issue and have it labeled as an agent's; the cost is a wrong
+  # label a maintainer removes, against a report that otherwise reaches nobody.
+  label:
+    if: contains(github.event.issue.body, '### Filed by')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # One file, because that is all this job reads.
+        with:
+          sparse-checkout: .github/ISSUE_TEMPLATE/agent-filed.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Apply the labels the form declares
+        # Through the environment rather than `${{ }}` inside the script: an issue
+        # number is a number, and the habit is what keeps a body somebody else
+        # wrote from ever reaching a shell.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          labels=$(awk '
+            /^labels:/ { inside = 1; next }
+            inside && /^  - / { sub(/^  - /, ""); print; next }
+            inside { exit }
+          ' .github/ISSUE_TEMPLATE/agent-filed.yml | paste -sd,)
+          if [ -z "$labels" ]; then
+            echo "::error::agent-filed.yml declares no labels this could read, so the report it was filed for is unlabeled."
+            exit 1
+          fi
+          echo "labeling #$NUMBER: $labels"
+          gh issue edit "$NUMBER" --add-label "$labels"

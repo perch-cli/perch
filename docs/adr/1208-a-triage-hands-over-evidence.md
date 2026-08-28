@@ -155,3 +155,11 @@ themselves.
 - The `filed-by-agent` label says provenance, deliberately not `via-triage`:
   `needs-triage` already exists in this tracker and means a maintainer has not
   looked yet, which is a different thing that would read like a variant.
+- No reporter can apply any of the three. A Triage files under the user's own
+  GitHub account, and GitHub honors a form's `labels:` only for a submission
+  through the form, dropping them from the API call `gh` makes for anyone without
+  push access. So the form stays the one place the list lives and
+  `.github/workflows/label-agent-filed.yml` applies it on arrival, keyed on the
+  `Filed by` heading that only this form renders. An unlabeled report is one a
+  maintainer filtering the tracker never sees, which is the whole of what the
+  labels are for.

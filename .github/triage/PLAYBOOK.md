@@ -138,7 +138,10 @@ Its fields, and what each wants:
 - `workaround` is anything that got the user moving again.
 - `filed-by` is which agent and which model produced the report.
 
-Label it `filed-by-agent`. Use a plain, specific title with no prefix.
+Do not label it, and do not report failing to. You are filing under the user's own
+GitHub account, which has no rights to label on this repository; the form declares
+the labels and a workflow applies them when the issue arrives. Use a plain,
+specific title with no prefix.
 
 Show the user the complete issue text and get an explicit yes before posting.
 Never post without one. If `gh` is not authenticated, offer `gh auth login`, or
