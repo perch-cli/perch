@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Switch's Capture until somebody deleted the file by hand. A session does not
   outlive a reboot, and the boot is one question no permission stands in front
   of. A Trail start from before a reboot is read the same way
+- no figure is filed against an Account nothing says the Credential belongs to.
+  Where Anthropic's profile endpoint stops naming an email address, the check
+  that keeps one Account's figures out of another's used to remark on the drift
+  and pass everything through — for every Account, on every machine, until Perch
+  was taught the new shape. It now falls back to what this machine holds: an
+  Account's own Profile is one only Perch writes into, and the live Credential is
+  vouched for by the Identity beside it or not at all
 
 ## [0.3.0](https://github.com/perch-cli/perch/compare/v0.2.0...v0.3.0) - 2026-08-28
 

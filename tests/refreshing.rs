@@ -728,7 +728,7 @@ fn a_profile_reply_this_build_does_not_recognize_still_lets_the_figures_be_read(
 }
 
 #[test]
-fn a_profile_reply_that_names_nobody_says_the_ownership_check_is_passing_everything() {
+fn a_profile_reply_that_names_nobody_files_the_figures_the_identity_vouches_for() {
     let host = machine_with_two_accounts();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     // Valid JSON, and none of the fields Perch knows to read an address out of.
@@ -742,12 +742,64 @@ fn a_profile_reply_that_names_nobody_says_the_ownership_check_is_passing_everyth
     result.expect("the command answers");
     assert!(
         printed.contains("42%"),
-        "the figures are still read: {printed}"
+        "the Identity beside the Credential names this Account, so the figures \
+         are still read: {printed}"
     );
     let noted = host.notes().join("\n");
     assert!(
         noted.contains("email address"),
-        "and the guard says it is passing everything through: {noted}"
+        "and the guard says what it is resting on instead: {noted}"
+    );
+}
+
+#[test]
+fn a_profile_endpoint_that_names_nobody_leaves_the_check_to_the_identity_file() {
+    // The exposure: somebody ran `claude` and logged in directly, and Anthropic
+    // has stopped saying whose an access token is. What is left that knows is
+    // the Identity Claude Code wrote beside the Credential Perch asks with.
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    host.set_file(IDENTITY_PATH, SECOND_IDENTITY_FILE);
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, r#"{"account":{"mail":"x"}}"#)
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("the command still answers");
+    assert!(
+        cached_windows(&host, EMAIL).is_empty(),
+        "no figure is filed under an Account nothing says the Credential is \
+         for: {printed}"
+    );
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "and no read is spent on a figure that could not be recorded anywhere"
+    );
+}
+
+#[test]
+fn an_account_read_out_of_its_own_profile_is_not_stopped_by_a_profile_endpoint_that_drifted() {
+    // Only Perch writes into an Account's own Profile, so a Credential there is
+    // this Account's whatever Anthropic will or will not say about it.
+    let host = two_accounts_in_a_group();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
+        .with_reply_to(PROFILE_URL, SECOND_TOKEN, 200, "<html>hello</html>")
+        .with_reply_to(USAGE_URL, SECOND_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    let (result, printed) = run_list_refresh(&host, false);
+
+    result.expect("the command answers");
+    assert!(
+        !cached_windows(&host, SECOND_EMAIL).is_empty(),
+        "the figures are filed against the Account whose Profile they came out \
+         of: {printed}"
     );
 }
 
