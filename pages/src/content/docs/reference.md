@@ -1,7 +1,7 @@
 ---
 title: "Reference"
 sidebar:
-  order: 9
+  order: 10
 ---
 
 ## Commands
@@ -29,57 +29,13 @@ sidebar:
 | `perch upgrade [--release <tag>] [--check] [--json] [--channel <name>] [--yes]` | replace this Perch with a newer Release, through the Channel that installed it |
 | `perch version` | which Perch is installed, and a line more when a newer Release exists |
 | `perch probe [--json] [--raw]` | everything Perch can see of this machine, for pasting into a bug report |
+| `perch triage [--model <name>] [--raw]` | hand that to Claude Code, and let it investigate this machine and help you file the issue |
 
 ## Reporting something broken
 
-`perch probe` gathers what a report needs and would otherwise be typed by hand:
-which Perch and which Claude Code, how Perch was installed, where its files are,
-what the Holdings hold, which of its assumptions about Claude Code still hold,
-and what has been run here lately.
-
-```
-$ perch probe
-Findings
-  <account 3> is Quarantined, so Cycling will not choose it and a Switch to it
-  refuses. `perch relogin <account 3>` is the way back. (exit 19)
-
-Perch         0.2.0 (linux x86_64), installed by npm
-Claude Code   2.1.221, at <home>/.local/share/claude/bin/claude
-Home          <home>/.config/perch, registry version 5
-Active        <account 1>
-Holdings      4 Accounts in 2 Groups, 1 Quarantined, 0 Disabled
-Watcher       installed, running, may act somewhere
-Its log       <home>/.config/perch/watch.log
-Trail         412 lines, last written 2026-08-28 09:16:41Z
-...
-```
-
-The judgment comes first and the facts sit under it, so the facts still stand
-where the judgment is wrong. A finding only ever restates something Perch
-already works out to decide a refusal, and carries the code that refusal exits
-with.
-
-Email addresses, Alias and Group names and your home directory come out as
-placeholders, because the point of this is pasting it somewhere else. The
-numbers are the Account's place in the registry, so `<account 3>` is the same
-Account every time you run it — two reports a week apart are comparable.
-`--raw` prints the names as they are, and is worth checking before you paste.
-
-It reads and judges and repairs nothing. No network, no registry brought
-forward, no line added to the Trail, and it exits `0` whatever it finds.
-
-Every command writes two lines to the **Trail** as it goes, one when it starts
-and one when it ends: what was typed, and what it exited with. Words after `--`
-go to Claude Code and are counted rather than recorded. A start with no end
-whose process is gone is a command that died without a word, and `perch probe`
-says so — one whose process is still running is not, which is why the Watcher
-sitting in its loop is never reported as a failure. The Watcher adds a line of
-its own when it Switches. The Trail is not one of the Holdings — it is never
-exported, and a Purge takes it with everything else.
-
-`perch probe` names the Watcher's own log and does not read it. On macOS and
-Windows that is `watch.log` beside the registry; on Linux systemd keeps it, and
-what the Probe prints is the `journalctl` line to run.
+`perch probe` gathers what a report needs, and `perch triage` hands it to Claude
+Code and lets the agent do the writing. Both are in
+[troubleshooting](troubleshooting.md).
 
 ## Exit codes
 

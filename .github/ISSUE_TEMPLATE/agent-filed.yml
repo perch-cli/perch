@@ -1,0 +1,153 @@
+# The report `perch triage` produces, whose fields `.github/triage/PLAYBOOK.md`
+# names one by one. A field renamed here is one the playbook tells an agent to
+# fill and GitHub silently drops, so `tests/publication.rs` asserts they agree.
+#
+# Separate from `bug_report.yml` because the reporter is different: an agent has
+# already searched, already redacted and already investigated, so the checkboxes
+# go and a Diagnosis arrives (ADR a-triage-hands-over-evidence). It carries no
+# `title:` for the same reason — an agent writes a specific one, where a prefix
+# is scaffolding for somebody facing an empty box.
+name: Agent-filed report
+description: Filed by a coding agent through `perch triage`. Writing one by hand? Use the Bug report form instead.
+labels:
+  - bug
+  - needs-triage
+  - filed-by-agent
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the shape `perch triage` fills in. One problem per issue.
+
+        The `perch probe` block below is redacted by Perch rather than by the
+        agent filing this, so it is pasted whole and unedited.
+
+        A **security problem** goes to
+        [private vulnerability reporting](https://github.com/perch-cli/perch/security/advisories/new)
+        rather than to a public issue.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Perch is this about?
+      options:
+        - Switching and Cycling, including which Account gets picked
+        - The Watcher, and switching while nobody is looking
+        - Adding, relogging in, or removing an Account
+        - Utilization figures, their age, or --refresh
+        - Running a client against one Account (perch run)
+        - Holdings — export, import, or purge
+        - The registry, or a migration between versions
+        - Groups, Aliases, and Settings (perch config)
+        - Install, upgrade, or packaging
+        - The --json shape, or an exit code
+        - The guide, the README, or --help
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Perch version
+      description: The first line of `perch version`.
+      placeholder: perch 0.2.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: What the user ran
+      description: The commands, in order, starting from a state you can describe.
+      placeholder: |
+        1. perch add --group work --alias overflow
+        2. perch switch overflow
+        3. perch status
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What they expected
+      placeholder: A switch to overflow@example.com, and status showing it as active.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: >-
+        The message Perch printed, quoted exactly, and the exit code beside it.
+        Perch says why it refused, and that sentence is usually the fastest way in.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnosis
+    attributes:
+      label: Diagnosis
+      description: >-
+        What the investigation found, grounded in the Trail, the probe's findings
+        and assumptions, and what Perch printed. Say what could not be
+        established as well as what could.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - Perch lost or damaged something it holds — a Profile, a Credential, the registry
+        - The user cannot get to an Account they need
+        - It fails often, or a figure it shows is wrong
+        - Occasional, or there is a way around it
+        - Wording, formatting, or something the docs get wrong
+    validations:
+      required: true
+
+  - type: textarea
+    id: probe
+    attributes:
+      label: perch probe
+      description: >-
+        The contents of `probe.txt` from the triage directory, pasted whole. Email
+        addresses, Alias and Group names and the home directory are already
+        placeholders, because Perch replaced them before writing the file.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >-
+        The Trail lines, output or messages that carry the problem, redacted.
+        The relevant part rather than the whole session.
+      render: shell
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related issues
+      description: Existing issues that look similar, and why this is not one of them.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Anything that got the user moving again
+      description: What was run to unblock them, if anything was.
+
+  - type: input
+    id: filed-by
+    attributes:
+      label: Filed by
+      description: Which agent and which model produced this report.
+      placeholder: Claude Code, claude-opus-5
+    validations:
+      required: true

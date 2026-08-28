@@ -119,6 +119,8 @@ Account in one terminal without changing which is active.
 | `perch remove` | give up an Account | [guide](pages/src/content/docs/accounts.md#giving-up-an-account) |
 | `perch holdings export` / `import` | back up everything Perch holds to one encrypted file, and put it back | [guide](pages/src/content/docs/backup.md) |
 | `perch holdings purge` | give the machine back the state it had before Perch | [guide](pages/src/content/docs/backup.md#giving-the-machine-back) |
+| `perch probe` | everything Perch can see of this machine, redacted and ready to paste | [guide](pages/src/content/docs/troubleshooting.md) |
+| `perch triage` | hand that to Claude Code, and let it investigate and help you file the issue | [guide](pages/src/content/docs/troubleshooting.md#letting-an-agent-do-it) |
 | `perch upgrade` | replace this Perch with a newer Release, through the channel that installed it | [guide](pages/src/content/docs/installing.md#upgrading) |
 | `perch version` | which Perch is installed, and a line more when a newer Release exists | [guide](pages/src/content/docs/installing.md#being-told-about-new-releases) |
 
@@ -168,6 +170,8 @@ why it does it that way. The same pages, rendered and searchable, are at
 - [Running one Account in one terminal](pages/src/content/docs/running.md)
 - [Backing up and moving machines](pages/src/content/docs/backup.md)
 - [Configuration](pages/src/content/docs/configuration.md)
+- [When something goes wrong](pages/src/content/docs/troubleshooting.md) — `probe`,
+  `triage`, and the Trail
 - [Reference](pages/src/content/docs/reference.md) — commands, exit codes, paths
 
 ## Design

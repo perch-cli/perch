@@ -15,6 +15,7 @@ use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
+use perch::commands::triage::{self, TriageArgs};
 use perch::commands::upgrade::{self, UpgradeArgs};
 use perch::commands::version;
 use perch::commands::watcher::{self, WatcherCommand};
@@ -180,6 +181,26 @@ enum Command {
     /// memory, settings, plugins and project history are untouched.
     Switch(SwitchArgs),
 
+    /// Hand what Perch can see of this machine to Claude Code, and let it help
+    /// you file an issue.
+    ///
+    /// For when something has gone wrong and typing out a bug report by hand is
+    /// the last thing you want to do. Perch gathers what `perch probe` gathers,
+    /// writes the playbook a coding agent follows, and starts Claude Code on it.
+    /// The agent asks what went wrong, investigates this machine, and drafts the
+    /// issue — it posts nothing without showing you the whole thing first.
+    ///
+    /// Perch itself only gathers. It brings no registry forward, writes no line
+    /// to its own log, and changes nothing about the machine you are asking it
+    /// to describe. Two copies of the evidence are written: one with the real
+    /// names and paths for the agent to work from, and one with placeholders,
+    /// which is the copy meant for a public issue.
+    ///
+    /// With no Claude Code installed, or with the Account you are on broken,
+    /// nothing is launched: the files are written and Perch says where they are,
+    /// so you can paste them into whatever you do have.
+    Triage(TriageArgs),
+
     /// Replace this Perch with a newer Release.
     ///
     /// Through whatever Channel installed it: a Homebrew Installation is
@@ -233,8 +254,9 @@ enum Command {
 
 /// Nought for having worked, and otherwise whatever the failure earned.
 ///
-/// A Run is the one command this is wrong for: it launches a program, and what
-/// that program said is what Perch says.
+/// Three do not come through here, because each hands the terminal to something
+/// else — a Run's client, a Triage's Claude Code, an Upgrade's Channel — and a
+/// code of Perch's own would lose which of their failures it was.
 fn ok(outcome: perch::Result<()>) -> perch::Result<i32> {
     outcome.map(|()| EXIT_OK)
 }
@@ -262,23 +284,23 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
 
 /// Whether this command comes after a registry migration.
 ///
-/// Three do not: each is what somebody runs when the machine is already
-/// misbehaving, and each promises at `--help` to touch nothing Perch holds. A
-/// version carried forward on the way past a Probe is a finding it destroyed.
+/// Four do not: each is run when the machine is already misbehaving, and each
+/// promises at `--help` to touch nothing Perch holds. A version carried forward
+/// past a Probe, or past the Triage handing one over, is a finding it destroyed.
 fn migrates(command: &Command) -> bool {
     !matches!(
         command,
-        Command::Version | Command::Upgrade(_) | Command::Probe(_)
+        Command::Version | Command::Upgrade(_) | Command::Probe(_) | Command::Triage(_)
     )
 }
 
 /// Whether this command writes itself down.
 ///
-/// One does not: a Probe renders the Trail, and a line of its own would push
-/// what somebody wanted to see out of the window every time they re-ran it
-/// (ADR a-trail-is-evidence).
+/// Two do not, for one reason: a Probe renders the Trail and a Triage hands one
+/// over, so a line of their own would push what somebody wanted to see out of
+/// the window every time they re-ran it (ADR a-trail-is-evidence).
 fn leaves_a_trail(command: &Command) -> bool {
-    !matches!(command, Command::Probe(_))
+    !matches!(command, Command::Probe(_) | Command::Triage(_))
 }
 
 fn main() {
@@ -347,13 +369,10 @@ fn main() {
         Command::Probe(args) => probe::run(&host, args, &mut out),
         Command::Relogin(args) => ok(relogin::run(&host, args, &mut out)),
         Command::Remove(args) => ok(remove::run(&host, args, &mut out)),
-        // The one command whose exit code is not Perch's own: what the client
-        // said is what a script reads.
         Command::Run(args) => run::run(&host, args, &mut out),
         Command::Status(args) => ok(status::run(&host, args, &mut out)),
         Command::Switch(args) => ok(switch::run(&host, args, &mut out)),
-        // What `brew` or `npm` exited with, because a code of Perch's own
-        // would lose which of their failures it was.
+        Command::Triage(args) => triage::run(&host, args, &mut out),
         Command::Upgrade(args) => upgrade::run(&host, args, &mut out),
         Command::Version => ok(version::run(&host, &mut out)),
         // A `check` reports what it decided, so a scheduler tells a Switch
@@ -376,14 +395,15 @@ mod tests {
     use super::*;
 
     /// The two exemptions a Probe carries, which are one idea: it changes
-    /// nothing about the machine it is describing.
+    /// nothing about the machine it is describing. A Triage carries both, for
+    /// the same idea — it is a Probe somebody else is about to read.
     #[test]
-    fn a_probe_neither_migrates_the_registry_nor_writes_itself_down() {
-        let probe = Cli::try_parse_from(["perch", "probe"])
-            .expect("the line parses")
-            .command;
-        assert!(!migrates(&probe));
-        assert!(!leaves_a_trail(&probe));
+    fn neither_a_probe_nor_a_triage_migrates_the_registry_or_writes_itself_down() {
+        for line in [["perch", "probe"], ["perch", "triage"]] {
+            let command = Cli::try_parse_from(line).expect("the line parses").command;
+            assert!(!migrates(&command), "{line:?}");
+            assert!(!leaves_a_trail(&command), "{line:?}");
+        }
 
         let list = Cli::try_parse_from(["perch", "list"])
             .expect("the line parses")

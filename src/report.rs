@@ -6,7 +6,9 @@
 //! version, on what platform, where to send it, and how to get the backtrace
 //! if the first run did not carry one.
 
-const ISSUES: &str = "https://github.com/perch-cli/perch/issues";
+/// Where a report of a Perch bug goes, for the panic hook here and for the
+/// Triage that helps somebody write one.
+pub(crate) const ISSUES: &str = "https://github.com/perch-cli/perch/issues";
 
 /// The default hook stays underneath rather than being replaced — it already
 /// prints the payload, the location and the backtrace — so what is added is

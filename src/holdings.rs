@@ -152,6 +152,37 @@ pub fn pending_login_started_at(dir: &Path) -> Option<DateTime<Utc>> {
     DateTime::from_timestamp_millis(millis)
 }
 
+/// Where every Triage writes what it hands over.
+///
+/// Under `$PERCH_HOME` so a Purge takes it back, and carrying no version of its
+/// own: what a Triage leaves is evidence rather than one of the Holdings, so
+/// nothing migrates it and no Export carries it (ADR a-trail-is-evidence).
+pub fn triage_dir(host: &dyn Host) -> Result<PathBuf> {
+    Ok(perch_home(host)?.join("triage"))
+}
+
+/// Where one Triage writes, named after the moment it started — as a pending
+/// login is, and for its reason: the name is the only account of the
+/// directory's age that nothing later moves. Milliseconds are fixed width for
+/// the next two centuries, so the runs sort in the order they were written and
+/// pruning the oldest needs no second reading.
+pub fn triage_run_dir(host: &dyn Host, started_at: DateTime<Utc>) -> Result<PathBuf> {
+    Ok(triage_dir(host)?.join(format!("run-{}", started_at.timestamp_millis())))
+}
+
+/// When the Triage that made this directory started, as its name records.
+/// `run-<millis>`, written by [`triage_run_dir`], and what tells one of its runs
+/// from anything else somebody left in there.
+pub fn triage_run_started_at(dir: &Path) -> Option<DateTime<Utc>> {
+    let millis: i64 = dir
+        .file_name()?
+        .to_str()?
+        .strip_prefix("run-")?
+        .parse()
+        .ok()?;
+    DateTime::from_timestamp_millis(millis)
+}
+
 /// Whether two Accounts derive the same Profile directory. The derivation is
 /// `profiles_dir` joined with the slugged email, so sharing a slug is sharing
 /// a Profile — kept here beside the derivation so the two cannot drift apart.

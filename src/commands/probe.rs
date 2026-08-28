@@ -64,12 +64,29 @@ const REACHED: [&str; 6] = [
     probe::assumption::SESSION_MARKER,
 ];
 
+/// Named findings, as [`crate::probe::assumption`] names assumptions and for its
+/// reason: a script counts these, and a Triage decides on four of them, so a
+/// rename here is a rename everywhere rather than a literal that stops matching.
+pub mod finding {
+    pub const CLAUDE_CODE_UNREADABLE: &str = "claude-code-unreadable";
+    pub const REGISTRY_UNREADABLE: &str = "registry-unreadable";
+    pub const REGISTRY_BEHIND: &str = "registry-behind";
+    pub const ACCOUNT_QUARANTINED: &str = "account-quarantined";
+    pub const TRAIL_NOT_KEPT: &str = "trail-not-kept";
+    pub const WATCHER_MAY_ACT_NOWHERE: &str = "watcher-may-act-nowhere";
+    pub const COMMAND_NEVER_FINISHED: &str = "command-never-finished";
+    pub const TRAIL_EMPTY: &str = "trail-empty";
+    pub const ASSUMPTION_BROKE: &str = "assumption-broke";
+    pub const KEYCHAIN_UNAVAILABLE: &str = "keychain-unavailable";
+    pub const STORE_UNREADABLE: &str = "store-unreadable";
+}
+
 /// Something that would make a command refuse, with the code it would refuse
 /// with. `code` is what a script counts; `said` is the same thing for a person.
-struct Finding {
-    code: &'static str,
-    exit_code: Option<i32>,
-    said: String,
+pub struct Finding {
+    pub code: &'static str,
+    pub exit_code: Option<i32>,
+    pub said: String,
 }
 
 impl Finding {
@@ -156,6 +173,41 @@ struct Seen {
     findings: Vec<Finding>,
 }
 
+/// The placeholders this gathering redacts to. A registry that would not load
+/// numbers nothing, which is a Probe of a machine with no registry rather than a
+/// failure: the home directory is still hidden.
+fn redaction_over(host: &dyn Host, seen: &Seen) -> Redaction {
+    Redaction::of(
+        seen.registry.as_ref().unwrap_or(&Registry::default()),
+        host.home_dir().ok().as_deref(),
+    )
+}
+
+/// One gathering, read both ways, and what it found.
+///
+/// All three at once because two gatherings a second apart could disagree about
+/// the machine: an agent investigates from the raw reading and pastes the
+/// redacted one (ADR a-triage-hands-over-evidence).
+pub struct Gathered {
+    pub raw: String,
+    pub redacted: String,
+    /// What it found, so a caller can act on one without parsing the rendering
+    /// back apart.
+    pub found: Vec<Finding>,
+}
+
+/// The Probe a Triage hands over, gathered once. Here rather than in the
+/// command that wants it, because everything it reads is this module's.
+pub fn gathered(host: &dyn Host) -> Gathered {
+    let seen = gather(host);
+    let hidden = redaction_over(host, &seen);
+    Gathered {
+        raw: lines(&seen, &Redaction::none()).join("\n"),
+        redacted: lines(&seen, &hidden).join("\n"),
+        found: seen.findings,
+    }
+}
+
 /// Gathers once, redacts once, and renders the answer one of two ways.
 ///
 /// Output that could not be written travels as it does from any other command:
@@ -164,10 +216,7 @@ pub fn run(host: &dyn Host, args: ProbeArgs, out: &mut dyn Write) -> Result<i32>
     let seen = gather(host);
     let hidden = match args.raw {
         true => Redaction::none(),
-        false => Redaction::of(
-            seen.registry.as_ref().unwrap_or(&Registry::default()),
-            host.home_dir().ok().as_deref(),
-        ),
+        false => redaction_over(host, &seen),
     };
 
     match args.json {
@@ -192,7 +241,7 @@ fn gather(host: &dyn Host) -> Seen {
     let claude = match &installed {
         Ok(installed) => Ok(installed.version().to_string()),
         Err(err) => {
-            findings.push(Finding::refused("claude-code-unreadable", err));
+            findings.push(Finding::refused(finding::CLAUDE_CODE_UNREADABLE, err));
             Err(err.to_string())
         }
     };
@@ -205,7 +254,7 @@ fn gather(host: &dyn Host) -> Seen {
     let (registry, registry_said) = match registry::load(host) {
         Ok(registry) => (registry, None),
         Err(err) => {
-            findings.push(Finding::refused("registry-unreadable", &err));
+            findings.push(Finding::refused(finding::REGISTRY_UNREADABLE, &err));
             (None, Some(err.to_string()))
         }
     };
@@ -213,7 +262,7 @@ fn gather(host: &dyn Host) -> Seen {
     if let Some(registry) = &registry {
         if on_disk.is_some_and(|stated| stated < u64::from(registry::CURRENT_VERSION)) {
             findings.push(Finding::noticed(
-                "registry-behind",
+                finding::REGISTRY_BEHIND,
                 format!(
                     "The registry on disk is version {} and this Perch writes \
                      version {}. No command has brought it forward yet, which the \
@@ -229,7 +278,7 @@ fn gather(host: &dyn Host) -> Seen {
             .filter(|held| held.quarantine.is_some())
         {
             findings.push(Finding {
-                code: "account-quarantined",
+                code: finding::ACCOUNT_QUARANTINED,
                 exit_code: Some(crate::error::EXIT_QUARANTINED),
                 said: format!(
                     "{} is Quarantined, so Cycling will not choose it and a Switch \
@@ -248,7 +297,7 @@ fn gather(host: &dyn Host) -> Seen {
             && wrote - last > chrono::Duration::minutes(1)
         {
             findings.push(Finding::noticed(
-                "trail-not-kept",
+                finding::TRAIL_NOT_KEPT,
                 format!(
                     "The registry was written at {} and the Trail's last line is \
                      from {}, so a command ran and wrote nothing down. Perch's \
@@ -268,7 +317,7 @@ fn gather(host: &dyn Host) -> Seen {
         && standing.any_scope_may_act == Some(false)
     {
         findings.push(Finding::noticed(
-            "watcher-may-act-nowhere",
+            finding::WATCHER_MAY_ACT_NOWHERE,
             "A Service is installed and no Scope has told the Watcher it may act, \
              so it holds every round rather than Switching anything. \
              `perch config set <scope> watcher-may-act true`."
@@ -278,7 +327,7 @@ fn gather(host: &dyn Host) -> Seen {
 
     for started in &trail_read.unfinished {
         findings.push(Finding::noticed(
-            "command-never-finished",
+            finding::COMMAND_NEVER_FINISHED,
             format!(
                 "`perch {}` was started at {} and the process that ran it is gone, \
                  so it never finished.",
@@ -289,7 +338,7 @@ fn gather(host: &dyn Host) -> Seen {
     }
     if trail_read.held == 0 {
         findings.push(Finding::noticed(
-            "trail-empty",
+            finding::TRAIL_EMPTY,
             "The Trail holds nothing. Either no command has run here since this \
              Perch was installed, or Perch's home cannot be written to."
                 .to_string(),
@@ -343,7 +392,7 @@ fn asked(host: &dyn Host, findings: &mut Vec<Finding>) -> [Stood; REACHED.len()]
                 };
             }
             findings.push(Finding {
-                code: "assumption-broke",
+                code: finding::ASSUMPTION_BROKE,
                 exit_code: Some(crate::error::EXIT_PROBE_REFUSED),
                 said: refusal.to_string(),
             });
@@ -351,8 +400,8 @@ fn asked(host: &dyn Host, findings: &mut Vec<Finding>) -> [Stood; REACHED.len()]
         Err(err) => {
             held[0] = Stood::Held;
             let code = match err {
-                PerchError::KeychainUnavailable(_) => "keychain-unavailable",
-                _ => "store-unreadable",
+                PerchError::KeychainUnavailable(_) => finding::KEYCHAIN_UNAVAILABLE,
+                _ => finding::STORE_UNREADABLE,
             };
             findings.push(Finding::refused(code, &err));
         }

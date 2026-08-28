@@ -1,9 +1,9 @@
-//! What the site publishes, asserted against the repository that publishes it
-//! (ADR one-thing-renders-the-site).
+//! What this repository publishes for somebody who never reads it, asserted
+//! against the repository that publishes it (ADR one-thing-renders-the-site).
 //!
-//! Nothing the site gets wrong fails loudly — a link to a renamed heading is a
-//! 404 somebody else finds, and a page nobody linked to is one nobody reaches —
-//! so what would go quietly wrong is asserted here instead.
+//! None of it fails loudly — a renamed heading is a 404 somebody else finds, and
+//! an issue form field nobody offers is one GitHub drops without a word — so what
+//! would go quietly wrong is asserted here instead.
 //!
 //! The other half is the constraint the site had before it had a guide: the
 //! installers are pasted into terminals from a versionless URL, so they sit at
@@ -445,4 +445,47 @@ fn pages_of_the_site() -> BTreeSet<String> {
     let mut pages = guide_pages();
     pages.insert("index.mdx".to_string());
     pages
+}
+
+/// The triage playbook walks an agent through the fields of the form it files,
+/// and the form decides whether those fields exist. Both ways: a field the
+/// playbook names and the form drops is text GitHub throws away, and a field the
+/// form offers and the playbook skips is one that arrives empty every time.
+#[test]
+fn the_triage_playbook_and_the_form_it_files_name_the_same_fields() {
+    let playbook = read(&repo().join(".github/triage/PLAYBOOK.md"));
+    let form = read(&repo().join(".github/ISSUE_TEMPLATE/agent-filed.yml"));
+
+    let offered: BTreeSet<String> = form
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("id: ").map(str::to_string))
+        .collect();
+    assert!(!offered.is_empty(), "the form names its fields by id");
+
+    // Every backticked word on a bullet of the playbook's field list, which is
+    // more than one per bullet: two dropdowns share a line, and so do the two
+    // halves of what the user expected. A path or a command is not an id.
+    let named: BTreeSet<String> = playbook
+        .lines()
+        .filter(|line| line.starts_with("- `"))
+        .flat_map(|line| line.split('`').skip(1).step_by(2))
+        .filter(|word| !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase() || c == '-'))
+        .map(str::to_string)
+        .collect();
+
+    assert_eq!(
+        named, offered,
+        "the playbook walks an agent through one set of fields and the form offers another"
+    );
+}
+
+/// The label the playbook applies has to be one the form already puts on every
+/// report, or a maintainer filtering on it misses half of them.
+#[test]
+fn the_label_the_triage_playbook_applies_is_one_the_form_carries() {
+    let playbook = read(&repo().join(".github/triage/PLAYBOOK.md"));
+    let form = read(&repo().join(".github/ISSUE_TEMPLATE/agent-filed.yml"));
+
+    assert!(playbook.contains("Label it `filed-by-agent`"));
+    assert!(form.contains("  - filed-by-agent"));
 }
