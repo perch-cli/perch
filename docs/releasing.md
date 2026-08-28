@@ -38,6 +38,10 @@ without it.
 None of this is automatic, and until it is done the workflows fail rather than
 misbehave quietly.
 
+Both tokens expire. Each workflow checks its own before it spends anything, so a
+lapsed one is a refusal to start that names the secret to rotate, rather than a
+version bump on `main` with no tag or a Release the Tap never hears about.
+
 ### `RELEASE_PLZ_TOKEN`
 
 A repository secret holding a **fine-grained personal access token scoped to

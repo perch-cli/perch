@@ -43,6 +43,16 @@ jobs:
           # need a credential in .git/config.
           persist-credentials: false
 
+      # `Tag` runs only once the release pull request has merged, so a token
+      # that has expired by then leaves main carrying a version bump and a
+      # changelog with no tag and no Release. Every push to main asks.
+      - name: The release-plz token still reaches this repository
+        uses: ./.github/actions/token-still-reaches
+        with:
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          repository: ${{ github.repository }}
+          secret: RELEASE_PLZ_TOKEN
+
       # The binary rather than release-plz/action: this repository's Actions
       # policy admits neither it nor the three further actions it pulls in.
       # Pinned by version and by checksum, so bumping one without the other

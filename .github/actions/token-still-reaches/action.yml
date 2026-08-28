@@ -1,0 +1,62 @@
+# Both stored credentials are used at the point where failing costs most: the
+# tap token after a Release is public and npm has published, the release-plz
+# token after the release pull request has merged. Asking first turns either of
+# those into a refusal to start, and a token close to lapsing into a warning on
+# an ordinary push.
+# What is checked is write access and expiry, not which scopes were granted.
+# Expiry, revocation and a value stored wrong are how a credential that worked
+# stops working; a missing scope is a setup error, and a setup error fails the
+# first time rather than one day in the future.
+name: A token still reaches a repository
+description: Fail when a stored credential can no longer write where it exists to write.
+
+inputs:
+  token:
+    description: The stored credential to check.
+    required: true
+  repository:
+    description: The repository it is expected to write to, as owner/name.
+    required: true
+  secret:
+    description: The name of the secret holding it, so a failure says what to rotate.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPOSITORY: ${{ inputs.repository }}
+        SECRET: ${{ inputs.secret }}
+      run: |
+        if ! response=$(gh api -i "repos/$REPOSITORY"); then
+          echo "::error::$SECRET cannot reach $REPOSITORY: expired, revoked, or stored wrong"
+          exit 1
+        fi
+
+        body=$(printf '%s\n' "$response" | sed -e '1,/^[[:space:]]*$/d')
+        if [ "$(printf '%s' "$body" | jq -r '.permissions.push')" != "true" ]; then
+          echo "::error::$SECRET reaches $REPOSITORY but cannot write to it"
+          exit 1
+        fi
+        echo "$SECRET still writes to $REPOSITORY"
+
+        # A warning, not a failure: the token works today, and being told on an
+        # ordinary push beats a Release refusing to start. `|| true` because a
+        # credential that never expires sends no header and grep exits 1.
+        expiry=$(printf '%s\n' "$response" \
+          | grep -i '^github-authentication-token-expiration:' \
+          | head -n1 | cut -d' ' -f2- | tr -d '\r') || true
+
+        # Under `set -e` a closing test that came out false would end the step
+        # on its own status.
+        [ -n "$expiry" ] || exit 0
+        lapses=$(date -u -d "$expiry" +%s 2>/dev/null) || exit 0
+
+        days=$(( (lapses - $(date -u +%s)) / 86400 ))
+        if [ "$days" -le 30 ]; then
+          echo "::warning::$SECRET expires in $days days, on $expiry. Rotate it."
+        else
+          echo "$SECRET expires in $days days"
+        fi
