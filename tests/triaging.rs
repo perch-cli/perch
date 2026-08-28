@@ -9,7 +9,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use common::*;
 use perch::commands::triage::TriageArgs;
 use perch::error::EXIT_OK;
@@ -21,10 +21,24 @@ use perch::registry::Quarantine;
 /// knowable from the test rather than read back out of the output.
 const AT: i64 = 1_787_059_012_431;
 
-const TRIAGE: &str = "/Users/someone/.config/perch/triage";
+fn moment(millis: i64) -> DateTime<Utc> {
+    Utc.timestamp_millis_opt(millis).single().expect("a moment")
+}
 
 fn at_a_fixed_moment(host: FakeHost) -> FakeHost {
-    host.with_now(Utc.timestamp_millis_opt(AT).single().expect("a moment"))
+    host.with_now(moment(AT))
+}
+
+/// Asked of the same derivation the command uses rather than spelled out. A
+/// `FakeHost` standing in for Windows joins with a backslash while its home is
+/// still written the way the fixture wrote it, so a path spelled here matches on
+/// one runner and not the other.
+fn triage_dir(host: &FakeHost) -> PathBuf {
+    perch::holdings::triage_dir(host).expect("Perch has a home")
+}
+
+fn run_dir(host: &FakeHost) -> PathBuf {
+    perch::holdings::triage_run_dir(host, moment(AT)).expect("Perch has a home")
 }
 
 fn run_triage(host: &FakeHost, args: TriageArgs) -> (i32, String) {
@@ -46,14 +60,15 @@ fn triaged(host: &FakeHost) -> (i32, String) {
     )
 }
 
-fn run_dir() -> PathBuf {
-    Path::new(TRIAGE).join(format!("run-{AT}"))
-}
-
 fn written(host: &FakeHost, name: &str) -> String {
-    host.file(run_dir().join(name))
+    host.file(run_dir(host).join(name))
         .unwrap_or_else(|| panic!("{name} is written"))
 }
+
+/// The three files, by the names the command and the playbook share.
+const PROMPT: &str = "prompt.md";
+const RAW: &str = "probe.raw.txt";
+const REDACTED: &str = "probe.txt";
 
 /// What the machine was asked to launch, if anything.
 fn launched(host: &FakeHost) -> Option<(String, Vec<String>)> {
@@ -131,7 +146,7 @@ fn a_triage_hands_claude_code_the_file_rather_than_the_playbook() {
         "one word, for a `.cmd` shim on Windows: {args:?}"
     );
     assert!(
-        args[0].contains(&run_dir().join("prompt.md").display().to_string()),
+        args[0].contains(&run_dir(&host).join("prompt.md").display().to_string()),
         "and it names the prompt: {args:?}"
     );
     assert!(
@@ -210,9 +225,35 @@ fn a_quarantined_active_account_is_said_rather_than_handed_to_a_login_prompt() {
     assert!(said.contains("Quarantined"), "{said}");
     for name in ["prompt.md", "probe.raw.txt", "probe.txt"] {
         assert!(
-            said.contains(&run_dir().join(name).display().to_string()),
+            said.contains(&run_dir(&host).join(name).display().to_string()),
             "{name} is named so it can be pasted by hand: {said}"
         );
+    }
+}
+
+/// Two platforms are in play at once: the runner's, and the one the fake claims.
+/// Every path a Triage prints is derived on the second, and a case that spells
+/// one out passes on one runner and not the other.
+#[test]
+fn the_paths_a_triage_prints_are_the_ones_it_wrote_on_the_platform_it_claims() {
+    for platform in [Platform::MacOs, Platform::Windows, Platform::Other] {
+        let host = at_a_fixed_moment(machine_with_two_accounts().with_platform(platform));
+        quarantine_for(&host, EMAIL, Quarantine::RenewalRejected);
+
+        let (_, said) = triaged(&host);
+
+        for name in [PROMPT, RAW, REDACTED] {
+            let at = run_dir(&host).join(name);
+            assert!(
+                host.file(&at).is_some(),
+                "{platform:?}: {} is written",
+                at.display()
+            );
+            assert!(
+                said.contains(&at.display().to_string()),
+                "{platform:?}: and named as it was written: {said}"
+            );
+        }
     }
 }
 
@@ -242,7 +283,7 @@ fn a_credential_that_will_not_read_is_said_rather_than_launched_into() {
         "and it says which belief stopped holding: {said}"
     );
     assert!(
-        host.file(run_dir().join("prompt.md")).is_some(),
+        host.file(run_dir(&host).join("prompt.md")).is_some(),
         "the evidence is written either way"
     );
 }
@@ -271,17 +312,14 @@ fn only_the_newest_three_runs_are_kept() {
     let mut host = machine_with_two_accounts();
     let mut kept = Vec::new();
     for minute in 0..5 {
-        let at = Utc
-            .timestamp_millis_opt(AT + minute * 60_000)
-            .single()
-            .expect("a moment");
+        let at = moment(AT + minute * 60_000);
         host = host.with_now(at);
         triaged(&host);
         kept.push(format!("run-{}", at.timestamp_millis()));
     }
 
     let held: Vec<String> = host
-        .list_dir(Path::new(TRIAGE))
+        .list_dir(&triage_dir(&host))
         .expect("the triage directory is there")
         .into_iter()
         .filter_map(|path| Some(path.file_name()?.to_str()?.to_string()))
