@@ -215,6 +215,19 @@ jobs:
             found { print }
           ' CHANGELOG.md > notes.md || true
 
+          # A Release body stops at 125000 characters and a CHANGELOG.md section
+          # does not. Cut at a line boundary and pointed at the file, rather than
+          # dropped for the generated commit list.
+          if [ "$(wc -c < notes.md)" -gt 124000 ]; then
+            head -c 124000 notes.md | head -n -1 > kept.md
+            {
+              cat kept.md
+              printf '\n_Cut to fit a Release page. The whole entry is in [CHANGELOG.md](%s/%s/blob/%s/CHANGELOG.md)._\n' \
+                "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME"
+            } > notes.md
+            echo "::warning::release notes cut to fit the 125000-character body"
+          fi
+
           if [ -s notes.md ]; then
             cat notes.md
           else
