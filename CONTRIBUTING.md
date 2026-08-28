@@ -104,6 +104,11 @@ numbers.
 
 ## Pull requests
 
+If this is your first change to this repository, CI will not start on its own.
+GitHub holds a fork's workflow run until a maintainer approves it, and re-arms
+that hold on every push until your first pull request merges. The checks are
+waiting rather than failing (ADR a-gate-lives-outside-the-tree).
+
 The repository squash-merges, and the pull request title becomes the commit
 subject that release-plz reads to pick the next version. So the title is a
 Conventional Commit, and a workflow checks it on every edit:

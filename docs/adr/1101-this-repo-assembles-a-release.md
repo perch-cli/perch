@@ -76,6 +76,32 @@ people are about to install.
 Revisiting this is cheap and stays cheap: the thing that would replace these
 workflows consumes the same tag and produces the same Artifacts.
 
+## A version is decided by more than the title
+
+Every change lands as one squash commit whose subject is the pull request title
+and whose body is every commit the branch accumulated, which is
+`squash_merge_commit_message = COMMIT_MESSAGES`. The subject is written once,
+deliberately, and a workflow checks it is a Conventional Commit. The body is
+whatever was typed along the way.
+
+release-plz reads both. Conventional Commits places `BREAKING CHANGE:` at the
+start of a line in the body, not only in the subject, and GitHub prefixes the
+branch's subjects with `* ` when it concatenates them but copies their bodies
+through untouched. So a line written mid-branch and never reread reaches the
+version decision as directly as the title does.
+
+The body stays anyway. On a repository that only squashes, that concatenation is
+the sole surviving record of what the branch actually did, and the two
+alternatives each spend something for the same protection: `BLANK` deletes the
+record, and `PR_BODY` writes the pull request template's comments and unticked
+boxes into the history instead.
+
+What makes that affordable is that release-plz proposes rather than acts. The
+version it derives arrives as a release pull request and is read before it is
+merged, so a bump argued by a stray line is caught in the same place every other
+wrong thing about a Release is caught. It would not be affordable if the tag
+were automatic.
+
 ## crates.io is not one of Perch's Channels
 
 Perch is written in Rust and is not published to crates.io. `publish = false` in
