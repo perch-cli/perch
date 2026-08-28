@@ -360,8 +360,9 @@ naming a process that is still the one that wrote it. A Run makes one and writes
 that evidence itself. Writing into a Live Profile is refused — a Capture, a
 Renewal, a `.claude.json` key — because something else is holding those files;
 reading out of one is not, so a Switch onto the Account still lands and its
-Utilization is still readable. A Marker whose process is gone, or whose pid has
-been taken by something younger, makes nothing Live.
+Utilization is still readable. A Marker whose process is gone, whose pid has
+been taken by something younger, or that was written before the machine last
+started, makes nothing Live.
 _Avoid_: active, running, in-use
 
 **Marker**:

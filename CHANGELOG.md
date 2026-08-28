@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- a Marker written before the machine last started stops holding a Profile. On
+  macOS and Windows the operating system will not say when a process owned by
+  another user began, so a Marker left behind before a reboot — beside a low pid
+  the boot handed to a system daemon — could be neither corroborated nor
+  dismissed, and refused `relogin`, `remove`, `purge`, `holdings import` and a
+  Switch's Capture until somebody deleted the file by hand. A session does not
+  outlive a reboot, and the boot is one question no permission stands in front
+  of. A Trail start from before a reboot is read the same way
+
 ## [0.3.0](https://github.com/perch-cli/perch/compare/v0.2.0...v0.3.0) - 2026-08-28
 
 ### Added

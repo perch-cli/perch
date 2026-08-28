@@ -431,6 +431,28 @@ fn a_pid_the_machine_gave_to_something_newer_is_not_the_command_that_wrote_it() 
     assert!(probed(&host).contains("never finished"));
 }
 
+/// A reboot inside the window a Probe reports on, and a start from before it
+/// wearing a pid the boot handed to something whose start the operating system
+/// will not say. The reasoning a Marker uses, reached the other way.
+#[test]
+fn a_start_written_before_the_machine_rebooted_never_finished() {
+    let host = machine_with_two_accounts()
+        .with_live_process_of_unknown_start(532)
+        .with_booted_at(Utc.with_ymd_and_hms(2026, 8, 4, 11, 47, 34).unwrap());
+    host.set_file(
+        TRAIL,
+        &a_line(
+            "gone",
+            "2026-08-04T11:42:45Z",
+            "start",
+            r#","words":["switch"],"pid":532"#,
+        ),
+    );
+    let host = host.with_now(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap());
+
+    assert!(probed(&host).contains("never finished"));
+}
+
 /// The Watcher's rounds reach the Trail, which is what lets a Probe say what it
 /// decided on Linux without reading the journal.
 #[test]

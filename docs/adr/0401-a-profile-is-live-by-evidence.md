@@ -54,6 +54,47 @@ holding. The margin costs nothing in the direction the ordering is for: a pid
 the operating system has handed out again belongs to a process that began a
 whole session later rather than a few seconds.
 
+## Two dismissals are exact, and an unreadable start is not one of them
+
+A Marker is dismissed only where something says it cannot name a live client,
+and both things that say so are exact rather than probable.
+
+**The process began after the session.** A recycled pid necessarily belongs to a
+process that started after the Marker was written, which is the comparison
+above.
+
+**The Marker predates the boot.** No session survives a reboot, so a Marker
+recorded before the machine started names no client, whatever pid it wears and
+whatever that pid is doing now. This is the dismissal that still answers when
+the first one cannot: the start time is missing in precisely the case the
+comparison was written for. Low pids go to system daemons at startup, and those
+are the pids a Marker written before a reboot names — macOS refuses
+`proc_pidinfo(PROC_PIDTBSDINFO)` for a process owned by another user and Windows
+answers `ERROR_ACCESS_DENIED` to `OpenProcess`, so a camera system extension
+holding pid 532 made every write into that Profile a refusal, permanently, until
+somebody deleted the file by hand. That is the failure at the top of this
+document reached one door over. The boot needs no permission over anybody's
+process: `/proc/stat`'s `btime`, `sysctl KERN_BOOTTIME`, and now minus
+`GetTickCount64` are one machine-wide question with one answer.
+
+It takes the same five seconds of slack as the comparison above, for the same
+reason. `btime` is realtime minus uptime and `GetTickCount64` is subtracted from
+a wall clock, so a step in that clock moves the boot as well as a process's
+start. What the margin costs is a client started within five seconds of a boot
+whose Marker is dismissed, which is the exposure this margin already carries at
+the other comparison rather than a new one.
+
+**An unreadable start is not a dismissal.** A pid that is alive inside this
+boot, whose start the operating system will not say, establishes nothing and
+still resolves towards Live. Reading the denial itself as the mismatch is the
+stronger alternative and is not taken: a client that wrote a Marker as this user
+leaves a process this user may inspect, so a readable Marker beside an
+uninspectable process is a pair no single client produces — but that argument
+rests on a claim about which flavors of which syscall are permission-gated on
+two platforms, where the boot is one capability answering one question. It
+would narrow the remaining doubt to a pid recycled within one boot, and the two
+do not conflict.
+
 A Marker that cannot be read or understood is no evidence at all — a Profile is
 Live when something says so, not when nothing does. That a Marker names its
 process and when it started is a named assumption, and it fails the way the
@@ -124,6 +165,11 @@ see it. It was two entries and two answers before, and the four callers that had
 only the boolean could not see doubt at all: `perch holdings import` and `perch
 holdings purge` told somebody to quit a client that nothing had said was
 running, for a `sessions` directory that had merely not been readable.
+
+When the machine last started is asked of the Clock rather than of the
+processes. Every other question here is about one pid; this is one fact about the
+machine with one answer, and it earns a port method precisely because it is the
+only one of them that no permission stands in front of.
 
 The rule that a Marker which cannot be read or understood is no evidence at all
 therefore lives beside the ask rather than inside the module that reads Markers.

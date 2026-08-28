@@ -1525,6 +1525,32 @@ const WHOLE_HOST_CASES: &[WholeHostCase] = &[
         },
     },
     WholeHostCase {
+        named: "the machine booted no later than the process asking began",
+        asserts: |host, adapter| {
+            // The ordering a pre-boot Marker is dismissed on: a process cannot
+            // predate the machine it runs on, so a Marker older than the boot
+            // was written by a session that did not survive it.
+            let Some(booted) = host.booted_at() else {
+                return;
+            };
+            assert!(
+                booted <= host.now(),
+                "{adapter}: the machine started at {booted}, and the clock reads \
+                 {}",
+                host.now()
+            );
+            let began = host
+                .process_started_at(host.process_id())
+                .unwrap_or_else(|| panic!("{adapter}: this process has a start time"));
+            assert!(
+                booted <= began,
+                "{adapter}: the machine started at {booted} and the process \
+                 asking began at {began}, so a Marker between the two would be \
+                 dismissed as the litter of a session that never ran"
+            );
+        },
+    },
+    WholeHostCase {
         named: "where this process is, and where it came from, are rooted",
         asserts: |host, adapter| {
             // Through `probe::rooted` rather than `Path::is_absolute`, which reads

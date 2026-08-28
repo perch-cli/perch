@@ -515,6 +515,13 @@ pub trait Clock {
     /// The current instant. Utilization is displayed as an observation with an
     /// age (ADR a-figure-carries-its-age).
     fn now(&self) -> DateTime<Utc>;
+
+    /// When this machine last started, or `None` where there is no saying. A
+    /// session does not outlive a reboot, so a Marker recorded before this one
+    /// began names no client whatever its pid is now doing — the one dismissal
+    /// that needs no permission over the process, and so the one that still
+    /// answers where the process belongs to another user.
+    fn booted_at(&self) -> Option<DateTime<Utc>>;
 }
 
 /// Where this Perch is running: whose machine, which platform, and what it was
