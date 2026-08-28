@@ -24,9 +24,15 @@ it proves only that the two agree. Both installers check the checksum always
 and the provenance whenever `gh` is installed and logged in, and refuse to
 install when that check fails.
 
-Perch is unsigned on macOS and Windows before 1.0: no Apple notarization, no
-Authenticode. The provenance above is what stands in for it, and notarization
-is on the list for 1.0.
+Perch is unsigned on macOS and Windows: no Apple notarization, no Authenticode.
+The build provenance above stands in for it, and it is the stronger claim about
+where a file came from. A signature says only that somebody passed a certificate
+authority's identity check.
+
+What it does not do is satisfy Gatekeeper or SmartScreen. An archive downloaded
+from the releases page in a browser will warn before it runs. One fetched by
+either installer, by Homebrew or by npm will not, because none of those marks
+the file as downloaded. Signing is not currently planned.
 
 ## Reporting a vulnerability
 

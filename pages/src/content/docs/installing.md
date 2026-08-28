@@ -143,9 +143,9 @@ That is checked before the request rather than after it, so nothing goes out.
 
 ## On macOS, if you download an archive in a browser
 
-Gatekeeper marks it as quarantined, and the binary inside is unsigned: Perch
-skips Apple notarization before 1.0. macOS will refuse to run it until you clear
-the mark:
+Gatekeeper marks it as quarantined, and the binary inside is unsigned. Perch
+does not use Apple notarization. macOS will refuse to run it until you clear the
+mark:
 
 ```sh
 xattr -d com.apple.quarantine perch
