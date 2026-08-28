@@ -104,10 +104,11 @@ numbers.
 
 ## Pull requests
 
-If this is your first change to this repository, CI will not start on its own.
-GitHub holds a fork's workflow run until a maintainer approves it, and re-arms
-that hold on every push until your first pull request merges. The checks are
-waiting rather than failing (ADR a-gate-lives-outside-the-tree).
+If this is your first change to this repository, no check will start on its
+own. GitHub holds a fork's workflow runs until a maintainer approves them, and
+re-arms that hold on every push until your first pull request merges. Until then
+both required checks report nothing at all, which looks like a broken repository
+and is not one (ADR a-gate-lives-outside-the-tree).
 
 The repository squash-merges, and the pull request title becomes the commit
 subject that release-plz reads to pick the next version. So the title is a
