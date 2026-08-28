@@ -1,13 +1,14 @@
 # The report `perch triage` produces, whose fields `.github/triage/PLAYBOOK.md`
 # names one by one. A field renamed here is one the playbook tells an agent to
-# fill and GitHub silently drops, so `tests/triaging.rs` asserts the two agree.
+# fill and GitHub silently drops, so `tests/publication.rs` asserts they agree.
 #
 # Separate from `bug_report.yml` because the reporter is different: an agent has
 # already searched, already redacted and already investigated, so the checkboxes
-# go and a Diagnosis arrives (ADR a-triage-hands-over-evidence).
+# go and a Diagnosis arrives (ADR a-triage-hands-over-evidence). It carries no
+# `title:` for the same reason — an agent writes a specific one, where a prefix
+# is scaffolding for somebody facing an empty box.
 name: Agent-filed report
-description: Filed by a coding agent through `perch triage`. Writing one by hand? Use the bug report instead.
-title: "[Bug]: "
+description: Filed by a coding agent through `perch triage`. Writing one by hand? Use the Bug report form instead.
 labels:
   - bug
   - needs-triage

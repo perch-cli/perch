@@ -1,6 +1,6 @@
 # A triage hands over evidence
 
-`perch probe` gathers more about a broken machine than any bug report has ever
+`perch probe` gathers more about a broken machine than any report has ever
 carried, and `bug_report.yml` asks for it in a field somebody has to paste into.
 The Trail records what was run and how it went (ADR a-trail-is-evidence). Both
 are already better than what arrives in an issue, and both depend on a person
@@ -36,7 +36,7 @@ paths, because an agent that cannot `ls` the directory it is reading about
 cannot investigate. `probe.txt` is the same gathering redacted, and the playbook
 says it goes into the issue whole and unedited. The agent's judgment is removed
 from the step where judgment fails silently. `--raw` writes the raw form to both,
-for whoever is debugging the Triage itself.
+for whoever is working on the Triage itself.
 
 One gathering feeds both. Two passes a second apart could disagree about the
 machine, and an issue whose two halves describe different states is worse than
@@ -150,8 +150,8 @@ themselves.
   Triage does with no code change. Old builds pick the edit up over the network;
   new builds compile it in.
 - `.github/ISSUE_TEMPLATE/agent-filed.yml` and the playbook name the same fields,
-  and `tests/triaging.rs` asserts they still do. A field renamed on one side is
-  otherwise a form GitHub silently drops.
+  and `tests/publication.rs` asserts they still do, both ways. A field renamed
+  on one side is otherwise a form GitHub silently drops.
 - The `filed-by-agent` label says provenance, deliberately not `via-triage`:
   `needs-triage` already exists in this tracker and means a maintainer has not
   looked yet, which is a different thing that would read like a variant.

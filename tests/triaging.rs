@@ -1,9 +1,7 @@
 //! Behavior: what `perch triage` writes down, what it launches, and what it
-//! declines to launch.
-//!
-//! Plus the one correspondence a Triage rests on and nothing else asserts: the
-//! playbook tells an agent to fill fields, and the template decides whether
-//! those fields exist.
+//! declines to launch. The playbook and the template have to agree about the
+//! fields, which is a correspondence rather than a behavior and is asserted in
+//! `publication.rs` (ADR a-suite-is-named-and-gated).
 
 mod common;
 
@@ -84,18 +82,18 @@ fn a_triage_writes_the_playbook_and_both_readings_of_the_probe() {
 
     triaged(&host);
 
-    let prompt = written(&host, "prompt.md");
+    let prompt = written(&host, PROMPT);
     assert!(
-        prompt.contains("You are a support engineer for Perch"),
+        prompt.contains("Perch triage playbook"),
         "the playbook travels with the prompt: {prompt}"
     );
     assert!(
-        prompt.contains("probe.raw.txt") && prompt.contains("probe.txt"),
+        prompt.contains(RAW) && prompt.contains(REDACTED),
         "and points at both readings: {prompt}"
     );
 
-    let raw = written(&host, "probe.raw.txt");
-    let redacted = written(&host, "probe.txt");
+    let raw = written(&host, RAW);
+    let redacted = written(&host, REDACTED);
     assert!(
         raw.contains(EMAIL),
         "the agent investigates from names: {raw}"
@@ -114,7 +112,7 @@ fn a_triage_writes_the_playbook_and_both_readings_of_the_probe() {
     );
 }
 
-/// The flag is for whoever is debugging the Triage itself, so it reaches the
+/// The flag is for whoever is working on the Triage itself, so it reaches the
 /// copy meant for an issue and leaves the agent's copy alone.
 #[test]
 fn raw_writes_the_names_into_the_copy_that_would_be_pasted() {
@@ -128,8 +126,8 @@ fn raw_writes_the_names_into_the_copy_that_would_be_pasted() {
         },
     );
 
-    assert_eq!(written(&host, "probe.txt"), written(&host, "probe.raw.txt"));
-    assert!(written(&host, "probe.txt").contains(EMAIL));
+    assert_eq!(written(&host, REDACTED), written(&host, RAW));
+    assert!(written(&host, REDACTED).contains(EMAIL));
 }
 
 #[test]
@@ -146,11 +144,11 @@ fn a_triage_hands_claude_code_the_file_rather_than_the_playbook() {
         "one word, for a `.cmd` shim on Windows: {args:?}"
     );
     assert!(
-        args[0].contains(&run_dir(&host).join("prompt.md").display().to_string()),
+        args[0].contains(&run_dir(&host).join(PROMPT).display().to_string()),
         "and it names the prompt: {args:?}"
     );
     assert!(
-        !args[0].contains("You are a support engineer"),
+        !args[0].contains("Perch triage playbook\n"),
         "rather than carrying it: {args:?}"
     );
     assert_eq!(code, EXIT_OK, "what Claude Code exited with");
@@ -223,7 +221,7 @@ fn a_quarantined_active_account_is_said_rather_than_handed_to_a_login_prompt() {
     assert!(launched(&host).is_none(), "nothing is launched: {said}");
     assert_eq!(code, EXIT_OK, "which is an answer rather than a refusal");
     assert!(said.contains("Quarantined"), "{said}");
-    for name in ["prompt.md", "probe.raw.txt", "probe.txt"] {
+    for name in [PROMPT, RAW, REDACTED] {
         assert!(
             said.contains(&run_dir(&host).join(name).display().to_string()),
             "{name} is named so it can be pasted by hand: {said}"
@@ -283,7 +281,7 @@ fn a_credential_that_will_not_read_is_said_rather_than_launched_into() {
         "and it says which belief stopped holding: {said}"
     );
     assert!(
-        host.file(run_dir(&host).join("prompt.md")).is_some(),
+        host.file(run_dir(&host).join(PROMPT)).is_some(),
         "the evidence is written either way"
     );
 }
@@ -298,7 +296,7 @@ fn no_claude_code_writes_the_files_and_says_where_they_are() {
 
     assert!(launched(&host).is_none(), "{said}");
     assert_eq!(code, EXIT_OK);
-    assert!(said.contains("prompt.md"), "{said}");
+    assert!(said.contains(PROMPT), "{said}");
     assert!(
         said.contains("Paste prompt.md into any coding agent"),
         "the files are the fallback: {said}"
@@ -376,49 +374,35 @@ fn only_the_newest_three_runs_are_kept() {
     }
 }
 
-/// The playbook tells an agent to fill fields it does not own. A field renamed
-/// in the template is one GitHub silently drops, and nothing else would notice.
+/// A Triage adopts nothing and saves nothing. On a machine Perch holds nothing
+/// on, any other command would leave a registry behind, and the evidence is the
+/// whole of what this one writes — no registry, and no line in the Trail.
 #[test]
-fn every_field_the_playbook_names_is_one_the_template_offers() {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let playbook =
-        std::fs::read_to_string(repo.join(".github/triage/PLAYBOOK.md")).expect("the playbook");
-    let template = std::fs::read_to_string(repo.join(".github/ISSUE_TEMPLATE/agent-filed.yml"))
-        .expect("the template");
+fn a_triage_adopts_nothing_and_writes_only_its_own_evidence() {
+    let host = at_a_fixed_moment(logged_in_machine());
 
-    let offered: Vec<String> = template
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("id: ").map(str::to_string))
+    triaged(&host);
+
+    assert!(
+        host.file(REGISTRY_PATH).is_none(),
+        "a machine Perch held nothing on still holds nothing"
+    );
+    let wrote: Vec<PathBuf> = host
+        .effects()
+        .into_iter()
+        .filter_map(|effect| match effect {
+            Effect::WroteFile(at)
+            | Effect::WrotePrivateFile(at)
+            | Effect::AppendedPrivateLine(at) => Some(at),
+            _ => None,
+        })
+        // A private write lands beside its target and is renamed over it, so
+        // each one records the scratch name as well as the one asked for.
+        .filter(|at| !at.to_string_lossy().contains(".perch-tmp."))
         .collect();
-    assert!(!offered.is_empty(), "the template names fields by id");
-
-    // The list the playbook walks the agent through, one `- ` bullet each.
-    let named: Vec<String> = playbook
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("- `")?.split_once('`'))
-        .map(|(field, _)| field.to_string())
-        .filter(|field| !field.contains(' ') && !field.contains('/'))
+    let evidence: Vec<PathBuf> = [RAW, REDACTED, PROMPT]
+        .iter()
+        .map(|name| run_dir(&host).join(name))
         .collect();
-    assert!(named.len() > 5, "the playbook names the fields: {named:?}");
-
-    for field in named {
-        assert!(
-            offered.contains(&field),
-            "the playbook tells an agent to fill `{field}`, which the template does not offer: {offered:?}"
-        );
-    }
-}
-
-/// The label the playbook applies has to be one the template already puts on
-/// every report, or a maintainer filtering on it misses half of them.
-#[test]
-fn the_label_the_playbook_applies_is_one_the_template_carries() {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let playbook =
-        std::fs::read_to_string(repo.join(".github/triage/PLAYBOOK.md")).expect("the playbook");
-    let template = std::fs::read_to_string(repo.join(".github/ISSUE_TEMPLATE/agent-filed.yml"))
-        .expect("the template");
-
-    assert!(playbook.contains("Label it `filed-by-agent`"));
-    assert!(template.contains("  - filed-by-agent"));
+    assert_eq!(wrote, evidence, "and nothing else is written");
 }

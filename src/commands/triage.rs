@@ -12,19 +12,16 @@
 use std::io::Write;
 use std::path::Path;
 
-use crate::commands::probe::Gathered;
+use crate::commands::probe::{Gathered, finding};
 use crate::error::{EXIT_OK, PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, Active};
-use crate::{commands, holdings, probe, say};
+use crate::{commands, holdings, probe, report, say};
 
 /// The playbook the agent follows, and the repository's own copy of it. One
 /// string rather than two that a test compares, because a second copy is a
 /// second thing to keep right.
 const PLAYBOOK: &str = include_str!("../../.github/triage/PLAYBOOK.md");
-
-/// Where a report ends up, for the two paths that print it.
-const ISSUES: &str = "https://github.com/perch-cli/perch/issues";
 
 /// How many Triages are kept. Enough to hold the run before a fix beside the one
 /// after it. What a Triage leaves is evidence, so losing an older one costs
@@ -36,10 +33,10 @@ const KEPT: usize = 3;
 /// Quoted from the Probe rather than asked again, so what withholds the launch
 /// is the same sentence the evidence carries.
 const WITHHOLDS_THE_LAUNCH: [&str; 4] = [
-    "claude-code-unreadable",
-    "assumption-broke",
-    "keychain-unavailable",
-    "store-unreadable",
+    finding::CLAUDE_CODE_UNREADABLE,
+    finding::ASSUMPTION_BROKE,
+    finding::KEYCHAIN_UNAVAILABLE,
+    finding::STORE_UNREADABLE,
 ];
 
 #[derive(Debug, clap::Args)]
@@ -74,8 +71,8 @@ pub fn run(host: &dyn Host, args: TriageArgs, out: &mut dyn Write) -> Result<i32
     host.create_private_dir_all(&at)
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", at.display())))?;
 
-    wrote(host, &at.join(RAW), &gathered.raw)?;
-    wrote(
+    write_down(host, &at.join(RAW), &gathered.raw)?;
+    write_down(
         host,
         &at.join(REDACTED),
         match args.raw {
@@ -83,7 +80,7 @@ pub fn run(host: &dyn Host, args: TriageArgs, out: &mut dyn Write) -> Result<i32
             false => &gathered.redacted,
         },
     )?;
-    wrote(host, &at.join(PROMPT), &seed(&at))?;
+    write_down(host, &at.join(PROMPT), &seed(&at))?;
     prune(host);
 
     let Some(withheld) = withholding(host, &gathered) else {
@@ -101,7 +98,7 @@ pub fn run(host: &dyn Host, args: TriageArgs, out: &mut dyn Write) -> Result<i32
 /// One file of the evidence, or a refusal naming it. The only thing a Triage
 /// can fail at: everything before it is reading, and everything after is
 /// somebody else's session.
-fn wrote(host: &dyn Host, at: &Path, contents: &str) -> Result<()> {
+fn write_down(host: &dyn Host, at: &Path, contents: &str) -> Result<()> {
     host.write_private_file(at, contents)
         .map_err(|err| PerchError::Other(format!("could not write {}: {err}", at.display())))
 }
@@ -139,12 +136,12 @@ fn withholding(host: &dyn Host, gathered: &Gathered) -> Option<String> {
         )
     };
 
-    if let Some((_, said)) = gathered
+    if let Some(found) = gathered
         .found
         .iter()
-        .find(|(code, _)| WITHHOLDS_THE_LAUNCH.contains(code))
+        .find(|found| WITHHOLDS_THE_LAUNCH.contains(&found.code))
     {
-        return Some(unusable(said));
+        return Some(unusable(&found.said));
     }
 
     // Read and let go. A Triage brings no registry forward and saves none: the
@@ -160,8 +157,9 @@ fn withholding(host: &dyn Host, gathered: &Gathered) -> Option<String> {
     )))
 }
 
-/// Where the three files are, said the same way whether or not an agent was
-/// launched: with none, this is the whole of what a Triage produced.
+/// Where the three files are, for the path that launches nothing. The launch
+/// path names the directory in a note instead: somebody who is about to be
+/// handed a session wants one line, and somebody who is not wants the paths.
 fn written(at: &Path) -> Vec<String> {
     vec![
         "What Perch can see of this machine is written down:".to_string(),
@@ -171,7 +169,8 @@ fn written(at: &Path) -> Vec<String> {
         String::new(),
         format!(
             "Paste {PROMPT} into any coding agent to run the triage by hand, or \
-             open an issue at {ISSUES}."
+             open an issue at {}.",
+            report::ISSUES
         ),
     ]
 }

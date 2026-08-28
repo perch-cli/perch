@@ -62,8 +62,8 @@ what the Probe prints is the `journalctl` line to run.
 
 ## Letting an agent do it
 
-Typing out a bug report is the last thing anybody wants to do at the moment they
-need to. `perch triage` hands the job to the Claude Code you already have.
+Writing all of that out by hand is the last thing anybody wants to do at the
+moment they need to. `perch triage` hands the job to the Claude Code you already have.
 
 ```
 $ perch triage
@@ -82,7 +82,7 @@ real email addresses and paths, which is what the agent works from, and one with
 placeholders, which is the copy that goes into the issue. That redaction is
 Perch's own rather than something the agent is asked to remember, so an address
 does not reach a public issue because a model was careless. `--raw` writes the
-real names to both, and is for debugging the command itself.
+real names to both, and is for whoever is working on the command itself.
 
 Some things are off limits and the agent is told so: it never reads a Credential,
 never edits the registry by hand, never patches Perch's source, and never runs

@@ -29,6 +29,7 @@ sidebar:
 | `perch upgrade [--release <tag>] [--check] [--json] [--channel <name>] [--yes]` | replace this Perch with a newer Release, through the Channel that installed it |
 | `perch version` | which Perch is installed, and a line more when a newer Release exists |
 | `perch probe [--json] [--raw]` | everything Perch can see of this machine, for pasting into a bug report |
+| `perch triage [--model <name>] [--raw]` | hand that to Claude Code, and let it investigate this machine and help you file the issue |
 
 ## Reporting something broken
 

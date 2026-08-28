@@ -531,5 +531,11 @@ owns is the evidence handed over and the redaction applied to it. Redaction is
 Perch's rather than the agent's, so what reaches a public issue is placeholders
 whether or not the agent was careful (ADR a-triage-hands-over-evidence). Never a
 fix to Perch's own source, and never a change to the Holdings nobody approved.
-Evidence rather than one of the Holdings, like the Trail it hands over.
-_Avoid_: diagnose, doctor, support, debug, bug report
+Evidence rather than one of the Holdings, like the Trail it hands over. Shares a
+word with the `needs-triage` label deliberately and knowingly: that one is a
+maintainer sorting an issue that has arrived, this is somebody's machine
+producing one, and they sit at opposite ends of the same pipe. The label
+vocabulary lives in `docs/agents/` and is tooling rather than Perch's own
+language, so the collision is settled rather than open. A **Diagnosis** is one
+field of what a Triage files, and never the Triage.
+_Avoid_: doctor, support, debug, bug report

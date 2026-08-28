@@ -254,8 +254,9 @@ enum Command {
 
 /// Nought for having worked, and otherwise whatever the failure earned.
 ///
-/// A Run is the one command this is wrong for: it launches a program, and what
-/// that program said is what Perch says.
+/// Three do not come through here, because each hands the terminal to something
+/// else — a Run's client, a Triage's Claude Code, an Upgrade's Channel — and a
+/// code of Perch's own would lose which of their failures it was.
 fn ok(outcome: perch::Result<()>) -> perch::Result<i32> {
     outcome.map(|()| EXIT_OK)
 }
@@ -368,16 +369,10 @@ fn main() {
         Command::Probe(args) => probe::run(&host, args, &mut out),
         Command::Relogin(args) => ok(relogin::run(&host, args, &mut out)),
         Command::Remove(args) => ok(remove::run(&host, args, &mut out)),
-        // The one command whose exit code is not Perch's own: what the client
-        // said is what a script reads.
         Command::Run(args) => run::run(&host, args, &mut out),
         Command::Status(args) => ok(status::run(&host, args, &mut out)),
         Command::Switch(args) => ok(switch::run(&host, args, &mut out)),
-        // Claude Code takes the terminal, so what it said is what a script
-        // reads — a Run's rule, for a Run's reason.
         Command::Triage(args) => triage::run(&host, args, &mut out),
-        // What `brew` or `npm` exited with, because a code of Perch's own
-        // would lose which of their failures it was.
         Command::Upgrade(args) => upgrade::run(&host, args, &mut out),
         Command::Version => ok(version::run(&host, &mut out)),
         // A `check` reports what it decided, so a scheduler tells a Switch
