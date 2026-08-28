@@ -156,6 +156,38 @@ struct Seen {
     findings: Vec<Finding>,
 }
 
+/// One gathering, read both ways, and what it found.
+///
+/// All three at once because two gatherings a second apart could disagree about
+/// the machine: an agent investigates from the raw reading and pastes the
+/// redacted one (ADR a-triage-hands-over-evidence).
+pub struct Gathered {
+    pub raw: String,
+    pub redacted: String,
+    /// Every finding's code and its sentence, so a caller can act on one
+    /// without parsing the rendering back apart.
+    pub found: Vec<(&'static str, String)>,
+}
+
+/// The Probe a Triage hands over, gathered once. Here rather than in the
+/// command that wants it, because everything it reads is this module's.
+pub fn gathered(host: &dyn Host) -> Gathered {
+    let seen = gather(host);
+    let hidden = Redaction::of(
+        seen.registry.as_ref().unwrap_or(&Registry::default()),
+        host.home_dir().ok().as_deref(),
+    );
+    Gathered {
+        raw: lines(&seen, &Redaction::none()).join("\n"),
+        redacted: lines(&seen, &hidden).join("\n"),
+        found: seen
+            .findings
+            .iter()
+            .map(|finding| (finding.code, finding.said.clone()))
+            .collect(),
+    }
+}
+
 /// Gathers once, redacts once, and renders the answer one of two ways.
 ///
 /// Output that could not be written travels as it does from any other command:

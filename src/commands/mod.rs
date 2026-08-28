@@ -19,6 +19,7 @@ pub mod run;
 pub mod service;
 pub mod status;
 pub mod switch;
+pub mod triage;
 pub mod upgrade;
 pub mod version;
 pub mod watch;

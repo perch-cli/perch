@@ -508,7 +508,8 @@ finding traces to a refusal Perch would actually make, and carries the exit code
 it would refuse with — so a Probe never asserts a rule that exists nowhere else.
 Takes no Target, reaches no network, and touches nothing: it brings no registry
 forward and adds no line to the Trail: what repairs the machine it is describing
-destroys what it was asked to describe.
+destroys what it was asked to describe. A Triage captures one twice — as it
+stands, and redacted — because the two readings go to different readers.
 _Avoid_: doctor, diagnostic, health check, debug
 
 **Trail**:
@@ -520,3 +521,15 @@ no version, is never migrated, and travels in no Export
 beside it already holds the same names in plaintext, and rendered redacted, since
 what a Probe is for is being pasted somewhere else.
 _Avoid_: log, history, audit log, journal
+
+**Triage**:
+A session in which somebody's own coding agent investigates this machine and, if
+what it finds is Perch's, helps them file an issue about it. Perch gathers a
+Probe, writes the playbook the agent follows, and hands the terminal to Claude
+Code — and does no more than that: it neither investigates nor files, so what it
+owns is the evidence handed over and the redaction applied to it. Redaction is
+Perch's rather than the agent's, so what reaches a public issue is placeholders
+whether or not the agent was careful (ADR a-triage-hands-over-evidence). Never a
+fix to Perch's own source, and never a change to the Holdings nobody approved.
+Evidence rather than one of the Holdings, like the Trail it hands over.
+_Avoid_: diagnose, doctor, support, debug, bug report
