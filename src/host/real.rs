@@ -319,6 +319,10 @@ impl Clock for RealHost {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
+
+    fn booted_at(&self) -> Option<DateTime<Utc>> {
+        booted_at(self.now())
+    }
 }
 
 impl Environment for RealHost {
@@ -1608,13 +1612,7 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     let after_command = stat.rsplit_once(')')?.1;
     let ticks_after_boot: i64 = after_command.split_whitespace().nth(19)?.parse().ok()?;
 
-    let boot: i64 = std::fs::read_to_string("/proc/stat")
-        .ok()?
-        .lines()
-        .find_map(|line| line.strip_prefix("btime "))?
-        .trim()
-        .parse()
-        .ok()?;
+    let boot = boot_seconds()?;
 
     // SAFETY: `sysconf` reads a value the C library holds and takes no pointer.
     // A name it does not know answers -1, which the check below treats as no
@@ -1624,6 +1622,83 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
         return None;
     }
     DateTime::from_timestamp_millis(boot * 1_000 + ticks_after_boot * 1_000 / ticks_per_second)
+}
+
+/// When the machine started, as `/proc/stat` gives it. Whole seconds, and the
+/// kernel derives them as realtime minus uptime, so this figure moves by exactly
+/// as much as anything that steps the wall clock.
+#[cfg(target_os = "linux")]
+fn boot_seconds() -> Option<i64> {
+    std::fs::read_to_string("/proc/stat")
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()
+}
+
+#[cfg(target_os = "linux")]
+fn booted_at(_now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    DateTime::from_timestamp(boot_seconds()?, 0)
+}
+
+/// When the machine started, as `sysctl KERN_BOOTTIME` gives it: a `timeval` the
+/// kernel stamps at boot. `sysctl` rather than the `proc_pidinfo` beneath
+/// [`process_started_at`], because this is a question about the machine and no
+/// permission over anybody's process stands in front of it.
+#[cfg(target_os = "macos")]
+fn booted_at(_now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let mut name = [libc::CTL_KERN, libc::KERN_BOOTTIME];
+    // SAFETY: `timeval` is plain old data, so an all-zero value is a valid one
+    // for the kernel to fill in.
+    let mut boot: libc::timeval = unsafe { std::mem::zeroed() };
+    let mut size = std::mem::size_of::<libc::timeval>();
+
+    // SAFETY: the buffer is the `boot` above and `size` is that same type's
+    // size, so the kernel cannot write past it; `name` is two elements and
+    // `name.len()` says so. Nothing is written back, so `newp` is null.
+    let asked = unsafe {
+        libc::sysctl(
+            name.as_mut_ptr(),
+            name.len() as libc::c_uint,
+            (&raw mut boot).cast(),
+            &raw mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if asked != 0 || size != std::mem::size_of::<libc::timeval>() {
+        return None;
+    }
+
+    // `tv_sec` is already the `i64` this takes, unlike the `u64` beside it in
+    // [`process_started_at`]. `checked_mul` for that function's reason: a
+    // `tv_usec` above 4,294,967 wraps a nanosecond count in a release build.
+    let nanoseconds = u32::try_from(boot.tv_usec).ok()?.checked_mul(1_000)?;
+    DateTime::from_timestamp(boot.tv_sec, nanoseconds)
+}
+
+/// When the machine started, as Windows counts it: `GetTickCount64` is the
+/// milliseconds since boot, and the clock read here supplies the other end. The
+/// count is the biased one, so a machine that slept is still as old as it looks
+/// — `QueryUnbiasedInterruptTime` is the one that would forget the sleep.
+#[cfg(windows)]
+fn booted_at(now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    use windows_sys::Win32::System::SystemInformation::GetTickCount64;
+
+    // SAFETY: takes no pointer and touches no memory Perch owns.
+    let since_boot = unsafe { GetTickCount64() };
+    now.checked_sub_signed(chrono::TimeDelta::try_milliseconds(
+        i64::try_from(since_boot).ok()?,
+    )?)
+}
+
+/// A platform with no way to ask says so, rather than guessing: a Marker is
+/// dismissed by a boot that was read, never by one that was assumed.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn booted_at(_now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    None
 }
 
 /// When a process began, as libproc reports it: the `proc_bsdinfo` for one pid,

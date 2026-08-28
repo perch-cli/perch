@@ -929,6 +929,22 @@ fn a_live_process_whose_start_cannot_be_read_is_a_refusal_naming_the_assumption(
 }
 
 #[test]
+fn a_marker_older_than_the_boot_stops_holding_the_profile_of_a_recycled_pid() {
+    // The reported machine: a client wrote its marker, the machine rebooted,
+    // and a system daemon took the pid at startup. macOS and Windows both
+    // refuse the start of another user's process, so nothing corroborates it.
+    let host = machine_with_two_accounts()
+        .with_file(
+            format!("{FIRST_PROFILE}/sessions/532.json"),
+            &a_client_marker(532, Utc.with_ymd_and_hms(2026, 8, 3, 10, 42, 45).unwrap()),
+        )
+        .with_live_process_of_unknown_start(532)
+        .with_booted_at(Utc.with_ymd_and_hms(2026, 8, 3, 11, 47, 34).unwrap());
+
+    assert_the_switch_captured_and_landed(&host, "that session did not survive the reboot");
+}
+
+#[test]
 fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     let host = machine_with_two_accounts().with_a_path_refusing(
         IDENTITY_PATH,

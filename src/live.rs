@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
+
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
 use crate::probe::{self, Installed};
@@ -275,6 +277,8 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
         Err(why) => return Err(Unsure::Unlistable { dir, why }),
     };
 
+    // Once rather than per Marker: a machine does not reboot between two files.
+    let booted = host.booted_at();
     let mut running = Vec::new();
     for marker in markers {
         let pid: u32 = match marker
@@ -301,6 +305,12 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
             probe::Marker::Unreadable => continue,
         };
 
+        // A session does not outlive a reboot, so this Marker names no client
+        // whatever its pid is now doing.
+        if written_before_the_boot(booted, session_began) {
+            continue;
+        }
+
         match host.process_started_at(pid) {
             Some(process_began) => {
                 // Saturating, for the reason `usable` is: `startedAt` comes out
@@ -321,11 +331,22 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
     Ok(running)
 }
 
-/// How far a process may appear to have begun *after* the session it is named by
-/// and still be taken as the one that wrote the Marker. Linux recomputes a
-/// process's start from a `btime` the kernel derives as realtime minus uptime,
-/// so an NTP correction makes a live process look younger than the session it
-/// just recorded.
+/// Whether something recorded at `began` was written before this machine
+/// started, and so by a process that did not survive the boot whatever pid it
+/// named. The dismissal that needs no permission over the process, so it still
+/// answers where the operating system will not say when that process began.
+/// `booted_at` is passed in, so a caller reading a set asks the machine once.
+pub fn written_before_the_boot(booted_at: Option<DateTime<Utc>>, began: i64) -> bool {
+    booted_at.is_some_and(|boot| {
+        began.saturating_add(CLOCK_STEP_MARGIN_MILLIS) < boot.timestamp_millis()
+    })
+}
+
+/// How far a Marker may appear to predate the process it names, or the boot it
+/// was written after, and still be taken as evidence. Both figures come off a
+/// `btime` the kernel derives as realtime minus uptime on Linux, so an NTP
+/// correction makes a live process look younger than the session it just
+/// recorded and a boot look later than a Marker that preceded it.
 const CLOCK_STEP_MARGIN_MILLIS: i64 = 5_000;
 
 /// Refuses to write into a Profile a client is holding, over the one or two this
@@ -355,9 +376,8 @@ pub fn refuse_while_anything_is_running(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{DateTime, Utc};
 
-    use crate::host::FakeHost;
+    use crate::host::{FakeHost, Platform};
     use crate::probe::Identity;
 
     /// Midday on an ordinary day, as the epoch milliseconds a Marker records.
@@ -365,6 +385,10 @@ mod tests {
 
     fn live(host: &dyn Host, dir: &Path) -> bool {
         ask(host, &[Place::at(dir)]).counts_as_live()
+    }
+
+    fn moment(millis: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp_millis(millis).expect("a time")
     }
 
     /// Asserted through the ask rather than by reaching for the marker path,
@@ -434,6 +458,87 @@ mod tests {
              Renewal against the Profile for ever, and no client could be quit \
              to clear it"
         );
+    }
+
+    /// A Marker written before the machine started, wearing a pid a system
+    /// daemon took at boot and will not say the start of. Every platform the
+    /// fake can claim, because a dismissal that holds on one and not the others
+    /// puts the reader back in the refusal on the other two.
+    #[test]
+    fn a_marker_older_than_the_boot_is_no_evidence_whatever_its_pid_is_doing() {
+        for platform in [Platform::MacOs, Platform::Windows, Platform::Other] {
+            let host = FakeHost::new()
+                .with_platform(platform)
+                .with_file(
+                    "/tmp/profile/sessions/532.json",
+                    &format!(r#"{{"startedAt":{NOON}}}"#),
+                )
+                .with_live_process_of_unknown_start(532)
+                .with_booted_at(moment(NOON + 65 * 60 * 1_000));
+
+            assert_eq!(
+                clients_in(&host, Path::new("/tmp/profile")).ok(),
+                Some(vec![]),
+                "{platform:?}: no session survives a reboot, so the pid this \
+                 marker names is one the boot handed out again"
+            );
+        }
+    }
+
+    /// The other half of the same rule, and the one the dismissal must not
+    /// swallow: inside one boot an unreadable start establishes nothing.
+    #[test]
+    fn a_marker_written_after_the_boot_is_the_doubt_it_always_was() {
+        let host = FakeHost::new()
+            .with_file(
+                "/tmp/profile/sessions/532.json",
+                &format!(r#"{{"startedAt":{NOON}}}"#),
+            )
+            .with_live_process_of_unknown_start(532)
+            .with_booted_at(moment(NOON - 60 * 60 * 1_000));
+
+        assert!(
+            matches!(
+                clients_in(&host, Path::new("/tmp/profile")),
+                Err(Unsure::WhenItBegan(_))
+            ),
+            "a live pid with no readable start, inside this boot, still resolves \
+             towards Live"
+        );
+    }
+
+    /// The margin the process comparison already allows, allowed here for the
+    /// same reason: Linux derives the boot from a wall clock that steps.
+    #[test]
+    fn a_marker_a_moment_older_than_the_boot_is_not_dismissed_over_a_clock_step() {
+        let host = FakeHost::new()
+            .with_file(
+                "/tmp/profile/sessions/532.json",
+                &format!(r#"{{"startedAt":{NOON}}}"#),
+            )
+            .with_live_process_of_unknown_start(532)
+            .with_booted_at(moment(NOON + CLOCK_STEP_MARGIN_MILLIS - 1));
+
+        assert!(
+            clients_in(&host, Path::new("/tmp/profile")).is_err(),
+            "two seconds of NTP correction must not dismiss the marker of a \
+             client that is running"
+        );
+    }
+
+    /// A machine with no boot to read dismisses nothing, which is the platform
+    /// Perch has no way to ask and the refusal that was there before.
+    #[test]
+    fn a_machine_that_will_not_say_when_it_booted_dismisses_no_marker() {
+        let host = FakeHost::new()
+            .that_will_not_say_when_it_booted()
+            .with_file(
+                "/tmp/profile/sessions/532.json",
+                &format!(r#"{{"startedAt":{NOON}}}"#),
+            )
+            .with_live_process_of_unknown_start(532);
+
+        assert!(clients_in(&host, Path::new("/tmp/profile")).is_err());
     }
 
     /// Not a Live Profile and not a refusal: nothing about that Profile was ever

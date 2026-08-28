@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::holdings;
 use crate::host::Host;
+use crate::live;
 
 /// The live file, and where the cap moves it aside to. Two files taking turns
 /// rather than a trim: rotating is one `rename`, and trimming is a rewrite
@@ -199,17 +200,18 @@ pub struct Reading {
     pub unfinished: Vec<Line>,
 }
 
-/// Whether the process that wrote a line is the one still holding it.
-///
-/// The start time tells a live command from a pid the machine handed on, the
-/// reasoning a session marker uses (ADR a-profile-is-live-by-evidence). Doubt
-/// answers yes, so nothing is called dead on a guess.
-fn still_running(host: &dyn Host, line: &Line) -> bool {
-    line.pid == 0
-        || (host.process_alive(line.pid)
-            && host
-                .process_started_at(line.pid)
-                .is_none_or(|started| started <= line.at))
+/// Whether the process that wrote a line is the one still holding it. A start
+/// time tells a live command from a pid the machine handed on, and a line older
+/// than the boot was written by a process no reboot survived — the reasoning a
+/// session marker uses (ADR a-profile-is-live-by-evidence). Doubt answers yes,
+/// so nothing is called dead on a guess.
+fn still_running(host: &dyn Host, booted_at: Option<DateTime<Utc>>, line: &Line) -> bool {
+    !live::written_before_the_boot(booted_at, line.at.timestamp_millis())
+        && (line.pid == 0
+            || (host.process_alive(line.pid)
+                && host
+                    .process_started_at(line.pid)
+                    .is_none_or(|started| started <= line.at)))
 }
 
 /// Reads both files, newest last.
@@ -261,6 +263,9 @@ pub fn read(host: &dyn Host) -> Reading {
         .filter(|line| line.event == Event::End)
         .map(|line| line.id.as_str())
         .collect();
+    // Once rather than per line: a machine does not reboot inside one reading.
+    let booted_at = host.booted_at();
+
     // Within the window, because a start left unpaired by a machine going down
     // is one a reboot explains, and one of those would otherwise be reported
     // for as long as the file holds it.
@@ -268,7 +273,7 @@ pub fn read(host: &dyn Host) -> Reading {
         .iter()
         .filter(|line| line.at >= from)
         .filter(|line| line.event == Event::Start && !ended.contains(line.id.as_str()))
-        .filter(|line| !still_running(host, line))
+        .filter(|line| !still_running(host, booted_at, line))
         .cloned()
         .collect();
 

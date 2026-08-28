@@ -339,6 +339,10 @@ struct Network {
 /// `Clock` struct — `impl port::Clock for FakeHost` reads `self.stall.now`.
 struct Stall {
     now: RefCell<DateTime<Utc>>,
+    /// When this machine last started. The beginning of time by default, so a
+    /// fixture that has not said when the machine booted dismisses no Marker:
+    /// every case written before there was a boot to read means what it did.
+    booted_at: RefCell<Option<DateTime<Utc>>>,
     /// What the rest of the machine does the first time Perch waits, and then
     /// does not do again.
     somebody_else: RefCell<Option<WhileWaiting>>,
@@ -443,6 +447,7 @@ impl FakeHost {
             },
             stall: Stall {
                 now: RefCell::new(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()),
+                booted_at: RefCell::new(Some(DateTime::<Utc>::MIN_UTC)),
                 somebody_else: RefCell::new(None),
                 somebody_else_after_requests: RefCell::new(None),
             },
@@ -968,6 +973,20 @@ impl FakeHost {
         *self.stall.now.borrow_mut() = now;
     }
 
+    /// A machine that started at `at` — what makes a Marker written before it
+    /// the litter of a session that did not survive the reboot.
+    pub fn with_booted_at(self, at: DateTime<Utc>) -> Self {
+        *self.stall.booted_at.borrow_mut() = Some(at);
+        self
+    }
+
+    /// A machine that will not say when it started, which is every platform
+    /// Perch has no way to ask.
+    pub fn that_will_not_say_when_it_booted(self) -> Self {
+        *self.stall.booted_at.borrow_mut() = None;
+        self
+    }
+
     /// What the rest of the machine does the first time Perch waits — for a lock,
     /// or for an answer. Once, because it stands for a thing that happens rather
     /// than for a condition: a client starting, a lock being given back, another
@@ -1362,6 +1381,10 @@ fn exec_key(program: &str, args: &[&str]) -> String {
 impl port::Clock for FakeHost {
     fn now(&self) -> DateTime<Utc> {
         *self.stall.now.borrow()
+    }
+
+    fn booted_at(&self) -> Option<DateTime<Utc>> {
+        *self.stall.booted_at.borrow()
     }
 }
 
