@@ -8,3 +8,4 @@ perch-review.html
 # for every Account the machine has, so it is one `git add -A` away from a
 # public history.
 *.age
+fork-path-test
