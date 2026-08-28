@@ -14,9 +14,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Homebrew hardcodes the name: `brew tap perch-cli/perch` looks here.
+  TAP: perch-cli/homebrew-perch
 
 jobs:
-  # Two things have to be true before anything is built, and both of them are
+  # Three things have to be true before anything is built, and each of them is
   # cheap to check and expensive to discover afterwards.
   guard:
     runs-on: ubuntu-latest
@@ -35,7 +37,7 @@ jobs:
         uses: ./.github/actions/token-still-reaches
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          repository: perch-cli/homebrew-perch
+          repository: ${{ env.TAP }}
           secret: HOMEBREW_TAP_TOKEN
 
       # A tag that disagrees with the manifest ships a binary reporting a
@@ -372,7 +374,7 @@ jobs:
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          git clone --depth 1 https://github.com/perch-cli/homebrew-perch.git tap
+          git clone --depth 1 "https://github.com/$TAP.git" tap
           mkdir -p tap/Formula
           cp perch.rb tap/Formula/perch.rb
 
@@ -389,7 +391,7 @@ jobs:
           fi
 
           git commit -m "perch ${GITHUB_REF_NAME#v}"
-          git push "https://x-access-token:${TAP_TOKEN}@github.com/perch-cli/homebrew-perch.git" HEAD:main
+          git push "https://x-access-token:${TAP_TOKEN}@github.com/$TAP.git" HEAD:main
 
   # The site, once the Release exists and everything it holds can be downloaded
   # (ADR one-thing-renders-the-site). Called rather than left to an event this
