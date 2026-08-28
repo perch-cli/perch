@@ -148,8 +148,10 @@ GitHub Pages hands the newest release to anyone who pastes it, and always did.
 The floor is the weekly scheduled CI run green on all three platforms for four
 consecutive weeks — that is the check that catches Claude Code drift, which is
 the failure that cannot be tested for in advance. Beyond the floor it is a
-judgment call. Worth revisiting at the same time: Apple notarization, which
-0.x deliberately skips.
+judgment call. Apple notarization is not one of the conditions and is not
+planned. The attestation on every archive already names the workflow and the
+commit behind the bytes, and what a signature would add is Gatekeeper's
+approval, which only an archive a browser downloaded ever asks for.
 
 ## The site, and the installers on it
 

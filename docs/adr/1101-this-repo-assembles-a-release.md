@@ -193,5 +193,10 @@ The weekly contract suite green on all three platforms for four consecutive
 weeks. Not an arbitrary interval: those tests assert Perch's beliefs against a
 Claude Code that updates continuously (ADR an-assumption-is-probed), and drift
 there is the failure that cannot be tested for in advance, only waited out.
-Everything else is judgment, and Apple notarization is the thing worth
-reconsidering at the same time.
+Everything else is judgment. Apple notarization is not among the conditions and
+is not planned. The attestation on every archive already names the workflow and
+the commit that produced the bytes, which is a stronger claim about an Artifact
+than a certificate authority's opinion of who paid for one. What a signature
+buys instead is Gatekeeper and SmartScreen, and neither reaches a file that
+`curl` or `Invoke-WebRequest` fetched. Both reach the archive a browser
+downloaded from the Release page, which is the one path no Channel uses.
