@@ -479,13 +479,48 @@ fn the_triage_playbook_and_the_form_it_files_name_the_same_fields() {
     );
 }
 
-/// The label the playbook applies has to be one the form already puts on every
-/// report, or a maintainer filtering on it misses half of them.
+/// Nobody filing a report can label it, so the form declares the labels and
+/// `label-agent-filed.yml` applies them on arrival. What that costs is two ways
+/// for the labels to stop landing without a word: the workflow keying on a
+/// heading the form stopped rendering, and the form declaring its labels in a
+/// shape the workflow reads as none.
 #[test]
-fn the_label_the_triage_playbook_applies_is_one_the_form_carries() {
+fn an_agent_filed_report_arrives_carrying_the_labels_the_form_declares() {
     let playbook = read(&repo().join(".github/triage/PLAYBOOK.md"));
     let form = read(&repo().join(".github/ISSUE_TEMPLATE/agent-filed.yml"));
+    let workflow = read(&repo().join(".github/workflows/label-agent-filed.yml"));
 
-    assert!(playbook.contains("Label it `filed-by-agent`"));
-    assert!(form.contains("  - filed-by-agent"));
+    assert!(
+        !playbook.contains("Label it"),
+        "the playbook asks the agent for a right the account it files under does not have"
+    );
+
+    // The rendered heading the workflow keys on, which is a field's `label:` in
+    // the form.
+    let marker = workflow
+        .lines()
+        .find_map(|line| {
+            let (_, after) = line.split_once("'### ")?;
+            let (heading, _) = after.split_once('\'')?;
+            Some(heading)
+        })
+        .expect("the workflow names the heading it tells an agent-filed report by");
+    assert!(
+        form.contains(&format!("label: {marker}")),
+        "the workflow keys on a `{marker}` heading the form no longer renders"
+    );
+
+    // The shape that workflow's `awk` reads: `labels:` at the left margin, one
+    // `  - ` item a line. An inline list is valid YAML it finds nothing in.
+    let declared: Vec<&str> = form
+        .lines()
+        .skip_while(|line| *line != "labels:")
+        .skip(1)
+        .take_while(|line| line.starts_with("  - "))
+        .map(|line| line.trim_start_matches("  - "))
+        .collect();
+    assert!(
+        declared.contains(&"filed-by-agent"),
+        "the form declares the labels that get applied, and provenance is the one no maintainer can restore later"
+    );
 }
