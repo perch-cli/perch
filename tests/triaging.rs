@@ -14,7 +14,7 @@ use common::*;
 use perch::commands::triage::TriageArgs;
 use perch::error::EXIT_OK;
 use perch::host::fake::Effect;
-use perch::host::{FakeHost, Files, Platform};
+use perch::host::{FakeHost, Files, Platform, Refusing};
 use perch::registry::Quarantine;
 
 /// The moment every run below starts, so the directory it writes into is
@@ -303,6 +303,48 @@ fn no_claude_code_writes_the_files_and_says_where_they_are() {
         said.contains("Paste prompt.md into any coding agent"),
         "the files are the fallback: {said}"
     );
+}
+
+/// A machine that has never Switched has no active Account for a Quarantine to
+/// be recorded against, which withholds nothing: the live Credential is still
+/// whatever Claude Code would find on its own.
+#[test]
+fn a_machine_on_nobody_is_launched_into_as_usual() {
+    let host = at_a_fixed_moment(machine_with_two_accounts());
+    let mut registry = registry_of(&host);
+    registry.settle(None);
+    save_registry(&host, &registry);
+
+    let (_, said) = triaged(&host);
+
+    assert!(launched(&host).is_some(), "{said}");
+}
+
+/// The only thing a Triage can fail at, and it names the file: everything before
+/// the write is reading, and everything after is somebody else's session.
+#[test]
+fn evidence_that_cannot_be_written_is_a_refusal_naming_the_file() {
+    let host = at_a_fixed_moment(machine_with_two_accounts());
+    let at = run_dir(&host).join(REDACTED);
+    let host = host.with_a_path_refusing(&at, Refusing::Write, "permission denied");
+
+    host.forget_effects();
+    let mut written = Vec::new();
+    let refusal = perch::commands::triage::run(
+        &host,
+        TriageArgs {
+            model: None,
+            raw: false,
+        },
+        &mut written,
+    )
+    .expect_err("a Triage with nothing to hand over refuses");
+
+    assert!(
+        refusal.to_string().contains(&at.display().to_string()),
+        "{refusal}"
+    );
+    assert!(launched(&host).is_none(), "and launches nothing");
 }
 
 /// Evidence rather than one of the Holdings: three runs is enough to hold the
