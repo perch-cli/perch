@@ -2143,6 +2143,40 @@ mod tests {
         assert!(process_alive(std::process::id()));
     }
 
+    /// The write the Trail makes, on a real filesystem rather than a fake: the
+    /// directory above it, the mode it is created at, and the width it answers
+    /// with — a second line landing after the first rather than over it.
+    #[cfg(unix)]
+    #[test]
+    fn a_line_lands_after_the_last_one_in_a_file_only_its_owner_may_read() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!("perch-append-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let at = root.join("under").join("trail.log");
+        let host = RealHost::new();
+
+        let first = host.append_private_line(&at, "one").expect("a first line");
+        let second = host.append_private_line(&at, "two").expect("a second");
+
+        assert_eq!(first, 4, "the line and the newline that ends it");
+        assert_eq!(second, 8, "and the next one lands after it");
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), "one\ntwo\n");
+        assert_eq!(
+            std::fs::metadata(&at).unwrap().permissions().mode() & 0o777,
+            PRIVATE_FILE_MODE
+        );
+
+        // A file where the directory above would have to go, which is the
+        // failure the Trail answers by writing nothing.
+        assert!(
+            host.append_private_line(&at.join("deeper"), "three")
+                .is_err()
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The holder here is what Windows Defender amounts to: a handle on the
     /// target, shared with nobody, gone a moment later.
     #[cfg(windows)]

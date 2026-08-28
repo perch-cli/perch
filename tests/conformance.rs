@@ -157,6 +157,18 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a line will not be appended where a directory sits",
+        asserts: |host, root, adapter, _now| {
+            let at = root.join("a-directory-where-a-line-would-go");
+            host.create_private_dir_all(&at).expect("a directory");
+
+            assert!(
+                host.append_private_line(&at, "{\"n\":1}").is_err(),
+                "{adapter}: a directory took a line and answered a width"
+            );
+        },
+    },
+    Case {
         named: "a file that is not there reports NotFound",
         asserts: |host, root, adapter, _now| {
             let missing = root.join("nothing-here");

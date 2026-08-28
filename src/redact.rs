@@ -329,6 +329,33 @@ mod tests {
         assert_eq!(hidden.text("switch work."), "switch <account 1>.");
     }
 
+    /// A Group reaches `word` the same way an Account does — a Target is either
+    /// — and it keeps its own kind rather than borrowing the Alias's suffix.
+    #[test]
+    fn a_group_named_as_a_word_is_the_group_it_names() {
+        let registry = holding(
+            &["one@example.com"],
+            &[("spare", "one@example.com")],
+            &["work"],
+        );
+        let hidden = Redaction::of(&registry, None);
+
+        assert_eq!(hidden.word("work"), "<group 1>");
+        assert_eq!(hidden.word("spare"), "<account 1> (alias)");
+    }
+
+    /// A registry an older Perch wrote can name a Group nothing: matched
+    /// literally it stands between every pair of characters in the sentence.
+    #[test]
+    fn a_name_with_nothing_in_it_matches_nothing() {
+        let hidden = Redaction::of(&holding(&[], &[], &[""]), None);
+
+        assert_eq!(
+            hidden.text("a Switch to it refuses"),
+            "a Switch to it refuses"
+        );
+    }
+
     #[test]
     fn raw_answers_what_it_was_given() {
         let hidden = Redaction::none();

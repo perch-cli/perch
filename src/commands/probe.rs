@@ -398,30 +398,36 @@ fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
     if let Some(exe) = &seen.exe {
         said.push(column("Binary", hidden.path(exe)));
     }
+    // The version and the path are asked for separately, so a binary that is
+    // there and will not answer `--version` names both.
+    let claude = match &seen.claude {
+        Ok(version) => version.clone(),
+        Err(said) => hidden.text(said),
+    };
     said.push(column(
         "Claude Code",
-        match (&seen.claude, &seen.claude_at) {
-            (Ok(version), Some(at)) => format!("{version}, at {}", hidden.path(at)),
-            (Ok(version), None) => version.clone(),
-            (Err(said), _) => hidden.text(said),
+        match &seen.claude_at {
+            Some(at) => format!("{claude}, at {}", hidden.path(at)),
+            None => claude,
         },
     ));
+    // Read off the version rather than off the loaded registry: a file that
+    // states none is a file that would not load, so the two answers are one.
     said.push(column(
         "Home",
-        match (&seen.home, &seen.registry, &seen.registry_said) {
-            (Some(home), Some(_), _) => format!(
-                "{}, registry version {}",
-                hidden.path(home),
-                match seen.on_disk {
-                    Some(stated) => stated.to_string(),
-                    None => "unstated".to_string(),
-                }
-            ),
-            (Some(home), None, Some(_)) => {
+        match (&seen.home, &seen.registry_said) {
+            (Some(home), Some(_)) => {
                 format!("{}, and the registry would not load", hidden.path(home))
             }
-            (Some(home), None, None) => format!("{}, no registry yet", hidden.path(home)),
-            (None, _, _) => "could not be found".to_string(),
+            (Some(home), None) => format!(
+                "{}, {}",
+                hidden.path(home),
+                match seen.on_disk {
+                    Some(stated) => format!("registry version {stated}"),
+                    None => "no registry yet".to_string(),
+                }
+            ),
+            (None, _) => "could not be found".to_string(),
         },
     ));
     if let Some(registry) = &seen.registry {
