@@ -169,9 +169,10 @@ pub fn whose(
     email_in(&document).ok_or_else(|| {
         Refused::Unrecognized(
             "the profile endpoint named no email address, so whose an access \
-             token is cannot be established — the check that keeps one \
-             Account's figures from being filed under another's is passing \
-             everything through until Perch is taught the new shape"
+             token is cannot be established from Anthropic — the check that \
+             keeps one Account's figures from being filed under another's is \
+             falling back to what this machine holds until Perch is taught the \
+             new shape"
                 .to_string(),
         )
     })

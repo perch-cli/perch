@@ -396,7 +396,15 @@ fn observe(
 
     let asking = usable_token(host, perch, asked, installed, still_ours)
         .map_err(theirs(Because::ItSaysItRanOut))?;
-    match read_off(host, perch, &asking.token, account, still_ours) {
+    match read_off(
+        host,
+        perch,
+        &asking.token,
+        asked,
+        account,
+        installed,
+        still_ours,
+    ) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
         Err(Turned::Away) => {}
@@ -423,7 +431,16 @@ fn observe(
         still_ours,
     )
     .map_err(theirs(Because::AnthropicRefusedIt))?;
-    read_off(host, perch, &renewed.token, account, still_ours).map_err(Turned::settled)
+    read_off(
+        host,
+        perch,
+        &renewed.token,
+        asked,
+        account,
+        installed,
+        still_ours,
+    )
+    .map_err(Turned::settled)
 }
 
 /// What one attempt at a reading came to when it did not come to figures.
@@ -460,10 +477,12 @@ fn read_off(
     host: &dyn Host,
     perch: &mut Held<'_>,
     token: &str,
+    asked: &Asked,
     account: &Account,
+    installed: &Installed,
     still_ours: StillOurs<'_>,
 ) -> std::result::Result<QuotaWindows, Turned> {
-    confirm(host, token, account, still_ours)?;
+    confirm(host, token, asked, account, installed, still_ours)?;
     // Between the two requests, because they are two: an endpoint that accepts a
     // connection and then says nothing costs thirty seconds each.
     perch.renew();
@@ -515,7 +534,7 @@ fn only_off_a_credential_that_is_theirs(
         };
     }
 
-    if asked.its_own_profile || names(host, &asked.store, account, installed) {
+    if theirs_by_what_is_here(host, asked, account, installed) {
         return outcome;
     }
 
@@ -532,6 +551,20 @@ fn only_off_a_credential_that_is_theirs(
         ),
         spent: because.spent() || why.reached_anthropic(),
     }
+}
+
+/// Whether what this machine holds says the Credential being asked with is this
+/// Account's — the local evidence, for a recording that must not be made off
+/// somebody else's Credential and cannot get an answer out of Anthropic. An
+/// Account's own Profile is a directory only Perch writes into; the Default
+/// Profile is not, so there it is the Identity beside the Credential that says.
+fn theirs_by_what_is_here(
+    host: &dyn Host,
+    asked: &Asked,
+    account: &Account,
+    installed: &Installed,
+) -> bool {
+    asked.its_own_profile || names(host, &asked.store, account, installed)
 }
 
 /// Whether a store's Identity names this Account.
@@ -914,7 +947,9 @@ const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
 fn confirm(
     host: &dyn Host,
     token: &str,
+    asked: &Asked,
     account: &Account,
+    installed: &Installed,
     still_ours: StillOurs<'_>,
 ) -> std::result::Result<(), Turned> {
     match anthropic::whose(host, token, still_ours) {
@@ -938,10 +973,26 @@ fn confirm(
         // answers would cache one Account's figures under another's.
         Err(Refused::Unrecognized(drift)) => {
             // Said rather than swallowed, because an endpoint that renames a field
-            // turns this check into a no-op for ever and silence makes that
-            // indistinguishable from its passing. Once, which is `note`'s job.
+            // asks this question of the machine for ever after, and silence makes
+            // that indistinguishable from Anthropic answering. `note` says it once.
             host.note(&Refused::Unrecognized(drift).to_string());
-            Ok(())
+            if theirs_by_what_is_here(host, asked, account, installed) {
+                return Ok(());
+            }
+            Err(Turned::Settled(Outcome::Failed {
+                why: format!(
+                    "Anthropic no longer says whose an access token is, so whose \
+                     the live Credential is rests on what this machine holds — \
+                     and {} does not name {}, so it may belong to a login made \
+                     outside Perch and no figure was recorded against it. \
+                     `perch switch {}` puts this Account's own Credential back \
+                     in place.",
+                    asked.store.identity_file.display(),
+                    account.email(),
+                    account.email(),
+                ),
+                spent: true,
+            }))
         }
         Err(why) => Err(Turned::Settled(getting_ready_refused(why))),
     }
