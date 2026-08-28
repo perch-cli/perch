@@ -1,0 +1,36 @@
+# Both stored credentials are used at the point where failing costs most: the
+# tap token after a Release is public and npm has published, the release-plz
+# token after the release pull request has merged. Asking first turns either of
+# those into a refusal to start.
+# `.permissions.push` is the whole check. It catches expiry, revocation and a
+# value pasted wrong, which are the ways a credential that worked stops
+# working. It does not audit which scopes were granted: that is a setup error,
+# and a setup error fails the first time rather than one day in the future.
+name: A token still reaches a repository
+description: Fail when a stored credential can no longer write where it exists to write.
+
+inputs:
+  token:
+    description: The stored credential to check.
+    required: true
+  repository:
+    description: The repository it is expected to write to, as owner/name.
+    required: true
+  secret:
+    description: The name of the secret holding it, so a failure says what to rotate.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPOSITORY: ${{ inputs.repository }}
+        SECRET: ${{ inputs.secret }}
+      run: |
+        if [ "$(gh api "repos/$REPOSITORY" --jq .permissions.push)" != "true" ]; then
+          echo "::error::$SECRET cannot write to $REPOSITORY: expired, revoked, or stored wrong"
+          exit 1
+        fi
+        echo "$SECRET still reaches $REPOSITORY"

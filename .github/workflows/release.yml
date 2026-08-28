@@ -29,6 +29,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # The Tap is the last thing a Release writes, so this is the one credential
+      # whose failure lands after the Release page is public.
+      - name: The tap token still reaches the tap
+        uses: ./.github/actions/token-still-reaches
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          repository: perch-cli/homebrew-perch
+          secret: HOMEBREW_TAP_TOKEN
+
       # A tag that disagrees with the manifest ships a binary reporting a
       # version nobody released, and it is invisible until somebody files a bug
       # against a version that does not exist.
