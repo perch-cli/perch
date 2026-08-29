@@ -9,6 +9,7 @@
 //! place that knows an endpoint, [`registry`] is Perch's own state and
 //! [`holdings`] is the only place that says where it sits.
 
+pub mod act;
 pub mod adopt;
 pub mod anthropic;
 pub mod ask;

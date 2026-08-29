@@ -13,23 +13,21 @@ use std::io::Write;
 
 use chrono::{DateTime, Utc};
 
+use crate::act::{self, Acting, Watch};
 use crate::adopt;
-use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::{Host, Waited};
-use crate::live;
-use crate::lock::{self, Lost};
+use crate::lock;
+use crate::lock::Lost;
 use crate::observe;
 use crate::probe;
-use crate::registry::{self, Registry};
-use crate::round::{self, Verdict, Watching};
+use crate::registry;
+use crate::round::{self, Verdict};
 use crate::say;
-use crate::switch::{self, NotSwitched, Resolved};
+use crate::switch::{self, Resolved};
 use crate::trail;
-use crate::watch::{
-    self, Backoff, Cooled, Holding, Outcome, Recently, Speak, Watcher, nothing_was_switched,
-};
+use crate::watch::{self, Backoff, Holding, Recently, Speak, Watcher};
 
 /// One round, for whatever scheduled it.
 ///
@@ -157,45 +155,6 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     }
 
     stopped(out)
-}
-
-/// The watch this process holds, as one question rather than three.
-///
-/// `renew`, `still_held` and `asked_to_stop` were asked apart at nine points and five
-/// reviews found a long step running between two of them. One call asks all three, and
-/// the long steps take this rather than a bare renewal (ADR an-invariant-gets-a-door).
-struct Watch<'a> {
-    host: &'a dyn Host,
-    held: lock::Held<'a>,
-}
-
-impl<'a> Watch<'a> {
-    fn taken(host: &'a dyn Host, held: lock::Held<'a>) -> Watch<'a> {
-        Watch { host, held }
-    }
-
-    /// Renews the hold and says whether this Watcher is still the one to act.
-    ///
-    /// Called for its answer wherever a round is about to spend something or change
-    /// something, and called for the renewal everywhere else — the same call, so the
-    /// two cannot come apart.
-    fn goes_on(&mut self) -> std::result::Result<(), Lost> {
-        self.held.renew();
-        if !self.held.still_held() {
-            return Err(Lost::HandedOver);
-        }
-        if self.host.asked_to_stop() {
-            return Err(Lost::Stopped);
-        }
-        Ok(())
-    }
-
-    /// The renewal without the question, for the one place the answer changes
-    /// nothing: the Credential has already moved, and there is no step left to
-    /// stop before.
-    fn kept_up(&mut self) {
-        self.held.renew();
-    }
 }
 
 /// What the loop says on the way out when something other than the person at the
@@ -366,11 +325,11 @@ fn opening(host: &dyn Host) -> Result<String> {
 /// The registry lock is taken here and given back when this returns rather than held
 /// for the life of the loop, which would shut every other `perch` out of the machine
 /// for as long as the loop ran.
-fn one_round(
-    host: &dyn Host,
+fn one_round<'h>(
+    host: &'h dyn Host,
     watcher: Watcher,
     backoff: &mut Backoff,
-    watching_alone: &mut Watch<'_>,
+    watching_alone: &mut Watch<'h>,
 ) -> Result<Verdict> {
     // A machine with no Claude Code login has nothing to adopt. `Busy` is passed
     // through untouched, because both callers answer it differently from "not
@@ -455,15 +414,17 @@ fn one_round(
         // Reached only through a `Cooled`, which is the whole of what the decision
         // above is for: the one irreversible thing a round does is behind it.
         |cooled| {
-            act(
-                host,
-                &mut perch,
-                &mut registry,
-                &watching,
-                watcher,
+            act::run(
+                Acting {
+                    host,
+                    perch: &mut perch,
+                    registry: &mut registry,
+                    watching: &watching,
+                    watcher,
+                    probed: &installed,
+                    watching_alone,
+                },
                 cooled,
-                &installed,
-                watching_alone,
             )
         },
     )?;
@@ -473,161 +434,4 @@ fn one_round(
         trail::acted(host, &moved);
     }
     Ok(Verdict::Decided(decided))
-}
-
-/// The Account is full enough to move off, so this is the whole of what the watcher
-/// does about it: read the candidates, choose, and Switch.
-///
-/// Read here rather than kept warm — the only moment their figures are worth
-/// anything, and the moment they are cheapest to get.
-// Seven, and the seventh is the point: `probed` is what the round already asked the
-// machine and must not ask again.
-#[allow(clippy::too_many_arguments)]
-fn act(
-    host: &dyn Host,
-    perch: &mut crate::lock::Held<'_>,
-    registry: &mut Registry,
-    watching: &Watching,
-    watcher: Watcher,
-    cooled: &Cooled<'_>,
-    probed: &Result<probe::Installed>,
-    watching_alone: &mut Watch<'_>,
-) -> Result<Outcome> {
-    let scope = watching.scope.clone();
-    let outgoing = watching.account.clone();
-
-    let installed = match probed.as_ref() {
-        Ok(installed) => installed,
-        // Not reachable: a round reaches this only on a figure it read, and a figure
-        // is read only where the probe answered. Handed on rather than asserted,
-        // because what runs this is a Service nobody is watching.
-        Err(why) => return Err(PerchError::Other(why.to_string())),
-    };
-
-    // Asked before the candidates are read: the burst spends an hourly allowance that
-    // does not refill early, one read per candidate, and a `perch run` held open in
-    // another terminal would spend it every round.
-    let places = [live::Place::of_the_profile(host, &outgoing)?];
-    let idle = match live::ask(host, &places) {
-        live::Answer::Idle(idle) => idle,
-        live::Answer::NotIdle(not_idle) => {
-            return watch::refused_or_raised(not_idle, installed);
-        }
-    };
-
-    // The set a Refresh cannot move, walked once: what changes under one is the
-    // figures, and those come back out of `refreshed` below.
-    let candidates = round::Candidates::of(registry, watching, cooled, &idle);
-
-    // The burst, and the longest thing a round does: one read per candidate, each
-    // bounded only at thirty seconds, over as many as the Scope holds. It takes the
-    // watch rather than a renewal, so it ends where the watch does.
-    let read = observe::refresh(
-        host,
-        perch,
-        registry,
-        &candidates.addresses(),
-        probed,
-        observe::Spending::ItsOwn,
-        &mut || watching_alone.goes_on(),
-    );
-    // Before the choice rather than after it: a burst that stopped part way leaves
-    // every candidate past that point on whatever figure was cached, and choosing on
-    // those is the Switch this round is no longer the one to make.
-    if let Some(lost) = read.stopped {
-        return Ok(nothing_was_switched(lost));
-    }
-
-    // What could not be read, carried into the sentence that says where the watcher
-    // went: an Account ranked on a figure from an hour ago is the one thing that can
-    // make this Switch land somewhere worse than it left.
-    let unread = read.notes();
-
-    // The margin, applied to the figures the burst above has just written.
-    let set_aside = watch::set_aside(
-        &watching.policy,
-        &watching.scope,
-        &candidates.refreshed(registry),
-    );
-
-    let choice = match cycle::choose(
-        registry,
-        &scope,
-        Some(outgoing.email()),
-        &set_aside,
-        host.now(),
-    ) {
-        Ok(choice) => choice,
-        // Nowhere worth going is an answer rather than a failure, and both ways of
-        // getting there are resolved by waiting.
-        Err(error @ (PerchError::NoCandidate(_) | PerchError::NothingToDo(_))) => {
-            return Ok(Outcome::Nowhere {
-                why: also(error.to_string(), &unread),
-                looking_again: watcher.asking_again(watch::NOWHERE_INTERVAL_MILLIS),
-            });
-        }
-        Err(error) => return Err(error),
-    };
-
-    // The last thing asked before the one irreversible thing a round does. The burst
-    // above is bounded by nothing but the network, so it can outlast the watch — and a
-    // Switch made after that is the second Watcher deciding beside the first.
-    if let Err(lost) = watching_alone.goes_on() {
-        return Ok(nothing_was_switched(lost));
-    }
-    // One instant for both arrangements, and the beginning rather than the end, because
-    // that is the one already written down.
-    let acted_at = host.now();
-    let switched = switch::switch_to(
-        host,
-        perch,
-        registry,
-        installed,
-        &choice.account,
-        Some(&outgoing),
-        switch::Reason::Unasked {
-            scope: scope.clone(),
-            at: acted_at,
-        },
-    );
-    watching_alone.kept_up();
-
-    match switched {
-        // Where it went, and nothing about why it won: nobody is at the terminal to be
-        // owed a reason. Named as the person named it.
-        Ok(_switched) => Ok(Outcome::Switched {
-            to: registry.named_for_the_user(choice.account.email()),
-            unread,
-        }),
-        // The machine is part way through a Switch, so it is answered before the
-        // refusals below whatever the failure was.
-        Err(NotSwitched { error, moved: true }) => Err(error),
-        // Nothing was changed, and each of these clears itself. A locked keychain, a
-        // probe that cannot find Claude Code, a Profile that will not be written: none
-        // of those do, and they keep the code the failure earned.
-        Err(NotSwitched {
-            error:
-                error @ (PerchError::Quarantined { .. }
-                | PerchError::ProfileLive(_)
-                | PerchError::Busy(_)),
-            ..
-        }) => Ok(Outcome::Refused {
-            // A lock is the one of the three a scheduler should come straight back
-            // for, and the round is read as `refused` either way: it decided on a
-            // figure it had read, which is what tells it from a hold.
-            contended: matches!(error, PerchError::Busy(_)),
-            why: error.to_string(),
-            // Every candidate was read to get here.
-            after_reading: true,
-        }),
-        Err(NotSwitched { error, .. }) => Err(error),
-    }
-}
-
-/// A sentence, with whatever else has to be said on the same line after it.
-fn also(said: String, notes: &[String]) -> String {
-    match notes.is_empty() {
-        true => said,
-        false => format!("{said} {}", notes.join(" ")),
-    }
 }

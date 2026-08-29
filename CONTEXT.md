@@ -312,6 +312,15 @@ than in what one is. What it decided is said in one line — and, for a Check, i
 the exit code.
 _Avoid_: tick, pass, iteration, cycle
 
+**Act**:
+The irreversible half of a Round — read the candidates, choose, and Switch —
+taken only on a figure just read, past the Threshold and out of the Cooldown.
+A Round that decided anything else has no way to take one. What it spends, one
+Refresh per candidate, is spent at the only moment those figures are worth
+anything, and the watch is asked one last time before the Switch, because the
+burst is bounded by nothing but the network and can outlast it.
+_Avoid_: action, execution, firing, trigger
+
 **Check**:
 One round of the Watcher taken on its own — `perch watcher check` — for a
 scheduler to run. The loop's policy exactly, run once, saying what it decided in
