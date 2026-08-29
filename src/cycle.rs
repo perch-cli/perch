@@ -179,6 +179,90 @@ fn how_to_get_figures(scope: &Scope) -> String {
     )
 }
 
+/// How old a figure may be and still be ranked on as a figure rather than as a
+/// [`best_case`]. The Watcher's interval, taken rather than restated: it is
+/// already Perch's answer to how fresh a figure has to be before it is acted on,
+/// and a second answer to one question is two that come to disagree.
+const TRUSTED_MILLIS: i64 = crate::watch::REFRESH_INTERVAL_MILLIS as i64;
+
+/// The Headroom a Cycle may rank its rivals against: this Account's, where the
+/// cache carries a figure young enough to be one. `None` is a figure too old to
+/// stand for the Account's state, or no figure at all, and rules nothing out.
+pub fn trusted(account: &Account, now: DateTime<Utc>) -> Option<f64> {
+    let cached = account.observed_utilization()?;
+    let age = (now - cached.observed_at).num_milliseconds();
+    // A range rather than a `<`: a figure stamped in the future is not fresh,
+    // and reading one as fresh is what gets a stale figure trusted.
+    if !(0..TRUSTED_MILLIS).contains(&age) {
+        return None;
+    }
+    match headroom_of(account) {
+        Headroom::Room { percent, .. } => Some(percent),
+        // Nothing left, which every rival carrying room beats — a trusted floor
+        // rather than an absent one.
+        Headroom::Exhausted { .. } => Some(0.0),
+        Headroom::Unobserved => None,
+    }
+}
+
+/// The most Headroom a cached figure could still be describing: a window whose
+/// reset is still ahead caps an Account at what it was last seen with, and one
+/// past its reset or silent about it caps nothing
+/// (ADR a-choice-reads-what-it-ranks).
+fn best_case(account: &Account, now: DateTime<Utc>) -> f64 {
+    let Some(cached) = account.observed_utilization() else {
+        return 100.0;
+    };
+    cached
+        .windows
+        .iter()
+        .map(|window| match window.resets_at {
+            Some(at) if at > now => 100.0 - window.used_percent,
+            _ => 100.0,
+        })
+        .fold(100.0, f64::min)
+}
+
+/// Which of a Scope's Accounts a Cycle cannot rank without reading them first:
+/// every candidate whose figure is too old to stand on and whose [`best_case`]
+/// still beats `to_beat`. `None` rules nothing out, so nobody worth vouching
+/// for means everybody worth reading.
+pub fn worth_reading(
+    registry: &Registry,
+    scope: &Scope,
+    leaving: Option<&str>,
+    to_beat: Option<f64>,
+    now: DateTime<Utc>,
+) -> Vec<String> {
+    // Under `soonest-reset` the order is a reset time rather than room, so a
+    // bound on room excludes nothing and every stale candidate is read.
+    let on_room = !matches!(strategy(registry, scope), Strategy::SoonestReset);
+    let sharers = registry::Sharers::across(registry);
+    scope
+        .accounts(registry)
+        .into_iter()
+        .filter(|account| is_a_candidate(&sharers, account))
+        .filter(|account| !leaving.is_some_and(|email| name::same_name(account.email(), email)))
+        // A rival inside the same window that makes the Account being left
+        // worth trusting is worth trusting too, and reading it buys nothing.
+        .filter(|account| trusted(account, now).is_none())
+        .filter(|account| !on_room || to_beat.is_none_or(|floor| best_case(account, now) > floor))
+        .map(|account| account.email().to_string())
+        .collect()
+}
+
+/// Whether a `--refresh` still has anything to tell somebody a Cycle refused.
+///
+/// The caller's own fact, like [`SetAside`]: only it knows whether the figures
+/// this ranking rested on were read at the moment the decision was taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Figures {
+    /// Ranked on cache, so a reading could still change the answer.
+    Cached,
+    /// Read at the moment of the decision, or proven unable to change it.
+    Current,
+}
+
 /// The Quota Window that decides how full an Account is: its fullest, or `None`
 /// for one nothing has ever been observed of.
 ///
@@ -324,12 +408,13 @@ pub struct Choice {
 ///
 /// `leaving` is ranked like any other Account and never chosen: landing where
 /// you already are rewrites Credentials for nothing. `set_aside` is the caller's
-/// own reasons for not landing somewhere, obeyed without opinion ([`SetAside`]).
+/// own reasons for not landing ([`SetAside`]), `figures` what it read first.
 pub fn choose(
     registry: &Registry,
     scope: &Scope,
     leaving: Option<&str>,
     set_aside: &SetAside,
+    figures: Figures,
     now: DateTime<Utc>,
 ) -> Result<Choice> {
     let strategy = strategy(registry, scope);
@@ -409,7 +494,7 @@ pub fn choose(
         && worth_going.is_empty()
     {
         return Err(PerchError::NothingToDo(already_the_best(
-            registry, scope, here, strategy, now,
+            registry, scope, here, strategy, figures, now,
         )));
     }
 
@@ -789,10 +874,16 @@ fn already_the_best(
     scope: &Scope,
     here: &Ranked,
     strategy: Strategy,
+    figures: Figures,
     now: DateTime<Utc>,
 ) -> String {
     let named = registry.named_for_the_user(here.account.email());
-    let how_to_get_figures = how_to_get_figures(scope);
+    // The one refusal a Cycle reaches with every figure it ranked on already
+    // current, so it is the one that may not send somebody off to read them.
+    let how_to_get_figures = match figures {
+        Figures::Cached => format!(" — {}", how_to_get_figures(scope)),
+        Figures::Current => ".".to_string(),
+    };
     let scope = scope.place();
     // Said of the comparison Perch actually made: under `soonest-reset` it has
     // only compared Accounts whose figures carry a reset time.
@@ -804,7 +895,7 @@ fn already_the_best(
         format!("{named} is already the best Account in {scope}")
     };
     format!(
-        "{standing}, with {}. Nothing was changed — {how_to_get_figures}",
+        "{standing}, with {}. Nothing was changed{how_to_get_figures}",
         here.headroom
             .as_a_clause(strategy, now)
             .expect("staying put is only said of a figure that says to"),
@@ -892,6 +983,195 @@ pub(crate) mod tests {
             resets_at: Some(now() + chrono::Duration::hours(hours)),
             ..window(name, used_percent)
         }
+    }
+
+    /// The Account being left, as fresh as the floor allows: a figure Perch may
+    /// rank rivals against rather than one it must read again.
+    fn just_read(mut account: Account) -> Account {
+        let cached = account.utilization.as_mut().expect("a figure to freshen");
+        cached.observed_at = now() - chrono::Duration::seconds(1);
+        account
+    }
+
+    #[test]
+    fn a_figure_older_than_the_watchers_interval_is_not_one_to_rank_rivals_against() {
+        let stale = account("a@example.com", vec![window("5-hour", 10.0)]);
+        assert_eq!(
+            trusted(&stale, now()),
+            None,
+            "four minutes is past the floor"
+        );
+        assert_eq!(trusted(&just_read(stale), now()), Some(90.0));
+    }
+
+    #[test]
+    fn a_figure_stamped_in_the_future_is_not_fresh() {
+        let mut ahead = account("a@example.com", vec![window("5-hour", 10.0)]);
+        ahead.utilization.as_mut().expect("a figure").observed_at =
+            now() + chrono::Duration::hours(1);
+        assert_eq!(trusted(&ahead, now()), None);
+    }
+
+    #[test]
+    fn an_exhausted_account_read_just_now_is_trusted_at_nothing_left() {
+        let full = just_read(account("a@example.com", vec![window("5-hour", 100.0)]));
+        assert_eq!(trusted(&full, now()), Some(0.0));
+    }
+
+    #[test]
+    fn a_window_whose_reset_is_still_ahead_caps_the_account_at_what_it_was_seen_with() {
+        let account = account("a@example.com", vec![resetting("7-day", 9.0, 100)]);
+        assert_eq!(best_case(&account, now()), 91.0);
+    }
+
+    #[test]
+    fn a_window_past_its_reset_or_silent_about_one_caps_nothing() {
+        let gone = account("a@example.com", vec![resetting("5-hour", 11.0, -21)]);
+        assert_eq!(best_case(&gone, now()), 100.0, "the window has come back");
+        let silent = account("b@example.com", vec![window("5-hour", 11.0)]);
+        assert_eq!(
+            best_case(&silent, now()),
+            100.0,
+            "it never said when it does"
+        );
+        let never = account("c@example.com", vec![]);
+        assert_eq!(best_case(&never, now()), 100.0, "nothing has been observed");
+    }
+
+    /// The worst window, exactly as Headroom is: a five-hour window that has
+    /// come back caps nothing, and the weekly one beside it still caps the
+    /// Account.
+    #[test]
+    fn an_accounts_best_case_is_its_worst_windows() {
+        let account = account(
+            "a@example.com",
+            vec![resetting("5-hour", 11.0, -21), resetting("7-day", 9.0, 100)],
+        );
+        assert_eq!(best_case(&account, now()), 91.0);
+    }
+
+    /// The transcript this rule was written around: a rival unseen for
+    /// twenty-one hours, and arithmetic enough to answer without reading it.
+    #[test]
+    fn a_rival_that_could_not_win_at_its_best_is_not_read() {
+        let registry = holding(vec![
+            just_read(account("here@example.com", vec![window("5-hour", 0.0)])),
+            account(
+                "rival@example.com",
+                vec![resetting("5-hour", 11.0, -21), resetting("7-day", 9.0, 100)],
+            ),
+        ]);
+        let scope = Scope::Group("work".to_string());
+        let to_beat = trusted(registry.account("here@example.com").unwrap(), now());
+
+        assert_eq!(to_beat, Some(100.0));
+        assert!(
+            worth_reading(&registry, &scope, Some("here@example.com"), to_beat, now()).is_empty(),
+            "91% at its very best loses to a trusted 100%"
+        );
+    }
+
+    #[test]
+    fn a_rival_that_could_win_at_its_best_is_read() {
+        let registry = holding(vec![
+            just_read(account("here@example.com", vec![window("5-hour", 50.0)])),
+            account("rival@example.com", vec![resetting("7-day", 9.0, 100)]),
+        ]);
+        let scope = Scope::Group("work".to_string());
+        let to_beat = trusted(registry.account("here@example.com").unwrap(), now());
+
+        assert_eq!(
+            worth_reading(&registry, &scope, Some("here@example.com"), to_beat, now()),
+            vec!["rival@example.com".to_string()],
+            "91% at its best beats a trusted 50%, so the cache cannot settle it"
+        );
+    }
+
+    #[test]
+    fn nothing_worth_vouching_for_means_everybody_worth_reading() {
+        let registry = holding(vec![
+            account("here@example.com", vec![window("5-hour", 0.0)]),
+            account("rival@example.com", vec![resetting("7-day", 99.0, 100)]),
+        ]);
+        let scope = Scope::Group("work".to_string());
+
+        assert_eq!(
+            worth_reading(&registry, &scope, Some("here@example.com"), None, now()),
+            vec!["rival@example.com".to_string()],
+            "a 1% Best Case still cannot be ruled out against nothing"
+        );
+    }
+
+    #[test]
+    fn a_rival_inside_the_floor_is_never_read() {
+        let registry = holding(vec![
+            just_read(account("here@example.com", vec![window("5-hour", 50.0)])),
+            just_read(account("rival@example.com", vec![window("5-hour", 1.0)])),
+        ]);
+        let scope = Scope::Group("work".to_string());
+
+        assert!(
+            worth_reading(
+                &registry,
+                &scope,
+                Some("here@example.com"),
+                Some(50.0),
+                now()
+            )
+            .is_empty(),
+            "its figure is as young as the one it would be measured against"
+        );
+    }
+
+    /// A bound on room excludes nobody from an order made on reset times, so the
+    /// Strategy that ranks on one reads every stale candidate.
+    #[test]
+    fn soonest_reset_proves_nothing_from_a_best_case() {
+        let registry = preferring(
+            holding(vec![
+                just_read(account("here@example.com", vec![window("5-hour", 0.0)])),
+                account(
+                    "rival@example.com",
+                    vec![resetting("5-hour", 11.0, -21), resetting("7-day", 9.0, 100)],
+                ),
+            ]),
+            crate::registry::Strategy::SoonestReset,
+        );
+        let scope = Scope::Group("work".to_string());
+
+        assert_eq!(
+            worth_reading(
+                &registry,
+                &scope,
+                Some("here@example.com"),
+                Some(100.0),
+                now()
+            ),
+            vec!["rival@example.com".to_string()],
+        );
+    }
+
+    #[test]
+    fn a_quarantined_or_disabled_account_is_never_worth_reading() {
+        let mut out = account("out@example.com", vec![]);
+        out.disabled = true;
+        let registry = holding(vec![
+            just_read(account("here@example.com", vec![window("5-hour", 50.0)])),
+            out,
+        ]);
+        let scope = Scope::Group("work".to_string());
+
+        assert!(
+            worth_reading(
+                &registry,
+                &scope,
+                Some("here@example.com"),
+                Some(50.0),
+                now()
+            )
+            .is_empty(),
+            "a Cycle could not land on it, so its figure decides nothing"
+        );
     }
 
     pub(crate) fn holding(accounts: Vec<Account>) -> Registry {
@@ -1156,6 +1436,7 @@ pub(crate) mod tests {
             &Scope::Group("work".to_string()),
             registry.active().whose(),
             set_aside,
+            Figures::Cached,
             now(),
         )
     }
@@ -1936,6 +2217,7 @@ mod properties {
             &Scope::Group("work".to_string()),
             leaving,
             &SetAside::nothing(),
+            Figures::Cached,
             now(),
         )
         .ok()

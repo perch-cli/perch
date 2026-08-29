@@ -15,6 +15,7 @@ use crate::adopt;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::probe::Installed;
 use crate::registry::{self, Account, Registry, Scope, Settled};
 use crate::say;
@@ -27,6 +28,14 @@ pub struct SwitchArgs {
     /// The Account to switch to — its Alias or its email address — or a
     /// Group to Cycle within.
     pub target: Option<String>,
+
+    /// Cycle on the cached figures, without reading any first.
+    ///
+    /// A Cycle otherwise reads the Accounts it cannot rank without, which
+    /// costs a round trip each. Nothing is read for a named Account
+    /// either way, because naming one decides nothing.
+    #[arg(long)]
+    pub no_refresh: bool,
 }
 
 /// The Account to switch to, and what deciding on it left to be said.
@@ -36,6 +45,11 @@ struct Decision {
     /// to go on the end of the landing line. Absent when somebody named the
     /// Account, because then nothing was chosen (ADR perch-says-what-it-did).
     chosen: Option<String>,
+    /// The Accounts this Cycle wanted to read and could not, said in the words
+    /// the failure used. Empty is every figure it ranked on either current or
+    /// proven unable to change the answer, which is the ordinary case and says
+    /// nothing.
+    unread: Vec<String>,
 }
 
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
@@ -43,14 +57,25 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 
     let settled = crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
 
-    let Decision { incoming, chosen } =
-        decide(&registry, &settled, args.target.as_deref(), host.now(), out)?;
-    let outgoing = registry.active_account(&settled).cloned();
-
-    // Read once, for the whole command: both the question below and the Switch
-    // after it name the Claude Code they were reading in anything they refuse
-    // (ADR an-assumption-is-probed).
+    // Read once, for the whole command: the refusals below and the Switch after
+    // them name the Claude Code they were reading in anything they refuse
+    // (ADR an-assumption-is-probed). Ahead of the Cycle now, which refuses on it.
     let installed = Installed::probed(host)?;
+
+    let Decision {
+        incoming,
+        chosen,
+        unread,
+    } = decide(
+        host,
+        &mut perch,
+        &mut registry,
+        &settled,
+        &args,
+        &installed,
+        out,
+    )?;
+    let outgoing = registry.active_account(&settled).cloned();
 
     already_there(host, &installed, &registry, &settled, &incoming)?;
 
@@ -72,6 +97,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         &registry,
         &incoming,
         chosen.as_deref(),
+        &unread,
         &captured,
         host.now(),
     )
@@ -83,13 +109,15 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 /// which is what a Cycle needs — so the three forms differ only in how the
 /// Account is arrived at, and the Switch that follows is the same one.
 fn decide(
-    registry: &Registry,
+    host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
+    registry: &mut Registry,
     settled: &Settled,
-    target: Option<&str>,
-    now: chrono::DateTime<chrono::Utc>,
+    args: &SwitchArgs,
+    installed: &Installed,
     out: &mut dyn Write,
 ) -> Result<Decision> {
-    let scope = match target {
+    let scope = match args.target.as_deref() {
         Some(target) => {
             let found = target::resolve(registry, target)?;
             say::line(out, &found.matched())?;
@@ -101,6 +129,7 @@ fn decide(
                     return Ok(Decision {
                         incoming,
                         chosen: None,
+                        unread: Vec::new(),
                     });
                 }
             }
@@ -110,6 +139,9 @@ fn decide(
         None => cycle::scope_for(registry, leaving(registry, settled)?)?,
     };
 
+    let (figures, unread) =
+        read_what_it_cannot_rank(host, perch, registry, settled, args, installed, &scope)?;
+
     // Nothing is set aside: a Cycle somebody asked for is one they get, and the
     // margin and the cooldown are the Watcher's rules for acting unasked
     // (ADR a-watcher-knob-is-arithmetic).
@@ -118,12 +150,58 @@ fn decide(
         &scope,
         registry.active().whose(),
         &cycle::SetAside::nothing(),
-        now,
+        figures,
+        host.now(),
     )?;
     Ok(Decision {
         chosen: Some(choice.basis.in_the(&scope)),
         incoming: choice.account,
+        unread,
     })
+}
+
+/// Reads the Accounts this Cycle cannot rank without, and no others
+/// (ADR a-choice-reads-what-it-ranks). Two passes, because the second's question
+/// is the first's answer: the Account being left is what every rival is measured
+/// against, so it is read before there is anything to measure them against.
+fn read_what_it_cannot_rank(
+    host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
+    registry: &mut Registry,
+    settled: &Settled,
+    args: &SwitchArgs,
+    installed: &Installed,
+    scope: &Scope,
+) -> Result<(cycle::Figures, Vec<String>)> {
+    if args.no_refresh {
+        return Ok((cycle::Figures::Cached, Vec::new()));
+    }
+
+    let leaving = registry.active_account(settled).cloned();
+    // Before a single allowance is spent, because a Switch off a Profile a
+    // client is running against is refused whatever the figures say
+    // (ADR a-profile-is-live-by-evidence).
+    if let Some(leaving) = &leaving {
+        live::ask(host, &[live::Place::of_the_profile(host, leaving)?])
+            .idle_or(installed, &live::NOTHING_WAS_CHANGED)?;
+    }
+
+    let mut unread = Vec::new();
+    if let Some(leaving) = &leaving
+        && cycle::trusted(leaving, host.now()).is_none()
+    {
+        let about = [leaving.email().to_string()];
+        unread.extend(crate::commands::read_now(host, perch, registry, &about).notes());
+    }
+
+    let leaving = leaving.as_ref().map(Account::email);
+    let to_beat = leaving
+        .and_then(|leaving| registry.account(leaving))
+        .and_then(|account| cycle::trusted(account, host.now()));
+    let rivals = cycle::worth_reading(registry, scope, leaving, to_beat, host.now());
+    unread.extend(crate::commands::read_now(host, perch, registry, &rivals).notes());
+
+    Ok((cycle::Figures::Current, unread))
 }
 
 /// Refuses to make a Credential live that is known not to work.
@@ -178,6 +256,7 @@ fn report(
     registry: &Registry,
     incoming: &Account,
     chosen: Option<&str>,
+    unread: &[String],
     captured: &Captured,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
@@ -240,6 +319,13 @@ fn report(
                 incoming.email(),
             ),
         )?,
+    }
+
+    // An Account the Cycle wanted to read and could not, ranked on whatever was
+    // cached — the one thing that can make this Switch land somewhere worse than
+    // it left. Silence is every figure it ranked on current or proven harmless.
+    for note in unread {
+        say::line(out, note)?;
     }
 
     // Where it landed, and — where the Account was chosen rather than named —

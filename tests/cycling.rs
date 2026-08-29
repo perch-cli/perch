@@ -1,8 +1,9 @@
-//! Behavior: what bare `perch switch` picks, and the three ways it honestly
-//! picks nothing.
+//! Behavior: what bare `perch switch` picks, what it reads before picking, and
+//! the three ways it honestly picks nothing.
 //!
-//! Ranking reads the cache and nothing else (ADR a-figure-carries-its-age), so
-//! every fixture here seeds figures rather than arranging replies.
+//! A Cycle reads the Accounts it cannot rank without and no others
+//! (ADR a-choice-reads-what-it-ranks), so a fixture seeds figures and the tests
+//! about the ranking say `run_cycle_on_cache` to keep the network out of it.
 
 // Every path compared here comes out of the fake's effect log, spelled as the
 // code under test wrote it: filtering that log by prefix asks which effects
@@ -131,7 +132,8 @@ fn ranking_reads_each_accounts_worst_quota_window() {
 /// The specimen ADR perch-says-what-it-did is written around: three lines, each
 /// of them something that happened. Counted as well as read, because "and
 /// nothing else" is the claim, and a `contains` per line passes just as happily
-/// on a rationale sitting between them.
+/// on a rationale sitting between them. On the cache, so the subject is the
+/// landing line rather than what a Cycle reads before writing one.
 #[test]
 fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
     let host = three_accounts_in_one_group();
@@ -142,7 +144,7 @@ fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
         vec![window("5-hour", 12.0), window("7-day", 40.0)],
     );
 
-    let (result, printed) = run_cycle(&host);
+    let (result, printed) = run_cycle_on_cache(&host);
 
     result.expect("there is somewhere to go");
     let said: Vec<&str> = printed.lines().collect();
@@ -349,7 +351,7 @@ fn being_already_on_the_best_account_rewrites_no_credentials() {
     observed(&host, THIRD_EMAIL, vec![window("5-hour", 44.0)]);
     host.forget_effects();
 
-    let (result, _) = run_cycle(&host);
+    let (result, _) = run_cycle_on_cache(&host);
 
     let error = result.expect_err("there is nothing to do");
     assert_eq!(error.exit_code(), EXIT_NOTHING_TO_DO);
@@ -389,12 +391,12 @@ fn a_bare_switch_never_prompts() {
 /// The age is the whole of the promise Perch makes about a cached figure, and it
 /// is made where the figure is rather than in a paragraph underneath it.
 #[test]
-fn the_figures_a_choice_was_made_on_are_dated_and_never_read_from_the_network() {
+fn the_figures_a_choice_was_made_on_are_dated() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
 
-    let (result, printed) = run_cycle(&host);
+    let (result, printed) = run_cycle_on_cache(&host);
 
     result.expect("there is somewhere to go");
     assert!(
@@ -405,10 +407,6 @@ fn the_figures_a_choice_was_made_on_are_dated_and_never_read_from_the_network() 
         !printed.contains("--refresh"),
         "and a Switch that worked does not send anybody to another command: \
          {printed}"
-    );
-    assert!(
-        host.http_calls().is_empty(),
-        "ranking reads the cache and never the network"
     );
 }
 
@@ -741,5 +739,122 @@ fn a_cycle_never_chooses_an_account_whose_profile_another_shares() {
         EXIT_NOTHING_TO_DO,
         "with the sharers out, the Account being left is the only candidate \
          there is: {printed}"
+    );
+}
+
+/// The transcript this file's rule was written around, to the figure: an Account
+/// read a moment ago at nothing used, and a rival unseen for twenty-one hours
+/// whose five-hour window has certainly come back.
+#[test]
+fn a_rival_that_could_not_win_at_its_very_best_costs_no_read() {
+    let host = three_accounts_in_one_group();
+    observed_just_now(
+        &host,
+        EMAIL,
+        vec![resetting("5-hour", 0.0, host.now() + Duration::hours(4))],
+    );
+    for email in [SECOND_EMAIL, THIRD_EMAIL] {
+        observed(
+            &host,
+            email,
+            vec![
+                resetting("5-hour", 11.0, host.now() - Duration::hours(21)),
+                resetting("7-day", 9.0, host.now() + Duration::hours(100)),
+            ],
+        );
+    }
+
+    let (result, printed) = run_cycle(&host);
+
+    let refused = result.expect_err("the Account it is on is the best one");
+    assert_eq!(refused.exit_code(), EXIT_NOTHING_TO_DO);
+    assert!(
+        host.http_calls().is_empty(),
+        "91% at its very best loses to a trusted 100%, so nothing was worth \
+         asking Anthropic: {printed}"
+    );
+    assert!(
+        !refused.to_string().contains("--refresh"),
+        "and nothing is left for a refresh to change, so it is not offered: \
+         {refused}"
+    );
+}
+
+/// The same Scope with the Account being left low enough that a rival's Best
+/// Case clears it: the arithmetic settles nothing, so the reads happen.
+#[test]
+fn a_rival_that_could_win_at_its_best_is_read_before_it_is_ranked() {
+    let host = three_accounts_in_one_group();
+    observed_just_now(
+        &host,
+        EMAIL,
+        vec![resetting("5-hour", 80.0, host.now() + Duration::hours(4))],
+    );
+    for email in [SECOND_EMAIL, THIRD_EMAIL] {
+        observed(
+            &host,
+            email,
+            vec![resetting("7-day", 9.0, host.now() + Duration::hours(100))],
+        );
+    }
+
+    let (_, printed) = run_cycle(&host);
+
+    assert!(
+        !host.http_calls().is_empty(),
+        "91% at its best beats a trusted 20%, so the cache cannot settle it: \
+         {printed}"
+    );
+}
+
+/// Naming an Account decides nothing, so there is nothing to read for.
+#[test]
+fn switching_to_a_named_account_reads_no_figures() {
+    let host = three_accounts_in_one_group();
+    observed(&host, EMAIL, vec![window("5-hour", 90.0)]);
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 1.0)]);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("the Account was named");
+    assert!(
+        host.http_calls().is_empty(),
+        "an instruction is obeyed rather than checked: {printed}"
+    );
+}
+
+#[test]
+fn no_refresh_cycles_on_the_cache_and_says_where_to_get_figures() {
+    let host = three_accounts_in_one_group();
+    observed(&host, EMAIL, vec![window("5-hour", 90.0)]);
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 1.0)]);
+
+    let (result, printed) = run_cycle_on_cache(&host);
+
+    result.expect("there is somewhere to go");
+    assert!(host.http_calls().is_empty(), "{printed}");
+}
+
+/// The bargain this rule strikes against the Watcher's: a person is waiting, so
+/// the Cycle lands rather than holding, and the Account it could not read is
+/// named instead of quietly ranked.
+#[test]
+fn a_cycle_that_could_not_read_an_account_names_it_and_still_lands() {
+    let host = three_accounts_in_one_group();
+    observed(&host, EMAIL, vec![window("5-hour", 90.0)]);
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 1.0)]);
+    observed(&host, THIRD_EMAIL, vec![window("5-hour", 50.0)]);
+
+    let (result, printed) = run_cycle(&host);
+
+    result.expect("a read nobody answered does not cost the Switch");
+    assert!(
+        printed.contains(SECOND_EMAIL) && printed.contains("could not be reached"),
+        "the Account ranked on a figure from four minutes ago is named: \
+         {printed}"
+    );
+    assert!(
+        printed.contains("Switched to"),
+        "and it still landed somewhere: {printed}"
     );
 }

@@ -557,6 +557,9 @@ fn act(
         &scope,
         Some(outgoing.email()),
         &set_aside,
+        // The burst above read every candidate, so nothing this refusal could
+        // send somebody off to refresh is older than the decision.
+        cycle::Figures::Current,
         host.now(),
     ) {
         Ok(choice) => choice,

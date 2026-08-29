@@ -91,10 +91,11 @@ Every surface that shows it has room for "as of" alongside the number, and
 `--json` carries the observation time so scripts can decide for themselves
 whether it is fresh enough.
 
-Switching decisions inherit this. `perch switch` with no target ranks on cached
-figures, which can be minutes old — so a Cycle that lands on an Account fuller
-than the cache implied is expected behavior, reported plainly rather than treated
-as a bug.
+Switching decisions do not inherit this. Displaying a stale figure is honest
+because the age is printed beside it, and ranking on one throws that age away
+inside a comparison nobody can see — so a Cycle reads the Accounts it cannot rank
+without (ADR a-choice-reads-what-it-ranks). The rule here is about the fetch a
+display makes, and a display still never blocks on the network.
 
 `--refresh` has no failure exit code of its own. A script that needs to know
 whether the figures it is looking at are current reads `refresh` from `--json`

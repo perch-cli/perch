@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `perch switch` reads Utilization before it Cycles, instead of ranking on
+  whatever was cached. It ranked a rival nobody had read for twenty-one hours
+  against one read a minute ago and said it had compared them, which the age
+  beside a displayed figure would have made obvious and a comparison hides
+- it reads only what arithmetic cannot settle. Usage climbs within a Quota Window
+  and falls when the window comes back, so a window whose reset is still ahead
+  caps an Account at the Headroom it was last seen with — a candidate that loses
+  at its very best is not read. In the case above that is no reads at all
+- an Account that could not be read is named and its cached figure still ranked,
+  so a throttled endpoint does not cost you the Switch you asked for
+- `perch switch --no-refresh` Cycles on the cache, for somebody offline or
+  somebody who put the command where latency matters. Nothing is read for a named
+  Account either way, because naming one decides nothing
+- so `perch switch` is slower and can hang on a dead endpoint. No exit code moves
+  and no output shape changes
+
 ## [0.3.1](https://github.com/perch-cli/perch/compare/v0.3.0...v0.3.1) - 2026-08-29
 
 ### Fixed
