@@ -276,6 +276,19 @@ a temp file needs the process id, that id cannot come from `std::process::id`,
 and so the filesystem concern cannot be separated from the process concern even
 inside the port that owns both.
 
+**Moving the `platform()` branches behind the port.** `platform` is read at
+eighteen sites in ten modules, and a review reads that as the machine's business
+scattered: let the port walk PATH, pick the link kind, order the stores. Read
+one by one, none of those branches is machine mechanics. The Credential Store
+ordering, the keychain's `$USER` naming and the empty-store prose are Claude
+Code's per-platform choices, and an adapter that knew them would be the machine
+knowing Claude Code. `reconcile`'s link-kind selection and its hard-link
+replacement are one repair policy stated across two functions, honest only
+whole. `on_path` is logic over `env_var`, and sitting outside the adapter is
+what lets the fake ask the Windows question from any platform. Every mover buys
+the same trade: policy relocated to where only `conformance.rs` reaches it, out
+of the unit tests that hold it now.
+
 **"A new Credential Store backend becomes an adapter at `Keys` alone."** False,
 and worth recording because it is the sort of thing this reading appears to buy.
 An adapter must also answer `platform`, `read_file` and `note` —
