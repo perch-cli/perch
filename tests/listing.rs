@@ -677,7 +677,7 @@ fn list_ungrouped_shows_every_account_in_no_group() {
         "an Account in a Group is not one of the ungrouped:\n{printed}"
     );
     assert!(
-        printed.contains("only moves between these when you say it may"),
+        printed.contains("Cycling off"),
         "being ungrouped is not a Group, and Cycling says so:\n{printed}"
     );
     assert!(

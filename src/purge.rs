@@ -48,7 +48,7 @@ pub struct Unnamed {
 const NOTHING_WAS_PURGED: live::Consequence = live::Consequence {
     nothing_happened: "Nothing was purged.",
     quit_it: "A Purge deletes those directories, and what is in them belongs to \
-              whatever is holding them until it exits — quit it and run this \
+              whatever is holding them until it exits. Quit it and run this \
               again.",
 };
 
@@ -117,10 +117,8 @@ fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
                 return Err(
                     PerchError::file_read(parent.clone(), err).with_note(&format!(
                         "Nothing was purged. Until Perch can list {}, it cannot say \
-                     which Profiles are under it — and a Credential Store is \
-                     named after the directory it belongs to, so a Profile that \
-                     goes unlisted is a Credential that could be left behind \
-                     with nothing left to name it by.",
+                     which Profiles are under it, and one that goes unlisted is \
+                     a Credential left behind with nothing to name it by.",
                         parent.display(),
                     )),
                 );
@@ -160,11 +158,9 @@ pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -
     perch.renew();
     if !perch.still_held() {
         return Err(PerchError::Other(format!(
-            "Another `perch` changed the registry while this Purge was working, \
-             so this one is working from a copy that is out of date. Every \
-             Credential Perch held is already deleted; what is left is {}, and \
-             it has been left where it is rather than taken with whatever the \
-             other `perch` put in it.\n\
+            "Another `perch` changed the registry while this Purge was working. \
+             Every Credential Perch held is deleted; {} was left where it is, \
+             rather than taken with whatever the other `perch` put in it.\n\
              Run `perch holdings purge` again and it will finish.",
             home.display(),
         )));

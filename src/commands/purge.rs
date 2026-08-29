@@ -30,8 +30,8 @@ const THE_WORD: &str = "purge";
 /// What to do about a Purge that stopped over the Export it offered. Said in
 /// one place because both ways out of the offer end here, and the two are one
 /// instruction.
-const RUN_IT_AGAIN: &str = "Nothing was purged. Run `perch holdings purge` again \
-     — answering `n` to the offer purges without one.";
+const RUN_IT_AGAIN: &str = "Nothing was purged. Run `perch holdings purge` again; \
+     answering `n` to the offer purges without one.";
 
 /// What agreeing to a Purge costs, said in one place: both of the sentences the
 /// question can open with end on it, and two copies would sooner or later be
@@ -158,9 +158,9 @@ fn still_standing(error: PerchError, exported: Option<&std::path::Path>) -> Perc
 /// happened around it.
 fn the_export_is_at(path: &Path) -> String {
     format!(
-        "The Export is at {} — it holds a working Credential for every Account, \
-         so keep it somewhere you would keep those. `perch holdings purge` will \
-         not write over it.",
+        "The Export is at {}, and holds a working Credential for every Account. \
+         Keep it somewhere you would keep those. `perch holdings purge` will not \
+         write over it.",
         path.display(),
     )
 }
@@ -196,9 +196,8 @@ fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> (Regist
         Err(unreadable) => {
             host.note(&format!(
                 "{unreadable}\n\nSo the Accounts cannot be named. Every Profile \
-                 under {} is emptied and deleted regardless — that is what a \
-                 Purge does — and the count below is of Profiles rather than of \
-                 Accounts.",
+                 under {} is emptied and deleted regardless, and the count below \
+                 is of Profiles rather than of Accounts.",
                 home.display(),
             ));
             (Registry::default(), false)
@@ -252,7 +251,7 @@ fn what_will_go(
                 // the browser step, and is not a corrupt file to be agreed to.
                 match readable {
                     true => "",
-                    false => " — its registry says nothing this Perch can read",
+                    false => ", its registry saying nothing this Perch can read",
                 },
                 home.display(),
             ),
@@ -263,8 +262,8 @@ fn what_will_go(
         "Perch holds {}: {}.\n\
          A Purge deletes every one of their Profiles, every Credential Perch \
          holds for them, and {} itself. {NOTHING_UNDOES_IT}\n\
-         Claude Code goes on running as whatever it is logged in as — the live \
-         Credential is not Perch's to take away.{and_the_service}",
+         Claude Code goes on running as whatever it is logged in as.\
+         {and_the_service}",
         say::accounts(accounts.len()),
         accounts.join(", "),
         home.display(),
@@ -351,9 +350,7 @@ fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
     let Some(rest) = rest.strip_prefix(separator) else {
         return Err(PerchError::Invalid(format!(
             "`{typed}` begins with a `~` that does not name this machine's home, \
-             and Perch will not read it as the name of a file — written where it \
-             says, the Export would land in whatever directory you typed this \
-             in.\n\
+             and Perch will not read it as the name of a file.\n\
              Nothing was purged. Run `perch holdings purge` again and name a \
              path, such as `~/perch.age`."
         )));
@@ -436,7 +433,7 @@ fn report(
         say::line(
             out,
             &format!(
-                "{} of them had nothing in either Credential Store to delete — {}.",
+                "{} of them had nothing in either Credential Store to delete, and {}.",
                 say::accounts(purged.accounts - purged.credentials),
                 credentials::a_store_that_held_nothing(host),
             ),

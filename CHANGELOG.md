@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Perch states the verdict and the next command, and no longer shows its
+  working. `perch switch` from the Account that is already best answered in
+  forty-four words — the ranking clause the landing line had already been
+  forbidden, a figure with its age, and a refresh command nobody asked for — and
+  now answers in one line: `you@example.com is already the best Account in Group
+  \`work\`.` The rule behind that reaches everything Perch says. Refusals split
+  on whether the reader is left with anything to do: one that needs something
+  done keeps its prose and its next command, one that needs nothing done gets
+  the acting command's budget. *Nothing was changed* had reached nineteen
+  sentences and now appears only where something moved, or where somebody agreed
+  to a deletion and cannot see whether it began. A case analysis survives only
+  where its branches end differently for the reader, which is what tells the two
+  kinds of *it may be this one's, or that one's* apart. The Watcher's round lines
+  lose the preambles that restated their own status column, so a hold reads
+  `held  unread — <what is holding it>` rather than repeating *nothing current to
+  decide on, so nothing was decided* every two and a half minutes for the life of
+  the loop. Em dashes are gone from what Perch says, except between a value and
+  its qualifier in a labeled row, and `tests/dash.rs` holds that. One defect
+  turned up in the reading: a Watcher hold whose reason carried no full stop ran
+  it into the wait, printing `named no Quota Window Asking again in 2m30s`. No
+  exit code moves, no `--json` shape moves, and `--help` is untouched
+  (ADR perch-says-what-it-did)
+
 ## [0.3.1](https://github.com/perch-cli/perch/compare/v0.3.0...v0.3.1) - 2026-08-29
 
 ### Fixed

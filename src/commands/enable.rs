@@ -75,8 +75,8 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
 fn what_the_quarantine_still_denies(quarantine: Option<Quarantine>, target: &str) -> String {
     match quarantine {
         Some(why) => format!(
-            " It is Quarantined, though — {} — so nothing switches to it, \
-             Cycling or you. {}",
+            " It is Quarantined, though: {}. Nothing switches to it, Cycling \
+             or you. {}",
             why.because(),
             registry::how_to_repair(target),
         ),

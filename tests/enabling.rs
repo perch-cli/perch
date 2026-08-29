@@ -250,8 +250,10 @@ fn disabling_a_quarantined_account_promises_no_switch_that_would_not_work() {
     // will switch to is a refusal wearing an outcome's clothes, so it keeps its
     // explanation and its remedy (ADR perch-says-what-it-did).
     assert!(
-        printed.contains("It is Quarantined, though")
-            && printed.contains("so nothing switches to it, Cycling or you."),
+        printed.contains(
+            "It is Quarantined, though: Anthropic would not renew its \
+             Credential. Nothing switches to it, Cycling or you."
+        ),
         "the promise disabling makes about naming an Account is exactly the one \
          Quarantine breaks, so what is said here is the breakage: {printed}"
     );

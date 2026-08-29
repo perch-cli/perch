@@ -78,7 +78,7 @@ pub enum Refused {
 }
 
 const THROTTLED: &str = "Anthropic is rate-limiting reads of this Account's \
-                         Utilization — about 28-30 an hour, and the window \
+                         Utilization, at about 28-30 an hour. The window \
                          does not refill early";
 const REJECTED: &str = "Anthropic did not accept the Credential";
 const UNRECOGNIZED: &str = "Anthropic answered something Perch does not understand";
@@ -169,10 +169,9 @@ pub fn whose(
     email_in(&document).ok_or_else(|| {
         Refused::Unrecognized(
             "the profile endpoint named no email address, so whose an access \
-             token is cannot be established from Anthropic — the check that \
-             keeps one Account's figures from being filed under another's is \
-             falling back to what this machine holds until Perch is taught the \
-             new shape"
+             token is cannot be established from Anthropic. The check that keeps \
+             one Account's figures out of another's falls back to what this \
+             machine holds."
                 .to_string(),
         )
     })

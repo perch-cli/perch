@@ -135,8 +135,8 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Accou
     registry::refuse_a_quarantined_account(
         registry,
         incoming.email(),
-        "Nothing was changed — switching to it would make a Credential live \
-         that no longer works, and cost you the Account you are on.",
+        "Switching to it would make a Credential live that no longer works, and \
+         cost you the Account you are on.",
     )
 }
 
@@ -168,7 +168,7 @@ fn already_there(
     }
 
     Err(PerchError::NothingToDo(format!(
-        "{} is already the active Account. Nothing was changed.",
+        "{} is already the active Account.",
         registry.named_for_the_user(incoming.email())
     )))
 }
@@ -192,16 +192,15 @@ fn report(
             out,
             &format!(
                 "The live Credential names {live}, not {outgoing}, so it was not \
-                 Captured — {outgoing}'s own Credential is untouched. A login \
-                 made outside Perch is not kept: run `perch add` before \
-                 switching to keep one."
+                 Captured and {outgoing}'s own Credential is untouched. To keep \
+                 a login made outside Perch, `perch add` it before switching."
             ),
         )?,
         // The one case where switching back to that Account needs a login
         // rather than just working.
         Captured::NothingLive => say::line(
             out,
-            "There was no live Credential to Capture — Claude Code was logged out.",
+            "There was no live Credential to Capture: Claude Code was logged out.",
         )?,
         // The live store held something that was not a Credential. Said rather
         // than swallowed, and not refused either: bytes nothing can read are not
@@ -235,7 +234,7 @@ fn report(
             out,
             &format!(
                 "{}'s Credential was already the live one, so there was nothing \
-                 to Capture — this finished a Switch that had stopped before \
+                 to Capture. This finished a Switch that had stopped before \
                  naming it.",
                 incoming.email(),
             ),

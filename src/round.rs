@@ -58,8 +58,7 @@ pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
         cycle::MayAct::Undeclared { .. } => {
             return Err(PerchError::NotInterchangeable(format!(
                 "{} is in no Group, and nothing has said the Accounts in no Group \
-                 are interchangeable at all — so there is nowhere for the watcher \
-                 to Switch it to. Nothing is being watched.\n\
+                 are interchangeable at all, so nothing is being watched.\n\
                  `perch config set {UNGROUPED} interchangeable true` says they are, \
                  and `perch config set {UNGROUPED} watcher-may-act true` then says \
                  the watcher may act. Both are needed.\n\

@@ -566,8 +566,7 @@ pub fn set_aside(
     }
     crate::cycle::SetAside {
         because: format!(
-            "Nothing {} is worth Switching to yet — {}. Nothing \
-             was changed.",
+            "Nothing {} is worth Switching to yet: {}.",
             scope.within(),
             clauses.join("; "),
         ),
@@ -843,39 +842,40 @@ impl Round {
                 true => format!(" → {to}"),
                 false => format!(" → {to}{}", explaining(&unread.join(" "))),
             },
-            Outcome::Cooling { why } => explaining(why),
-            // The wait is said, as a hold says its own: this is the one decision
+            // The wait is said, as a hold says its own: these are the two decisions
             // the loop rests longer than an interval after.
             Outcome::Nowhere {
                 why,
                 looking_again: Some(millis),
-            } => explaining(&format!(
-                "nowhere to go: {why} Looking again in {}.",
-                how_long(*millis),
-            )),
-            Outcome::Nowhere {
+            } => explaining(&and_then(
                 why,
-                looking_again: None,
-            } => explaining(&format!("nowhere to go: {why}")),
+                &format!("Looking again in {}.", how_long(*millis)),
+            )),
             Outcome::Held {
                 why,
                 retrying_in: Some(millis),
-            } => explaining(&format!(
-                "nothing current to decide on, so nothing was decided: {why} \
-                 Asking again in {}.",
-                how_long(*millis),
-            )),
-            Outcome::Held {
+            } => explaining(&and_then(
                 why,
-                retrying_in: None,
-            } => explaining(&format!(
-                "nothing current to decide on, so nothing was decided: {why}"
+                &format!("Asking again in {}.", how_long(*millis)),
             )),
-            Outcome::Refused { why, .. } => {
-                explaining(&format!("the Switch was turned away: {why}"))
-            }
-            Outcome::HandedOver { why } | Outcome::Stopped { why } => explaining(why),
+            Outcome::Cooling { why }
+            | Outcome::Nowhere { why, .. }
+            | Outcome::Held { why, .. }
+            | Outcome::Refused { why, .. }
+            | Outcome::HandedOver { why }
+            | Outcome::Stopped { why } => explaining(why),
         }
+    }
+}
+
+/// A reason and the wait after it, as two sentences. A `why` reaching here from below
+/// does not always end in a stop, and where it does not the two run together as one
+/// clause naming a duration.
+fn and_then(why: &str, wait: &str) -> String {
+    let why = why.trim_end();
+    match why.ends_with(['.', '!', '?']) {
+        true => format!("{why} {wait}"),
+        false => format!("{why}. {wait}"),
     }
 }
 
@@ -1202,8 +1202,14 @@ mod tests {
             },
         )
         .line(now());
-        assert!(nowhere.contains("nowhere to go"), "{nowhere}");
-        assert!(nowhere.contains("is exhausted"), "{nowhere}");
+        assert!(
+            nowhere.contains("nowhere "),
+            "the column names it: {nowhere}"
+        );
+        assert!(
+            nowhere.contains("is exhausted"),
+            "and the tail says why: {nowhere}"
+        );
 
         let refused = round(
             at(86.0),
@@ -1214,7 +1220,10 @@ mod tests {
             },
         )
         .line(now());
-        assert!(refused.contains("turned away"), "{refused}");
+        assert!(
+            refused.contains("refused "),
+            "the column names it: {refused}"
+        );
         assert!(refused.contains("a client is running"), "{refused}");
     }
 
@@ -1353,8 +1362,11 @@ mod tests {
         )
         .line(now());
 
-        assert!(line.contains("nowhere to go"), "{line}");
-        assert!(line.contains("is exhausted"), "{line}");
+        assert!(line.contains("nowhere "), "the column names it: {line}");
+        assert!(
+            line.contains("is exhausted"),
+            "and the tail says why: {line}"
+        );
         assert!(!line.contains("Looking again"), "{line}");
         assert!(!line.contains("m00s"), "no interval at all: {line}");
     }

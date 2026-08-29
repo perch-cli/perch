@@ -57,13 +57,10 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
         }
     };
     Err(PerchError::Conflict(format!(
-        "Perch already holds {holding}, and an Import does not merge: the \
-         same Account on both sides one Rotation apart has no answer to which \
-         Credential is live, and an Alias can mean different Accounts on two \
-         machines.{declarations}\n\
+        "Perch already holds {holding}, and an Import does not merge onto a \
+         machine that holds anything.{declarations}\n\
          Nothing was imported and the file was not opened. `perch holdings \
-         purge` gives the machine back and is what makes room — it offers to \
-         write an Export first."
+         purge` makes room, and offers to write an Export first."
     )))
 }
 
@@ -154,9 +151,9 @@ impl Placed {
             };
             host.note(&format!(
                 "{} was already on this machine, so it was left where it is \
-                 rather than removed with the Profiles this Import made — but \
-                 {taken_back} this Import wrote into it has been taken back out. \
-                 The Export still holds it.",
+                 rather than removed with the Profiles this Import made. \
+                 {taken_back} this Import wrote into it has been taken back out, \
+                 and the Export still holds it.",
                 touched.store.config_dir.display(),
             ));
         }
@@ -178,7 +175,7 @@ fn every_map(export: &Export) -> [(&'static str, &BTreeMap<String, String>); 2] 
 const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
     nothing_happened: "Nothing was imported.",
     quit_it: "That Credential would be replaced underneath the session holding \
-              it — close it and run this again.",
+              it. Close it and run this again.",
 };
 
 /// Puts every Credential the Export holds into the Profile of the Account it
@@ -250,7 +247,7 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
         if holdings::slug(account.email()).is_empty() {
             return Err(PerchError::Invalid(format!(
                 "The Export holds an Account recorded as `{}`, which has no \
-                 character a Profile directory can be named after — so Perch \
+                 character a Profile directory can be named after, so Perch \
                  cannot say where its Credential would be kept.\n\
                  Nothing was imported. That Account has to be removed on a \
                  machine that still holds it, and the Export taken again.",
@@ -269,9 +266,8 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
             return Err(PerchError::Conflict(format!(
                 "{} and {} share the Profile they would be kept in, so importing \
                  both would mean each one's Credential replacing the other's.\n\
-                 Nothing was imported. This Export cannot be restored whole onto \
-                 this machine — one of the two has to be removed on a machine \
-                 that still holds it, and the Export taken again.",
+                 Nothing was imported. One of the two has to be removed on a \
+                 machine that still holds it, and the Export taken again.",
                 clash.email(),
                 account.email(),
             )));

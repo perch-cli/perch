@@ -166,8 +166,7 @@ impl Attempt {
             )),
             Outcome::JustRead => Some(format!(
                 "{}: a Watcher is reading this Account every {}, and read it \
-                 less than that ago. The figure it read is what you see, and \
-                 the allowance is left to the Watcher to decide on.",
+                 less than that ago. The figure it read is what you see.",
                 self.named,
                 crate::watch::how_often(),
             )),
@@ -522,11 +521,10 @@ fn only_off_a_credential_that_is_theirs(
     if asked.arriving_in_a_landing {
         return Outcome::Failed {
             why: format!(
-                "the Credential in this Account's own Profile could not be used \
-                 — {}{how} — but a Switch onto it is in flight and was never \
-                 recorded, so the working copy may be the live one. Nothing was \
-                 recorded against this Account. `perch switch {}` settles that \
-                 and says which it was.",
+                "the Credential in this Account's own Profile could not be used: \
+                 {}{how}. A Switch onto it is in flight and was never recorded, \
+                 so the working copy may be the live one, and `perch switch {}` \
+                 settles which.",
                 why.because(),
                 account.email(),
             ),
@@ -540,9 +538,9 @@ fn only_off_a_credential_that_is_theirs(
 
     Outcome::Failed {
         why: format!(
-            "the live Credential could not be used — {}{how} — but {} does not \
-             name {}, so it may belong to a login made outside Perch and nothing \
-             was recorded against this Account. `perch switch {}` puts its own \
+            "the live Credential could not be used: {}{how}. {} does not name \
+             {}, so it may belong to a login made outside Perch, and nothing was \
+             recorded against this Account. `perch switch {}` puts its own \
              Credential back in place.",
             why.because(),
             asked.store.identity_file.display(),
@@ -820,11 +818,9 @@ fn renew_under_the_lock(
     if let Some(sharer) = &asked.shares_its_profile_with {
         return Err(Outcome::Failed {
             why: format!(
-                "{} and it shares one Profile — and so one Credential Store — \
-                 with {sharer}, because their addresses differ only in characters \
-                 a Profile directory does not keep apart. Renewing may Rotate, \
-                 which would retire a refresh token that is not this Account's to \
-                 spend. The cached figure is what you see.",
+                "{} and it shares one Credential Store with {sharer}, so Renewing \
+                 may retire a refresh token that is not this Account's to spend. \
+                 The cached figure is what you see.",
                 because.clause(),
             ),
             spent: because.spent(),
@@ -925,10 +921,7 @@ fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -
                     "Anthropic renewed this Account without Rotating its refresh \
                  token, so nothing was retired and this is not a Quarantine: \
                  {error}\n\
-                 A store that refused the write still holds what it held \
-                 before, so this is worth trying again. One that took the write \
-                 and read it back wrong is said above, and there a `perch \
-                 relogin` is the way back."
+                 Worth trying again."
                 ),
             }
         }
@@ -981,12 +974,11 @@ fn confirm(
             }
             Err(Turned::Settled(Outcome::Failed {
                 why: format!(
-                    "Anthropic no longer says whose an access token is, so whose \
-                     the live Credential is rests on what this machine holds — \
-                     and {} does not name {}, so it may belong to a login made \
-                     outside Perch and no figure was recorded against it. \
-                     `perch switch {}` puts this Account's own Credential back \
-                     in place.",
+                    "Anthropic no longer says whose an access token is, and {} \
+                     does not name {}, so the live Credential may belong to a \
+                     login made outside Perch and no figure was recorded against \
+                     it. `perch switch {}` puts this Account's own Credential \
+                     back in place.",
                     asked.store.identity_file.display(),
                     account.email(),
                     account.email(),

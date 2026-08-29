@@ -1034,7 +1034,7 @@ fn an_import_whose_sessions_directory_will_not_be_read_writes_nothing_and_says_s
         "nothing was established, which is not a Live Profile: {error}"
     );
     assert!(
-        error.to_string().contains("make that directory readable"),
+        error.to_string().contains("Make that directory readable"),
         "{error}"
     );
     assert!(

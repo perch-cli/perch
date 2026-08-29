@@ -138,15 +138,14 @@ fn supersede_or_fail(
         Ok(None) => None,
         Err(_) => Some(format!(
             "The Credential was written to {}, but {} would not say whether it \
-             still holds the one it replaces — and that is the store read first. \
-             A lock is for a spell: whatever is behind this one wins every read \
-             after it opens. Open it and run this again.",
+             still holds the one it replaces, and that is the store read first. \
+             Open it and run this again.",
             written.describe(),
             preferred.describe(),
         )),
         Ok(Some(_)) => Some(format!(
             "The Credential was written to {}, but the copy it replaces is still \
-             in {} — which is the store read first, so it is the one Claude Code \
+             in {}, which is the store read first, so it is the one Claude Code \
              would go on using. Empty it and run this again.",
             written.describe(),
             preferred.describe(),

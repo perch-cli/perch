@@ -533,7 +533,7 @@ impl Unit {
 
         format!(
             "[Unit]\n\
-             Description=Perch — Cycles the Claude account you are on when it runs low\n\
+             Description=Perch cycles the Claude account you are on when it runs low\n\
              Documentation=https://github.com/perch-cli/perch\n\
              StartLimitIntervalSec={window}\n\
              StartLimitBurst={tries}\n\
@@ -788,9 +788,8 @@ impl Standing {
         }
         match (&self.binary, self.binary_is_there) {
             (Some(binary), Some(false)) => said.push(format!(
-                "It names {}, which is not there any more — an Upgrade moves \
-                 the binary. `perch watcher install` writes the unit again \
-                 against the one that is.",
+                "It names {}, which is not there any more. `perch watcher \
+                 install` writes the unit again against the binary that is.",
                 binary.display(),
             )),
             (Some(binary), _) => said.push(format!("It runs {}.", binary.display())),

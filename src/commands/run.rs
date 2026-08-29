@@ -233,7 +233,7 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> 
     registry::refuse_a_quarantined_account(
         registry,
         email,
-        "Nothing was launched — the client would open on an Account it cannot \
+        "Nothing was launched. The client would open on an Account it cannot \
          authenticate as and ask you to log in.",
     )
 }
