@@ -31,50 +31,48 @@ use crate::say;
 /// Whose the allowance a refresh spends is (ADR a-watcher-knob-is-arithmetic).
 ///
 /// Named at the call rather than worked out here: the Watcher holds the watch
-/// itself, and a lock cannot say whether the caller is its holder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Spending {
+/// itself, and a lock cannot say whether the caller is its holder. The ask rides
+/// in the arm that can lose the watch, so the role and the ask cannot come apart.
+pub enum Spending<'a> {
     /// A Watcher's own round. It is the one pacing this Account, so nothing
-    /// stands between it and the read.
-    ItsOwn,
+    /// stands between it and the read — and the watch it holds is asked between
+    /// turns, because a burst can outlast it.
+    ItsOwn { still_ours: StillOurs<'a> },
     /// A command somebody typed. Where a Watcher is running, the active
     /// Account's figure is already being kept at the Watcher's interval, and a
-    /// second reader spends what the Watcher decides with.
+    /// second reader spends what the Watcher decides with. It holds the registry
+    /// lock and nothing more, so there is nothing to lose part way.
     BesideTheWatcher,
 }
 
-impl Spending {
-    /// Whether this read is one the Watcher has already made: it holds the
-    /// watch, this is the Account it Refreshes, and what it last read is younger
-    /// than the interval it reads at.
-    fn already_read(self, host: &dyn Host, registry: &Registry, email: &str) -> bool {
-        if self != Spending::BesideTheWatcher {
-            return false;
-        }
-        if !registry
-            .active()
-            .whose()
-            .is_some_and(|on| name::same_name(on, email))
-        {
-            return false;
-        }
-        let Some(observed) = registry
-            .account(email)
-            .and_then(Account::observed_utilization)
-        else {
-            return false;
-        };
-        let age = (host.now() - observed.observed_at).num_milliseconds();
-        if !(0..crate::watch::REFRESH_INTERVAL_MILLIS as i64).contains(&age) {
-            return false;
-        }
-        // A lock that cannot be asked about is no Watcher: refusing a read over a
-        // question Perch could not answer is the worse of the two mistakes.
-        holdings::watcher_lock_spec(host)
-            .ok()
-            .and_then(|watch| lock::is_held(host, &watch))
-            .unwrap_or(false)
+/// Whether this read is one the Watcher has already made: it holds the
+/// watch, this is the Account it Refreshes, and what it last read is younger
+/// than the interval it reads at. Asked only beside a Watcher: a Watcher's
+/// own read is never one it has already made.
+fn already_read(host: &dyn Host, registry: &Registry, email: &str) -> bool {
+    if !registry
+        .active()
+        .whose()
+        .is_some_and(|on| name::same_name(on, email))
+    {
+        return false;
     }
+    let Some(observed) = registry
+        .account(email)
+        .and_then(Account::observed_utilization)
+    else {
+        return false;
+    };
+    let age = (host.now() - observed.observed_at).num_milliseconds();
+    if !(0..crate::watch::REFRESH_INTERVAL_MILLIS as i64).contains(&age) {
+        return false;
+    }
+    // A lock that cannot be asked about is no Watcher: refusing a read over a
+    // question Perch could not answer is the worse of the two mistakes.
+    holdings::watcher_lock_spec(host)
+        .ok()
+        .and_then(|watch| lock::is_held(host, &watch))
+        .unwrap_or(false)
 }
 
 /// How one Account's turn ended.
@@ -287,11 +285,18 @@ pub fn refresh(
     registry: &mut Registry,
     emails: &[String],
     installed: &Result<Installed>,
-    spending: Spending,
-    still_ours: StillOurs<'_>,
+    spending: Spending<'_>,
 ) -> Report {
     let mut report = Report::asked_for();
     let mut anything_to_keep = false;
+
+    // The role, split back into its two halves: the internals below know only
+    // "may I keep going", which is [`StillOurs`]'s whole vocabulary.
+    let mut nothing_to_lose = || Ok(());
+    let (beside_the_watcher, still_ours): (bool, StillOurs<'_>) = match spending {
+        Spending::ItsOwn { still_ours } => (false, still_ours),
+        Spending::BesideTheWatcher => (true, &mut nothing_to_lose),
+    };
 
     for email in emails {
         // A round trip to Anthropic each, so the hold is renewed between them and again
@@ -309,7 +314,7 @@ pub fn refresh(
         // Before the Account is read out, and before the hold below is spent: a read
         // the Watcher has already made is one this command declines to make again,
         // rather than one it makes and throws away.
-        if spending.already_read(host, registry, email) {
+        if beside_the_watcher && already_read(host, registry, email) {
             report.attempts.push(Attempt {
                 named: registry.named_for_the_user(email),
                 email: email.clone(),
@@ -1124,10 +1129,11 @@ mod tests {
             &mut registry,
             &emails,
             &installed,
-            Spending::ItsOwn,
-            &mut || {
-                renewals += 1;
-                Ok(())
+            Spending::ItsOwn {
+                still_ours: &mut || {
+                    renewals += 1;
+                    Ok(())
+                },
             },
         );
 
@@ -1168,13 +1174,14 @@ mod tests {
             &[email.to_string()],
             &installed,
             // The turn is entered, and the stop lands inside it.
-            Spending::ItsOwn,
-            &mut || {
-                asked += 1;
-                match asked {
-                    1 => Ok(()),
-                    _ => Err(Lost::Stopped),
-                }
+            Spending::ItsOwn {
+                still_ours: &mut || {
+                    asked += 1;
+                    match asked {
+                        1 => Ok(()),
+                        _ => Err(Lost::Stopped),
+                    }
+                },
             },
         );
 
@@ -1220,13 +1227,14 @@ mod tests {
             &mut registry,
             &emails,
             &installed,
-            Spending::ItsOwn,
-            &mut || {
-                asked += 1;
-                match asked {
-                    1 => Ok(()),
-                    _ => Err(Lost::Stopped),
-                }
+            Spending::ItsOwn {
+                still_ours: &mut || {
+                    asked += 1;
+                    match asked {
+                        1 => Ok(()),
+                        _ => Err(Lost::Stopped),
+                    }
+                },
             },
         );
 
@@ -1287,13 +1295,14 @@ mod tests {
                 &mut registry,
                 &emails,
                 &installed,
-                Spending::ItsOwn,
-                &mut || {
-                    asked += 1;
-                    match asked {
-                        1 => Ok(()),
-                        _ => Err(stopped_by),
-                    }
+                Spending::ItsOwn {
+                    still_ours: &mut || {
+                        asked += 1;
+                        match asked {
+                            1 => Ok(()),
+                            _ => Err(stopped_by),
+                        }
+                    },
                 },
             );
 

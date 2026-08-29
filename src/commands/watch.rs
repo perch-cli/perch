@@ -384,8 +384,9 @@ fn one_round<'h>(
         &mut registry,
         std::slice::from_ref(&email),
         &installed,
-        observe::Spending::ItsOwn,
-        &mut || watching_alone.goes_on(),
+        observe::Spending::ItsOwn {
+            still_ours: &mut || watching_alone.goes_on(),
+        },
     );
     // Worth saying and not worth holding a decision over: the figure this round decides
     // on is the one that was just read, and the next round reads its own.
