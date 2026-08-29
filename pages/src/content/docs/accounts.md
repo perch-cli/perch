@@ -166,7 +166,7 @@ $ perch relogin overflow
 Logging in again to repair overflow@example.com. someone@example.com stays active and its session is untouched.
 Quit Claude Code when the login is done to come back here.
 
-Repaired overflow@example.com (as `overflow`) — it is no longer Quarantined.
+Repaired overflow@example.com (as `overflow`). It is no longer Quarantined.
 ```
 
 The Account keeps its Alias, its Group, whether Cycling may choose it and its
@@ -183,8 +183,8 @@ because a working Credential that Cycling still passes over is a second thing to
 undo:
 
 ```
-Repaired overflow@example.com (as `overflow`) — it is no longer Quarantined.
-Cycling still will not choose it — it is disabled, which a repair does not undo.
+Repaired overflow@example.com (as `overflow`). It is no longer Quarantined.
+Cycling still will not choose it: it is disabled, which a repair does not undo.
 ```
 
 Relogging in the Account you are **on** also makes its fresh Credential the live
@@ -218,7 +218,7 @@ lands on it first, and asks before any of it happens.
 ```
 $ perch remove work
 `work` is an Alias for someone@example.com.
-someone@example.com (as `work`) is the active Account. overflow@example.com (as `overflow`) will be made active first, so nothing is left running as an Account Perch has forgotten — `perch switch <target>` first if you would rather land somewhere else. The login being given up goes with it: holding it again would mean `perch add`.
+someone@example.com (as `work`) is the active Account. overflow@example.com (as `overflow`) will be made active first, so nothing is left running as an Account Perch has forgotten. `perch switch <target>` first if you would rather land somewhere else. The login being given up goes with it, and holding it again would mean `perch add`.
 Remove someone@example.com (as `work`)? [y/N]: y
 overflow@example.com (as `overflow`) is the active Account now.
 Removed someone@example.com (as `work`).

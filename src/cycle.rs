@@ -38,7 +38,7 @@ pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
         None if registry.ungrouped.interchangeable => Ok(Scope::Ungrouped),
         None => Err(PerchError::NotInterchangeable(format!(
             "{} is in no Group, so nothing has declared which Accounts it is \
-             interchangeable with. Nothing was changed.\n\
+             interchangeable with.\n\
              Either put it in a Group with `perch group move {} <group>`, or \
              declare that every ungrouped Account is interchangeable with \
              `perch config set ungrouped interchangeable true`.",
@@ -116,56 +116,6 @@ impl Headroom<'_> {
 
     fn is_exhausted(&self) -> bool {
         matches!(self, Headroom::Exhausted { .. })
-    }
-
-    /// The figure as a clause, for the two sentences that quote it: why an
-    /// Account won, and why staying put is already the best you can do.
-    ///
-    /// Both make the same promise about the same number, so they make it in the
-    /// same words, and the clause is the one the Strategy judged on.
-    fn as_a_clause(&self, strategy: Strategy, now: DateTime<Utc>) -> Option<String> {
-        let Headroom::Room {
-            percent,
-            fullest_window,
-            resets_at,
-            observed_at,
-        } = self
-        else {
-            return None;
-        };
-        let age = utilization::age_phrase(*observed_at, now);
-        let percent = utilization::percentage(*percent);
-        // The same predicate the ranking asked, so the number quoted as the
-        // reason is the number that decided it.
-        Some(match (strategy, self.ranked_on_reset(strategy, now)) {
-            (Strategy::MostHeadroom, _) => format!(
-                "{percent}% headroom, which is true of every one of its Quota \
-                 Windows — {fullest_window} is its fullest, as of {age}"
-            ),
-            (Strategy::SoonestReset, Some(at)) => format!(
-                "{percent}% headroom, and the window that leaves it least — \
-                 {fullest_window} — resets at {}, as of {age}",
-                utilization::reset_phrase(at, now),
-            ),
-            // Ranked on its room, because that is what there was to rank it
-            // on. An elapsed reset is said as stale rather than as absent.
-            (Strategy::SoonestReset, None) => match resets_at {
-                // The clock time alone: `reset_phrase` renders a time already
-                // gone as "any moment now", which is a contradiction two words
-                // before "which has passed".
-                Some(at) => format!(
-                    "{percent}% headroom, and the window that leaves it least — \
-                     {fullest_window} — was due back at {}, which has passed, so \
-                     there was no reset still to come to rank it on, as of {age}",
-                    utilization::clock_time(*at),
-                ),
-                None => format!(
-                    "{percent}% headroom, which is true of every one of its Quota \
-                     Windows — {fullest_window} is its fullest — and no cached \
-                     figure says when that one comes back, as of {age}"
-                ),
-            },
-        })
     }
 }
 
@@ -249,18 +199,6 @@ pub fn worth_reading(
         .filter(|account| !on_room || to_beat.is_none_or(|floor| best_case(account, now) > floor))
         .map(|account| account.email().to_string())
         .collect()
-}
-
-/// Whether a `--refresh` still has anything to tell somebody a Cycle refused.
-///
-/// The caller's own fact, like [`SetAside`]: only it knows whether the figures
-/// this ranking rested on were read at the moment the decision was taken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Figures {
-    /// Ranked on cache, so a reading could still change the answer.
-    Cached,
-    /// Read at the moment of the decision, or proven unable to change it.
-    Current,
 }
 
 /// The Quota Window that decides how full an Account is: its fullest, or `None`
@@ -408,13 +346,12 @@ pub struct Choice {
 ///
 /// `leaving` is ranked like any other Account and never chosen: landing where
 /// you already are rewrites Credentials for nothing. `set_aside` is the caller's
-/// own reasons for not landing ([`SetAside`]), `figures` what it read first.
+/// own reasons for not landing somewhere, obeyed without opinion ([`SetAside`]).
 pub fn choose(
     registry: &Registry,
     scope: &Scope,
     leaving: Option<&str>,
     set_aside: &SetAside,
-    figures: Figures,
     now: DateTime<Utc>,
 ) -> Result<Choice> {
     let strategy = strategy(registry, scope);
@@ -494,7 +431,7 @@ pub fn choose(
         && worth_going.is_empty()
     {
         return Err(PerchError::NothingToDo(already_the_best(
-            registry, scope, here, strategy, figures, now,
+            registry, scope, here, strategy, now,
         )));
     }
 
@@ -504,8 +441,8 @@ pub fn choose(
     let Some(best) = worth_going.first() else {
         let alone = here.expect("something unexhausted is here or elsewhere");
         return Err(PerchError::NothingToDo(format!(
-            "{} is the only Account in {} that is not exhausted, and Perch has \
-             never observed how full it is. Nothing was changed — {}",
+            "{} is the only Account in {} that is not exhausted, and nothing \
+             has been observed of it. {}",
             registry.named_for_the_user(alone.account.email()),
             scope.place(),
             how_to_get_figures(scope),
@@ -766,8 +703,7 @@ fn nobody_is_a_candidate(
     accounts: &[&Account],
 ) -> String {
     format!(
-        "No Account in {} is a Cycle candidate ({}), so there is nowhere to \
-         Switch to. Nothing was changed.",
+        "No Account in {} is a Cycle candidate ({}).",
         scope.place(),
         out_of_the_running(sharers, accounts),
     )
@@ -821,12 +757,12 @@ fn everyone_is_exhausted(
         // somebody off to wait for a reset that has already happened.
         None if elapsed > 0 => format!(
             "Every reset any of them cached has already passed, so they may be \
-             free now — {}",
+             free now. {}",
             how_to_get_figures(scope)
         ),
         // None of them carried a reset. Saying nothing would read as "never".
         None => format!(
-            "No cached figure says when any of them frees up — {}",
+            "No cached figure says when any of them frees up. {}",
             how_to_get_figures(scope)
         ),
     };
@@ -843,7 +779,7 @@ fn everyone_is_exhausted(
         };
         waiting.push_str(&format!(
             " {unsaid} of them {say} nothing about when they come back, so the \
-             wait could be shorter than that — {}",
+             wait may be shorter. {}",
             how_to_get_figures(scope)
         ));
     }
@@ -861,8 +797,7 @@ fn everyone_is_exhausted(
     };
 
     format!(
-        "Every Account in {}{every} is exhausted, so there is nowhere useful \
-         to Switch. Nothing was changed.{also}\n{waiting}",
+        "Every Account in {}{every} is exhausted.{also}\n{waiting}",
         scope.place(),
     )
 }
@@ -874,32 +809,18 @@ fn already_the_best(
     scope: &Scope,
     here: &Ranked,
     strategy: Strategy,
-    figures: Figures,
     now: DateTime<Utc>,
 ) -> String {
     let named = registry.named_for_the_user(here.account.email());
-    // The one refusal a Cycle reaches with every figure it ranked on already
-    // current, so it is the one that may not send somebody off to read them.
-    let how_to_get_figures = match figures {
-        Figures::Cached => format!(" — {}", how_to_get_figures(scope)),
-        Figures::Current => ".".to_string(),
-    };
     let scope = scope.place();
     // Said of the comparison Perch actually made: under `soonest-reset` it has
     // only compared Accounts whose figures carry a reset time.
-    let standing = if here.headroom.ranked_on_reset(strategy, now).is_some() {
-        format!(
-            "{named} already comes back soonest of the Accounts in {scope} whose figures say when they do"
-        )
-    } else {
-        format!("{named} is already the best Account in {scope}")
-    };
-    format!(
-        "{standing}, with {}. Nothing was changed{how_to_get_figures}",
-        here.headroom
-            .as_a_clause(strategy, now)
-            .expect("staying put is only said of a figure that says to"),
-    )
+    match here.headroom.ranked_on_reset(strategy, now).is_some() {
+        true => format!(
+            "{named} already comes back soonest of the Accounts in {scope} with a known reset."
+        ),
+        false => format!("{named} is already the best Account in {scope}."),
+    }
 }
 
 #[cfg(test)]
@@ -1319,7 +1240,7 @@ pub(crate) mod tests {
         let said = refused.to_string();
         assert!(said.contains("here@example.com"), "which Account: {said}");
         assert!(
-            said.contains("never observed how full it is"),
+            said.contains("nothing has been observed of it"),
             "and why staying put is not a comparison Perch made: {said}"
         );
         assert!(
@@ -1436,7 +1357,6 @@ pub(crate) mod tests {
             &Scope::Group("work".to_string()),
             registry.active().whose(),
             set_aside,
-            Figures::Cached,
             now(),
         )
     }
@@ -1769,44 +1689,14 @@ pub(crate) mod tests {
             Basis::MostRoom,
             "nothing may claim a reset it has not got",
         );
-
-        // A Switch says the basis and leaves the figures to the lines under it,
-        // so the clause is quoted only by the refusal that says staying put is
-        // best — asserted here, over the same two figures.
-        let staying = preferring(
-            holding(vec![
-                account("emptier@example.com", vec![resetting("5-hour", 20.0, -1)]),
-                account("fuller@example.com", vec![resetting("5-hour", 80.0, -9)]),
-            ]),
-            Strategy::SoonestReset,
-        );
-        let refusal = cycle(&staying)
-            .expect_err("there is nowhere emptier to go")
-            .to_string();
-
-        assert!(
-            !refusal.contains("resets at"),
-            "the clause quoting the figure may not claim a reset either: {refusal}"
-        );
-        assert!(
-            refusal.contains("has passed"),
-            "it says the reading is stale rather than absent: {refusal}"
-        );
-        // The parenthetical `reset_phrase` puts on a time already gone, which
-        // the assertion above walks straight past.
-        assert!(
-            !refusal.contains("any moment now"),
-            "a window that came back is not one coming back: {refusal}"
-        );
-        // Nor may the sentence after the clause call the figure absent.
-        assert!(
-            !refusal.contains("No cached figure says when any"),
-            "the cache said exactly when it came back: {refusal}"
-        );
     }
 
+    /// A figure Perch quotes carries its age and a reset it quotes has to be
+    /// one still to come, so the verdict that needs nothing done quotes
+    /// neither. What a reset already elapsed renders as is asserted where one
+    /// still reaches a sentence, in `tests/cycling.rs`.
     #[test]
-    fn staying_put_on_an_elapsed_reset_does_not_quote_it_as_still_to_come() {
+    fn staying_put_names_where_you_are_and_quotes_no_figure() {
         let registry = preferring(
             holding(vec![
                 // Active, the most room, and a reset that came back an hour ago.
@@ -1820,15 +1710,15 @@ pub(crate) mod tests {
             .expect_err("there is nowhere better to go")
             .to_string();
 
-        assert!(
-            !said.contains("resets at"),
-            "an elapsed reset is not a reset still to come: {said}"
-        );
-        assert!(said.contains("has passed"), "{said}");
-        assert!(
-            !said.contains("any moment now"),
-            "and the bracket after the time may not say it is still to come: {said}"
-        );
+        assert!(said.contains("here@example.com"), "which Account: {said}");
+        assert!(said.contains("Group `work`"), "and against what: {said}");
+        for quoted in ["%", "as of", "resets at", "has passed", "any moment now"] {
+            assert!(
+                !said.contains(quoted),
+                "a verdict with nothing to do quotes no figure, and this says \
+                 `{quoted}`: {said}"
+            );
+        }
     }
 
     #[test]
@@ -2217,7 +2107,6 @@ mod properties {
             &Scope::Group("work".to_string()),
             leaving,
             &SetAside::nothing(),
-            Figures::Cached,
             now(),
         )
         .ok()

@@ -343,17 +343,15 @@ fn opening(host: &dyn Host) -> Result<String> {
     });
     let Some((named, watching)) = watching else {
         return Ok(
-            "Started. Nothing is being decided yet — the next line says what is \
-             holding it, and the watcher takes over the moment that changes. \
-             Ctrl-C stops."
+            "Started. Nothing is being decided yet; the next line says what is \
+             holding it. Ctrl-C stops."
                 .to_string(),
         );
     };
     Ok(format!(
-        "Watching {} {}. Reading how full it is every {}, and Switching \
-         within that Scope when its fullest Quota Window reaches {}% — to an \
-         Account at {}% or under, and never twice inside {} minutes. Ctrl-C \
-         stops.",
+        "Watching {} {}. Reading how full it is every {}, and Switching within \
+         that Scope when its fullest Quota Window reaches {}%, to an Account at \
+         {}% or under, and never twice inside {} minutes. Ctrl-C stops.",
         named,
         watching.scope.within(),
         watch::how_often(),
@@ -557,9 +555,6 @@ fn act(
         &scope,
         Some(outgoing.email()),
         &set_aside,
-        // The burst above read every candidate, so nothing this refusal could
-        // send somebody off to refresh is older than the decision.
-        cycle::Figures::Current,
         host.now(),
     ) {
         Ok(choice) => choice,

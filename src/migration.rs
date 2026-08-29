@@ -474,7 +474,7 @@ pub fn what_was_renamed_said(renamed: &[Renamed]) -> Option<String> {
         )
         .collect();
     Some(format!(
-        "This build refuses names it once accepted, so {} — nothing else about \
+        "This build refuses names it once accepted, so {}. Nothing else about \
          {} changed.",
         said.join(", "),
         match renamed.len() {

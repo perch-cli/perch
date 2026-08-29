@@ -1546,8 +1546,12 @@ fn a_200_carrying_no_quota_window_holds_the_round_rather_than_reading_as_empty()
         "it says what was wrong with the answer: {held}"
     );
     assert!(
-        held.contains("nothing current to decide on"),
-        "and that this is why nothing was decided: {held}"
+        !held.contains("nothing was decided"),
+        "the column already reads `held`, so the tail does not say it again: {held}"
+    );
+    assert!(
+        held.contains("Quota Window. Asking again"),
+        "and the reason closes before the wait rather than running into it: {held}"
     );
     assert!(
         held.contains("Asking again in"),
@@ -1601,8 +1605,8 @@ fn a_check_another_perch_holds_the_registry_against_says_so_where_cron_is_readin
         "the decision line is on standard output: {printed}"
     );
     assert!(
-        printed.contains("nothing was decided"),
-        "and says what came of the round: {printed}"
+        !printed.contains("nothing was decided"),
+        "the column already reads `held`, so the tail does not say it again: {printed}"
     );
     assert!(
         !printed.contains("Asking again in"),

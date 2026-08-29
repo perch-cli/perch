@@ -166,10 +166,10 @@ fn narrowed(registry: &Registry, name: &str) -> Result<Scope> {
     // then refuses. A listing has the happier answer.
     if name::means_global(name) {
         return Err(PerchError::NotFound(format!(
-            "There is no Scope called `{name}` — it is how people say every \
-             Scope at once, and every Scope at once is what a bare `perch list` \
-             shows. Narrowing takes a Group by name, or `{UNGROUPED}` for the \
-             Accounts in no Group."
+            "There is no Scope called `{name}`. It is how people say every \
+             Scope at once, which is what a bare `perch list` shows. Narrowing \
+             takes a Group by name, or `{UNGROUPED}` for the Accounts in no \
+             Group."
         )));
     }
     match registry.declared_group(name) {

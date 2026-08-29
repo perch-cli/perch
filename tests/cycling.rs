@@ -774,8 +774,8 @@ fn a_rival_that_could_not_win_at_its_very_best_costs_no_read() {
          asking Anthropic: {printed}"
     );
     assert!(
-        !refused.to_string().contains("--refresh"),
-        "and nothing is left for a refresh to change, so it is not offered: \
+        refused.to_string().contains(EMAIL),
+        "and the verdict names the Account it proved was already the best: \
          {refused}"
     );
 }

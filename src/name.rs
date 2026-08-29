@@ -231,8 +231,8 @@ impl Rule {
                     .unwrap_or_default(),
             ),
             Rule::NotAnIdentifier => format!(
-                "`{name}` carries {}, and {} are made of letters, digits, `_` and \
-                 `-` — every alphabet, so `café` and `日本` are names.",
+                "`{name}` carries {}, and {} are made of letters, digits, `_` \
+                 and `-`, in every alphabet, so `café` and `日本` are names.",
                 said(name.chars().find(|c| !a_name_may_carry(*c))),
                 kind.names()
             ),
@@ -248,7 +248,7 @@ impl Rule {
                 kind.names()
             ),
             Rule::LikeAnAddress => format!(
-                "`{name}` carries `@`, and {} do not — a Target is an Alias, an \
+                "`{name}` carries `@`, and {} do not. A Target is an Alias, an \
                  email address or a Group name, and no `@` is what tells the \
                  address from the other two.",
                 kind.names()

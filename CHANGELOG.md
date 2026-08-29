@@ -9,21 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Perch states the verdict and the next command, and no longer shows its
+  working. `perch switch` from the Account that is already best answered in
+  forty-four words — the ranking clause the landing line had already been
+  forbidden, a figure with its age, and a refresh command nobody asked for — and
+  now answers in one line: `you@example.com is already the best Account in Group
+  \`work\`.` The rule behind that reaches everything Perch says. Refusals split
+  on whether the reader is left with anything to do: one that needs something
+  done keeps its prose and its next command, one that needs nothing done gets
+  the acting command's budget. *Nothing was changed* had reached nineteen
+  sentences and now appears only where something moved, or where somebody agreed
+  to a deletion and cannot see whether it began. A case analysis survives only
+  where its branches end differently for the reader, which is what tells the two
+  kinds of *it may be this one's, or that one's* apart. The Watcher's round lines
+  lose the preambles that restated their own status column, so a hold reads
+  `held  unread — <what is holding it>` rather than repeating *nothing current to
+  decide on, so nothing was decided* every two and a half minutes for the life of
+  the loop. Em dashes are gone from what Perch says, except between a value and
+  its qualifier in a labeled row, and `tests/dash.rs` holds that. One defect
+  turned up in the reading: a Watcher hold whose reason carried no full stop ran
+  it into the wait, printing `named no Quota Window Asking again in 2m30s`. No
+  exit code moves, no `--json` shape moves, and `--help` is untouched
+  (ADR perch-says-what-it-did)
 - `perch switch` reads Utilization before it Cycles, instead of ranking on
   whatever was cached. It ranked a rival nobody had read for twenty-one hours
-  against one read a minute ago and said it had compared them, which the age
-  beside a displayed figure would have made obvious and a comparison hides
+  against one read a minute ago and said it had compared them. An age printed
+  beside a figure makes staleness obvious; a comparison hides it
 - it reads only what arithmetic cannot settle. Usage climbs within a Quota Window
   and falls when the window comes back, so a window whose reset is still ahead
-  caps an Account at the Headroom it was last seen with — a candidate that loses
-  at its very best is not read. In the case above that is no reads at all
+  caps an Account at the Headroom it was last seen with. A candidate that loses
+  at its very best is not read, which in the case above is every one of them
 - an Account that could not be read is named and its cached figure still ranked,
   so a throttled endpoint does not cost you the Switch you asked for
 - `perch switch --no-refresh` Cycles on the cache, for somebody offline or
   somebody who put the command where latency matters. Nothing is read for a named
   Account either way, because naming one decides nothing
 - so `perch switch` is slower and can hang on a dead endpoint. No exit code moves
-  and no output shape changes
+  and no output shape changes (ADR a-choice-reads-what-it-ranks)
 
 ## [0.3.1](https://github.com/perch-cli/perch/compare/v0.3.0...v0.3.1) - 2026-08-29
 

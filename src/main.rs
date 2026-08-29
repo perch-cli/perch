@@ -177,7 +177,7 @@ enum Command {
     /// Window, and never asks anything.
     ///
     /// It reads current Utilization first, for the Accounts it cannot rank
-    /// without — a candidate that would lose even if its quota had refilled
+    /// without. A candidate that would lose even if its quota had refilled
     /// entirely is not worth a round trip, and is not read.
     ///
     /// The Credential you are leaving is Captured back into its own Profile

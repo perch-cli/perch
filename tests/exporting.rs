@@ -510,7 +510,7 @@ fn an_export_says_accounts_in_the_plural_when_several_have_no_credential() {
 
     result.expect("an Export is still written");
     assert!(
-        printed.contains("carries the Accounts without one"),
+        printed.contains("carries the Accounts without a Credential"),
         "two of them, so the plural: {printed}"
     );
     assert!(

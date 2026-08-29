@@ -53,7 +53,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
         (Err(error), Some(at)) => Err(error.with_note(&format!(
             "The Export at {} was written and holds a working Credential for \
              every Account. Only saying so failed, so there is nothing to run \
-             again — keep it somewhere you would keep those, or delete it.",
+             again. Keep it somewhere you would keep those, or delete it.",
             at.display(),
         ))),
         (written, _) => written,
@@ -125,9 +125,8 @@ fn refuse_a_path_perchs_home_would_take(host: &dyn Host, path: &Path) -> Result<
         return Ok(());
     }
     Err(PerchError::Invalid(format!(
-        "{} is inside {}, which is Perch's own — and `perch holdings purge` \
-         deletes that directory whole, so an Export written there goes with the \
-         Holdings it is the only copy of.\n\
+        "{} is inside {}, which `perch holdings purge` deletes whole, so an \
+         Export written there goes with the Holdings it is the only copy of.\n\
          Name a path somewhere Perch does not own.",
         path.display(),
         home.display(),
@@ -227,9 +226,8 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
             out,
             &format!(
                 "Neither Credential Store held anything for {}, so the Export \
-                 carries the {} without one — Quarantine reason and all. \
-                 `perch relogin` is what ends that, and it is worth doing before \
-                 this file is the only copy.",
+                 carries the {} without a Credential. `perch relogin` is worth \
+                 doing before this file is the only copy.",
                 bare.join(", "),
                 match bare.len() {
                     1 => "Account",

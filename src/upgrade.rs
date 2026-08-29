@@ -192,7 +192,7 @@ fn refuse_a_release_homebrew_cannot_take(release: &Option<String>) -> Result<()>
             "This Installation came from Homebrew, which installs whatever the \
              formula names and cannot be pointed at {named}.\n\
              `brew upgrade perch` takes the newest. To hold a particular \
-             Release, install it with the installer script instead — it takes \
+             Release, install it with the installer script instead, which takes \
              `PERCH_VERSION`."
         ))),
     }
@@ -530,7 +530,7 @@ pub fn notice(host: &dyn Host) -> Option<String> {
     let newest = newest(host, Some(CHECK_WITHIN_MILLIS)).ok()?;
     match compare(&newest, installed()) {
         Ordering::Greater => Some(format!(
-            "a newer Release is available: {newest} — `perch upgrade`"
+            "a newer Release is available: {newest}. `perch upgrade` takes it"
         )),
         _ => None,
     }

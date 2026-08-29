@@ -193,7 +193,7 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
         };
         return PerchError::NotFound(format!(
             "No Group called `{name}`. That is an Account Perch holds, {sits}. \
-             This takes the Group rather than one of the Accounts in it — \
+             This takes the Group rather than one of the Accounts in it, and \
              `perch group list` shows the ones that have been declared."
         ));
     }
@@ -320,8 +320,7 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
         // `interchangeable` takes, so a reader typing back what they were shown
         // would be refused.
         crate::cycle::MayAct::Undeclared { granted: true } => format!(
-            "off — `{}` is {}, so there is nowhere to Switch to (would act \
-             {acting})",
+            "off — `{}` is {} (would act {acting})",
             crate::config::Setting::Interchangeable.as_str(),
             registry.ungrouped.interchangeable
         ),

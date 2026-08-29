@@ -5,7 +5,7 @@ on the best. Until now it ranked on whatever was cached, however old, because
 ADR a-figure-carries-its-age extended the no-network rule from displaying a
 figure to deciding on one.
 
-That extension was wrong, and the way it reads on a terminal says why:
+That extension was wrong, and the sentence it produced says why:
 
 ```
 mads@example.com is already the best Account in Group `default`, with 100%
@@ -17,6 +17,12 @@ The rival it beat had not been read for twenty-one hours. **A displayed figure
 carries its age and a ranked one does not**, so the age that is the whole of
 Perch's promise about a number is the one thing a comparison throws away. The
 sentence claims a comparison Perch is not in a position to make.
+
+ADR perch-says-what-it-did takes the same specimen and cuts it to its verdict,
+because a refusal that needs nothing done may not show its working. The two
+findings are independent and the second does not answer the first: the short
+sentence asserts the same comparison in six words rather than in forty-four, and
+a claim Perch cannot support is not repaired by putting it more concisely.
 
 ADR a-watcher-knob-is-arithmetic already settled the principle, for the Watcher:
 *"Candidates are read at the moment a decision is taken instead, which is also
@@ -98,10 +104,12 @@ made for nothing.
 
 ## Consequences
 
-**A refusal may not promise what a refresh would change.** "Nothing was changed —
-`perch list default --refresh` reads current figures" is false advice after a
-Cycle that just read them, so the Cycle is told whether the figures it ranked on
-were current and the sentence ends there when they were.
+**No refusal a Cycle reaches offers a refresh it has already made.** Under
+ADR perch-says-what-it-did the verdict that Perch is already on the best Account
+carries no suggestion at all, so nothing has to be told whether the figures were
+current. The refusals that do still name `--refresh` are the ones about Accounts
+nothing could be read for, where a reader who runs it learns something and the
+advice is sound whether or not this Cycle tried.
 
 **`perch switch` reaches the network.** It is slower, it can hang on a dead
 endpoint, and a hook or shell prompt running it will feel that. No exit code

@@ -1,12 +1,18 @@
 # Perch says what it did
 
 **Perch says what it did, and what the person could not have predicted. It explains
-itself only when it refused.**
+itself only where the reader has something to do about it.**
 
 A thing that happens on every single run is the definition of predictable, and
 predictability is earned by the guide rather than re-earned by every invocation. A
-refusal is the opposite: nothing happened, the person cannot see why, and the next step
-is not obvious. That is the one moment the prose is the product.
+refusal is usually the opposite: nothing happened, the person cannot see why, and the
+next step is not obvious. That is the moment the prose is the product — and the test is
+the next step rather than the refusal, because a refusal saying nothing needs doing
+leaves nobody with a next step to find.
+
+Under all of it sits one sentence, and everything below is it applied to a surface:
+
+> **Perch states the verdict and the next command. It does not show its working.**
 
 The rule binds everything Perch writes, at three budgets, because three populations have
 three readers.
@@ -48,6 +54,73 @@ The figures keep their age. A figure without `(as of 4m ago)` is a promise Perch
 make (ADR a-figure-carries-its-age), and shortening output is not license to start making
 it.
 
+## A refusal that needs nothing done
+
+The landing line above cut its ranking rationale. One function away, the same clause
+survived into the refusal that says you are already on the best Account:
+
+```
+$ perch switch
+you@example.com is already the best Account in Group `work`, with 100% headroom, which
+is true of every one of its Quota Windows — 5-hour is its fullest, as of 1m ago. Nothing
+was changed — `perch list work --refresh` reads current figures.
+```
+
+Forty-four words, and the same argument the landing line was not allowed to make. What
+let it through was the exemption for refusals, and the exemption rests on three claims:
+nothing happened, the person cannot see why, and the next step is not obvious. Two of
+them are false here. The person can see why — they asked to be moved somewhere better
+and are already there — and the next step is nothing at all.
+
+So the exemption is not about refusing. It is about whether the reader is left with
+something to find:
+
+> **A refusal that needs something done keeps its prose. A refusal that needs nothing
+> done gets the acting command's budget.**
+
+The specimen becomes its verdict:
+
+```
+you@example.com is already the best Account in Group `work`.
+```
+
+The figure goes with the argument it was serving. A figure Perch quotes carries its age
+(ADR a-figure-carries-its-age), and quoting none breaks no promise: `perch status` is one
+command away and exists to show them.
+
+The exit code does not move. `EXIT_NOTHING_TO_DO` is what the Watcher's loop branches on
+and what a shell prompt tests, and it is not output.
+
+### What was changed is said only where something was
+
+*Nothing was changed* had reached nineteen sentences, and in most of them the command
+refused before it touched anything. There it reassures somebody about a danger that
+never existed. After a `remove` that deleted a Credential and then lost its hold, it is
+the most important sentence on the screen, and `Busy` rests on it
+(ADR a-refusal-is-a-promise).
+
+The test is whether anything moved, not whether this is a refusal — with one
+case where nothing moved and the sentence is still owed. A refusal that comes
+*after* somebody agreed to a deletion reaches a reader who has just authorized
+one and cannot see whether it began. `perch holdings purge` refusing the export
+path it was handed is the specimen. What the reader can believe is the test, and
+agreeing to a destructive act is what changes it.
+
+### An ambiguity is a fact where the branches differ
+
+The longest sentences Perch had were case analyses: the live Credential *may be this
+one's, made after a Switch that could not finish, or that one's, Rotated since*. Under
+the rule that is working, and under the rule it is also sometimes the only warning that
+running the suggested command picks one branch and discards the other.
+
+> **An unresolved ambiguity survives where the reader would choose differently knowing
+> it, and is cut where they would not.**
+
+That disposes of the class. Where the branches end the same way, the enumeration is
+Perch narrating a search it already finished. Where they end differently, the reader may
+want to look at the Profile before running anything, and nothing else on the screen
+tells them so.
+
 ## The Watcher
 
 It writes to a scrollback or a cron mailbox, read long after the fact and often skimmed
@@ -70,6 +143,12 @@ within a run, so re-deriving it in every line spends words on the one thing that
 varies — and if it ever did change mid-run, that deserves a line of its own rather than a
 repetition in every line.
 
+The word column is the verdict, so nothing after the dash repeats it. A hold opened with
+*nothing current to decide on, so nothing was decided:* and a round with nowhere to go
+with *nowhere to go:* — eleven words and three, in front of a column already reading
+`held` and `nowhere`, on every such line for as long as the loop runs. What the line is
+for is the reason and the retry time.
+
 ## Showing commands
 
 Here the text is the deliverable, so the rule lands only on the prose appended beneath.
@@ -77,6 +156,34 @@ The table stays whole. Underneath it, each varying fact is said once and each in
 fact is said once in total: a Quarantine reason genuinely differs per Account, so it is
 written out for each; the repair is the same command whatever broke and however many
 Accounts it broke, so it closes the block once rather than ending every line in it.
+
+## The dash, and the one place it is not prose
+
+The mark that joins a verdict to its working is the em dash, and Perch had 142 of them in
+what it says. Cutting the working takes most; a rule finishes it.
+
+> **No em dash in anything Perch says, except between a value and its qualifier in a
+> labeled row.**
+
+The exception is a shape rather than a list of places. *Reserve: none — no Account here
+may be Cycled to (1 Quarantined)*, *Watcher  off — `watcher-may-act` is false*, and the
+Watcher's own mark where a decision line stops being data. None of them is a sentence:
+there is no verb, and the dash is doing a table's work somewhere a table will not fit.
+
+Inside a sentence there is no exception, and the substitutes are not one. A parenthesis
+or a colon in the dash's old position is the same clause wearing a different mark, which
+is what gave the dash away rather than the dash itself.
+
+**Gated, and this is the one place a mechanical check is right.** `tests/comment.rs`
+already gates comment shape, and CLAUDE.md already says that passing it is not passing
+the standard; this sits beside it under the same caveat. It is not the line-count cap
+rejected below: a character's presence is a fact about the text rather than a proxy for
+whether a sentence earned its place, so the check can be wrong about a labeled row and
+about nothing else.
+
+It stops at what Perch says. Comments, `docs/adr/`, the guide and `tests/` keep theirs —
+the reader this is for is the one at a terminal, and a test asserting what Perch says has
+to be free to quote it.
 
 ## The sentence, and how it is asserted
 
@@ -150,6 +257,12 @@ somebody reading it, which is the only thing that has ever caught one of these h
 datum reached the page, which is what they should assert, and auditing them wholesale
 would churn hundreds of correct data-presence claims into worse ones. Assertions are
 re-pointed as they break, each under the rule above.
+
+Finding the sentence-shaped ones ahead of a change that moves every sentence at once is
+not that sweep. Of 1,610 `contains` calls, 44 assert something sentence-shaped, and they
+are re-pointed deliberately rather than whichever way greens them: a red assertion invites
+the smallest edit that passes, which is how a sentence claim decays into a fragment claim
+and stops seeing the defect it was written for.
 
 ## The glossary
 

@@ -623,7 +623,7 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
     assert!(
         printed.contains(&format!(
             "Removed {SECOND_EMAIL}. Neither of its Credential Stores held \
-             anything to delete — on macOS a keychain item is filed under \
+             anything to delete, and on macOS a keychain item is filed under \
              `$USER`, so one written under a different login name is still \
              there."
         )),
