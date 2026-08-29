@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- the profile endpoint is read where it names an Account's email address under
+  `email` as well as under `email_address`. It sends the first and Perch looked
+  only for the second, so the check that keeps one Account's figures out of
+  another's fell back to what the machine holds on every read, on every machine.
+  Both spellings are read, because a reply carrying either answers the question
 - a per-model Quota Window is named after its model rather than after a codename.
   Anthropic's usage reply describes the same quota twice, and Perch was reading
   the older half, where the weekly Fable window arrives under the key
