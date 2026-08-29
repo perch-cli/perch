@@ -284,7 +284,7 @@ pub fn refresh(
     perch: &mut Held<'_>,
     registry: &mut Registry,
     emails: &[String],
-    installed: &Result<Installed>,
+    installed: &Installed,
     spending: Spending<'_>,
 ) -> Report {
     let mut report = Report::asked_for();
@@ -326,14 +326,7 @@ pub fn refresh(
         let Some(account) = registry.account(email).cloned() else {
             continue;
         };
-        let outcome = match observe(
-            host,
-            perch,
-            registry,
-            &account,
-            installed.as_ref(),
-            still_ours,
-        ) {
+        let outcome = match observe(host, perch, registry, &account, installed, still_ours) {
             // The same answer as the ask at the top of the turn, reached from
             // inside one: nothing is recorded against the Account, because the
             // round stopped rather than learning anything about it.
@@ -375,7 +368,7 @@ fn observe(
     perch: &mut Held<'_>,
     registry: &Registry,
     account: &Account,
-    installed: std::result::Result<&Installed, &PerchError>,
+    installed: &Installed,
     still_ours: StillOurs<'_>,
 ) -> Step<QuotaWindows> {
     // An Account already known to be beyond repair is not asked again: nothing would be
@@ -385,10 +378,13 @@ fn observe(
         return Err(Outcome::Quarantined { why, detail: None });
     }
 
-    let installed = installed.map_err(|err| Outcome::Failed {
-        why: err.to_string(),
-        spent: false,
-    })?;
+    // Before the first request, so a machine with nothing to ask spends nothing.
+    if let Some(why) = installed.absent() {
+        return Err(Outcome::Failed {
+            why: why.to_string(),
+            spent: false,
+        });
+    }
     let asked = &holding(host, registry, account)?;
     // Taking the `Because` it was reached through, because what it answers with
     // is a `Failed`, and every `Failed` says whether the round spent a request.
@@ -1120,7 +1116,9 @@ mod tests {
         let mut perch = holdings::lock(&host).expect("nobody holds it");
         // Every Account fails to be read, which is beside the point: the renewal
         // happens before the first request either way.
-        let installed = Err(PerchError::Other("no Claude Code here".to_string()));
+        let installed = Installed::Absent {
+            why: "no Claude Code here".to_string(),
+        };
 
         let mut renewals = 0;
         let report = refresh(
@@ -1164,7 +1162,7 @@ mod tests {
         primary.write(&host, EXPIRED).expect("the store takes it");
 
         let mut perch = holdings::lock(&host).expect("nobody holds it");
-        let installed = Ok(crate::probe::Installed::unknown("2.1.221"));
+        let installed = crate::probe::Installed::unknown("2.1.221");
 
         let mut asked = 0;
         let report = refresh(
@@ -1218,7 +1216,7 @@ mod tests {
             })
             .collect();
         let mut perch = holdings::lock(&host).expect("nobody holds it");
-        let installed = Ok(crate::probe::Installed::unknown("2.1.221"));
+        let installed = crate::probe::Installed::unknown("2.1.221");
 
         let mut asked = 0;
         let report = refresh(
@@ -1286,7 +1284,9 @@ mod tests {
                 })
                 .collect();
             let mut perch = holdings::lock(&host).expect("nobody holds it");
-            let installed = Err(PerchError::Other("no Claude Code here".to_string()));
+            let installed = Installed::Absent {
+                why: "no Claude Code here".to_string(),
+            };
 
             let mut asked = 0;
             let report = refresh(

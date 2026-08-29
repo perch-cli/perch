@@ -69,7 +69,7 @@ pub struct Acting<'a, 'h> {
     pub watching: &'a Watching,
     pub watcher: Watcher,
     /// What the round already asked the machine and this Act must not ask again.
-    pub probed: &'a Result<probe::Installed<'h>>,
+    pub probed: &'a probe::Installed<'h>,
     pub watching_alone: &'a mut Watch<'h>,
 }
 
@@ -91,13 +91,13 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
     let scope = watching.scope.clone();
     let outgoing = watching.account.clone();
 
-    let installed = match probed.as_ref() {
-        Ok(installed) => installed,
-        // Not reachable: a round reaches this only on a figure it read, and a figure
-        // is read only where the probe answered. Handed on rather than asserted,
-        // because what runs this is a Service nobody is watching.
-        Err(why) => return Err(PerchError::Other(why.to_string())),
-    };
+    // Not reachable: a round reaches this only on a figure it read, and a figure
+    // is read only where the probe answered. Handed on rather than asserted,
+    // because what runs this is a Service nobody is watching.
+    if let Some(why) = probed.absent() {
+        return Err(PerchError::Other(why.to_string()));
+    }
+    let installed = probed;
 
     // Asked before the candidates are read: the burst spends an hourly allowance that
     // does not refill early, one read per candidate, and a `perch run` held open in
@@ -316,7 +316,7 @@ mod tests {
         let held = lock::take_all(host, vec![holdings::watcher_lock_spec(host).unwrap()])
             .expect("nobody holds the watch");
         let mut watching_alone = Watch::taken(host, held);
-        let probed = Ok(probe::Installed::unknown("2.1.221"));
+        let probed = probe::Installed::unknown("2.1.221");
 
         run(
             Acting {
