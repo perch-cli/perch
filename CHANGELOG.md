@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/perch-cli/perch/compare/v0.3.1...v0.3.2) - 2026-08-29
+
+### Added
+
+- *(switch)* a Cycle reads the Accounts it cannot rank without ([#375](https://github.com/perch-cli/perch/pull/375))
+
+### Fixed
+
+- Perch states the verdict and stops showing its working ([#373](https://github.com/perch-cli/perch/pull/373))
+
+### Other
+
+- the platform branches stay outside the port, and the rejection is recorded ([#383](https://github.com/perch-cli/perch/pull/383))
+- the Setting vocabulary lives where a Setting is defined ([#382](https://github.com/perch-cli/perch/pull/382))
+- an absent Claude Code is a state of Installed, not every caller's Result ([#381](https://github.com/perch-cli/perch/pull/381))
+- an Import that does not finish takes its Credentials back itself ([#380](https://github.com/perch-cli/perch/pull/380))
+- a Switch has one door out, and the Capture answers for itself ([#379](https://github.com/perch-cli/perch/pull/379))
+- a Refresh is told who is asking, and the ask rides with the role ([#377](https://github.com/perch-cli/perch/pull/377))
+- the act of a Round is one module's, and its ordering is owned ([#376](https://github.com/perch-cli/perch/pull/376))
+
 ### Changed
 
 - Perch states the verdict and the next command, and no longer shows its
