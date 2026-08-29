@@ -642,7 +642,10 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
     let error = result.expect_err("a Credential that cannot be read cannot be Captured");
-    assert!(error.to_string().contains("Nothing was changed"), "{error}");
+    assert!(
+        error.to_string().contains("could not be Captured"),
+        "it says which step stopped: {error}"
+    );
     assert!(
         error.to_string().contains(EMAIL),
         "and names the Account whose Credential it may be: {error}"
@@ -1361,7 +1364,7 @@ fn switching_from_a_logged_out_claude_code_says_there_was_nothing_live_to_captur
 
     result.expect("a logged-out machine is still one that can be switched");
     assert!(
-        printed.contains("There was no live Credential to Capture — Claude Code was logged out."),
+        printed.contains("There was no live Credential to Capture: Claude Code was logged out."),
         "{printed}"
     );
     assert_eq!(
@@ -1985,7 +1988,10 @@ fn a_live_store_that_will_not_answer_resolves_no_landing() {
         said.contains("was in flight and was not recorded"),
         "it says what could not be settled: {said}"
     );
-    assert!(said.contains("Nothing was changed"), "{said}");
+    assert!(
+        said.contains("Make that store readable and run this again."),
+        "and what to do about it: {said}"
+    );
 
     host.no_longer_refusing(CREDENTIALS_PATH, Refusing::Read);
     assert_eq!(

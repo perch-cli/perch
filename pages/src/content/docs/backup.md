@@ -134,7 +134,7 @@ and what you run on the laptop you are handing on.
 $ perch holdings purge
 Perch holds 3 Accounts: someone@example.com, overflow@example.com, spare@example.com.
 A Purge deletes every one of their Profiles, every Credential Perch holds for them, and /Users/someone/.config/perch itself. Nothing undoes it: only a fresh login brings an Account back, and it comes back as a new one.
-Claude Code goes on running as whatever it is logged in as — the live Credential is not Perch's to take away.
+Claude Code goes on running as whatever it is logged in as.
 Write an Export first? [Y/n]: y
 Where to write it: /Users/someone/perch-backup.age
 This file holds a working Credential for every Account Perch has. It is encrypted with a passphrase you choose, and there is no way into it without one.
@@ -143,7 +143,7 @@ Again:
 Exported 3 Accounts to /Users/someone/perch-backup.age.
 Type `purge` to give the machine back: purge
 Purged 3 Accounts, and /Users/someone/.config/perch is gone.
-The Export is at /Users/someone/perch-backup.age — it holds a working Credential for every Account, so keep it somewhere you would keep those. `perch holdings purge` will not write over it.
+The Export is at /Users/someone/perch-backup.age, and holds a working Credential for every Account. Keep it somewhere you would keep those. `perch holdings purge` will not write over it.
 ```
 
 The question is where a Purge says what it will take and what it will leave, so

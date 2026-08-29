@@ -49,7 +49,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         if replaced {
             return Err(failed.with_note(&format!(
                 "The Service was not started. {kept}, so it starts at the next \
-                 login — `perch watcher status` says what is there now, and \
+                 login. `perch watcher status` says what is there now, and \
                  `perch watcher uninstall` takes it away.",
             )));
         }
@@ -215,8 +215,8 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
             return Err(PerchError::Busy(
                 "A Watcher is running, so nothing was purged.\n\
                  It would go on Switching Credentials into Profiles this command \
-                 is deleting. Stop it — Ctrl-C in the terminal running \
-                 `perch watcher run` — and run this again."
+                 is deleting. Ctrl-C in the terminal running `perch watcher \
+                 run` stops it, then run this again."
                     .to_string(),
             ));
         }
@@ -233,7 +233,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
             "The Service is still running, so nothing was purged.\n\
              It would go on Switching Credentials into Profiles this command is \
              deleting. Stop it with `perch watcher uninstall` and run this \
-             again — it is {} and something is refusing to stop it.",
+             again. It is {} and something is refusing to stop it.",
             manager.described(),
         )));
     }
@@ -327,7 +327,7 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
         Err(why) => format!(
             "The Service could not be restarted against the new binary: {why}\n\
              Perch itself upgraded. Run `perch watcher install` to point the \
-             Service at it — until then it may not come up when you log in.",
+             Service at it. Until then it may not come up when you log in.",
         ),
     })
 }
@@ -473,7 +473,7 @@ fn drive(host: &dyn Host, steps: Vec<Driven>) -> Result<()> {
                 true => ran.stdout.trim().to_string(),
                 false => ran.stderr.trim().to_string(),
             },
-            Err(err) => format!("{err} — is `{}` on your PATH?", step.program),
+            Err(err) => format!("{err}. Is `{}` on your PATH?", step.program),
         };
         return Err(PerchError::Other(format!(
             "`{}` failed: {failed}",

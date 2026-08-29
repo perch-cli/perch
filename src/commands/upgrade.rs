@@ -167,10 +167,9 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
             .unwrap_or_else(|_| "its own directory".to_string());
 
         PerchError::Invalid(format!(
-            "Perch is installed at {}, and nothing about that path says which \
-             Channel put it there — Homebrew and npm keep theirs somewhere Perch \
-             recognizes, and the installer script puts one in {expected}. Perch \
-             will not write over a binary it did not put there.\n\
+            "Perch is installed at {}, which names no Channel, and Perch will \
+             not write over a binary it did not put there. The installer script \
+             puts one in {expected}.\n\
              Re-run the installer from https://github.com/{} to move to a \
              managed Installation, or say which Channel this is with \
              `--channel homebrew|npm|installer`.",
@@ -264,8 +263,8 @@ fn agree_to_going_back(
         &format!(
             "{wanted} is older than the {installed} that is installed.\n\
              Perch refuses a registry written by a newer Perch, so if {installed} \
-             has written yours, {wanted} will not read it — `perch upgrade` \
-             back to {installed} is the repair."
+             has written yours, {wanted} will not read it. `perch upgrade` back \
+             to {installed} is the repair."
         ),
     )?;
     ask::said_yes(

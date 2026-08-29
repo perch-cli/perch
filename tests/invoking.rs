@@ -570,11 +570,7 @@ fn the_upgrade_arm_refuses_a_binary_no_channel_put_where_it_is() {
     let ran = perch(&machine, &["upgrade"]);
 
     assert_eq!(ran.code, EXIT_INVALID, "{}{}", ran.out, ran.err);
-    assert!(
-        ran.err.contains("which Channel put it there"),
-        "{}",
-        ran.err
-    );
+    assert!(ran.err.contains("which names no Channel"), "{}", ran.err);
     assert!(
         ran.err.contains("--channel"),
         "and it says how to answer that:\n{}",

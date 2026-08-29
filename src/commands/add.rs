@@ -202,7 +202,7 @@ fn refuse_an_account_perch_already_holds(
     } else {
         format!(
             "Nothing about {} is changed. To hold this login instead, remove \
-             that Account first — or log in under an address that does not \
+             that Account first, or log in under an address that does not \
              flatten to the same name.",
             existing.email(),
         )
@@ -210,7 +210,7 @@ fn refuse_an_account_perch_already_holds(
 
     Err(PerchError::Conflict(format!(
         "Perch already holds {}, in {}.\n\
-         Nothing was added — {why}.\n\
+         Nothing was added: {why}.\n\
          {way_out}",
         registry.named_for_the_user(existing.email()),
         existing.profile_dir(host)?.display(),

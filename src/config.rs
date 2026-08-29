@@ -65,9 +65,8 @@ impl Setting {
     fn only_the_ungrouped_scope_carries_it() -> PerchError {
         PerchError::Invalid(format!(
             "`{}` is the declaration that the Accounts in no Group are \
-             interchangeable at all, and only they carry it — a Group is \
-             that declaration rather than something that holds \
-             one. `perch config set {UNGROUPED} {} <value>` says it.",
+             interchangeable at all, and only they carry it. `perch config set \
+             {UNGROUPED} {} <value>` says it.",
             Setting::Interchangeable.as_str(),
             Setting::Interchangeable.as_str(),
         ))
@@ -166,8 +165,8 @@ impl Setting {
             Setting::Interchangeable if registry.ungrouped.interchangeable => {
                 "A bare `perch switch` from an Account in no Group now Cycles \
                  among the other ungrouped Accounts. That declares every \
-                 ungrouped Account interchangeable at once, present and future \
-                 — including the next one `perch add` creates."
+                 ungrouped Account interchangeable at once, present and \
+                 future, including the next one `perch add` creates."
                     .to_string()
             }
             Setting::Interchangeable => {
@@ -205,13 +204,11 @@ impl Setting {
             ),
             Setting::WatcherMarginPercent => format!(
                 "`perch watcher run` will only move {within} to an Account at \
-                 {}% or under — that many points below the threshold of {}%. A \
-                 round with nowhere that empty to go says so and moves nothing. \
-                 {ONLY_WHILE_IT_RUNS}",
+                 {}% or under. A round with nowhere that empty to go says so and \
+                 moves nothing. {ONLY_WHILE_IT_RUNS}",
                 settings
                     .watcher_threshold_percent
                     .saturating_sub(settings.watcher_margin_percent),
-                settings.watcher_threshold_percent,
             ),
         }
     }
@@ -272,7 +269,7 @@ fn gated(registry: &Registry, scope: &Scope) -> String {
     match scope {
         Scope::Ungrouped if !registry.ungrouped.interchangeable => format!(
             " It does not act there yet: `{}` is false, and that is a separate \
-             declaration that those Accounts are interchangeable at all — \
+             declaration that those Accounts are interchangeable at all. \
              `perch config set {UNGROUPED} {} true` makes it.",
             Setting::Interchangeable.as_str(),
             Setting::Interchangeable.as_str(),
@@ -292,7 +289,7 @@ fn gated(registry: &Registry, scope: &Scope) -> String {
 /// service that has been switched on (ADR a-watcher-knob-is-arithmetic). All
 /// three ways of running one are named, or this would be a Setting somebody
 /// with a Service had no reason to read (ADR the-machine-runs-the-watcher).
-const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running — `perch \
+const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running: `perch \
      watcher run`, a Service `perch watcher install` set up, or a `perch watcher \
      check` on a schedule. Nothing here starts one.";
 
@@ -393,7 +390,7 @@ pub fn listed(names: &[&str]) -> String {
 /// can drift from it. The clause carries no label; a caller supplies one.
 pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
     format!(
-        "only moves between these when you say it may — `{}` is {}",
+        "off — `{}` is {}",
         Setting::Interchangeable.as_str(),
         registry.ungrouped.interchangeable
     )

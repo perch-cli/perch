@@ -538,8 +538,7 @@ pub fn resolve_a_landing<E>(
                     "A Switch to {arriving} was in flight and was not recorded, \
                      and the live Credential is the only thing that says whether \
                      it happened.\n\
-                     Nothing was changed. Make that store readable and run this \
-                     again."
+                     Make that store readable and run this again."
                 ))
             })?,
         };
@@ -647,14 +646,13 @@ fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> Stri
         Some(leaving) => format!(
             "{said}, nor the one it holds for {leaving}, nor any other it holds. \
              It may be {arriving}'s, Rotated since the Switch finished, or \
-             {leaving}'s, Rotated since it failed to start — so nothing was \
-             changed.\n\
+             {leaving}'s, Rotated since it failed to start.\n\
              `perch relogin {arriving}` finishes that Switch and `perch relogin \
              {leaving}` abandons it."
         ),
         None => format!(
-            "{said}, nor any other it holds, and Perch was on no Account before it \
-             — so nothing says whose it is, and nothing was changed.\n\
+            "{said}, nor any other it holds, and Perch was on no Account before \
+             it, so nothing says whose it is.\n\
              `perch relogin {arriving}` replaces whatever is live with a fresh \
              login for {arriving}."
         ),
@@ -694,10 +692,9 @@ pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result
         return Ok(());
     };
     Err(PerchError::Conflict(format!(
-        "{} and {} share one Profile, so they share one Credential — their \
-         addresses differ only in characters a Profile directory does not keep \
-         apart. Perch cannot act as either of them, because nothing afterwards \
-         could tell which it acted as.\n\
+        "{} and {} share one Profile, and so one Credential. Their addresses \
+         differ only in characters a Profile directory does not keep apart, so \
+         Perch cannot act as either.\n\
          `perch remove` one of them, then `perch add` it again.",
         account.email(),
         sharer.email(),
@@ -730,10 +727,7 @@ fn prepare<'h>(
         credentials::read(host, &incoming_store)?.ok_or_else(|| PerchError::Quarantined {
             why: Quarantine::NoCredential,
             said: format!(
-                "Perch holds no Credential for {}, so it is Quarantined — it \
-                 stays listed and named, and nothing switches to it until it has \
-                 been logged into again.\n\
-                 Nothing was changed. {}",
+                "Perch holds no Credential for {}, so it is Quarantined. {}",
                 incoming.email(),
                 registry::how_to_repair(incoming.email()),
             ),
@@ -782,9 +776,9 @@ fn capture(
         Err(would_not_answer) => {
             return Err(would_not_answer.with_note(&format!(
                 "The live Credential could not be read, so it could not be \
-                 Captured into {}'s Profile — and it may be that Account's own, \
-                 newer than the copy Perch holds. Nothing was changed. Make that \
-                 store readable and run this again.",
+                 Captured into {}'s Profile, and it may be that Account's own, \
+                 newer than the copy Perch holds. Make that store readable and \
+                 run this again.",
                 outgoing.email(),
             )));
         }
@@ -914,13 +908,12 @@ fn held_by(host: &dyn Host, account: &Account) -> Option<Zeroizing<String>> {
 fn the_identity_is_not_corroborated(outgoing: &Account, named: &str) -> String {
     let outgoing = outgoing.email();
     format!(
-        "The Identity beside the live Credential names {named}, but the live \
-         Credential is not the one Perch holds for {named} either — and Perch is \
-         on {outgoing}, so it cannot tell whose Rotation this is. It may be \
-         {outgoing}'s, made after a Switch that could not finish writing the \
-         Identity, or {named}'s, Rotated since — so nothing was changed.\n\
-         `perch relogin {outgoing}` is the way through: a Capture files the live \
-         Credential under the Account Perch is on."
+        "The Identity beside the live Credential names {named}, and Perch holds \
+         that Credential for neither {named} nor {outgoing}, the Account it is \
+         on. It may be {outgoing}'s from a Switch that could not finish, or \
+         {named}'s, Rotated since.\n\
+         `perch relogin {outgoing}` files the live Credential under the Account \
+         Perch is on."
     )
 }
 
@@ -931,11 +924,9 @@ fn the_identity_is_not_corroborated(outgoing: &Account, named: &str) -> String {
 fn the_live_credential_is_unaccounted_for(account: &Account) -> String {
     let email = account.email();
     format!(
-        "{email} is the Account Perch is on and the Account asked for, so this is \
-         the repair for a Switch that stopped before it finished — but the live \
-         Credential is not the one Perch holds for {email}. It may be {email}'s \
-         own, Rotated since, or a login somebody made outside Perch — so nothing \
-         was changed.\n\
+        "{email} is the Account Perch is on and the Account asked for, but the \
+         live Credential is not the one Perch holds for it. It may be {email}'s \
+         own, Rotated since, or a login made outside Perch.\n\
          `perch relogin {email}` finishes the repair. To keep a login made \
          outside Perch instead, `perch add` holds it as an Account of its own \
          first."
@@ -1026,9 +1017,8 @@ fn live_but_unnamed(prepared: &Prepared, outgoing: Option<&Account>, incoming: &
         None => "another Account".to_string(),
     };
     format!(
-        "{incoming} is active — its Credential is the live one — but {file} \
-         still names {named}, so Claude Code will act as {incoming} while \
-         displaying {named}.\n\
+        "{incoming} is active, but {file} still names {named}, so Claude Code \
+         will act as {incoming} while displaying {named}.\n\
          Run `perch switch {incoming}` again to finish the job.",
         incoming = incoming.email(),
         file = prepared.store.identity_file.display(),

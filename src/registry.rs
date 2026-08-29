@@ -553,7 +553,7 @@ impl Active {
             None => "Perch was on no Account".to_string(),
         };
         Some(format!(
-            "A Switch was in flight and was not recorded — {was_on} and was \
+            "A Switch was in flight and was not recorded. {was_on} and was \
              switching to {arriving}, so which Credential is live is not \
              settled. The next Switch resolves it, and says so if it cannot."
         ))
@@ -1321,8 +1321,8 @@ fn no_perch_wrote(path: &Path, claimed: Option<u64>) -> PerchError {
 /// file yet is the one sentence that would make it worse.
 pub fn the_file_to_edit(path: &Path) -> String {
     format!(
-        "It is in {}, and every Perch command reads that file — including the \
-         ones that would set it. Edit the value there.",
+        "It is in {}, which every Perch command reads, including the ones that \
+         would set it. Edit the value there.",
         path.display(),
     )
 }
@@ -1392,8 +1392,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
         if let Some(already) = named.insert(name::folded(email), alias) {
             return Err(PerchError::Invalid(format!(
                 "The registry gives {email} both the Alias `{already}` and the \
-                 Alias `{alias}`, and an Account answers to one Alias at a time \
-                 — so which of them Perch shows it under is not decided by \
+                 Alias `{alias}`, and an Account answers to one Alias at a \
+                 time, so which of them Perch shows it under is not decided by \
                  anything.",
             )));
         }
@@ -1432,7 +1432,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
         if !account.email().contains('@') {
             return Err(PerchError::Invalid(format!(
                 "The registry holds an Account called `{}`, which is not an \
-                 address an Alias or a Group name could be told from — and a \
+                 address an Alias or a Group name could be told from, and a \
                  Target that could be either has no single answer.",
                 account.email(),
             )));
@@ -1448,7 +1448,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
     if let Some((already, again)) = first_collision(registry.accounts.iter().map(Account::email)) {
         return Err(PerchError::Invalid(format!(
             "The registry holds two Accounts spelled `{already}` and `{again}`, \
-             which are one Account — so which entry a command reads, and which \
+             which are one Account, so which entry a command reads, and which \
              one it writes, is not decided by anything."
         )));
     }
@@ -1462,7 +1462,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
         }
         return Err(PerchError::Invalid(format!(
             "The registry records a Check against `{named}`, which is neither a \
-             Group Perch holds nor the Accounts in no Group — so the Cooldown it \
+             Group Perch holds nor the Accounts in no Group, so the Cooldown it \
              carries paces nothing."
         )));
     }
@@ -1473,8 +1473,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
     if let Some((already, name)) = first_collision(registry.checks.keys().map(String::as_str)) {
         return Err(PerchError::Invalid(format!(
             "The registry records a Check against `{already}` and one against \
-             `{name}`, which are one Group — so which Cooldown paces the next \
-             one is not decided by anything."
+             `{name}`, which are one Group, so which Cooldown paces the next one \
+             is not decided by anything."
         )));
     }
 
@@ -1493,9 +1493,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
             if !(0.0..=100.0).contains(&window.used_percent) {
                 return Err(PerchError::Invalid(format!(
                     "The registry says {} is {}% through its {} window, and a \
-                     window is between 0 and 100 percent full — so what a Cycle \
-                     would rank it on, and what the watcher would compare \
-                     against a threshold, is not a figure at all.\n\
+                     window is between 0 and 100 percent full, so it is not a \
+                     figure a Cycle could rank on.\n\
                      Deleting the Account's `utilization` lets a `perch status \
                      --refresh` read it again.",
                     account.email(),
@@ -1532,7 +1531,7 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
         None => Ok(()),
         Some((already, name)) => Err(PerchError::Invalid(format!(
             "The registry holds {} `{already}` and `{name}`, which differ only \
-             in case — so which one a Target finds is not decided by anything.",
+             in case, so which one a Target finds is not decided by anything.",
             kind.article(),
         ))),
     }

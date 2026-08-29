@@ -91,7 +91,8 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         return Err(PerchError::NotFound(format!(
             "{} was removed while that login was happening, so there is nothing \
              left to repair.\n\
-             The login itself worked — `perch add` holds it as a new Account.",
+             The login itself worked, and `perch add` holds it as a new \
+             Account.",
             account.email()
         )));
     }
@@ -189,8 +190,7 @@ fn refuse_a_different_account(
     }
     Err(PerchError::Conflict(format!(
         "That login was {}, but `perch relogin` was asked to repair {}.\n\
-         Nothing was changed — {} keeps its Alias, its Group and its place, and \
-         handing those to another Account is not a repair.\n\
+         Nothing was changed. {} keeps its Alias, its Group and its place.\n\
          To hold {} as well, run `perch add`.",
         logged_in.email,
         registry.named_for_the_user(account.email()),
@@ -260,7 +260,7 @@ fn unrecorded(
     if !landing_in_the_default_profile {
         return error.with_note(&format!(
             "The login itself worked and its Credential is in {email}'s own \
-             Profile, so nothing was lost — only the record of it is behind. \
+             Profile, so nothing was lost. Only the record of it is behind. \
              Run `perch relogin {email}` again to finish the job."
         ));
     }
@@ -351,7 +351,7 @@ fn report(
     if was_quarantined {
         say::line(
             out,
-            &format!("\nRepaired {named} — it is no longer Quarantined."),
+            &format!("\nRepaired {named}. It is no longer Quarantined."),
         )?;
     } else {
         // Which is the news. That the Account now holds a fresh Credential is
@@ -371,7 +371,7 @@ fn report(
     if held.disabled {
         say::line(
             out,
-            "Cycling still will not choose it — it is disabled, which a repair \
+            "Cycling still will not choose it: it is disabled, which a repair \
              does not undo.",
         )?;
     }

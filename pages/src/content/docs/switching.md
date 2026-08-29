@@ -94,19 +94,20 @@ argument for why it beat the others is not something a Switch owes you.
 
 Three outcomes are honest non-outcomes. They perform no Switch, explain
 themselves, and exit with a code of their own rather than pretending to have
-worked. They are also the one place a Cycle is wordy on purpose: nothing
-happened, you cannot see why from the outside, and the next step is not obvious.
+worked. How much they say turns on whether there is anything for you to do: a
+Cycle with nowhere to land explains itself and names the next command, and one
+that is already where it wants to be says only that.
 
 ```
 $ perch switch
-Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed.
+Every Account in Group `work` is exhausted.
 you@example.com frees up soonest, at 2026-08-04 15:00 UTC (in 3h).   # exit 17
 
 $ perch switch
-you@example.com is already the best Account in Group `work`, with 90% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of 4m ago. Nothing was changed — `perch list work --refresh` reads current figures.   # exit 15
+you@example.com is already the best Account in Group `work`.   # exit 15
 
 $ perch switch
-you@example.com is in no Group, so nothing has declared which Accounts it is interchangeable with. Nothing was changed.
+you@example.com is in no Group, so nothing has declared which Accounts it is interchangeable with.
 Either put it in a Group with `perch group move you@example.com <group>`, or declare that every ungrouped Account is interchangeable with `perch config set ungrouped interchangeable true`.   # exit 18
 ```
 

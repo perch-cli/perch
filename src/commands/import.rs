@@ -68,7 +68,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
         error.with_note(
             "The Import itself finished: every Credential the Export held is \
              restored and Perch's registry is written. Only the report of it \
-             could not be, so there is nothing to run again — `perch list` says \
+             could not be, so there is nothing to run again. `perch list` says \
              what arrived.",
         )
     })
@@ -141,7 +141,7 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
             out,
             &format!(
                 "The Export held no Credential for {}, so the {} restored \
-                 without one — Quarantine reason and all. {repair}",
+                 without one. {repair}",
                 bare.join(", "),
                 match bare.len() {
                     1 => "Account was",

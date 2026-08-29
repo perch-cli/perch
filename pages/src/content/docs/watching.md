@@ -87,9 +87,9 @@ Window out of is a failed read too — not an Account with nothing used, which i
 the one reading that could never be over any threshold.
 
 ```
-2026-08-04T12:00:00Z  held      unread — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 2m30s.
-2026-08-04T12:02:30Z  held      unread — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 5m00s.
-2026-08-04T12:07:30Z  nowhere   100% used, fullest 5-hour — nowhere to go: Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 2h23m).
+2026-08-04T12:00:00Z  held      unread — Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 2m30s.
+2026-08-04T12:02:30Z  held      unread — Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 5m00s.
+2026-08-04T12:07:30Z  nowhere   100% used, fullest 5-hour — Every Account in Group `work` is exhausted. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 2h23m).
 ```
 
 Neither of those ends the watch. Nowhere to go is resolved by waiting, which is
@@ -128,7 +128,7 @@ already allowed. Each is printed when it is what decided a round:
   cannot use.
 
 ```
-2026-08-04T12:02:30Z  nowhere   86% used, fullest 5-hour — nowhere to go: Nothing in Group `work` is worth Switching to yet — overflow@example.com is at 74% used and nothing over 70% is worth moving to. Nothing was changed.
+2026-08-04T12:02:30Z  nowhere   86% used, fullest 5-hour — Nothing in Group `work` is worth Switching to yet: overflow@example.com is at 74% used and nothing over 70% is worth moving to.
 2026-08-04T12:05:00Z  cooling   86% used, fullest 5-hour — the last Switch was 2 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
 ```
 
@@ -153,12 +153,12 @@ waits, and takes over the moment that changes:
 
 ```
 $ perch watcher run
-Started. Nothing is being decided yet — the next line says what is holding it, and the watcher takes over the moment that changes. Ctrl-C stops.
-2026-08-04T12:00:00Z  held      unread — nothing current to decide on, so nothing was decided: you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all [...] Asking again in 2m30s.
+Started. Nothing is being decided yet; the next line says what is holding it. Ctrl-C stops.
+2026-08-04T12:00:00Z  held      unread — you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all [...] Asking again in 2m30s.
 
 $ perch watcher run
-Started. Nothing is being decided yet — the next line says what is holding it, and the watcher takes over the moment that changes. Ctrl-C stops.
-2026-08-04T12:00:00Z  held      unread — nothing current to decide on, so nothing was decided: Group `work` has not been told the watcher may act on it [...] Asking again in 2m30s.
+Started. Nothing is being decided yet; the next line says what is holding it. Ctrl-C stops.
+2026-08-04T12:00:00Z  held      unread — Group `work` has not been told the watcher may act on it [...] Asking again in 2m30s.
 ```
 
 `perch watcher check` is the one that exits on these, with the codes in the

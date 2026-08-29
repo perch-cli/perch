@@ -184,7 +184,7 @@ fn unlink(host: &dyn Host, at: &Path) -> Result<()> {
 /// What to do about a link that will not go: the directory it sits in is the
 /// thing refusing, and its permissions are the user's.
 const WILL_NOT_GO: &str = "That link is Perch's own and is being replaced, so what refused is the directory holding \
-     it — check that you own it and can write to it.";
+     it. Check that you own it and can write to it.";
 
 /// Clears away links into the Default Profile that no longer stand for
 /// anything: a dangling link is not inert, because Claude Code takes its locks
@@ -240,9 +240,8 @@ fn refused(at: &Path, why: &str, remedy: &str) -> PerchError {
 
     PerchError::Other(format!(
         "`{entry}` could not be made reachable from {}: {why}.\n\n\
-         Perch shares by linking and never by copying, because a copy diverges \
-         the moment it is edited — so the Run is refused rather than served \
-         one. {remedy}",
+         Perch shares by linking and never by copying, so the Run is refused \
+         rather than served a copy. {remedy}",
         at.parent().unwrap_or(at).display(),
     ))
 }

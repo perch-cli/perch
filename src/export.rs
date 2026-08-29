@@ -444,7 +444,7 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
             "This file was sealed with more work than Perch will spend opening \
              one (2^{required} scrypt rounds, against a ceiling of \
              2^{MAX_WORK_FACTOR}). Nothing is wrong with the file and the \
-             passphrase is not in question — `age -d` opens it where this will \
+             passphrase is not in question. `age -d` opens it where this will \
              not."
         )),
         // This *is* the Export and it did not come through intact: a header
@@ -453,7 +453,7 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
         damaged @ (age::DecryptError::InvalidMac | age::DecryptError::Io(_)) => {
             PerchError::Invalid(format!(
                 "This is an `age` file and it did not come through intact \
-                 ({damaged}). The passphrase is not in question — nothing will \
+                 ({damaged}). The passphrase is not in question, and nothing will \
                  open this copy. Find another one."
             ))
         }
@@ -523,11 +523,9 @@ fn no_perch_wrote(claimed: Option<u64>) -> PerchError {
         path: "the Export".to_string(),
         detail: format!(
             "it says it is export version {}, which is a version no Perch has \
-             written — the earliest is {}. Nothing was imported: reading it as \
-             version {} would be a guess at a shape nothing describes.",
+             written. The earliest is {}. Nothing was imported.",
             claimed.unwrap_or_default(),
             EARLIEST_VERSION,
-            CURRENT_VERSION,
         ),
     }
 }

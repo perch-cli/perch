@@ -242,9 +242,9 @@ fn what_it_would_leave(
     said.push_str(&match &consequence.successor {
         Some(successor) => format!(
             "{} will be made active first, so nothing is left running as an \
-             Account Perch has forgotten — `perch switch <target>` first if you \
+             Account Perch has forgotten. `perch switch <target>` first if you \
              would rather land somewhere else. The login being given up goes \
-             with it: holding it again would mean `perch add`.",
+             with it, and holding it again would mean `perch add`.",
             registry.named_for_the_user(successor.email()),
         ),
         // Removing the *active* Account with nowhere to land leaves the machine
@@ -253,16 +253,14 @@ fn what_it_would_leave(
         None if consequence.is_active => format!(
             "Nothing Perch holds can be left active in its place, so it will \
              hold no active Account afterwards. Claude Code goes on running as \
-             {} — the live Credential is not Perch's to take away — but the \
-             Credential Perch holds is deleted, so anything that replaces the \
-             live one ends that login for good.",
+             {}, but the Credential Perch holds is deleted, so anything that \
+             replaces the live one ends that login for good.",
             account.email(),
         ),
         None => format!(
             "Perch is on no Account, so nothing is switched away from. The \
              Credential Perch holds for {} is deleted, and Perch will hold no \
-             Accounts at all afterwards — whatever Claude Code is logged in as \
-             is not Perch's to take away, and not Perch's to give back either.",
+             Accounts at all afterwards.",
             account.email(),
         ),
     });
@@ -307,7 +305,7 @@ fn land_on(
     }
 
     landed.map_err(|stopped| {
-        let held = format!("Nothing was removed — {} is still held", leaving.email());
+        let held = format!("Nothing was removed, and {} is still held", leaving.email());
         stopped.error.with_note(&if stopped.is_live {
             format!(
                 "{held}. Its Credential is no longer the live one: {}'s is, and \
@@ -384,7 +382,7 @@ fn delete_the_credential_and_its_profile(
                      store, so a Switch onto it may no longer work",
                     account.email(),
                 ),
-                false => format!("Nothing was removed — {} is still held", account.email()),
+                false => format!("Nothing was removed, and {} is still held", account.email()),
             };
             error.with_note(&format!(
                 "{so_far}, so `perch remove` can be run again once {} can be \
@@ -424,7 +422,7 @@ fn report(
     let credential = match deleted {
         Deleted::Credential => String::new(),
         Deleted::NothingWasThere => format!(
-            " Neither of its Credential Stores held anything to delete — {}.",
+            " Neither of its Credential Stores held anything to delete, and {}.",
             credentials::a_store_that_held_nothing(host),
         ),
         Deleted::NothingSharedWith(sharer) => format!(
@@ -446,7 +444,7 @@ fn report(
         (None, remaining) if consequence.is_active => say::line(
             out,
             &format!(
-                "Perch holds no active Account now — `perch switch <target>` \
+                "Perch holds no active Account now. `perch switch <target>` \
                  makes {} active.",
                 if remaining == 1 {
                     "the one it still holds".to_string()

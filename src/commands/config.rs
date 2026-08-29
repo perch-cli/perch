@@ -220,9 +220,8 @@ fn a_setting_is_not_a_scope(word: &str) -> Option<PerchError> {
 fn no_scope_was_named(registry: &Registry, key: &str, value: &str) -> PerchError {
     PerchError::Invalid(format!(
         "`perch config set {key} {value}` names no Scope, and every Setting is \
-         said about the Scope it governs — there is nothing above them for a \
-         value to be set at. `perch config set <scope> {key} {value}` sets one. \
-         {}",
+         said about the Scope it governs. `perch config set <scope> {key} \
+         {value}` sets one. {}",
         the_scopes(registry),
     ))
 }
@@ -242,9 +241,8 @@ fn the_scopes(registry: &Registry) -> String {
 /// The form `set` takes, said whenever the words said were not it.
 fn how_set_is_addressed(registry: &Registry, words: &[String]) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config set` was given {}. It takes a Scope, a key and a value — \
-         `perch config set <scope> <key> <value>`, where a Scope is a Group or \
-         `{UNGROUPED}`. {}",
+        "`perch config set` was given {}. It takes `perch config set <scope> \
+         <key> <value>`, where a Scope is a Group or `{UNGROUPED}`. {}",
         say::words(words.len()),
         the_scopes(registry),
     ))
@@ -255,9 +253,9 @@ fn how_set_is_addressed(registry: &Registry, words: &[String]) -> PerchError {
 /// serving both would name a form that does not exist.
 fn how_get_is_addressed(words: &[String]) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config get` was given {}. It takes a Scope and a key — `perch \
-         config get <scope> <key>` — or a Scope alone to read every Setting it \
-         holds. `perch config get` on its own reads every Scope there is.",
+        "`perch config get` was given {}. It takes `perch config get <scope> \
+         <key>`, or a Scope alone to read every Setting it holds. `perch config \
+         get` on its own reads every Scope there is.",
         say::words(words.len()),
     ))
 }

@@ -36,10 +36,9 @@ pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
         // working directory nobody chose.
         if !names_one_place(host.platform(), &overridden) {
             return Err(PerchError::Invalid(format!(
-                "PERCH_HOME is set to `{}`, which is not an absolute path — so \
+                "PERCH_HOME is set to `{}`, which is not an absolute path, so \
                  where Perch holds the Holdings would depend on the directory \
-                 each command was run from, and a second one would look like an \
-                 empty machine.\n\
+                 each command was run from.\n\
                  Set it to a full path, or unset it for {}.",
                 overridden,
                 home_dir(host)

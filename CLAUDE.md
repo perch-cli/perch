@@ -3,9 +3,11 @@ Always load the `unslop` skill if it is present.
 ## The Holdings survive an upgrade
 
 The CLI surface moves freely: commands, flags, output prose, exit codes and the
-shape of `--json`. Rename it, move it, cut it, and mark the entry
-`[**breaking**]` in `CHANGELOG.md`. Exit codes and `--json` are read by a script
-rather than by a person, so that entry is the only warning there will be.
+shape of `--json`. Rename it, move it, cut it. Commands, flags, exit codes and
+`--json` mark the entry `[**breaking**]` in `CHANGELOG.md`, because a script
+reads them and that entry is the only warning there will be. Output prose is
+read by a person who reads it again on the next run, so it moves under
+`### Changed`.
 
 The Holdings do not. A Profile, a Credential, the registry naming them and an
 Export carrying all three are what a changelog entry cannot give back, so a

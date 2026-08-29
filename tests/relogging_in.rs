@@ -119,7 +119,7 @@ fn a_repair_says_what_it_repaired_and_nothing_about_what_it_left_alone() {
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(
-            format!("Repaired {SECOND_EMAIL} (as `overflow`) — it is no longer Quarantined.")
+            format!("Repaired {SECOND_EMAIL} (as `overflow`). It is no longer Quarantined.")
                 .as_str()
         ),
         "{printed}"
@@ -141,7 +141,7 @@ fn a_repaired_account_that_is_still_disabled_is_told_so() {
     result.expect("the Account is repaired");
     assert!(
         printed.contains(
-            "Cycling still will not choose it — it is disabled, which a repair \
+            "Cycling still will not choose it: it is disabled, which a repair \
              does not undo."
         ),
         "{printed}"

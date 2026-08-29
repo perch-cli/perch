@@ -118,10 +118,7 @@ fn the_login_claude_code_is_running_on_is_left_exactly_where_it_is() {
     // rather than again in the report. Asserted whole, because the sentence is
     // the claim.
     assert!(
-        printed.contains(
-            "Claude Code goes on running as whatever it is logged in as — the \
-             live Credential is not Perch's to take away."
-        ),
+        printed.contains("Claude Code goes on running as whatever it is logged in as."),
         "which is said, because it is the one thing a Purge deliberately leaves \
          behind:\n{printed}"
     );
@@ -1038,7 +1035,7 @@ fn a_hold_lost_after_the_credentials_were_deleted_does_not_say_nothing_happened(
         "every Credential is already deleted, so that sentence is false: {said}"
     );
     assert!(
-        said.contains("already deleted"),
+        said.contains("Every Credential Perch held is deleted"),
         "it says what did happen: {said}"
     );
     assert!(
@@ -1469,7 +1466,7 @@ fn a_sessions_directory_that_will_not_be_read_stops_the_purge_and_says_so() {
         "nothing was established, which is not a Live Profile: {refused}"
     );
     assert!(
-        refused.to_string().contains("make that directory readable"),
+        refused.to_string().contains("Make that directory readable"),
         "and it says what to do about the directory rather than naming a client \
          to quit: {refused}"
     );

@@ -184,7 +184,7 @@ pub struct Consequence {
 /// exactly nothing behind, and they offer the same two ways out.
 pub const NOTHING_WAS_CHANGED: Consequence = Consequence {
     nothing_happened: "Nothing was changed.",
-    quit_it: "That Credential belongs to it until it exits — quit it, or switch \
+    quit_it: "That Credential belongs to it until it exits. Quit it, or switch \
               to a different Account.",
 };
 
@@ -255,8 +255,8 @@ impl Unsure {
             Unsure::Unlistable { dir, why } => format!(
                 "{} could not be read ({why}), so whether a client is running \
                  against this Profile is not a question that got an answer. \
-                 Nothing is assumed either way — make that directory readable, \
-                 or delete it if no client is running",
+                 Make that directory readable, or delete it if no client is \
+                 running",
                 dir.display()
             ),
         }
