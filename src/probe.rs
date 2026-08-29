@@ -48,6 +48,10 @@ pub enum Installed<'h> {
         host: &'h dyn Host,
         said: std::cell::OnceCell<String>,
     },
+    /// No Claude Code to ask, and why. A state rather than a failure, because
+    /// the Watcher carries the answer from round to round as a value and every
+    /// reader downstream answers it in its own words.
+    Absent { why: String },
 }
 
 impl<'h> Installed<'h> {
@@ -61,14 +65,26 @@ impl<'h> Installed<'h> {
     /// forks a Node program to quote a string most rounds never quote. Only the
     /// version waits: a refusal quotes the Claude Code installed when it was
     /// raised rather than when the process started.
-    pub fn asked_when_needed(host: &'h dyn Host) -> Result<Installed<'h>> {
+    pub fn asked_when_needed(host: &'h dyn Host) -> Installed<'h> {
         // Claude Code being *there* is still established now, a round with none
         // having nothing to do — and it is a `PATH` walk rather than a fork.
-        claude_bin(host)?;
-        Ok(Installed::Asking {
-            host,
-            said: std::cell::OnceCell::new(),
-        })
+        match claude_bin(host) {
+            Ok(_) => Installed::Asking {
+                host,
+                said: std::cell::OnceCell::new(),
+            },
+            Err(why) => Installed::Absent {
+                why: why.to_string(),
+            },
+        }
+    }
+
+    /// The reason there is nothing to ask, where that is the state this is in.
+    pub fn absent(&self) -> Option<&str> {
+        match self {
+            Installed::Absent { why } => Some(why),
+            Installed::Said(_) | Installed::Asking { .. } => None,
+        }
     }
 
     /// When the question could not be asked, or is not the thing being tested.
@@ -95,6 +111,9 @@ impl<'h> Installed<'h> {
             Installed::Asking { host, said } => {
                 said.get_or_init(|| claude_version(*host).unwrap_or_else(|_| "unknown".to_string()))
             }
+            // Reached from inside a refusal being built, with nothing there to
+            // hand a second failure to.
+            Installed::Absent { .. } => "unknown",
         }
     }
 }
@@ -1867,7 +1886,7 @@ mod tests {
                 },
             );
 
-        let installed = Installed::asked_when_needed(&host).expect("`claude` is on PATH");
+        let installed = Installed::asked_when_needed(&host);
         assert_eq!(
             versions_read_by(&host),
             0,
@@ -1888,9 +1907,22 @@ mod tests {
             .with_env("PATH", "/usr/bin")
             .with_file("/usr/bin/claude", "");
 
-        let installed = Installed::asked_when_needed(&host).expect("`claude` is on PATH");
+        let installed = Installed::asked_when_needed(&host);
 
         assert_eq!(installed.version(), "unknown");
+    }
+
+    #[test]
+    fn a_machine_with_nothing_to_defer_to_is_absent_and_quoted_as_unknown() {
+        let host = FakeHost::new();
+        let installed = Installed::asked_when_needed(&host);
+
+        assert!(installed.absent().is_some(), "no `claude` on an empty PATH");
+        assert_eq!(installed.version(), "unknown");
+        assert!(
+            Installed::unknown("2.1.221").absent().is_none(),
+            "a version said is not an absence"
+        );
     }
 
     #[test]

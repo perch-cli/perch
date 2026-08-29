@@ -118,12 +118,19 @@ pub fn read_now(
     registry: &mut crate::registry::Registry,
     about: &[String],
 ) -> crate::observe::Report {
+    // A probe that fails travels as the state it found, so every turn below
+    // answers it in its own words rather than this caller deciding for them.
+    let installed = crate::probe::Installed::probed(host).unwrap_or_else(|why| {
+        crate::probe::Installed::Absent {
+            why: why.to_string(),
+        }
+    });
     crate::observe::refresh(
         host,
         perch,
         registry,
         about,
-        &crate::probe::Installed::probed(host),
+        &installed,
         // Somebody typed this, so a Watcher running behind it is already
         // keeping the active Account's figure and this read is left to it.
         crate::observe::Spending::BesideTheWatcher,
