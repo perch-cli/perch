@@ -720,13 +720,21 @@ fn rank(window: &str) -> u8 {
         .map_or(EVERY_ACCOUNT_HAS.len() as u8, |at| at as u8)
 }
 
-/// The email address a profile reply names, if it names one.
+/// The email address a profile reply names, if it names one. Two spellings,
+/// because the endpoint has sent both and a machine may be talking to either.
+/// Read rather than chosen between: preferring one turns the other into drift
+/// on the day it comes back.
 fn email_in(document: &Value) -> Option<String> {
-    document
-        .get("account")
-        .and_then(|account| account.get("email_address"))
-        .or_else(|| document.get("email_address"))
-        .and_then(Value::as_str)
+    ["email", "email_address"]
+        .into_iter()
+        .flat_map(|spelled| {
+            [
+                document.get("account").and_then(|it| it.get(spelled)),
+                document.get(spelled),
+            ]
+        })
+        .flatten()
+        .find_map(Value::as_str)
         .map(str::to_string)
 }
 
@@ -1122,13 +1130,27 @@ mod tests {
 
     #[test]
     fn a_profile_reply_names_the_account_or_says_nothing() {
-        let named = json!({"account": {"email_address": "someone@example.com"}});
-        assert_eq!(
-            email_in(&named),
-            Some("someone@example.com".to_string()),
-            "which Account a token belongs to is what this endpoint is for"
-        );
+        for named in [
+            json!({"account": {"email": "someone@example.com"}}),
+            json!({"account": {"email_address": "someone@example.com"}}),
+            json!({"email_address": "someone@example.com"}),
+        ] {
+            assert_eq!(
+                email_in(&named),
+                Some("someone@example.com".to_string()),
+                "which Account a token belongs to is what this endpoint is for: {named}"
+            );
+        }
         assert_eq!(email_in(&json!({"organization": {"name": "Acme"}})), None);
+    }
+
+    #[test]
+    fn a_spelling_that_says_nothing_does_not_shut_out_the_one_that_does() {
+        let named = json!({
+            "account": {"email": null, "email_address": "someone@example.com"}
+        });
+
+        assert_eq!(email_in(&named), Some("someone@example.com".to_string()));
     }
 
     /// The ask is in front of the request rather than beside it: a Renewal is the
