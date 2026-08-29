@@ -6,10 +6,18 @@ five-hour window and 95% on its seven-day while another is the reverse, so the
 two rank in opposite orders depending on which window is read.
 
 Perch takes each Account's worst window and picks the Account whose worst is
-best. Being blocked by any window blocks you completely, so this is the only
-ranking that measures what actually stops work: when Perch reports 40% Headroom,
-that is true of every window, and nothing surprising blocks you five minutes
-later.
+best. When Perch reports 40% Headroom, that is true of every window, and nothing
+surprising blocks you five minutes later.
+
+**This is deliberately pessimistic rather than exact.** A per-model window meters
+one model, and the work about to run may never touch it, so an Account held back
+by a full weekly Fable window could have been fine for the Sonnet session
+somebody was starting. Perch cannot know which model the work will use, and the
+two mistakes do not cost the same: a second Account nobody needed costs a Switch,
+and an Account that dies mid-task costs the session. Ranking on what could block
+rather than on what will is the cheaper mistake, and Perch makes it on purpose. A
+Scope naming which of its windows count is the live alternative, and 1.0 does not
+offer one.
 
 Ranking on the five-hour window alone is refused. It is the window you hit first
 and the simplest to explain, and it will switch you onto an Account about to die
@@ -81,16 +89,27 @@ dead on arrival.
 So the reply is read as loosely as it can be about *which* windows there are, and
 not loosely at all about whether one answers.
 
-- **A window is whatever says how full it is.** The windows are whatever the
+- **A window is whatever says how full it is**, whatever it is called, with the
+  paid-credit allowance held out by name below. The windows are whatever the
   reply holds rather than a fixed list, because an Account is limited by
   whichever window fills first, and a window dropped for carrying a name Perch
-  had not been taught is one nothing would ever rank on.
+  had not been taught is one nothing would ever rank on. Anthropic has since
+  moved its per-model windows onto names that say nothing at all, `nimbus_quill`
+  and `iguana_necktie` and `juniper_tide`, so a rule keyed on the name would by
+  now be dropping every one of them. The two errors are not
+  symmetrical: admitting a key nobody can read can only make an Account look
+  fuller than it is, and dropping one makes it look emptier, which is the
+  direction this section exists to stop. What is left is a row nobody can
+  identify, which is a naming problem and gets a naming answer
+  (ADR a-window-comes-from-limits).
 - **A key that names a period and will not say how full it is is drift, and the
-  reply is refused.** A key that names no period is a field beside the windows,
-  which Perch is not entitled to an opinion about — read as windows, those fail
-  the whole Refresh for every Account in one pass, in a message calling a thing
-  that is not a window a Quota Window. The line is drawn on the *unit* rather
-  than the count, or the rule holds for the periods in use and for nothing else.
+  reply is refused.** Naming a period is what makes silence suspicious: a key
+  called `one_hour` carrying no figure is a window that has stopped answering,
+  and one called `tangelo` carrying none is a field beside the windows, which
+  Perch is not entitled to an opinion about. Read as windows, those fail the
+  whole Refresh for every Account in one pass, in a message calling a thing that
+  is not a window a Quota Window. The line is drawn on the *unit* rather than the
+  count, or the rule holds for the periods in use and for nothing else.
 - **The two windows every Account has are held to that standard when they are
   absent as well.** Drift can only refuse a window that is there and has stopped
   answering, so a `five_hour` the reply leaves out is the same loss arriving by

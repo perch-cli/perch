@@ -359,15 +359,116 @@ fn says_revoked(body: &str) -> bool {
         == Some(REVOKED)
 }
 
-/// The Quota Windows a usage reply describes.
-///
-/// Every value carrying a `utilization` is one, whatever it is called: what makes
-/// something a window is the key rather than the type. `said` collects what is
-/// worth remarking on about a reply that is still usable ([`reset_time_in`]).
+/// The Quota Windows a usage reply describes: `limits` where the reply carries
+/// one, and the top-level map where it does not (ADR a-window-comes-from-limits).
+/// What makes an entry a window, and what makes an unreadable one drift, is
+/// ADR headroom-is-the-worst-window's. `said` collects what is worth remarking
+/// on about a reply that is still usable ([`reset_time_in`]).
 fn windows_in(
     document: &Value,
     said: &mut Vec<String>,
 ) -> std::result::Result<QuotaWindows, String> {
+    // An empty array is an answer rather than an absence, so it is not a
+    // fallback: a reply naming no window is `utilization`'s to refuse.
+    match document.get("limits").and_then(Value::as_array) {
+        Some(limits) => ranked(limits_in(limits, said)?),
+        None => map_in(document, said),
+    }
+}
+
+/// The Quota Windows a `limits` array describes.
+///
+/// An entry meters a period its `group` names, and that is what admits it: a
+/// `kind` is the narrower field and grows with every scope Anthropic adds, so a
+/// rule keyed on it refuses what it has not been taught yet.
+fn limits_in(
+    limits: &[Value],
+    said: &mut Vec<String>,
+) -> std::result::Result<QuotaWindows, String> {
+    let mut windows = QuotaWindows::new();
+    for entry in limits {
+        // A group Perch does not know is a limit beside the windows, which it is
+        // not entitled to an opinion about.
+        let Some(period) = entry.get("group").and_then(Value::as_str).and_then(period) else {
+            continue;
+        };
+        let named = match qualifier(entry) {
+            Some(qualifier) => format!("{period}-{qualifier}"),
+            None => period.to_string(),
+        };
+        let Some(percent) = entry.get("percent").and_then(Value::as_f64) else {
+            return Err(drifted(&named, "percent"));
+        };
+        windows.push(WindowUtilization {
+            resets_at: reset_time_in(&named, entry, said),
+            window: named,
+            // A window cannot be less than empty or more than full, and clamping
+            // here is what stops a figure outside that becoming "105% headroom"
+            // in a sentence somebody is asked to act on.
+            used_percent: percent.clamp(0.0, 100.0),
+        });
+    }
+    the_two_are_there(&windows, EVERY_ACCOUNT_HAS_AS_LIMITS)?;
+    Ok(windows)
+}
+
+/// What follows the period in a window's name.
+///
+/// A scope names the window before its `kind` does, because a `kind` says only
+/// that a window is scoped and the scope says to what. `session` and
+/// `weekly_all` meter the whole of their period and take no qualifier.
+fn qualifier(entry: &Value) -> Option<String> {
+    let scope = entry.get("scope");
+    if let Some(named) = named_by(scope.and_then(|scope| scope.get("model")))
+        .or_else(|| named_by(scope.and_then(|scope| scope.get("surface"))))
+    {
+        return Some(slug(&named));
+    }
+    let kind = entry.get("kind").and_then(Value::as_str)?;
+    let group = entry
+        .get("group")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match kind.strip_prefix(group).unwrap_or(kind).trim_matches('_') {
+        "" | "all" => None,
+        rest => Some(slug(rest)),
+    }
+}
+
+/// What a scope names, however it names it: Anthropic writes a display name
+/// under `model`, and `surface` is null in every reply seen so far, so a bare
+/// string is read as the name as well.
+fn named_by(scope: Option<&Value>) -> Option<String> {
+    let scope = scope?;
+    match scope.as_str() {
+        Some(named) => Some(named.to_string()),
+        None => scope
+            .get("display_name")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }
+}
+
+/// A name Anthropic wrote for a person, as the rest of a window's name is
+/// spelled. `scope.model.id` is null, so a display name is the only handle
+/// there is, and it is prose.
+fn slug(named: &str) -> String {
+    let mut out = String::with_capacity(named.len());
+    for character in named.chars() {
+        match character.is_ascii_alphanumeric() {
+            true => out.push(character.to_ascii_lowercase()),
+            false if !out.is_empty() && !out.ends_with('-') => out.push('-'),
+            false => {}
+        }
+    }
+    out.truncate(out.trim_end_matches('-').len());
+    out
+}
+
+/// The Quota Windows the top-level map describes, read where a reply carries no
+/// `limits` array. Every value carrying a `utilization` is a window, whatever it
+/// is called: what makes something a window is that it says how full it is.
+fn map_in(document: &Value, said: &mut Vec<String>) -> std::result::Result<QuotaWindows, String> {
     let Some(fields) = document.as_object() else {
         return Ok(QuotaWindows::new());
     };
@@ -385,25 +486,41 @@ fn windows_in(
         // to learn its name. Everything else goes to [`is_drift`].
         let Some(used_percent) = how_full_it_says_it_is(value) else {
             if is_drift(name, value) {
-                return Err(drifted(name));
+                return Err(drifted(name, "utilization"));
             }
             continue;
         };
         windows.push(window_from(name, used_percent, value, said));
     }
 
-    // The two every Account has, held to the same standard absent as unreadable:
-    // `is_drift` is asked once per key the reply carries. Only where something
-    // was read — a reply naming no window at all is `utilization`'s to say.
-    if !windows.is_empty()
-        && let Some((at, _)) = EVERY_ACCOUNT_HAS_SHOWN
-            .iter()
-            .enumerate()
-            .find(|(_, shown)| !windows.iter().any(|held| held.window == **shown))
-    {
-        return Err(went_missing(EVERY_ACCOUNT_HAS[at]));
-    }
+    the_two_are_there(&windows, EVERY_ACCOUNT_HAS)?;
+    ranked(windows)
+}
 
+/// The two every Account has, held to the same standard absent as unreadable.
+/// `spelled` is whichever half of the reply this came from, so a refusal names
+/// what Anthropic did not send rather than what Perch would have called it.
+/// Only where something was read: a reply naming no window at all is
+/// [`utilization`]'s to say.
+fn the_two_are_there(
+    windows: &QuotaWindows,
+    spelled: [&str; 2],
+) -> std::result::Result<(), String> {
+    if windows.is_empty() {
+        return Ok(());
+    }
+    match EVERY_ACCOUNT_HAS_SHOWN
+        .iter()
+        .enumerate()
+        .find(|(_, shown)| !windows.iter().any(|held| held.window == **shown))
+    {
+        Some((at, _)) => Err(went_missing(spelled[at])),
+        None => Ok(()),
+    }
+}
+
+/// The windows in the order every surface shows them.
+fn ranked(windows: QuotaWindows) -> std::result::Result<QuotaWindows, String> {
     // Ranked once each rather than inside a comparator that runs O(n log n)
     // times, which is what `cycle::ranked` does for the same reason.
     let mut ranked: Vec<(u8, WindowUtilization)> = windows
@@ -440,10 +557,9 @@ fn how_full_it_says_it_is(value: &Value) -> Option<f64> {
 }
 
 /// Whether something Perch could not read as a Quota Window is drift to refuse,
-/// or a field beside the windows to pass over. The single place that draws the
-/// line, and it draws it on the name (ADR headroom-is-the-worst-window). A `null`
-/// under a per-model name is the endpoint saying the Account has no such window,
-/// which is most models for most Accounts.
+/// or a field beside the windows to pass over. Naming a period is what makes
+/// silence suspicious. A `null` under a per-model name is the endpoint saying
+/// the Account has no such window, which is most models for most Accounts.
 fn is_drift(name: &str, value: &Value) -> bool {
     named_by_a_period(name) && !says_the_account_has_no_such_window(name, value)
 }
@@ -476,16 +592,52 @@ const EVERY_ACCOUNT_HAS: [&str; 2] = ["five_hour", "seven_day"];
 /// two cannot drift apart is a test rather than a call.
 const EVERY_ACCOUNT_HAS_SHOWN: [&str; 2] = ["5-hour", "7-day"];
 
+/// The same two as a `limits` reply spells them, in the order
+/// [`EVERY_ACCOUNT_HAS_SHOWN`] names them.
+const EVERY_ACCOUNT_HAS_AS_LIMITS: [&str; 2] = ["session", "weekly_all"];
+
+/// The period each `group` meters, as Perch names it. Perch's own names rather
+/// than anything the reply says, since a `limits` entry carries no period at
+/// all. One table, because a window is named from it on the way in and says
+/// which group it came from on the way out, and a second copy is where those two
+/// stop agreeing.
+const PERIODS: [(&str, &str); 2] = [("session", "5-hour"), ("weekly", "7-day")];
+
+/// What Perch calls the period a `group` meters, where it is one Perch knows.
+fn period(group: &str) -> Option<&'static str> {
+    PERIODS
+        .iter()
+        .find(|(named, _)| *named == group)
+        .map(|(_, period)| *period)
+}
+
+/// Which `group` a window's name came from, for the script that needs a handle
+/// steadier than a name derived from Anthropic's prose.
+pub fn group_of(window: &str) -> Option<&'static str> {
+    PERIODS
+        .iter()
+        .find(|(_, period)| {
+            window == *period
+                || window
+                    .strip_prefix(period)
+                    .is_some_and(|rest| rest.starts_with('-'))
+        })
+        .map(|(group, _)| *group)
+}
+
 /// Whether a key names one of [`EVERY_ACCOUNT_HAS`], as the endpoint spells it
 /// rather than as Perch shows it — `five_hour`, never `5-hour`.
 fn every_account_has(name: &str) -> bool {
     EVERY_ACCOUNT_HAS.contains(&name)
 }
 
-fn drifted(name: &str) -> String {
+/// `field` because the two halves of a reply say how full a window is under
+/// different names, and a refusal a person is meant to check against the body
+/// names the one that was actually looked for.
+fn drifted(name: &str, field: &str) -> String {
     format!(
         "the usage endpoint named the Quota Window `{name}` without a numeric \
-         `utilization`, so how full it is could not be read"
+         `{field}`, so how full it is could not be read"
     )
 }
 
@@ -502,13 +654,14 @@ fn window_from(
     value: &Value,
     said: &mut Vec<String>,
 ) -> WindowUtilization {
+    let named = window_name(name);
     WindowUtilization {
-        window: window_name(name),
         // A window cannot be less than empty or more than full, and clamping
         // here is what stops a figure outside that becoming "105% headroom" in a
         // sentence somebody is asked to act on.
         used_percent: used_percent.clamp(0.0, 100.0),
-        resets_at: reset_time_in(name, value, said),
+        resets_at: reset_time_in(&named, value, said),
+        window: named,
     }
 }
 
@@ -517,7 +670,7 @@ fn window_from(
 /// unparsable `resets_at` loses a Strategy rather than a figure, since every
 /// `soonest-reset` Scope quietly becomes a `most-headroom` one with the Setting
 /// unchanged.
-fn reset_time_in(name: &str, value: &Value, said: &mut Vec<String>) -> Option<DateTime<Utc>> {
+fn reset_time_in(named: &str, value: &Value, said: &mut Vec<String>) -> Option<DateTime<Utc>> {
     // Absent and `null` are the same answer: this window does not say when it
     // resets, and Anthropic writes both.
     let carried = value.get("resets_at").filter(|at| !at.is_null())?;
@@ -529,11 +682,10 @@ fn reset_time_in(name: &str, value: &Value, said: &mut Vec<String>) -> Option<Da
 
     if parsed.is_none() {
         said.push(format!(
-            "the usage endpoint said when the `{}` window resets in a form Perch \
-             could not read, so that window is ranked as one with no reset time. \
-             A Group set to `soonest-reset` chooses on Headroom alone while this \
-             lasts.",
-            window_name(name),
+            "the usage endpoint said when the `{named}` window resets in a form \
+             Perch could not read, so that window is ranked as one with no reset \
+             time. A Group set to `soonest-reset` chooses on Headroom alone while \
+             this lasts."
         ));
     }
     parsed
@@ -740,7 +892,7 @@ mod tests {
     fn a_field_beside_the_windows_is_still_not_a_window() {
         let document: Value = serde_json::from_str(
             r#"{"five_hour": {"utilization": 1}, "seven_day": {"utilization": 10},
-                "organization": {"uuid": "x"}, "limits": [], "extra_usage": 3}"#,
+                "organization": {"uuid": "x"}, "spend": {"percent": 3}, "extra_usage": 3}"#,
         )
         .unwrap();
 
@@ -1071,6 +1223,204 @@ mod tests {
             renewed("-1.0").expires_at,
             None,
             "and the refusals hold whichever way the number is spelled"
+        );
+    }
+
+    /// A real reply, trimmed of the blocks no rule here reads. Kept whole where
+    /// it is evidence: the codename keys, the nulls beside them, and the
+    /// `limits` array describing the same three windows the map describes two of.
+    const BOTH_HALVES: &str = r#"{
+      "five_hour": {"utilization": 2.0, "resets_at": "2026-08-29T13:20:00.1+00:00"},
+      "seven_day": {"utilization": 10.0, "resets_at": "2026-09-03T20:00:00.1+00:00"},
+      "seven_day_opus": null,
+      "seven_day_sonnet": null,
+      "tangelo": null,
+      "iguana_necktie": null,
+      "nimbus_quill": {"utilization": 0.0, "resets_at": null},
+      "juniper_tide": null,
+      "extra_usage": {"is_enabled": false, "utilization": null},
+      "limits": [
+        {"kind": "session", "group": "session", "percent": 2,
+         "resets_at": "2026-08-29T13:20:00.1+00:00", "scope": null, "is_active": false},
+        {"kind": "weekly_all", "group": "weekly", "percent": 10,
+         "resets_at": "2026-09-03T20:00:00.1+00:00", "scope": null, "is_active": true},
+        {"kind": "weekly_scoped", "group": "weekly", "percent": 0, "resets_at": null,
+         "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+         "is_active": false}
+      ],
+      "spend": {"percent": 0, "enabled": false},
+      "member_dashboard_available": false
+    }"#;
+
+    fn both_halves() -> QuotaWindows {
+        windows_of(&serde_json::from_str(BOTH_HALVES).expect("valid JSON"))
+            .expect("every limit says how full it is")
+    }
+
+    fn named(windows: QuotaWindows) -> Vec<String> {
+        windows.into_iter().map(|window| window.window).collect()
+    }
+
+    #[test]
+    fn a_reply_carrying_both_halves_is_read_from_limits() {
+        assert_eq!(named(both_halves()), ["5-hour", "7-day", "7-day-fable"]);
+    }
+
+    #[test]
+    fn a_window_the_map_names_only_by_a_codename_is_named_by_its_model() {
+        let named = named(both_halves());
+
+        assert!(
+            !named.iter().any(|window| window.contains("nimbus")),
+            "the codename is the map's name for the window `limits` calls Fable: {named:?}"
+        );
+    }
+
+    #[test]
+    fn a_scoped_window_carries_the_period_its_group_meters() {
+        let fable = &both_halves()[2];
+
+        assert_eq!(fable.window, "7-day-fable");
+        assert_eq!(fable.used_percent, 0.0);
+        assert_eq!(fable.resets_at, None, "the reply gives it none");
+    }
+
+    #[test]
+    fn every_window_a_limits_reply_names_says_which_group_it_came_from() {
+        for window in both_halves() {
+            assert!(
+                group_of(&window.window).is_some(),
+                "{} came from a group and can name it",
+                window.window
+            );
+        }
+        assert_eq!(group_of("5-hour"), Some("session"));
+        assert_eq!(group_of("7-day-fable"), Some("weekly"));
+        assert_eq!(
+            group_of("nimbus-quill"),
+            None,
+            "the map's names say nothing"
+        );
+    }
+
+    #[test]
+    fn an_empty_limits_array_is_an_answer_rather_than_a_reply_without_one() {
+        let document: Value = serde_json::from_str(
+            r#"{"limits": [], "five_hour": {"utilization": 1},
+                "seven_day": {"utilization": 10}}"#,
+        )
+        .unwrap();
+
+        let windows = windows_of(&document).expect("nothing here is drift");
+
+        assert!(
+            windows.is_empty(),
+            "the map is read where there is no array, not where the array is empty: {windows:?}"
+        );
+    }
+
+    #[test]
+    fn a_reply_with_no_limits_array_is_read_from_the_map() {
+        let document: Value = serde_json::from_str(
+            r#"{"five_hour": {"utilization": 1}, "seven_day": {"utilization": 10},
+                "nimbus_quill": {"utilization": 4}}"#,
+        )
+        .unwrap();
+
+        let named = named(windows_of(&document).expect("every key that answers is a window"));
+
+        assert_eq!(
+            named,
+            vec!["5-hour", "7-day", "nimbus-quill"],
+            "a key nobody can read is still a window on the fallback"
+        );
+    }
+
+    #[test]
+    fn a_limits_array_that_is_not_an_array_falls_back_to_the_map() {
+        let document: Value = serde_json::from_str(
+            r#"{"limits": {"session": 2}, "five_hour": {"utilization": 1},
+                "seven_day": {"utilization": 10}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(windows_of(&document).expect("the map answers").len(), 2);
+    }
+
+    #[test]
+    fn a_limit_in_a_group_perch_does_not_know_is_not_a_window() {
+        let document: Value = serde_json::from_str(
+            r#"{"limits": [
+                {"kind": "session", "group": "session", "percent": 2},
+                {"kind": "weekly_all", "group": "weekly", "percent": 10},
+                {"kind": "monthly_all", "group": "monthly", "percent": 90},
+                {"kind": "spend", "group": "spend"}
+            ]}"#,
+        )
+        .unwrap();
+
+        let named = named(
+            windows_of(&document).expect("an unknown group is passed over rather than refused"),
+        );
+
+        assert_eq!(named, vec!["5-hour", "7-day"]);
+    }
+
+    #[test]
+    fn a_limit_in_a_group_perch_knows_that_will_not_say_how_full_it_is_is_drift() {
+        let document: Value = serde_json::from_str(
+            r#"{"limits": [
+                {"kind": "session", "group": "session", "percent": 2},
+                {"kind": "weekly_all", "group": "weekly", "percent": 10},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": "lots",
+                 "scope": {"model": {"display_name": "Fable"}}}
+            ]}"#,
+        )
+        .unwrap();
+
+        let refused = windows_of(&document).expect_err("a window is a window");
+
+        assert!(refused.contains("7-day-fable"), "it names it: {refused}");
+        assert!(refused.contains("percent"), "and the field: {refused}");
+    }
+
+    #[test]
+    fn a_limits_reply_missing_one_of_the_two_names_it_as_limits_spells_it() {
+        for (left_out, kept) in [("session", "weekly_all"), ("weekly_all", "session")] {
+            let group = match kept {
+                "session" => "session",
+                _ => "weekly",
+            };
+            let document: Value = serde_json::from_str(&format!(
+                r#"{{"limits": [{{"kind": "{kept}", "group": "{group}", "percent": 10}}]}}"#
+            ))
+            .unwrap();
+
+            let refused = windows_of(&document).expect_err("half a picture is not a picture");
+
+            assert!(refused.contains(left_out), "{refused}");
+        }
+    }
+
+    #[test]
+    fn a_limit_scoped_to_something_that_is_not_a_model_is_named_from_that() {
+        let document: Value = serde_json::from_str(
+            r#"{"limits": [
+                {"kind": "session", "group": "session", "percent": 2},
+                {"kind": "weekly_all", "group": "weekly", "percent": 10},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 5,
+                 "scope": {"model": null, "surface": {"display_name": "Claude Code"}}},
+                {"kind": "weekly_oauth_apps", "group": "weekly", "percent": 7}
+            ]}"#,
+        )
+        .unwrap();
+
+        let named = named(windows_of(&document).expect("every limit answers"));
+
+        assert_eq!(
+            named,
+            vec!["5-hour", "7-day", "7-day-claude-code", "7-day-oauth-apps"],
+            "a scope names the window, and a kind names it where no scope does"
         );
     }
 }
