@@ -72,13 +72,13 @@ fn a_declared_group_survives_a_restart() {
         .expect("the Group is written down, not derived from the Accounts in it");
     assert_eq!(
         config,
-        perch::registry::Settings::default(),
+        perch::config::Settings::default(),
         "a fresh Group holds the compiled-in defaults, and nothing said about \
          another Scope reaches it (ADR a-setting-names-its-scope)"
     );
     assert!(
         !registry_of(&host)
-            .settings(&perch::registry::Scope::Group("work".to_string()))
+            .settings(&perch::config::Scope::Group("work".to_string()))
             .watcher_may_act,
         "unattended switching is off until the user says otherwise"
     );

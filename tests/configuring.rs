@@ -13,10 +13,10 @@ mod common;
 
 use chrono::Duration;
 use common::*;
+use perch::config::Strategy;
 use perch::error::{EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE};
 use perch::host::FakeHost;
 use perch::host::prelude::*;
-use perch::registry::Strategy;
 
 /// Three Accounts in one Group where the two Strategies disagree: the Account
 /// with the most room is not the one whose quota is about to be thrown away,
@@ -48,8 +48,8 @@ fn active(host: &FakeHost) -> Option<String> {
 /// The Settings a Group holds, which are the whole of what a Cycle there
 /// follows: there is nothing above a Scope for a value to have come from
 /// (ADR a-setting-names-its-scope).
-fn group_config(host: &FakeHost, name: &str) -> perch::registry::Settings {
-    registry_of(host).settings(&perch::registry::Scope::Group(name.to_string()))
+fn group_config(host: &FakeHost, name: &str) -> perch::config::Settings {
+    registry_of(host).settings(&perch::config::Scope::Group(name.to_string()))
 }
 
 #[test]
@@ -847,7 +847,7 @@ fn a_setting_said_about_one_scope_reaches_no_other() {
     );
     assert_eq!(
         registry_of(&host)
-            .settings(&perch::registry::Scope::Ungrouped)
+            .settings(&perch::config::Scope::Ungrouped)
             .watcher_threshold_percent,
         80
     );
@@ -905,7 +905,7 @@ fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed() {
     assert!(printed.contains("soonest-reset"), "{printed}");
     assert_eq!(
         registry_of(&host)
-            .settings(&perch::registry::Scope::Ungrouped)
+            .settings(&perch::config::Scope::Ungrouped)
             .strategy,
         Strategy::SoonestReset,
     );

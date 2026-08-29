@@ -12,6 +12,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
+use crate::config;
 use crate::cycle;
 use crate::host::Host;
 use crate::registry::{self, Account, Quarantine, Registry};
@@ -24,13 +25,13 @@ use crate::utilization;
 /// reaching past [`Section::document`], [`Section::reserve`] and [`flattened`]
 /// could sort them — and the order is the whole of what this carries.
 pub struct Section<'a> {
-    scope: registry::Scope,
+    scope: config::Scope,
     ranked: bool,
     accounts: Vec<&'a Account>,
 }
 
 impl<'a> Section<'a> {
-    pub fn of(registry: &'a Registry, scope: registry::Scope, now: DateTime<Utc>) -> Section<'a> {
+    pub fn of(registry: &'a Registry, scope: config::Scope, now: DateTime<Utc>) -> Section<'a> {
         let ranked = cycle::may_cycle_within(registry, &scope);
         let accounts = match ranked {
             true => cycle::ranked(registry, &scope, now),
@@ -109,10 +110,10 @@ pub fn flattened<'a>(sections: &[Section<'a>]) -> Vec<&'a Account> {
 /// shape for the other. The arm no Cycle's Scope has — every Scope at once — is
 /// added by [`crate::commands::list`], where it is the only place it can mean
 /// anything.
-pub fn scope_json(scope: &registry::Scope) -> serde_json::Value {
+pub fn scope_json(scope: &config::Scope) -> serde_json::Value {
     match scope {
-        registry::Scope::Group(name) => json!({"kind": "group", "name": name}),
-        registry::Scope::Ungrouped => json!({"kind": "ungrouped", "name": serde_json::Value::Null}),
+        config::Scope::Group(name) => json!({"kind": "group", "name": name}),
+        config::Scope::Ungrouped => json!({"kind": "ungrouped", "name": serde_json::Value::Null}),
     }
 }
 
@@ -120,12 +121,12 @@ pub fn scope_json(scope: &registry::Scope) -> serde_json::Value {
 /// one a bare `perch switch` looks in. These partition the registry, and what
 /// keeps them partitioning it is `load` declaring any Group an Account claims:
 /// one claiming a Group nothing declared would be in no Listing at all.
-pub fn scopes(registry: &Registry) -> Vec<registry::Scope> {
-    let mut every: Vec<registry::Scope> = registry
+pub fn scopes(registry: &Registry) -> Vec<config::Scope> {
+    let mut every: Vec<config::Scope> = registry
         .group_names()
-        .map(|name| registry::Scope::Group(name.to_string()))
+        .map(|name| config::Scope::Group(name.to_string()))
         .collect();
-    every.push(registry::Scope::Ungrouped);
+    every.push(config::Scope::Ungrouped);
 
     let Some(active) = registry
         .active()
@@ -135,8 +136,8 @@ pub fn scopes(registry: &Registry) -> Vec<registry::Scope> {
         return every;
     };
     let here = match &active.group {
-        Some(name) => registry::Scope::Group(name.clone()),
-        None => registry::Scope::Ungrouped,
+        Some(name) => config::Scope::Group(name.clone()),
+        None => config::Scope::Ungrouped,
     };
     let mut ordered = vec![here.clone()];
     ordered.extend(every.into_iter().filter(|scope| *scope != here));
@@ -303,13 +304,13 @@ mod tests {
     #[test]
     fn the_scope_the_active_account_is_in_leads() {
         let registry = holdings();
-        assert_eq!(scopes(&registry).first(), Some(&registry::Scope::Ungrouped));
+        assert_eq!(scopes(&registry).first(), Some(&config::Scope::Ungrouped));
 
         let mut in_a_group = holdings();
         in_a_group.settle(Some("b@example.com".to_string()));
         assert_eq!(
             scopes(&in_a_group).first(),
-            Some(&registry::Scope::Group("play".to_string())),
+            Some(&config::Scope::Group("play".to_string())),
         );
     }
 
@@ -322,9 +323,9 @@ mod tests {
         assert_eq!(
             every,
             vec![
-                registry::Scope::Group("play".to_string()),
-                registry::Scope::Ungrouped,
-                registry::Scope::Group("work".to_string()),
+                config::Scope::Group("play".to_string()),
+                config::Scope::Ungrouped,
+                config::Scope::Group("work".to_string()),
             ],
         );
     }
@@ -336,13 +337,13 @@ mod tests {
     fn a_section_is_ranked_only_where_something_declared_its_accounts_a_set() {
         let mut registry = holdings();
         let now = cycle::tests::now();
-        let group = || registry::Scope::Group("work".to_string());
+        let group = || config::Scope::Group("work".to_string());
 
         assert!(
             !registry.ungrouped.interchangeable,
             "nobody has said so yet"
         );
-        let held = Section::of(&registry, registry::Scope::Ungrouped, now);
+        let held = Section::of(&registry, config::Scope::Ungrouped, now);
         assert_eq!(held.order(), "held");
         assert!(held.reserve(&registry).is_none(), "and no Reserve with it");
 
@@ -351,7 +352,7 @@ mod tests {
         assert!(declared.reserve(&registry).is_some());
 
         registry.ungrouped.interchangeable = true;
-        let now_a_set = Section::of(&registry, registry::Scope::Ungrouped, now);
+        let now_a_set = Section::of(&registry, config::Scope::Ungrouped, now);
         assert_eq!(now_a_set.order(), "ranked");
         assert!(now_a_set.reserve(&registry).is_some());
     }

@@ -9,9 +9,11 @@
 //! key too, and a key spelled as a literal at one of those sites is a surface
 //! printing a word `perch config set` would refuse.
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::{PerchError, Result};
 use crate::name::UNGROUPED;
-use crate::registry::{self, Registry, Scope, Strategy};
+use crate::registry::{Account, Registry};
 use crate::say;
 
 /// One Setting, as Perch names it.
@@ -341,8 +343,8 @@ fn percentage(key: &str, value: &str) -> Result<u8> {
     value
         .parse::<u8>()
         .ok()
-        .filter(|percent| *percent <= registry::MAX_PERCENTAGE)
-        .ok_or_else(|| not_a_value(key, value, &registry::a_percentage()))
+        .filter(|percent| *percent <= MAX_PERCENTAGE)
+        .ok_or_else(|| not_a_value(key, value, &a_percentage()))
 }
 
 /// The same for a margin, whose floor is not zero. Its own so that the person
@@ -352,10 +354,8 @@ fn margin(key: &str, value: &str) -> Result<u8> {
     value
         .parse::<u8>()
         .ok()
-        .filter(|percent| {
-            (registry::MIN_MARGIN_PERCENT..=registry::MAX_PERCENTAGE).contains(percent)
-        })
-        .ok_or_else(|| not_a_value(key, value, &registry::a_margin()))
+        .filter(|percent| (MIN_MARGIN_PERCENT..=MAX_PERCENTAGE).contains(percent))
+        .ok_or_else(|| not_a_value(key, value, &a_margin()))
 }
 
 /// A value refused for the value it is, said to somebody who just typed it —
@@ -396,10 +396,246 @@ pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
     )
 }
 
+/// How Cycling orders the Accounts in a Group.
+///
+/// Both readings measure headroom the same way — the worst Quota Window an
+/// Account has (ADR headroom-is-the-worst-window) — so neither is a way round an
+/// exhausted Account.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Strategy {
+    /// Prefer the Account with the most room left.
+    #[default]
+    MostHeadroom,
+    /// Prefer the Account whose window resets soonest, so perishable quota is
+    /// spent rather than wasted.
+    SoonestReset,
+}
+
+impl Strategy {
+    /// Every Strategy there is, so the vocabulary `perch config` accepts and
+    /// names in a refusal cannot fall behind the ones Cycling implements.
+    pub const ALL: [Strategy; 2] = [Strategy::MostHeadroom, Strategy::SoonestReset];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Strategy::MostHeadroom => "most-headroom",
+            Strategy::SoonestReset => "soonest-reset",
+        }
+    }
+}
+
+/// The watcher's threshold when nobody has said otherwise: high enough that an
+/// unattended Switch means the Account really is running out.
+pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
+
+/// The watcher's margin when nobody has said otherwise, in percentage points
+/// under the threshold. Wide enough that a candidate barely emptier than the
+/// Account being left is refused, which is what stops two Accounts walking
+/// upward together.
+pub const DEFAULT_WATCHER_MARGIN_PERCENT: u8 = 10;
+
+/// The least a margin may be. Nothing is out of range rather than permissive: an
+/// Account is left on `>=` the threshold and a candidate set aside on `>` the
+/// ceiling, so at a margin of nothing one Account is both full enough to leave
+/// and clear enough to arrive at.
+pub const MIN_MARGIN_PERCENT: u8 = 1;
+
+/// The most a Setting said as a share of something can be.
+///
+/// Not the bound on a Utilization figure, which `validate` checks separately:
+/// that is what a *reading* may be and this is what a Setting may be *set to*.
+/// The same number today, and two facts always.
+pub const MAX_PERCENTAGE: u8 = 100;
+
+/// What a percentage accepts, said once so a mistyped `perch config set` and a
+/// hand-edited registry are refused in the same words. Built from the bound, so
+/// the sentence and the number cannot disagree.
+pub fn a_percentage() -> String {
+    format!("a whole number between 0 and {MAX_PERCENTAGE}")
+}
+
+/// The same for a margin, whose floor is not zero. Built from the bounds for
+/// [`a_percentage`]'s reason.
+pub fn a_margin() -> String {
+    format!("a whole number between {MIN_MARGIN_PERCENT} and {MAX_PERCENTAGE}")
+}
+
+/// Every Setting there is, all of them set: what one Scope holds.
+///
+/// There is nothing above a Scope for a value to fall back to, so a Setting
+/// nobody has said anything about is the compiled-in default.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Settings {
+    pub strategy: Strategy,
+    /// Whether the watcher may Switch within this Scope unattended. Off unless
+    /// the user says otherwise: nothing changes underneath somebody because they
+    /// did not say it could. Said about the Scope it grants and nowhere else.
+    pub watcher_may_act: bool,
+    /// The Utilization the watcher would act at, as a percentage.
+    pub watcher_threshold_percent: u8,
+    /// How far under the threshold a candidate has to sit before moving to it is
+    /// worth doing, in percentage points. Separate from the threshold because
+    /// the two are not one preference: how full is too full to stay on, and how
+    /// empty is empty enough to move to, are answered by different appetites.
+    pub watcher_margin_percent: u8,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            strategy: Strategy::default(),
+            watcher_may_act: false,
+            watcher_threshold_percent: DEFAULT_WATCHER_THRESHOLD_PERCENT,
+            watcher_margin_percent: DEFAULT_WATCHER_MARGIN_PERCENT,
+        }
+    }
+}
+
+impl Settings {
+    /// Refuses configuration that cannot mean what it says. Serde refuses a
+    /// strategy Perch does not implement; what is left is the range.
+    ///
+    /// The refusal names the numbers that would have been accepted, because the
+    /// script that mistyped one is the reader.
+    pub fn validate(&self, scope: &Scope) -> Result<()> {
+        if self.watcher_threshold_percent > MAX_PERCENTAGE {
+            return Err(out_of_range(
+                scope,
+                "watcher-threshold-percent",
+                self.watcher_threshold_percent,
+                &a_percentage(),
+            ));
+        }
+        if !(MIN_MARGIN_PERCENT..=MAX_PERCENTAGE).contains(&self.watcher_margin_percent) {
+            return Err(out_of_range(
+                scope,
+                "watcher-margin-percent",
+                self.watcher_margin_percent,
+                &a_margin(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A number a setting cannot hold, refused with the ones it can.
+fn out_of_range(
+    scope: &Scope,
+    key: &str,
+    held: impl std::fmt::Display,
+    accepted: &str,
+) -> PerchError {
+    PerchError::Invalid(format!(
+        "{} has a `{key}` of {held}, and it takes {accepted}.",
+        scope.described(),
+    ))
+}
+
+/// The set of Accounts a Setting governs, and the set a Cycle may look within:
+/// one Group, or the Accounts in no Group taken together.
+///
+/// One type for both, because they are one idea: a Cycle never leaves the Scope
+/// it started in, and a Setting is said about exactly the Scope it governs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Scope {
+    /// The Accounts in no Group, taken as one Scope. Not a Group and never one:
+    /// a Group is a declaration somebody made, and this is the absence of one.
+    Ungrouped,
+    /// One Group, named as it was declared.
+    Group(String),
+}
+
+impl Scope {
+    /// The word that addresses this Scope on a command line, and the word it is
+    /// recorded under wherever something is kept per Scope.
+    ///
+    /// A Group cannot be called `ungrouped` ([`name::validate`]), so the two can
+    /// never collide.
+    pub fn word(&self) -> &str {
+        match self {
+            Scope::Ungrouped => UNGROUPED,
+            Scope::Group(name) => name,
+        }
+    }
+
+    /// The Accounts this Scope holds.
+    ///
+    /// The same set whoever is asking. A second idea of which Accounts those are
+    /// is how the figure on screen comes to describe a different set from the
+    /// one that gets chosen.
+    pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
+        match self {
+            Scope::Ungrouped => registry.ungrouped_accounts(),
+            Scope::Group(name) => registry.accounts_in(name),
+        }
+    }
+
+    /// The Scope as an adverbial phrase: "a Cycle {} prefers…". Said once here,
+    /// because three spellings of "among the Accounts in no Group" is how two of
+    /// them come to name the same set differently.
+    pub fn within(&self) -> String {
+        match self {
+            Scope::Ungrouped => "among the Accounts in no Group".to_string(),
+            Scope::Group(name) => format!("within Group `{name}`"),
+        }
+    }
+
+    /// The Scope as the subject of a sentence about what it holds.
+    pub fn described(&self) -> String {
+        match self {
+            Scope::Ungrouped => "The Ungrouped Scope".to_string(),
+            Scope::Group(name) => format!("Group `{name}`"),
+        }
+    }
+
+    /// The Scope in the middle of a sentence *about the Scope itself*: "a Setting
+    /// {} carries", "`strategy` on {} is now …".
+    ///
+    /// [`Scope::described`] with the capital taken off: that one reads as a
+    /// subject and this one does not. A Group is unaffected, being a name.
+    pub fn mentioned(&self) -> String {
+        match self {
+            Scope::Ungrouped => "the Ungrouped Scope".to_string(),
+            Scope::Group(_) => self.described(),
+        }
+    }
+
+    /// The Scope as the middle of a sentence about the Accounts in it: "every
+    /// Account in {}".
+    ///
+    /// Not [`Scope::described`], which is ungrammatical the moment "in" is said
+    /// before it.
+    pub fn place(&self) -> String {
+        match self {
+            Scope::Ungrouped => "no Group".to_string(),
+            Scope::Group(_) => self.described(),
+        }
+    }
+}
+
+/// What the Ungrouped Scope holds: the declaration that those Accounts are
+/// interchangeable at all, and the Settings governing how they are Cycled.
+///
+/// The one Scope whose record is not a bare [`Settings`], because it is the one
+/// that has to say it is a Scope at all. A Group **is** that declaration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UngroupedConfig {
+    /// Whether the Accounts in no Group have been declared interchangeable —
+    /// what a bare `perch switch` and the watcher both need first.
+    ///
+    /// Off unless the user says otherwise: being ungrouped is the absence of a
+    /// declaration, not a weaker form of one.
+    pub interchangeable: bool,
+    /// The Settings this Scope holds, like every other Scope.
+    pub settings: Settings,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::Settings;
 
     fn holding_a_group() -> Registry {
         let mut registry = Registry::default();
@@ -416,7 +652,7 @@ mod tests {
     /// another refuses is a Setting somebody can write and not keep.
     #[test]
     fn every_surface_agrees_what_a_percentage_is() {
-        let most = registry::MAX_PERCENTAGE;
+        let most = MAX_PERCENTAGE;
         let past_it = u32::from(most) + 1;
 
         let setting = Setting::WatcherThresholdPercent;
@@ -440,7 +676,7 @@ mod tests {
         .validate(&scope)
         .expect_err("and one past it is not");
         assert!(
-            refused.to_string().contains(&registry::a_percentage()),
+            refused.to_string().contains(&a_percentage()),
             "refused in the words every other surface uses: {refused}"
         );
     }

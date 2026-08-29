@@ -11,10 +11,10 @@
 
 use serde_json::{Map, Value};
 
+use crate::config::{Settings, UngroupedConfig};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::name::{self, NameKind};
-use crate::registry::{Settings, UngroupedConfig};
 
 /// The oldest version any published Perch stamped, and so the oldest shape this
 /// has. Below it is a number no Perch wrote.
@@ -655,7 +655,7 @@ mod tests {
             read.group("work")
                 .expect("the Group came forward")
                 .watcher_margin_percent,
-            crate::registry::DEFAULT_WATCHER_MARGIN_PERCENT,
+            crate::config::DEFAULT_WATCHER_MARGIN_PERCENT,
             "a Scope that never said is the Scope the constant is for"
         );
     }

@@ -29,7 +29,7 @@ use crate::say;
 use crate::utilization;
 
 /// What a listing was asked for. `scope` is the word as it was typed rather than
-/// a resolved [`crate::registry::Scope`], because a name nothing was declared
+/// a resolved [`crate::config::Scope`], because a name nothing was declared
 /// under is answered with what *was* declared.
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct ListArgs {
@@ -55,7 +55,7 @@ pub struct ListArgs {
 }
 
 /// Which Accounts a listing covers. Deliberately not
-/// [`crate::registry::Scope`], which is the same idea for a Cycle and has no
+/// [`crate::config::Scope`], which is the same idea for a Cycle and has no
 /// `Everything`: showing every Account is ordinary, and Cycling across every
 /// Account is what ADR a-group-is-a-declaration exists to prevent — a
 /// difference kept in the types rather than in a check.
@@ -101,8 +101,8 @@ impl Scope {
         let of = |scope| Section::of(registry, scope, now);
         match self {
             Scope::Everything => listing::scopes(registry).into_iter().map(of).collect(),
-            Scope::Group(name) => vec![of(registry::Scope::Group(name.clone()))],
-            Scope::Ungrouped => vec![of(registry::Scope::Ungrouped)],
+            Scope::Group(name) => vec![of(config::Scope::Group(name.clone()))],
+            Scope::Ungrouped => vec![of(config::Scope::Ungrouped)],
         }
     }
 
@@ -123,18 +123,18 @@ impl Scope {
     fn json(&self) -> serde_json::Value {
         match self {
             Scope::Everything => json!({"kind": "all", "name": serde_json::Value::Null}),
-            Scope::Group(name) => listing::scope_json(&registry::Scope::Group(name.clone())),
-            Scope::Ungrouped => listing::scope_json(&registry::Scope::Ungrouped),
+            Scope::Group(name) => listing::scope_json(&config::Scope::Group(name.clone())),
+            Scope::Ungrouped => listing::scope_json(&config::Scope::Ungrouped),
         }
     }
 }
 
 /// One Group, said as the line above the Accounts in it. From
-/// [`registry::Scope::described`] rather than spelled again, because a Group
+/// [`config::Scope::described`] rather than spelled again, because a Group
 /// that read one way over a listing and another in the sentence explaining a
 /// Cycle would read as two Groups.
 fn group_heading(name: &str) -> String {
-    registry::Scope::Group(name.to_string()).described()
+    config::Scope::Group(name.to_string()).described()
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
