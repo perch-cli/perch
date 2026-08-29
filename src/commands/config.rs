@@ -13,12 +13,13 @@ use std::io::Write;
 
 use crate::adopt;
 use crate::commands::{group, only_the_registry};
+use crate::config::Scope;
 use crate::config::{SETTINGS, Setting};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::name;
 use crate::name::UNGROUPED;
-use crate::registry::{Registry, Scope};
+use crate::registry::Registry;
 use crate::say;
 
 /// What was asked of `perch config`, as the words that were typed — carried
@@ -263,7 +264,7 @@ fn how_get_is_addressed(words: &[String]) -> PerchError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::Strategy;
+    use crate::config::Strategy;
 
     fn holding_a_group() -> Registry {
         let mut registry = Registry::default();

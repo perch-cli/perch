@@ -928,7 +928,7 @@ mod tests {
         let work = opened.registry.group("work").expect("the Group travels");
         assert_eq!(
             work.strategy,
-            crate::registry::Strategy::SoonestReset,
+            crate::config::Strategy::SoonestReset,
             "with what it Inherited from Global"
         );
         assert!(opened.registry.ungrouped.interchangeable);

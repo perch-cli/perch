@@ -10,11 +10,12 @@
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
+use crate::config::Settings;
 use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, Result};
 use crate::live::{self, NotIdle};
 use crate::lock::Lost;
 use crate::probe::Installed;
-use crate::registry::{Account, Checked, Settings};
+use crate::registry::{Account, Checked};
 
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
@@ -536,7 +537,7 @@ pub struct Considered {
 /// and a candidate whose Refresh merely failed is judged on what was cached.
 pub fn set_aside(
     policy: &Policy,
-    scope: &crate::registry::Scope,
+    scope: &crate::config::Scope,
     considered: &[Considered],
 ) -> crate::cycle::SetAside {
     let mut emails = Vec::new();
@@ -1647,8 +1648,8 @@ mod tests {
         Policy::of(&Settings::default())
     }
 
-    fn work() -> crate::registry::Scope {
-        crate::registry::Scope::Group("work".to_string())
+    fn work() -> crate::config::Scope {
+        crate::config::Scope::Group("work".to_string())
     }
 
     #[test]

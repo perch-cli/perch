@@ -12,12 +12,13 @@
 use std::io::Write;
 
 use crate::adopt;
+use crate::config::Scope;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::live;
 use crate::probe::Installed;
-use crate::registry::{self, Account, Registry, Scope, Settled};
+use crate::registry::{self, Account, Registry, Settled};
 use crate::say;
 use crate::switch::{self, Captured, Switched};
 use crate::target::{self, Target};

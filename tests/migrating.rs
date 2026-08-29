@@ -16,12 +16,11 @@ use std::path::Path;
 
 use common::*;
 use perch::commands::config::ConfigCommand;
+use perch::config::{DEFAULT_WATCHER_THRESHOLD_PERCENT, Settings, Strategy};
 use perch::host::FakeHost;
 use perch::host::prelude::*;
 use perch::name;
-use perch::registry::{
-    self, CURRENT_VERSION, DEFAULT_WATCHER_THRESHOLD_PERCENT, Settings, Strategy,
-};
+use perch::registry::{self, CURRENT_VERSION};
 
 /// A registry v0.2.0 wrote: `active` a bare address, `groups` a map of partial
 /// Overrides, an `ungrouped` beside a `global`, and one Account kept out of

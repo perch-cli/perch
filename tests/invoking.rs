@@ -13,11 +13,12 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use perch::config::Settings;
 use perch::error::{
     EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_UNDERSTOOD, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
 use perch::probe::Identity;
-use perch::registry::{Account, CURRENT_VERSION, Registry, Settings};
+use perch::registry::{Account, CURRENT_VERSION, Registry};
 
 /// The Account every scratch machine holds, and the Group declared beside it.
 const SOMEONE: &str = "someone@example.com";

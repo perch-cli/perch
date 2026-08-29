@@ -13,12 +13,13 @@ use std::io::Write;
 use crate::adopt;
 use crate::commands::only_the_registry;
 use crate::config;
+use crate::config::Scope;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Shown};
 use crate::listing;
 use crate::name;
 use crate::name::NO_GROUP;
-use crate::registry::{Registry, Scope};
+use crate::registry::Registry;
 use crate::say;
 use crate::target::{self, AccountTarget};
 

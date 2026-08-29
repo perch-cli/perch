@@ -36,8 +36,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
     };
     let accounts = registry.accounts.len();
     let groups = registry.groups.len();
-    let ungrouped_says_something =
-        registry.ungrouped != crate::registry::UngroupedConfig::default();
+    let ungrouped_says_something = registry.ungrouped != crate::config::UngroupedConfig::default();
     if accounts == 0 && groups == 0 && !ungrouped_says_something {
         return Ok(());
     }
@@ -395,12 +394,13 @@ fn landed(host: &dyn Host, store: &Store, carried: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Settings;
     use crate::export::CURRENT_VERSION;
     use crate::host::Refusing;
     use crate::host::prelude::*;
     use crate::probe::Identity;
     use crate::registry::Active;
-    use crate::registry::{Account, Quarantine, Settings};
+    use crate::registry::{Account, Quarantine};
     use std::collections::BTreeMap;
 
     /// What the refusal counts, on each of the three ways a machine can be

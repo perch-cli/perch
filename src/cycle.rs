@@ -11,11 +11,10 @@
 
 use chrono::{DateTime, Utc};
 
+use crate::config::{Scope, Strategy};
 use crate::error::{PerchError, Result};
 use crate::name;
-use crate::registry::{
-    self, Account, CachedUtilization, Registry, Scope, Strategy, WindowUtilization,
-};
+use crate::registry::{self, Account, CachedUtilization, Registry, WindowUtilization};
 use crate::utilization;
 
 /// Which Account a Scope prefers when more than one would serve.
@@ -1056,7 +1055,7 @@ pub(crate) mod tests {
                     vec![resetting("5-hour", 11.0, -21), resetting("7-day", 9.0, 100)],
                 ),
             ]),
-            crate::registry::Strategy::SoonestReset,
+            crate::config::Strategy::SoonestReset,
         );
         let scope = Scope::Group("work".to_string());
 
@@ -1108,7 +1107,7 @@ pub(crate) mod tests {
     /// The same Group, told to prefer the other of the two Strategies.
     pub(crate) fn preferring(
         mut registry: Registry,
-        strategy: crate::registry::Strategy,
+        strategy: crate::config::Strategy,
     ) -> Registry {
         registry.groups.get_mut("work").expect("declared").strategy = strategy;
         registry
@@ -2033,7 +2032,8 @@ pub(crate) mod tests {
 mod properties {
     use super::tests::*;
     use super::*;
-    use crate::registry::{Quarantine, Strategy};
+    use crate::config::Strategy;
+    use crate::registry::Quarantine;
 
     /// One case: some Accounts, in some shape, under one Strategy.
     struct Arrangement {

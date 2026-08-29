@@ -12,6 +12,7 @@
 use chrono::{DateTime, Utc};
 use zeroize::Zeroizing;
 
+use crate::config::Scope;
 use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::holdings;
@@ -22,7 +23,7 @@ use crate::lock::Asking;
 use crate::name;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
-use crate::registry::{self, Account, Active, Quarantine, Registry, Scope, Settled};
+use crate::registry::{self, Account, Active, Quarantine, Registry, Settled};
 
 /// What the Capture found — the part of a Switch worth saying out loud, because
 /// it is what protects the Account being left behind.

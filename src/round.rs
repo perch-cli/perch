@@ -10,6 +10,7 @@
 
 use chrono::{DateTime, Utc};
 
+use crate::config::Scope;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::live::Idle;
@@ -17,7 +18,7 @@ use crate::lock::Lost;
 use crate::name::{self, UNGROUPED};
 use crate::observe::{self, Attempt};
 use crate::registry::Settled;
-use crate::registry::{Account, Registry, Scope};
+use crate::registry::{Account, Registry};
 use crate::watch::{
     self, Backoff, Considered, Cooled, Fullest, Outcome, Policy, Recently, Round, Watcher,
     nothing_was_switched,

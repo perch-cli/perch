@@ -12,8 +12,9 @@
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
+use crate::config::Scope;
 use crate::cycle::{self, HowMuchIsLeft};
-use crate::registry::{Account, Registry, Scope};
+use crate::registry::{Account, Registry};
 use crate::say;
 use crate::utilization;
 
