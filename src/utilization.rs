@@ -115,7 +115,11 @@ fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_jso
         .iter()
         .map(|window| {
             json!({
+                // A label rather than a key: a per-model window is named from a
+                // display name with no id behind it, so a script matches on
+                // `group` (ADR a-window-comes-from-limits).
                 "window": window.window,
+                "group": crate::anthropic::group_of(&window.window),
                 "used_percent": window.used_percent,
                 "resets_at": window.resets_at.map(|at| at.to_rfc3339()),
                 "observed_at": cached.observed_at.to_rfc3339(),

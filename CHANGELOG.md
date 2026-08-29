@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- every Quota Window in `--json` carries the `group` it meters over, `session` or
+  `weekly`. A per-model window is named from a display name Anthropic writes for
+  a person and gives no id for, so `window` is a label a script should not key on
+  and `group` is the handle beside it
+
 ### Fixed
 
+- a per-model Quota Window is named after its model rather than after a codename.
+  Anthropic's usage reply describes the same quota twice, and Perch was reading
+  the older half, where the weekly Fable window arrives under the key
+  `nimbus_quill` and `perch status` printed a row nobody on the machine could
+  identify. It now reads the `limits` array, which names the model, so that row
+  reads `7-day-fable`. Where a reply carries no `limits` array Perch reads the
+  older half as before
 - a Marker written before the machine last started stops holding a Profile. On
   macOS and Windows the operating system will not say when a process owned by
   another user began, so a Marker left behind before a reboot — beside a low pid
