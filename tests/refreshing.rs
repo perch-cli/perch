@@ -106,6 +106,27 @@ fn wrote_the_live_credential(effect: &Effect) -> bool {
     matches!(effect, Effect::KeychainSet { service, .. } if service == DEFAULT_SERVICE)
 }
 
+/// The absence travels as a state of the probe rather than as the command's
+/// failure, so the cache still answers and each figure says why it is old.
+#[test]
+fn a_refresh_on_a_machine_whose_claude_code_is_gone_answers_from_cache() {
+    let host = ready();
+    host.remove_file(std::path::Path::new(CLAUDE_BIN))
+        .expect("the binary was there");
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("the command answers rather than refusing");
+    assert!(
+        printed.contains("claude"),
+        "the note says what could not be found: {printed}"
+    );
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "and nothing was spent asking Anthropic with no way to renew"
+    );
+}
+
 #[test]
 fn refreshing_reads_current_utilization_and_shows_it_as_read_just_now() {
     let host = ready();
