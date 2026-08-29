@@ -110,9 +110,10 @@ struct Touched {
 }
 
 /// The Profiles an Import has touched, so they can be taken back out if
-/// anything after them fails.
+/// anything after them fails. Never leaves [`place`], which is what makes the
+/// taking-back an obligation nothing outside can drop.
 #[derive(Debug, Default)]
-pub struct Placed {
+struct Placed {
     touched: Vec<Touched>,
 }
 
@@ -122,7 +123,7 @@ impl Placed {
     /// Made rather than written into: it is the *registry* an Import needs empty,
     /// and a Profile directory nothing names outlives every command that would
     /// have named it — on macOS, the only name reaching a live Credential.
-    pub fn undo(&self, host: &dyn Host) {
+    fn undo(&self, host: &dyn Host) {
         for touched in &self.touched {
             if !touched.was_already_there {
                 profile::discard(host, &touched.store);
@@ -179,11 +180,16 @@ const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
 };
 
 /// Puts every Credential the Export holds into the Profile of the Account it
-/// belongs to, wherever this machine keeps one, through
-/// [`profile::store_credential`] so an Import gets the read-back guard. An
-/// Account the Export carries neither a Credential nor a `.claude.json` for gets
-/// no Profile, is restored anyway, and is not Quarantined here for it.
-pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<Placed> {
+/// belongs to, wherever this machine keeps one, then runs `save` — the caller's
+/// registry write — and takes everything back out where that refuses, so an
+/// Import that does not finish cannot leave a Credential behind. Through
+/// [`profile::store_credential`] so an Import gets the read-back guard.
+pub fn place(
+    host: &dyn Host,
+    export: &Export,
+    installed: &Installed,
+    save: impl FnOnce() -> Result<()>,
+) -> Result<()> {
     // Keyed rather than asked of the registry per key: two names are one name
     // exactly where `name::folded` agrees, which is what `account` scans for.
     let listed: std::collections::HashSet<String> = export
@@ -362,7 +368,17 @@ pub fn place(host: &dyn Host, export: &Export, installed: &Installed) -> Result<
             )));
         }
     }
-    Ok(placed)
+    // The save is this Import's to run: held outside, the taking-back was an
+    // ordering one caller remembered in prose.
+    if let Err(error) = save() {
+        placed.undo(host);
+        return Err(error.with_note(
+            "Nothing was imported. The Credentials this had already restored \
+             have been taken back out again, and the file can be imported \
+             again.",
+        ));
+    }
+    Ok(())
 }
 
 /// Whether a store holds the Credential this Import was writing into it.
@@ -478,7 +494,8 @@ mod tests {
             .store(&host)
             .unwrap();
 
-        place(&host, &export, &Installed::unknown("2.1.221")).expect("the Profiles can be made");
+        place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
+            .expect("the Profiles can be made");
 
         assert_eq!(
             host.read_file(&store.identity_file).ok().as_deref(),
@@ -488,6 +505,64 @@ mod tests {
         assert!(
             crate::credentials::read(&host, &store).unwrap().is_none(),
             "and no Credential was invented to carry it"
+        );
+    }
+
+    #[test]
+    fn a_save_that_refuses_takes_every_credential_back_out() {
+        let host = crate::host::FakeHost::new();
+        let export = an_export();
+        let store = export
+            .registry
+            .account("one@example.com")
+            .unwrap()
+            .store(&host)
+            .unwrap();
+
+        let refused = place(&host, &export, &Installed::unknown("2.1.221"), || {
+            Err(PerchError::Other("the disk filled".to_string()))
+        })
+        .expect_err("the registry could not be written");
+
+        assert!(refused.to_string().contains("taken back out"), "{refused}");
+        assert!(
+            !host.path_exists(&store.config_dir),
+            "the Profile this Import made is gone with it"
+        );
+    }
+
+    #[test]
+    fn the_save_runs_once_and_only_after_every_credential_landed() {
+        let host = crate::host::FakeHost::new();
+        let export = an_export();
+        let store = export
+            .registry
+            .account("one@example.com")
+            .unwrap()
+            .store(&host)
+            .unwrap();
+
+        let mut saved = 0;
+        place(&host, &export, &Installed::unknown("2.1.221"), || {
+            saved += 1;
+            // The Credential is already in its store when the save runs, so the
+            // registry never records an Account whose Credential is not there.
+            assert!(
+                crate::credentials::read(&host, &store)
+                    .expect("the store answers")
+                    .is_some(),
+                "the Credential lands before the registry says it did"
+            );
+            Ok(())
+        })
+        .expect("the ordinary Import");
+
+        assert_eq!(saved, 1);
+        assert!(
+            crate::credentials::read(&host, &store)
+                .expect("the store answers")
+                .is_some(),
+            "and it stays"
         );
     }
 
@@ -626,7 +701,7 @@ mod tests {
                 .store(&host)
                 .unwrap();
 
-            place(&host, &export, &Installed::unknown("2.1.221"))
+            place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
                 .expect("the one Profile can be made");
 
             assert!(
@@ -661,7 +736,7 @@ mod tests {
             .credentials
             .insert("two@example.com".to_string(), "also held".to_string());
 
-        let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+        let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
             .expect_err("the second store will not take it");
 
         assert!(refused.to_string().contains("partial restore"), "{refused}");
@@ -681,7 +756,7 @@ mod tests {
         let mut export = an_export();
         export.registry.upsert(account("@"));
 
-        let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+        let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
             .expect_err("`@` names no directory");
 
         let said = refused.to_string();
@@ -716,7 +791,7 @@ mod tests {
             };
             map.insert("nobody@example.com".to_string(), "held".to_string());
 
-            let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+            let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
                 .expect_err("that file belongs to nothing");
 
             let said = refused.to_string();
@@ -750,7 +825,7 @@ mod tests {
             map.insert("one@example.com".to_string(), "held".to_string());
             map.insert("ONE@example.com".to_string(), "also held".to_string());
 
-            let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+            let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
                 .expect_err("only one of the two would land");
 
             let said = refused.to_string();
@@ -787,7 +862,7 @@ mod tests {
             );
         }
 
-        let refused = place(&host, &export, &Installed::unknown("2.1.221"))
+        let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
             .expect_err("both would land in one Profile");
 
         assert!(

@@ -51,14 +51,8 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // one another `perch` has since claimed and put an Account down under.
     still_ours(&mut perch, "imported")?;
     let installed = Installed::probed_or_absent(host);
-    let placed = import::place(host, &export, &installed)?;
-    registry::save(host, &mut perch, &mut restored).map_err(|error| {
-        placed.undo(host);
-        error.with_note(
-            "Nothing was imported. The Credentials this had already restored \
-             have been taken back out again, and the file can be imported \
-             again.",
-        )
+    import::place(host, &export, &installed, || {
+        registry::save(host, &mut perch, &mut restored)
     })?;
 
     // The Import is complete by this line: every Credential is placed and the
