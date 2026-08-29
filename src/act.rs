@@ -180,7 +180,7 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
         registry,
         installed,
         &choice.account,
-        Some(&outgoing),
+        switch::Departure::Capturing(Some(&outgoing)),
         switch::Reason::Unasked {
             scope: scope.clone(),
             at: acted_at,

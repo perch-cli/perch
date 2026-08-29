@@ -145,7 +145,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         Ok(()) => said
             .and_then(|()| say::line(out, "Its fresh Credential is the live one."))
             .map_err(the_repair_stands),
-        Err(stopped) if stopped.is_live => Err(stopped.error.with_note(&format!(
+        Err(stopped) if stopped.moved => Err(stopped.error.with_note(&format!(
             "The repair stands and {} is working again: its fresh Credential is \
              the live one. What is behind is Claude Code's own record of which \
              Account that Credential belongs to, so it may display the wrong \
@@ -233,7 +233,7 @@ fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> Result
 /// What is on the machine when the repaired Credential did not become the live
 /// one at all.
 ///
-/// Only for that side of [`switch::NotLanded::is_live`]: the live store still
+/// Only for that side of [`switch::NotSwitched::moved`]: the live store still
 /// holds the Credential that stopped working.
 fn not_made_live(account: &Account, error: PerchError) -> PerchError {
     error.with_note(&format!(

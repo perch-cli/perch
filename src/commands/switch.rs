@@ -88,7 +88,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         &mut registry,
         &installed,
         &incoming,
-        outgoing.as_ref(),
+        switch::Departure::Capturing(outgoing.as_ref()),
         switch::Reason::Asked,
     )?;
 
