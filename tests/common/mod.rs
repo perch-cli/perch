@@ -444,13 +444,33 @@ pub fn run_switch(host: &FakeHost, target: &str) -> (perch::Result<()>, String) 
         host,
         SwitchArgs {
             target: Some(target.to_string()),
+            no_refresh: false,
         },
     )
 }
 
-/// `perch switch` with no target: the Cycle, which picks for you.
+/// `perch switch` with no target: the Cycle, which picks for you, reading the
+/// Accounts it cannot rank without first.
 pub fn run_cycle(host: &FakeHost) -> (perch::Result<()>, String) {
-    run_switch_with(host, SwitchArgs { target: None })
+    run_switch_with(
+        host,
+        SwitchArgs {
+            target: None,
+            no_refresh: false,
+        },
+    )
+}
+
+/// The same Cycle ranking on what is cached, for a test about the ranking
+/// rather than about what a Cycle reads before making one.
+pub fn run_cycle_on_cache(host: &FakeHost) -> (perch::Result<()>, String) {
+    run_switch_with(
+        host,
+        SwitchArgs {
+            target: None,
+            no_refresh: true,
+        },
+    )
 }
 
 fn run_switch_with(host: &FakeHost, args: SwitchArgs) -> (perch::Result<()>, String) {
@@ -680,6 +700,22 @@ pub fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtil
 /// ago would have left them.
 pub fn observed(host: &FakeHost, email: &str, windows: Vec<WindowUtilization>) {
     let observed_at = host.now() - Duration::minutes(4);
+    let mut registry = registry_of(host);
+    registry
+        .account_mut(email)
+        .expect("an Account Perch holds")
+        .utilization = Some(CachedUtilization {
+        observed_at,
+        windows,
+    });
+    save_registry(host, &registry);
+}
+
+/// The same, where a `--refresh` a second ago would have left them: a figure
+/// inside the Watcher's interval, which a Cycle ranks on rather than reads again
+/// (ADR a-choice-reads-what-it-ranks).
+pub fn observed_just_now(host: &FakeHost, email: &str, windows: Vec<WindowUtilization>) {
+    let observed_at = host.now() - Duration::seconds(1);
     let mut registry = registry_of(host);
     registry
         .account_mut(email)

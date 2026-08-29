@@ -199,6 +199,15 @@ generous-looking figure never hides an exhausted one. What Accounts are
 compared on, whoever is doing the choosing.
 _Avoid_: capacity, room, slack, remaining
 
+**Best Case**:
+The most Headroom a cached figure could still be describing, given its age and
+when each of its Quota Windows resets. Usage climbs within a window and falls
+only when the window comes back, so a window with a reset still ahead caps an
+Account at what it was last seen with, and one past its reset caps nothing. What
+a Cycle reads an Account on: a candidate whose Best Case loses to a figure Perch
+can vouch for cannot win, so nobody spends an allowance confirming it.
+_Avoid_: bound, ceiling, upper bound, optimistic headroom
+
 **Reserve**:
 What a Scope has left to draw on, said as how many of its Accounts still have
 Headroom and how much the best of them has. Never one pooled figure: Accounts

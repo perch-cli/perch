@@ -94,8 +94,7 @@ pub fn opened_for(
 
 /// Current figures for exactly the Accounts the command is about to show, so
 /// narrowing what is shown narrows the reads with it. The empty report where
-/// nobody asked, which renders as "nobody asked". Nothing else is held across
-/// the read: both callers take the registry lock and nothing more.
+/// nobody asked, which renders as "nobody asked".
 pub fn refreshed(
     host: &dyn Host,
     perch: &mut Option<crate::lock::Held<'_>>,
@@ -103,21 +102,35 @@ pub fn refreshed(
     about: &[String],
 ) -> crate::observe::Report {
     match perch {
-        Some(perch) => crate::observe::refresh(
-            host,
-            perch,
-            registry,
-            about,
-            &crate::probe::Installed::probed(host),
-            // Somebody typed this, so a Watcher running behind it is already
-            // keeping the active Account's figure and this read is left to it.
-            crate::observe::Spending::BesideTheWatcher,
-            // Nothing to lose part way: these two hold the registry lock and
-            // nothing else, and neither is a Watcher a signal can displace.
-            &mut || Ok(()),
-        ),
+        Some(perch) => read_now(host, perch, registry, about),
         None => crate::observe::Report::default(),
     }
+}
+
+/// The same read, for a command that holds the registry whatever it was asked.
+///
+/// A Cycle takes the exclusive hold before it decides anything, so it has no
+/// `Option` to answer and no way to reach [`refreshed`]. Nothing else is held
+/// across the read: every caller takes the registry lock and nothing more.
+pub fn read_now(
+    host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
+    registry: &mut crate::registry::Registry,
+    about: &[String],
+) -> crate::observe::Report {
+    crate::observe::refresh(
+        host,
+        perch,
+        registry,
+        about,
+        &crate::probe::Installed::probed(host),
+        // Somebody typed this, so a Watcher running behind it is already
+        // keeping the active Account's figure and this read is left to it.
+        crate::observe::Spending::BesideTheWatcher,
+        // Nothing to lose part way: these callers hold the registry lock and
+        // nothing else, and none is a Watcher a signal can displace.
+        &mut || Ok(()),
+    )
 }
 
 /// Brings the registry on this machine forward, once, ahead of the command.

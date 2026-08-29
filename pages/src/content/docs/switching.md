@@ -85,11 +85,22 @@ most room, so perishable quota is spent rather than wasted — see
 [Configuration](configuration.md). It reorders the Accounts that have room and
 nothing else: an exhausted Account is never chosen however soon it resets.
 
-Ranking reads the cache and never the network, so the figures can be minutes
-old. Landing on an Account that turns out fuller than they implied is the cache
-being stale rather than the Switch going wrong — which is what the age beside
-every figure is for, and `perch status --refresh` reads a current one. The
-landing line says which Account was chosen and what it was chosen on; the
+Before it ranks, a Cycle reads current Utilization — but only for the Accounts
+it cannot rank without. Quota climbs within a window and refills when the window
+comes back, so an Account's cached figure is the most room it could still have
+until its reset passes. A candidate that would lose even if its quota had
+refilled entirely is not worth a round trip, and is not read. Often that is
+every one of them, and a Cycle spends nothing.
+
+An Account that could not be read — a spent hourly allowance, an endpoint that
+is not answering — keeps whatever figure it had, is ranked on it, and is named
+on its own line. A Switch you asked for is one you get; the age beside the
+figure is still the promise, said in a sentence instead of a column.
+`perch switch --no-refresh` skips all of it and Cycles on the cache, for when
+you are offline or in a hurry. Nothing is read when you name an Account,
+because naming one decides nothing.
+
+The landing line says which Account was chosen and what it was chosen on; the
 argument for why it beat the others is not something a Switch owes you.
 
 Three outcomes are honest non-outcomes. They perform no Switch, explain

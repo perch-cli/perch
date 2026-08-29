@@ -13,7 +13,7 @@ sidebar:
 | `perch add [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
 | `perch alias <target> <name>` / `perch alias <target> --unset` | name an Account, or free the name |
 | `perch switch <target>` | make an Account active everywhere |
-| `perch switch [<group>]` | Cycle to the best Account in a Group |
+| `perch switch [<group>] [--no-refresh]` | Cycle to the best Account in a Group |
 | `perch watcher run` | Cycle automatically when the Account you are on runs low |
 | `perch watcher check` | take one round for cron or a systemd timer, saying what it decided in the exit code |
 | `perch watcher install\|uninstall` | have the machine run the watcher for you, starting at login, or take that unit back |
