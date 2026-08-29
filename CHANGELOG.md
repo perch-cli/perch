@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/perch-cli/perch/compare/v0.3.0...v0.3.1) - 2026-08-29
+
+### Fixed
+
+- *(anthropic)* a profile reply is read under both spellings of an address ([#372](https://github.com/perch-cli/perch/pull/372))
+- *(anthropic)* a per-model Quota Window is named after its model ([#371](https://github.com/perch-cli/perch/pull/371))
+- *(observe)* a figure is not filed against an Account nothing says it is for ([#369](https://github.com/perch-cli/perch/pull/369))
+- *(live)* a Marker written before the boot stops holding a Profile ([#368](https://github.com/perch-cli/perch/pull/368))
+- *(triage)* a report arrives labeled whoever filed it ([#367](https://github.com/perch-cli/perch/pull/367))
+
 ### Added
 
 - every Quota Window in `--json` carries the `group` it meters over, `session` or
