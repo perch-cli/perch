@@ -123,8 +123,9 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
         registry,
         &candidates.addresses(),
         probed,
-        observe::Spending::ItsOwn,
-        &mut || watching_alone.goes_on(),
+        observe::Spending::ItsOwn {
+            still_ours: &mut || watching_alone.goes_on(),
+        },
     );
     // Before the choice rather than after it: a burst that stopped part way leaves
     // every candidate past that point on whatever figure was cached, and choosing on

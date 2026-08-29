@@ -127,9 +127,6 @@ pub fn read_now(
         // Somebody typed this, so a Watcher running behind it is already
         // keeping the active Account's figure and this read is left to it.
         crate::observe::Spending::BesideTheWatcher,
-        // Nothing to lose part way: these callers hold the registry lock and
-        // nothing else, and none is a Watcher a signal can displace.
-        &mut || Ok(()),
     )
 }
 
