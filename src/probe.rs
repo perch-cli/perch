@@ -1913,6 +1913,19 @@ mod tests {
     }
 
     #[test]
+    fn a_machine_with_nothing_to_defer_to_is_absent_and_quoted_as_unknown() {
+        let host = FakeHost::new();
+        let installed = Installed::asked_when_needed(&host);
+
+        assert!(installed.absent().is_some(), "no `claude` on an empty PATH");
+        assert_eq!(installed.version(), "unknown");
+        assert!(
+            Installed::unknown("2.1.221").absent().is_none(),
+            "a version said is not an absence"
+        );
+    }
+
+    #[test]
     fn a_machine_with_no_claude_code_is_answered_rather_than_refused() {
         assert_eq!(
             Installed::probed_or_absent(&FakeHost::new()).version(),

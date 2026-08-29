@@ -305,6 +305,20 @@ mod tests {
 
     /// Drives [`run`] with the watch taken and the registry held, as a round would.
     fn run_the_act(host: &FakeHost, registry: &mut Registry, watcher: Watcher) -> Result<Outcome> {
+        run_the_act_probed(
+            host,
+            registry,
+            watcher,
+            probe::Installed::unknown("2.1.221"),
+        )
+    }
+
+    fn run_the_act_probed(
+        host: &FakeHost,
+        registry: &mut Registry,
+        watcher: Watcher,
+        probed: probe::Installed,
+    ) -> Result<Outcome> {
         let watching = watching(registry);
         let fullest = Fullest::of(&watching.account).expect("a figure was cached");
         let crossed = fullest.crossed(80).expect("90 is over 80");
@@ -316,7 +330,6 @@ mod tests {
         let held = lock::take_all(host, vec![holdings::watcher_lock_spec(host).unwrap()])
             .expect("nobody holds the watch");
         let mut watching_alone = Watch::taken(host, held);
-        let probed = probe::Installed::unknown("2.1.221");
 
         run(
             Acting {
@@ -345,6 +358,28 @@ mod tests {
     /// must not have moved anybody.
     fn still_on(registry: &Registry, email: &str) -> bool {
         *registry.active() == crate::registry::Active::Settled(email.to_string())
+    }
+
+    #[test]
+    fn an_act_reached_with_no_claude_code_hands_the_absence_on_rather_than_asserting() {
+        let host = host();
+        let mut registry = watching_a_pair(5.0);
+
+        let raised = run_the_act_probed(
+            &host,
+            &mut registry,
+            Watcher::Loop,
+            probe::Installed::Absent {
+                why: "no Claude Code here".to_string(),
+            },
+        )
+        .expect_err("what runs this is a Service nobody is watching");
+
+        assert!(
+            raised.to_string().contains("no Claude Code here"),
+            "{raised}"
+        );
+        assert!(still_on(&registry, WATCHED), "and nothing was switched");
     }
 
     #[test]
