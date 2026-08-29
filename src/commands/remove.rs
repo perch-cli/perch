@@ -289,7 +289,7 @@ fn land_on(
         WHY_THE_DEFAULT_PROFILE,
         installed,
     );
-    let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.is_live);
+    let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.moved);
 
     if is_live {
         registry.settle(Some(successor.email().to_string()));
@@ -306,7 +306,7 @@ fn land_on(
 
     landed.map_err(|stopped| {
         let held = format!("Nothing was removed, and {} is still held", leaving.email());
-        stopped.error.with_note(&if stopped.is_live {
+        stopped.error.with_note(&if stopped.moved {
             format!(
                 "{held}. Its Credential is no longer the live one: {}'s is, and \
                  Perch records it as active. Run `perch switch {}` to finish \
