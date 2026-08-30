@@ -42,42 +42,38 @@ pub struct StatusArgs {
 }
 
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = crate::commands::opened_for(host, args.refresh)?;
+    let mut viewing = crate::commands::Viewing::opened(host, args.refresh)?;
     // Perch on nobody *because* a Switch was in flight is the answer to why the
     // absence is there rather than an absence to report, so it exits 0
     // (ADR a-switch-is-written-down-first).
     let active = match (
-        active_email(&registry),
-        registry.active().a_switch_in_flight(),
+        active_email(viewing.registry()),
+        viewing.registry().active().a_switch_in_flight(),
     ) {
         (Ok(active), _) => active,
         (Err(_), Some(said)) => {
-            return the_switch_alone(out, &registry, args.json, args.refresh, &said);
+            return the_switch_alone(out, viewing.registry(), args.json, args.refresh, &said);
         }
         // The other absence, and a script reads it off the same document: no
         // Account, and the refusal on stderr with its own exit code as ever.
         (Err(nobody), None) => {
             if args.json {
-                nobody_at_all(out, &registry, args.refresh)?;
+                nobody_at_all(out, viewing.registry(), args.refresh)?;
             }
             return Err(nobody);
         }
     };
 
     // This command shows one Account, so it reads one Account.
-    let report = crate::commands::refreshed(
-        host,
-        &mut perch,
-        &mut registry,
-        std::slice::from_ref(&active),
-    );
+    let report = viewing.figures_for(std::slice::from_ref(&active));
 
     let now = host.now();
+    let registry = viewing.registry();
     let account = registry.held(&active)?;
     if args.json {
-        render_json(host, out, &registry, account, now, &report)
+        render_json(host, out, registry, account, now, &report)
     } else {
-        render_human(out, &registry, account, now, &report)
+        render_human(out, registry, account, now, &report)
     }
 }
 

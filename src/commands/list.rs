@@ -138,18 +138,26 @@ fn group_heading(name: &str) -> String {
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = crate::commands::opened_for(host, args.refresh)?;
+    let mut viewing = crate::commands::Viewing::opened(host, args.refresh)?;
 
     let scope = match &args.scope {
-        Some(name) => narrowed(&registry, name)?,
+        Some(name) => narrowed(viewing.registry(), name)?,
         None => Scope::Everything,
     };
 
-    let asking_about = scope.emails(&registry);
-    let report = crate::commands::refreshed(host, &mut perch, &mut registry, &asking_about);
+    let asking_about = scope.emails(viewing.registry());
+    let report = viewing.figures_for(&asking_about);
 
     let now = host.now();
-    render(host, out, &registry, scope, now, args.json, &report)
+    render(
+        host,
+        out,
+        viewing.registry(),
+        scope,
+        now,
+        args.json,
+        &report,
+    )
 }
 
 /// The Scope a name addresses: a Group by name, or the Accounts in no Group.

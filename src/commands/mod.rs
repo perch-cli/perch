@@ -74,43 +74,55 @@ pub fn only_the_registry(
     Ok(())
 }
 
-/// The registry, opened for what the command is about to do with it.
+/// The registry as a listing sees it, opened for what it was asked to do.
 ///
-/// Exclusively only where something will be written, which is `--refresh` and
-/// nothing else: two listings drawn at once are ordinary, and a read that took
-/// the write lock would fail on one of them.
-pub fn opened_for(
-    host: &dyn Host,
-    refresh: bool,
-) -> Result<(Option<crate::lock::Held<'_>>, crate::registry::Registry)> {
-    match refresh {
-        true => {
-            let (perch, registry) = crate::adopt::ensure_adopted_exclusively(host)?;
-            Ok((Some(perch), registry))
-        }
-        false => Ok((None, crate::adopt::ensure_adopted(host)?)),
-    }
+/// Whether the registry is held for writing is `--refresh`'s business, so the
+/// hold lives in here and no caller sees it: a command opens a `Viewing`, asks
+/// it for figures, and reads the registry through it.
+pub struct Viewing<'a> {
+    host: &'a dyn Host,
+    perch: Option<crate::lock::Held<'a>>,
+    registry: crate::registry::Registry,
 }
 
-/// Current figures for exactly the Accounts the command is about to show, so
-/// narrowing what is shown narrows the reads with it. The empty report where
-/// nobody asked, which renders as "nobody asked".
-pub fn refreshed(
-    host: &dyn Host,
-    perch: &mut Option<crate::lock::Held<'_>>,
-    registry: &mut crate::registry::Registry,
-    about: &[String],
-) -> crate::observe::Report {
-    match perch {
-        Some(perch) => read_now(host, perch, registry, about),
-        None => crate::observe::Report::default(),
+impl<'a> Viewing<'a> {
+    /// Exclusively only where something will be written, which is `--refresh`
+    /// and nothing else: two listings drawn at once are ordinary, and a read
+    /// that took the write lock would fail on one of them.
+    pub fn opened(host: &'a dyn Host, refresh: bool) -> Result<Self> {
+        let (perch, registry) = match refresh {
+            true => {
+                let (perch, registry) = crate::adopt::ensure_adopted_exclusively(host)?;
+                (Some(perch), registry)
+            }
+            false => (None, crate::adopt::ensure_adopted(host)?),
+        };
+        Ok(Self {
+            host,
+            perch,
+            registry,
+        })
+    }
+
+    pub fn registry(&self) -> &crate::registry::Registry {
+        &self.registry
+    }
+
+    /// Current figures for exactly the Accounts the command is about to show,
+    /// so narrowing what is shown narrows the reads with it. The empty report
+    /// where nobody asked, which renders as "nobody asked".
+    pub fn figures_for(&mut self, about: &[String]) -> crate::observe::Report {
+        match &mut self.perch {
+            Some(perch) => read_now(self.host, perch, &mut self.registry, about),
+            None => crate::observe::Report::default(),
+        }
     }
 }
 
 /// The same read, for a command that holds the registry whatever it was asked.
 ///
 /// A Cycle takes the exclusive hold before it decides anything, so it has no
-/// `Option` to answer and no way to reach [`refreshed`]. Nothing else is held
+/// hold in question and no reason to open a [`Viewing`]. Nothing else is held
 /// across the read: every caller takes the registry lock and nothing more.
 pub fn read_now(
     host: &dyn Host,
