@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{PerchError, Result};
-use crate::name::UNGROUPED;
+use crate::name::{self, UNGROUPED};
 use crate::registry::{Account, Registry};
 use crate::say;
 
@@ -545,7 +545,36 @@ pub enum Scope {
     Group(String),
 }
 
+/// Which way a word failed to name a Scope. Each command owes its own sentence,
+/// because what the reader should do next differs by command; which case they
+/// are in does not.
+pub enum NotAScope {
+    /// The word people use for every Scope at once, which nothing addressable
+    /// answers to.
+    MeansEveryScope,
+    /// An ordinary miss: no Group is declared under the word.
+    NoSuchGroup,
+}
+
 impl Scope {
+    /// The Scope a word names, or which way it fails to — the one derivation of
+    /// the decision, so no command comes to lack an arm of it. A word for every
+    /// Scope is answered before the Group lookup, because fallen through it
+    /// earns "Declare it with `perch group add global`", which the registry
+    /// then refuses.
+    pub fn named(registry: &Registry, word: &str) -> std::result::Result<Scope, NotAScope> {
+        if name::means_the_ungrouped_scope(word) {
+            return Ok(Scope::Ungrouped);
+        }
+        if name::means_global(word) {
+            return Err(NotAScope::MeansEveryScope);
+        }
+        match registry.declared_group(word) {
+            Some(declared) => Ok(Scope::Group(declared.to_string())),
+            None => Err(NotAScope::NoSuchGroup),
+        }
+    }
+
     /// The word that addresses this Scope on a command line, and the word it is
     /// recorded under wherever something is kept per Scope.
     ///

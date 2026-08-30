@@ -157,12 +157,14 @@ fn rename(registry: &mut Registry, from: &str, to: &str) -> Result<String> {
 /// re-adding a bad way to do this.
 fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) -> Result<String> {
     let email = target.email.clone();
-    let destination = if name::means_the_ungrouped_scope(group) {
-        None
-    } else if let Some(declared) = registry.declared_group(group) {
-        Some(declared.to_string())
-    } else {
-        return Err(no_such_group(registry, group));
+    let destination = match crate::config::Scope::named(registry, group) {
+        Ok(crate::config::Scope::Ungrouped) => None,
+        Ok(crate::config::Scope::Group(declared)) => Some(declared),
+        // A word for every Scope at once is not a destination, and is answered
+        // as the Group it is not, like any other word no Group is called.
+        Err(crate::config::NotAScope::MeansEveryScope | crate::config::NotAScope::NoSuchGroup) => {
+            return Err(no_such_group(registry, group));
+        }
     };
 
     let account = registry.held_mut(&email)?;
