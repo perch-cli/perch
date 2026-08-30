@@ -370,10 +370,8 @@ fn one_round<'h>(
     // Watcher this Service restarts would otherwise come back owing nobody a wait.
     let recently = Recently::recorded(registry.checked(watching.scope.word()), host.now());
 
-    // Once per round, and handed to everything in it that wants one. Deferred, so a
-    // round that refuses nothing forks nothing: this loop runs until the session ends,
-    // and every round asking a Node program its version is a cost with no reader.
-    let installed = probe::Installed::asked_when_needed(host);
+    // Once per round, and handed to everything in it that wants one.
+    let installed = probe::Installed::for_every_round(host);
 
     // The one Account Refreshed, and nearly all of the network this loop spends.
     // Renewed either side of it, as the loop renews either side of the wait: up to six

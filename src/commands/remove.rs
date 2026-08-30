@@ -91,7 +91,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // not one to ask about giving up (ADR a-profile-is-live-by-evidence).
     let consequence = consequence_of(&registry, &settled, &account);
 
-    let installed = Installed::probed_or_absent(host);
+    let installed = Installed::for_a_report(host);
 
     live::refuse_while_anything_is_running(
         host,

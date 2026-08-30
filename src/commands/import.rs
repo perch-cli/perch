@@ -50,7 +50,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // the one wait here with no bound on it — so the hold taken before it may be
     // one another `perch` has since claimed and put an Account down under.
     still_ours(&mut perch, "imported")?;
-    let installed = Installed::probed_or_absent(host);
+    let installed = Installed::for_a_report(host);
     import::place(host, &export, &installed, || {
         registry::save(host, &mut perch, &mut restored)
     })?;

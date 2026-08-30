@@ -58,10 +58,10 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 
     let settled = crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
 
-    // Read once, for the whole command: the refusals below and the Switch after
-    // them name the Claude Code they were reading in anything they refuse
-    // (ADR an-assumption-is-probed). Ahead of the Cycle now, which refuses on it.
-    let installed = Installed::probed(host)?;
+    // The refusals below and the Switch after them name the Claude Code they
+    // were reading in anything they refuse (ADR an-assumption-is-probed).
+    // Ahead of the Cycle now, which refuses on it.
+    let installed = Installed::for_a_refusal(host)?;
 
     let Decision {
         incoming,
