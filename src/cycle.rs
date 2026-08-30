@@ -128,21 +128,12 @@ fn how_to_get_figures(scope: &Scope) -> String {
     )
 }
 
-/// How old a figure may be and still be ranked on as a figure rather than as a
-/// [`best_case`]. The Watcher's interval, taken rather than restated: it is
-/// already Perch's answer to how fresh a figure has to be before it is acted on,
-/// and a second answer to one question is two that come to disagree.
-const TRUSTED_MILLIS: i64 = crate::watch::REFRESH_INTERVAL_MILLIS as i64;
-
 /// The Headroom a Cycle may rank its rivals against: this Account's, where the
 /// cache carries a figure young enough to be one. `None` is a figure too old to
 /// stand for the Account's state, or no figure at all, and rules nothing out.
 pub fn trusted(account: &Account, now: DateTime<Utc>) -> Option<f64> {
     let cached = account.observed_utilization()?;
-    let age = (now - cached.observed_at).num_milliseconds();
-    // A range rather than a `<`: a figure stamped in the future is not fresh,
-    // and reading one as fresh is what gets a stale figure trusted.
-    if !(0..TRUSTED_MILLIS).contains(&age) {
+    if !crate::watch::figure_stands(cached, now) {
         return None;
     }
     match headroom_of(account) {

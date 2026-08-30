@@ -17,7 +17,7 @@ use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, Re
 use crate::live::{self, NotIdle};
 use crate::lock::Lost;
 use crate::probe::Installed;
-use crate::registry::{Account, Checked};
+use crate::registry::{Account, CachedUtilization, Checked};
 use crate::say;
 
 /// How long the watcher waits between Refreshing the Account it is on.
@@ -39,6 +39,16 @@ pub const LONGEST_WAIT_MILLIS: u64 = REFRESH_INTERVAL_MILLIS * 8;
 const _: () = assert!(
     crate::holdings::WATCHER_STALE_MILLIS == (LONGEST_WAIT_MILLIS + REFRESH_INTERVAL_MILLIS) as i64
 );
+
+/// Whether a cached figure still stands for its Account: stamped no later than
+/// `now`, and younger than the Refresh interval — already Perch's answer to how
+/// fresh a figure has to be, and a second answer is two that come to disagree.
+/// A range rather than a `<`, because a figure stamped in the future is not
+/// fresh, and reading one as fresh is what gets a stale figure trusted.
+pub fn figure_stands(cached: &CachedUtilization, now: DateTime<Utc>) -> bool {
+    let age = (now - cached.observed_at).num_milliseconds();
+    (0..REFRESH_INTERVAL_MILLIS as i64).contains(&age)
+}
 
 /// How long the loop rests after a round that found nowhere to go.
 ///
