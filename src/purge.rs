@@ -133,7 +133,12 @@ fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
 /// A store that will not give its Credential up stops the Purge. Nothing is
 /// undone — the registry is still there, so running it again finishes it — and
 /// the home goes last and whole, lock artifact and all.
-pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<Purged> {
+pub fn erase(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    registry: &Registry,
+    _fresh: &crate::wait::Fresh,
+) -> Result<Purged> {
     // Resolved before anything is deleted, although it is not needed until the
     // end: every Profile is derived from it, so a machine that cannot say where
     // home is must not lose half its Credentials on the way to finding out.
@@ -324,6 +329,7 @@ mod tests {
                 &host,
                 &mut holdings::lock(&host).expect("the lock is free"),
                 &registry,
+                &crate::wait::Fresh::for_a_test(),
             )
             .expect("nothing refuses");
 
@@ -369,6 +375,7 @@ mod tests {
             &host,
             &mut holdings::lock(&host).expect("the lock is free"),
             &registry,
+            &crate::wait::Fresh::for_a_test(),
         )
         .expect("nothing refuses");
 
@@ -396,6 +403,7 @@ mod tests {
             &host,
             &mut holdings::lock(&host).expect("the lock is free"),
             &registry,
+            &crate::wait::Fresh::for_a_test(),
         )
         .expect_err("the keychain will not answer");
 
@@ -422,6 +430,7 @@ mod tests {
             &host,
             &mut holdings::lock(&host).expect("the lock is free"),
             &registry,
+            &crate::wait::Fresh::for_a_test(),
         )
         .expect("`@` names no directory and no store");
 

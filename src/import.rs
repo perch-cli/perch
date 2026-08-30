@@ -187,6 +187,7 @@ pub fn place(
     host: &dyn Host,
     export: &Export,
     installed: &Installed,
+    _fresh: &crate::wait::Fresh,
     save: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
     // Keyed rather than asked of the registry per key: two names are one name
@@ -458,6 +459,12 @@ mod tests {
         }
     }
 
+    /// The save that succeeds, shared so a test whose `place` refuses before
+    /// it names the same step every succeeding test runs.
+    fn saves() -> Result<()> {
+        Ok(())
+    }
+
     fn an_export() -> Export {
         let mut registry = Registry::default();
         registry.upsert(account("one@example.com"));
@@ -494,8 +501,14 @@ mod tests {
             .store(&host)
             .unwrap();
 
-        place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
-            .expect("the Profiles can be made");
+        place(
+            &host,
+            &export,
+            &Installed::unknown("2.1.221"),
+            &crate::wait::Fresh::for_a_test(),
+            saves,
+        )
+        .expect("the Profiles can be made");
 
         assert_eq!(
             host.read_file(&store.identity_file).ok().as_deref(),
@@ -519,9 +532,13 @@ mod tests {
             .store(&host)
             .unwrap();
 
-        let refused = place(&host, &export, &Installed::unknown("2.1.221"), || {
-            Err(PerchError::Other("the disk filled".to_string()))
-        })
+        let refused = place(
+            &host,
+            &export,
+            &Installed::unknown("2.1.221"),
+            &crate::wait::Fresh::for_a_test(),
+            || Err(PerchError::Other("the disk filled".to_string())),
+        )
         .expect_err("the registry could not be written");
 
         assert!(refused.to_string().contains("taken back out"), "{refused}");
@@ -543,18 +560,24 @@ mod tests {
             .unwrap();
 
         let mut saved = 0;
-        place(&host, &export, &Installed::unknown("2.1.221"), || {
-            saved += 1;
-            // The Credential is already in its store when the save runs, so the
-            // registry never records an Account whose Credential is not there.
-            assert!(
-                crate::credentials::read(&host, &store)
-                    .expect("the store answers")
-                    .is_some(),
-                "the Credential lands before the registry says it did"
-            );
-            Ok(())
-        })
+        place(
+            &host,
+            &export,
+            &Installed::unknown("2.1.221"),
+            &crate::wait::Fresh::for_a_test(),
+            || {
+                saved += 1;
+                // The Credential is already in its store when the save runs, so the
+                // registry never records an Account whose Credential is not there.
+                assert!(
+                    crate::credentials::read(&host, &store)
+                        .expect("the store answers")
+                        .is_some(),
+                    "the Credential lands before the registry says it did"
+                );
+                Ok(())
+            },
+        )
         .expect("the ordinary Import");
 
         assert_eq!(saved, 1);
@@ -701,8 +724,14 @@ mod tests {
                 .store(&host)
                 .unwrap();
 
-            place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
-                .expect("the one Profile can be made");
+            place(
+                &host,
+                &export,
+                &Installed::unknown("2.1.221"),
+                &crate::wait::Fresh::for_a_test(),
+                saves,
+            )
+            .expect("the one Profile can be made");
 
             assert!(
                 host.path_exists(&store.config_dir),
@@ -736,8 +765,14 @@ mod tests {
             .credentials
             .insert("two@example.com".to_string(), "also held".to_string());
 
-        let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
-            .expect_err("the second store will not take it");
+        let refused = place(
+            &host,
+            &export,
+            &Installed::unknown("2.1.221"),
+            &crate::wait::Fresh::for_a_test(),
+            saves,
+        )
+        .expect_err("the second store will not take it");
 
         assert!(refused.to_string().contains("partial restore"), "{refused}");
         let first = holdings::profile_dir_for(&host, "one@example.com").unwrap();
@@ -756,8 +791,14 @@ mod tests {
         let mut export = an_export();
         export.registry.upsert(account("@"));
 
-        let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
-            .expect_err("`@` names no directory");
+        let refused = place(
+            &host,
+            &export,
+            &Installed::unknown("2.1.221"),
+            &crate::wait::Fresh::for_a_test(),
+            saves,
+        )
+        .expect_err("`@` names no directory");
 
         let said = refused.to_string();
         assert!(said.contains('@'), "{said}");
@@ -791,8 +832,14 @@ mod tests {
             };
             map.insert("nobody@example.com".to_string(), "held".to_string());
 
-            let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
-                .expect_err("that file belongs to nothing");
+            let refused = place(
+                &host,
+                &export,
+                &Installed::unknown("2.1.221"),
+                &crate::wait::Fresh::for_a_test(),
+                saves,
+            )
+            .expect_err("that file belongs to nothing");
 
             let said = refused.to_string();
             assert!(
@@ -825,8 +872,14 @@ mod tests {
             map.insert("one@example.com".to_string(), "held".to_string());
             map.insert("ONE@example.com".to_string(), "also held".to_string());
 
-            let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
-                .expect_err("only one of the two would land");
+            let refused = place(
+                &host,
+                &export,
+                &Installed::unknown("2.1.221"),
+                &crate::wait::Fresh::for_a_test(),
+                saves,
+            )
+            .expect_err("only one of the two would land");
 
             let said = refused.to_string();
             assert!(
@@ -862,8 +915,14 @@ mod tests {
             );
         }
 
-        let refused = place(&host, &export, &Installed::unknown("2.1.221"), || Ok(()))
-            .expect_err("both would land in one Profile");
+        let refused = place(
+            &host,
+            &export,
+            &Installed::unknown("2.1.221"),
+            &crate::wait::Fresh::for_a_test(),
+            saves,
+        )
+        .expect_err("both would land in one Profile");
 
         assert!(
             refused.to_string().contains("user+work@example.com")

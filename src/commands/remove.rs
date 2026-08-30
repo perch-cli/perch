@@ -26,6 +26,7 @@ use crate::registry::{self, Account, Registry, Settled};
 use crate::say;
 use crate::switch;
 use crate::target;
+use crate::wait;
 
 /// Why this command writes into the Default Profile, named for the two places
 /// that have to agree about it: the refusal somebody meets *before* the
@@ -100,24 +101,29 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
         &installed,
     )?;
 
-    if !agreed(host, out, &registry, &account, &consequence, args.yes)? {
-        return say::line(out, "Nothing was removed.");
-    }
-
-    // Asked again: somebody may have started a client while the question sat
-    // there, and an answer about the machine as it was before lunch says nothing
-    // about the Profile this is about to delete.
-    live::refuse_while_anything_is_running(
-        host,
-        &account,
-        why_the_default_profile(&consequence),
-        &installed,
+    let crossed = wait::across_unless_declined(
+        &mut perch,
+        |_| {
+            Ok(
+                match agreed(host, out, &registry, &account, &consequence, args.yes)? {
+                    true => wait::Asked::Answered(()),
+                    false => wait::Asked::Declined,
+                },
+            )
+        },
+        |perch| {
+            live::refuse_while_anything_is_running(
+                host,
+                &account,
+                why_the_default_profile(&consequence),
+                &installed,
+            )?;
+            still_ours(perch, "removed")
+        },
     )?;
-
-    // The question above is the one wait in Perch with no bound on it, so it is
-    // the one place the registry lock can go stale under a command that is
-    // otherwise behaving. Asked before the first thing that cannot be undone.
-    still_ours(&mut perch, "removed")?;
+    let Some(((), (), fresh)) = crossed else {
+        return say::line(out, "Nothing was removed.");
+    };
 
     // Somewhere to land before anything is deleted. A failure here has cost
     // nothing: the Account is still held, and its Credential is still live.
@@ -130,10 +136,11 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
             successor,
             &account,
             &installed,
+            &fresh,
         )?;
     }
 
-    let deleted = delete_the_credential_and_its_profile(host, &registry, &account)?;
+    let deleted = delete_the_credential_and_its_profile(host, &registry, &account, &fresh)?;
 
     let named = registry.named_for_the_user(account.email());
     let alias = registry.alias_of(account.email()).map(str::to_string);
@@ -272,6 +279,10 @@ fn what_it_would_leave(
 /// rather than with the rest of the registry at the end, because everything
 /// between is destructive and can fail. Written whether the landing finished or
 /// not: a Credential that reached the Default Profile is live either way.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the witness made it eight; a struct with one caller would only rename the list"
+)]
 fn land_on(
     host: &dyn Host,
     perch: &mut Held<'_>,
@@ -280,6 +291,7 @@ fn land_on(
     successor: &Account,
     leaving: &Account,
     installed: &Installed,
+    _fresh: &wait::Fresh,
 ) -> Result<()> {
     let landed = switch::make_live(
         host,
@@ -356,6 +368,7 @@ fn delete_the_credential_and_its_profile(
     host: &dyn Host,
     registry: &Registry,
     account: &Account,
+    _fresh: &wait::Fresh,
 ) -> Result<Deleted> {
     // Two Accounts whose addresses slug to one directory share a Credential
     // Store, so deleting it would take the Credential of an Account nobody asked
