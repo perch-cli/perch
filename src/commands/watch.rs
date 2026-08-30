@@ -19,7 +19,6 @@ use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::{Host, Waited};
 use crate::lock;
-use crate::lock::Lost;
 use crate::observe;
 use crate::probe;
 use crate::registry;
@@ -27,7 +26,7 @@ use crate::round::{self, Verdict};
 use crate::say;
 use crate::switch::{self, Resolved};
 use crate::trail;
-use crate::watch::{self, Backoff, Holding, Recently, Speak, Watcher};
+use crate::watch::{self, Backoff, Recently, Voice, Watcher};
 
 /// One round, for whatever scheduled it.
 ///
@@ -37,13 +36,16 @@ use crate::watch::{self, Backoff, Holding, Recently, Speak, Watcher};
 pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     host.listen_for_interrupts();
 
+    // Fresh, so the one line a Check says is always said in full.
+    let mut voice = Voice::quiet();
+
     // The same lock a loop takes: a Check firing while a Service runs is the double-
     // Switch it exists for. Held rather than refused, and `20` tells a scheduler to
     // come back.
     let watching_alone = match lock::take_all(host, vec![holdings::watcher_lock_spec(host)?]) {
         Ok(held) => held,
         Err(PerchError::Busy(why)) => {
-            say::line(out, &watch::held_line(&why, None, host.now()))?;
+            voice.held(out, &why, None, host.now())?;
             return Ok(crate::error::EXIT_HELD);
         }
         Err(other) => return Err(other),
@@ -63,7 +65,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         // rather than a raise, which would reach a cron mailbox by way of standard
         // error.
         Err(PerchError::Busy(why)) => {
-            say::line(out, &watch::held_line(&why, None, host.now()))?;
+            voice.held(out, &why, None, host.now())?;
             return Ok(crate::error::EXIT_HELD);
         }
         Err(other) => return Err(other),
@@ -76,11 +78,11 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         // Said and exited rather than raised: a Check that was interrupted read no
         // figure, and `20` is what tells a scheduler to come back.
         Verdict::Lost(lost) => {
-            say::line(out, &watch::stopped_line(lost, host.now()))?;
+            voice.lost(out, lost, host.now())?;
             return Ok(crate::error::EXIT_HELD);
         }
     };
-    say::line(out, &round.line(host.now()))?;
+    voice.round(out, &round, host.now())?;
     Ok(round.outcome.exit_code())
 }
 
@@ -95,12 +97,12 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // else: what the loop is waiting out and what it has already said belong to the
     // loop. What paces a Switch does not — it is read off the registry each round.
     let mut backoff = Backoff::none();
-    let mut holding = Holding::nothing();
+    let mut voice = Voice::quiet();
 
     // Exactly one Watcher per person per machine. Kept by name rather than dropped into
     // a `_`, because a hold nothing renews is one the next Check clears.
-    let Some(watching_alone) = take_the_watch(host, out, &mut holding)? else {
-        return stopped(out);
+    let Some(watching_alone) = take_the_watch(host, out, &mut voice)? else {
+        return voice.stopped(out);
     };
     let mut watching_alone = Watch::taken(host, watching_alone);
 
@@ -110,40 +112,33 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
         // Twice a round, and this is the half that bounds the gap: the window is the
         // longest wait plus a round, and a round is bounded by nothing but the network.
         if let Err(lost) = watching_alone.goes_on() {
-            return left(out, lost);
+            return voice.left(out, lost);
         }
 
-        let (waiting_for, spoken) =
-            match one_round(host, Watcher::Loop, &mut backoff, &mut watching_alone) {
-                Ok(Verdict::Decided(round)) => {
-                    let waiting_for = round.waiting_for();
-                    let line = round.line(host.now());
-                    match round.held_because() {
-                        // The wait this round announced is what the coalescing compares, so
-                        // a back-off that has doubled is said again.
-                        Some(why) => (waiting_for, Spoken::held(why, Some(waiting_for), line)),
-                        None => (waiting_for, Spoken::Decided(line)),
-                    }
-                }
-                // The machine is not arranged for watching, which the loop holds on.
-                // Nothing is charged to the back-off: this round asked the registry rather
-                // than Anthropic.
-                Ok(Verdict::NotArranged(why)) => held_before_a_round(&why.to_string(), host.now()),
-                // Out at once rather than round the loop to the ask at the top: this round
-                // asked it already, and the answer to a sticky question does not change.
-                Ok(Verdict::Lost(lost)) => return left(out, lost),
-                // Held like any other round that could not read. Ending the watcher over a
-                // contended registry would let a `perch status --refresh` stop it silently.
-                Err(PerchError::Busy(why)) => held_before_a_round(&why, host.now()),
-                Err(other) => return Err(other),
-            };
-
-        say_it(out, &mut holding, spoken, host.now())?;
+        let waiting_for = match one_round(host, Watcher::Loop, &mut backoff, &mut watching_alone) {
+            Ok(Verdict::Decided(round)) => {
+                voice.round(out, &round, host.now())?;
+                round.waiting_for()
+            }
+            // The machine is not arranged for watching, which the loop holds on.
+            // Nothing is charged to the back-off: this round asked the registry rather
+            // than Anthropic.
+            Ok(Verdict::NotArranged(why)) => {
+                held_before_a_round(out, &mut voice, &why.to_string(), host.now())?
+            }
+            // Out at once rather than round the loop to the ask at the top: this round
+            // asked it already, and the answer to a sticky question does not change.
+            Ok(Verdict::Lost(lost)) => return voice.left(out, lost),
+            // Held like any other round that could not read. Ending the watcher over a
+            // contended registry would let a `perch status --refresh` stop it silently.
+            Err(PerchError::Busy(why)) => held_before_a_round(out, &mut voice, &why, host.now())?,
+            Err(other) => return Err(other),
+        };
 
         // The other half, here because the round's own work is over: everything above
         // may have waited on Claude Code's locks or on a keychain that stopped to ask.
         if let Err(lost) = watching_alone.goes_on() {
-            return left(out, lost);
+            return voice.left(out, lost);
         }
 
         // The one place the loop holds nothing it took this round, and therefore How
@@ -154,38 +149,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
         }
     }
 
-    stopped(out)
-}
-
-/// What the loop says on the way out when something other than the person at the
-/// terminal ended it.
-fn left(out: &mut dyn Write, lost: Lost) -> Result<()> {
-    match lost {
-        Lost::HandedOver => handed_over(out),
-        Lost::Stopped => stopped(out),
-    }
-}
-
-/// What the loop says on the way out, which is that it is out.
-///
-/// One word, because everything else that is true of a stop is true of every stop
-/// without exception (ADR perch-says-what-it-did).
-fn stopped(out: &mut dyn Write) -> Result<()> {
-    say::line(out, "Stopped.")
-}
-
-/// What the loop says when it leaves because it is no longer the Watcher.
-///
-/// Not [`stopped`]: this is a stop nobody asked for, and a refusal says why. The lock
-/// is not given back — it is somebody else's now.
-fn handed_over(out: &mut dyn Write) -> Result<()> {
-    say::line(
-        out,
-        "Stopped: another Watcher has taken the watch over, so this one is no \
-         longer the only one deciding. Its lock is left where it is, no file of \
-         its own was written, and the Account you are on is the one it last \
-         Switched to.",
-    )
+    voice.stopped(out)
 }
 
 /// Becomes the only Watcher on this machine, holding until whoever has the watch gives
@@ -196,14 +160,13 @@ fn handed_over(out: &mut dyn Write) -> Result<()> {
 fn take_the_watch<'a>(
     host: &'a dyn Host,
     out: &mut dyn Write,
-    holding: &mut Holding,
+    voice: &mut Voice,
 ) -> Result<Option<crate::lock::Held<'a>>> {
     loop {
         match crate::lock::take_all(host, vec![holdings::watcher_lock_spec(host)?]) {
             Ok(held) => return Ok(Some(held)),
             Err(PerchError::Busy(why)) => {
-                let (waiting_for, spoken) = held_before_a_round(&why, host.now());
-                say_it(out, holding, spoken, host.now())?;
+                let waiting_for = held_before_a_round(out, voice, &why, host.now())?;
                 if host.wait(waiting_for) == Waited::Interrupted {
                     return Ok(None);
                 }
@@ -214,70 +177,18 @@ fn take_the_watch<'a>(
 }
 
 /// A hold that happened before there was a [`Round`] to hold, and so one with no
-/// Account to name; [`one_round`]'s `held` is the other shape. At the ordinary
+/// Account to name; a round's own hold is [`Voice::round`]'s. At the ordinary
 /// interval, because nothing here spent a request: a contended registry, a lock
 /// inside its window and a machine nothing arranged are each an answer.
-fn held_before_a_round(why: &str, now: DateTime<Utc>) -> (u64, Spoken) {
-    let waiting_for = watch::REFRESH_INTERVAL_MILLIS;
-    let line = watch::held_line(why, Some(waiting_for), now);
-    (waiting_for, Spoken::held(why, Some(waiting_for), line))
-}
-
-/// A round's line, and whether it was a hold — which is the only thing the coalescing
-/// needs to know about it.
-enum Spoken {
-    /// Held, by `why`, coming back in `retrying_in`, and this is the line that says
-    /// both in full. The two travel together because a hold that has changed either of
-    /// them is one the log has to say again.
-    Held {
-        why: String,
-        retrying_in: Option<u64>,
-        in_full: String,
-    },
-    /// Decided something, and this is the line.
-    Decided(String),
-}
-
-impl Spoken {
-    fn held(why: &str, retrying_in: Option<u64>, in_full: String) -> Spoken {
-        Spoken::Held {
-            why: why.to_string(),
-            retrying_in,
-            in_full,
-        }
-    }
-}
-
-/// Says a round, as much of it as is worth saying.
-///
-/// An unchanged hold is said in full when it starts, as a duration once an hour while
-/// it lasts, and as what it cost when it ends. A round that decided something is always
-/// said.
-fn say_it(
+fn held_before_a_round(
     out: &mut dyn Write,
-    holding: &mut Holding,
-    spoken: Spoken,
+    voice: &mut Voice,
+    why: &str,
     now: DateTime<Utc>,
-) -> Result<()> {
-    match spoken {
-        Spoken::Held {
-            why,
-            retrying_in,
-            in_full,
-        } => match holding.holding(&why, retrying_in, now) {
-            Speak::InFull => say::line(out, &in_full),
-            Speak::StillHolding { since } => say::line(out, &watch::still_holding_line(since, now)),
-            Speak::Nothing => Ok(()),
-        },
-        Spoken::Decided(line) => {
-            // The way out of a hold is always said, and said before the decision, so a
-            // log reads in the order the things happened.
-            if let Some(held_for) = holding.released(now) {
-                say::line(out, &watch::released_line(held_for, now))?;
-            }
-            say::line(out, &line)
-        }
-    }
+) -> Result<u64> {
+    let waiting_for = watch::REFRESH_INTERVAL_MILLIS;
+    voice.held(out, why, Some(waiting_for), now)?;
+    Ok(waiting_for)
 }
 
 /// What the loop is about to start doing, said before it does it.
