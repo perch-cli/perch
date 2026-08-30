@@ -166,23 +166,18 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
 /// not — the same way `perch config` answers one. A Target names one Account,
 /// and a listing of one row is what `perch status` answers better.
 fn narrowed(registry: &Registry, name: &str) -> Result<Scope> {
-    if name::means_the_ungrouped_scope(name) {
-        return Ok(Scope::Ungrouped);
-    }
-    // Answered here rather than left to fall through, because fallen through it
-    // offers "Declare it with `perch group add global`" — which `validate_name`
-    // then refuses. A listing has the happier answer.
-    if name::means_global(name) {
-        return Err(PerchError::NotFound(format!(
+    match config::Scope::named(registry, name) {
+        Ok(config::Scope::Ungrouped) => Ok(Scope::Ungrouped),
+        Ok(config::Scope::Group(declared)) => Ok(Scope::Group(declared)),
+        // A listing has the happier answer: the whole of it is what the word
+        // asks for.
+        Err(config::NotAScope::MeansEveryScope) => Err(PerchError::NotFound(format!(
             "There is no Scope called `{name}`. It is how people say every \
              Scope at once, which is what a bare `perch list` shows. Narrowing \
              takes a Group by name, or `{UNGROUPED}` for the Accounts in no \
              Group."
-        )));
-    }
-    match registry.declared_group(name) {
-        Some(declared) => Ok(Scope::Group(declared.to_string())),
-        None => Err(group::no_such_group(registry, name)),
+        ))),
+        Err(config::NotAScope::NoSuchGroup) => Err(group::no_such_group(registry, name)),
     }
 }
 
