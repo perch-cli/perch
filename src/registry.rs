@@ -454,6 +454,28 @@ impl Account {
     }
 }
 
+/// One claim on the shared namespace: what a caller is doing with a name, so
+/// which checks apply is [`Registry::refuse`]'s knowledge rather than each
+/// site's.
+#[derive(Clone, Copy)]
+pub enum Claim<'a> {
+    /// A name of one kind claimed outright — a Group declared or renamed, an
+    /// Alias given. `instead_of` is the name the holder gives up, which waives
+    /// only the collision with itself.
+    Naming {
+        kind: NameKind,
+        name: &'a str,
+        instead_of: Option<&'a str>,
+    },
+    /// `perch add`'s pair, either half optional. The Group half is shape and
+    /// the Alias collision only, because a Group named in passing may join one
+    /// already declared.
+    Adding {
+        alias: Option<&'a str>,
+        group: Option<&'a str>,
+    },
+}
+
 impl Registry {
     /// The Account an address names, folded as a Profile is derived: `CAFÉ@…`
     /// and `café@…` share one Profile and `perch add` refuses the second, so
@@ -613,55 +635,104 @@ impl Registry {
     /// Declares a Group, refusing a name that is not usable or already means
     /// something else.
     pub fn declare_group(&mut self, name: &str) -> Result<()> {
-        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, name, None)?;
+        self.refuse(Claim::Naming {
+            kind: NameKind::Group,
+            name,
+            instead_of: None,
+        })?;
         // At the compiled-in defaults, which is what every Setting means until
         // somebody says otherwise about this Group.
         self.groups.insert(name.to_string(), Settings::default());
         Ok(())
     }
 
-    /// Refuses a name nothing may answer to: one that is not usable, one another
-    /// name of the same kind holds, or one the other namespace half holds.
-    ///
-    /// Shape before collision. `instead_of` is the name this replaces, and
-    /// renaming itself waives only the same-kind collision.
-    pub fn refuse_a_name_nothing_may_answer_to(
-        &self,
-        kind: NameKind,
-        name: &str,
-        instead_of: Option<&str>,
-    ) -> Result<()> {
-        name::validate(kind, name)?;
-
-        let renaming_itself = instead_of.is_some_and(|held| same_name(held, name));
-        if !renaming_itself {
-            // The same-kind collision. Asked here for a Group and inside
-            // `refuse_taken_names` for an Alias, which is asymmetric: given an
-            // Alias it checks both halves, and given a Group only the Alias one.
-            if let (NameKind::Group, Some(declared)) = (kind, self.declared_group(name)) {
-                return Err(PerchError::Conflict(format!(
-                    "There is already a Group called `{declared}`."
-                )));
+    /// Refuses a claim on a name nothing may answer to: one that is not usable,
+    /// one another name of the same kind holds, or one the other namespace half
+    /// holds. Shape before collision, and which checks apply is read off the
+    /// claim rather than known at each site.
+    pub fn refuse(&self, claim: Claim<'_>) -> Result<()> {
+        match claim {
+            Claim::Naming {
+                kind,
+                name,
+                instead_of,
+            } => {
+                name::validate(kind, name)?;
+                let renaming_itself = instead_of.is_some_and(|held| same_name(held, name));
+                match kind {
+                    NameKind::Group => {
+                        if !renaming_itself && let Some(declared) = self.declared_group(name) {
+                            return Err(PerchError::Conflict(format!(
+                                "There is already a Group called `{declared}`."
+                            )));
+                        }
+                        self.refuse_an_alias_of_this_name(name)
+                    }
+                    // An Account keeping its own Alias under another
+                    // capitalization cannot collide with the Alias it gives up,
+                    // and is still asked about the other half.
+                    NameKind::Alias => {
+                        if !renaming_itself && let Some((held, target)) = self.declared_alias(name)
+                        {
+                            return Err(PerchError::Conflict(format!(
+                                "`{held}` already names {target}. Free it with \
+                                 `perch alias {held} --unset` first."
+                            )));
+                        }
+                        self.refuse_a_group_of_this_name(name)
+                    }
+                }
             }
-        }
-
-        match kind {
-            NameKind::Group => self.refuse_taken_names(None, Some(name)),
-            NameKind::Alias => match renaming_itself {
-                // An Account keeping its own Alias under another capitalization
-                // cannot collide with the Alias it is giving up.
-                true => self.refuse_a_group_of_this_name(name),
-                false => self.refuse_taken_names(Some(name), None),
-            },
+            Claim::Adding { alias, group } => {
+                // Both shapes before anything else: what is wrong with a name
+                // is said before what it clashes with.
+                if let Some(alias) = alias {
+                    name::validate(NameKind::Alias, alias)?;
+                }
+                if let Some(group) = group {
+                    name::validate(NameKind::Group, group)?;
+                }
+                // The pair against each other, which no check of one name can
+                // see: a command setting both at once could otherwise plant the
+                // collision this exists to prevent.
+                if let (Some(alias), Some(group)) = (alias, group)
+                    && same_name(alias, group)
+                {
+                    return Err(PerchError::Conflict(format!(
+                        "`{alias}` cannot be both an Alias and a Group name."
+                    )));
+                }
+                if let Some(alias) = alias {
+                    self.refuse(Claim::Naming {
+                        kind: NameKind::Alias,
+                        name: alias,
+                        instead_of: None,
+                    })?;
+                }
+                if let Some(group) = group {
+                    self.refuse_an_alias_of_this_name(group)?;
+                }
+                Ok(())
+            }
         }
     }
 
-    /// The half of [`Self::refuse_taken_names`] that still applies to an Alias
-    /// renaming itself: the other side of the shared namespace.
+    /// One side of the shared namespace, asked of an Alias: no Group may hold
+    /// the name.
     fn refuse_a_group_of_this_name(&self, name: &str) -> Result<()> {
         match self.declared_group(name) {
             Some(declared) => Err(PerchError::Conflict(format!(
                 "`{declared}` is already a Group name, and a name cannot be both."
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// The other side, asked of a Group name: no Alias may hold it.
+    fn refuse_an_alias_of_this_name(&self, name: &str) -> Result<()> {
+        match self.declared_alias(name) {
+            Some((held, target)) => Err(PerchError::Conflict(format!(
+                "`{held}` is already an Alias for {target}, and a name cannot be both."
             ))),
             None => Ok(()),
         }
@@ -681,7 +752,11 @@ impl Registry {
                 "no Group is called `{held}`."
             )));
         };
-        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
+        self.refuse(Claim::Naming {
+            kind: NameKind::Group,
+            name: to,
+            instead_of: Some(held),
+        })?;
 
         // `declared` is one of this map's own keys, `declared_group` having
         // just read it out — so the refusal above is the only one there is.
@@ -808,42 +883,6 @@ impl Registry {
             .map(|(alias, email)| (alias.as_str(), email.as_str()))
     }
 
-    /// Refuses an Alias and a Group name that would not both be free.
-    ///
-    /// The pair is checked against each other as well as against what is held: a
-    /// command setting both at once could otherwise plant the collision it is
-    /// meant to prevent. Two names differing only in case are one name.
-    pub fn refuse_taken_names(&self, alias: Option<&str>, group: Option<&str>) -> Result<()> {
-        if let (Some(alias), Some(group)) = (alias, group)
-            && same_name(alias, group)
-        {
-            return Err(PerchError::Conflict(format!(
-                "`{alias}` cannot be both an Alias and a Group name."
-            )));
-        }
-
-        if let Some(alias) = alias {
-            if let Some((held, target)) = self.declared_alias(alias) {
-                return Err(PerchError::Conflict(format!(
-                    "`{held}` already names {target}. Free it with `perch alias {held} --unset` first."
-                )));
-            }
-            // The same lookup and sentence `refuse_a_group_of_this_name` is,
-            // which an Alias renaming itself needs without the one above it.
-            self.refuse_a_group_of_this_name(alias)?;
-        }
-
-        if let Some(group) = group
-            && let Some((held, target)) = self.declared_alias(group)
-        {
-            return Err(PerchError::Conflict(format!(
-                "`{held}` is already an Alias for {target}, and a name cannot be both."
-            )));
-        }
-
-        Ok(())
-    }
-
     /// Names an Account, refusing a name that is not usable or already means
     /// something else. Hands back the Alias it gave up, where it had one.
     ///
@@ -851,7 +890,11 @@ impl Registry {
     /// replaces it rather than adding to it.
     pub fn name_account(&mut self, alias: &str, email: &str) -> Result<Option<String>> {
         let previous = self.alias_of(email).map(str::to_string);
-        self.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, previous.as_deref())?;
+        self.refuse(Claim::Naming {
+            kind: NameKind::Alias,
+            name: alias,
+            instead_of: previous.as_deref(),
+        })?;
 
         // The address as the registry *holds* it, not as it was typed: the
         // lookup above folds case, and storing the typed spelling would point
@@ -1853,7 +1896,11 @@ mod tests {
         ];
 
         for (kind, name, instead_of, refusal) in cases {
-            let asked = held().refuse_a_name_nothing_may_answer_to(*kind, name, *instead_of);
+            let asked = held().refuse(Claim::Naming {
+                kind: *kind,
+                name,
+                instead_of: *instead_of,
+            });
             match refusal {
                 None => asked.unwrap_or_else(|err| {
                     panic!("{kind:?} `{name}` should be free: {err}");
@@ -1883,7 +1930,11 @@ mod tests {
             .insert("Work".to_string(), Settings::default());
 
         let refused = registry
-            .refuse_a_name_nothing_may_answer_to(NameKind::Alias, "Work", Some("work"))
+            .refuse(Claim::Naming {
+                kind: NameKind::Alias,
+                name: "Work",
+                instead_of: Some("work"),
+            })
             .expect_err("the shared namespace is still checked");
 
         assert!(
