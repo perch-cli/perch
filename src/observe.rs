@@ -63,8 +63,7 @@ fn already_read(host: &dyn Host, registry: &Registry, email: &str) -> bool {
     else {
         return false;
     };
-    let age = (host.now() - observed.observed_at).num_milliseconds();
-    if !(0..crate::watch::REFRESH_INTERVAL_MILLIS as i64).contains(&age) {
+    if !crate::watch::figure_stands(observed, host.now()) {
         return false;
     }
     // A lock that cannot be asked about is no Watcher: refusing a read over a
