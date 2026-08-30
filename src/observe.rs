@@ -829,8 +829,7 @@ fn renew_under_the_lock(
     }
 
     let store = &asked.store;
-    lock::under(host, probe::locks_for(store), |held| {
-        let mut holds = lock::Holds::of(held, perch);
+    store.entered(host, perch, |holds| {
         // Both of the questions asked before the locks were taken, asked again now that
         // nothing can change the answer underneath Perch.
         refuse_if_live(host, asked, installed, because)?;

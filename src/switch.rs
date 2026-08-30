@@ -360,12 +360,10 @@ fn perform(
 
     let mut incoming_is_live = false;
     let mut wrote_it_down = false;
-    let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
-        // Every step is slow enough to outlast a hold: a keychain that stops to
-        // ask stretches `prepare` or `capture` past the ten seconds the
-        // config-file lock goes stale in. Built before the first of them.
-        let mut holds = lock::Holds::of(held, perch);
-
+    // Every step is slow enough to outlast a hold: a keychain that stops to
+    // ask stretches `prepare` or `capture` past the ten seconds the
+    // config-file lock goes stale in.
+    let switched: Result<Captured> = store.entered(host, perch, |holds| {
         // An Overwriting departure asks the Default Profile itself, since no
         // outgoing Profile will be: what is live is about to be written over
         // where it lies. Under the locks, for the reason [`Prepared`] gives.
@@ -377,7 +375,7 @@ fn perform(
         }
 
         let prepared =
-            holds.around(|| prepare(host, incoming, outgoing, installed.clone(), store))?;
+            holds.around(|| prepare(host, incoming, outgoing, installed.clone(), &store))?;
 
         let captured = holds
             .around(|| capture(host, &prepared, incoming, outgoing, registry))
@@ -509,13 +507,11 @@ pub fn resolve_a_landing<E>(
     // Under Claude Code's own locks, and the save is inside them too, so the
     // window they close is the whole of read-decide-record. A Rotation Perch
     // could have locked out would otherwise defeat resolution for good.
-    lock::under(host, probe::locks_for(&store), |held| {
-        let mut holds = lock::Holds::of(held, perch);
-
+    store.entered(host, perch, |holds| {
         // A store that will not answer says nothing about what it holds, and
         // what it holds is the whole of the evidence. Refused rather than
         // guessed at.
-        let live = match asking_first(&mut holds, still_ours, || credentials::read(host, &store)) {
+        let live = match asking_first(holds, still_ours, || credentials::read(host, &store)) {
             Err(lost) => return Ok(Resolved::Stopped(lost)),
             Ok(read) => read.map_err(|would_not_answer| {
                 would_not_answer.with_note(&format!(
@@ -529,7 +525,7 @@ pub fn resolve_a_landing<E>(
 
         let settled_on = match whose_the_live_credential_is(
             host,
-            &mut holds,
+            holds,
             still_ours,
             registry,
             leaving.as_deref(),
@@ -690,7 +686,7 @@ fn prepare<'h>(
     incoming: &Account,
     outgoing: Option<&Account>,
     installed: Installed<'h>,
-    store: Store,
+    store: &Store,
 ) -> Result<Prepared<'h>> {
     // Before anything is written, and only of the Profile written to. The
     // incoming Account's is only ever read from, and reading takes nothing away
@@ -725,7 +721,7 @@ fn prepare<'h>(
     Ok(Prepared {
         identity_block: identity_block_for(host, incoming, &incoming_store)?,
         installed,
-        store,
+        store: store.clone(),
         credential,
     })
 }
