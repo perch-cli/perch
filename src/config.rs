@@ -208,9 +208,7 @@ impl Setting {
                 "`perch watcher run` will only move {within} to an Account at \
                  {}% or under. A round with nowhere that empty to go says so and \
                  moves nothing. {ONLY_WHILE_IT_RUNS}",
-                settings
-                    .watcher_threshold_percent
-                    .saturating_sub(settings.watcher_margin_percent),
+                crate::watch::Policy::of(&settings).ceiling(),
             ),
         }
     }

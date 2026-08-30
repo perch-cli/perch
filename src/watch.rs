@@ -255,7 +255,13 @@ impl Voice {
     pub fn round(&mut self, out: &mut dyn Write, round: &Round, now: DateTime<Utc>) -> Result<()> {
         let line = round.line(now);
         match &round.outcome {
-            Outcome::Held { why, retrying_in } => self.hold(out, why, *retrying_in, line, now),
+            Outcome::Held { why, retrying_in } => self.hold(
+                out,
+                why,
+                round.watcher.asking_again(*retrying_in),
+                line,
+                now,
+            ),
             Outcome::Waiting
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
@@ -390,10 +396,9 @@ pub enum Watcher {
 }
 
 impl Watcher {
-    /// How long before the watcher reads again, where that is the watcher's to say.
-    ///
-    /// Given the wait rather than the [`Backoff`] it came off, so the only way to have
-    /// one is to have just been charged for it.
+    /// How long before the watcher reads again, where that is the watcher's to say:
+    /// a loop's own wait, and nothing for a check, which exits and leaves the next
+    /// reading to whatever scheduled it.
     pub fn asking_again(self, waiting_for: u64) -> Option<u64> {
         match self {
             Watcher::Loop => Some(waiting_for),
@@ -709,29 +714,20 @@ pub enum Outcome {
     Switched { to: String, unread: Vec<String> },
     /// It was, and there was nowhere worth going — every candidate exhausted, or none
     /// of them a candidate at all. Nothing to fix and nothing to retry: the answer is
-    /// to wait, so the loop does — and `looking_again` is absent for a check, which
-    /// exits, exactly as [`Outcome::Held`]'s `retrying_in` is.
-    Nowhere {
-        why: String,
-        looking_again: Option<u64>,
-    },
+    /// to wait, so the loop does, for `looking_again`.
+    Nowhere { why: String, looking_again: u64 },
     /// The figures could not be read, so nothing was decided on the ones Perch already
-    /// had. The only outcome carrying how long the loop then waits.
-    ///
-    /// Absent for a check, which is exiting: an interval it has no part in would be the
-    /// one untrue thing on the line.
-    Held {
-        why: String,
-        retrying_in: Option<u64>,
-    },
+    /// had. `retrying_in` is the wait the failure was charged for, set where it was
+    /// charged.
+    Held { why: String, retrying_in: u64 },
     /// A Switch was wanted, attempted, and turned away without changing anything — most
     /// often a client running against the Profile the Capture would write into
     /// (ADR a-profile-is-live-by-evidence). Only where waiting is an answer: a failure
-    /// that does not clear itself is reported as itself instead. `after_reading` paces
-    /// the loop's next round, and `contended` decides the exit code.
+    /// that does not clear itself is reported as itself instead. `resting_for` is set
+    /// where it is known what the round spent, and `contended` decides the exit code.
     Refused {
         why: String,
-        after_reading: bool,
+        resting_for: u64,
         contended: bool,
     },
     /// The watch was taken over between the reading and the Switch. Its own outcome
@@ -827,8 +823,9 @@ pub fn refused_or_raised(not_idle: NotIdle, installed: &Installed) -> Result<Out
             why: running
                 .refusal(installed, &live::NOTHING_WAS_CHANGED)
                 .to_string(),
-            // Asked before the burst, so nothing has been spent on it.
-            after_reading: false,
+            // Asked before the burst, so nothing has been spent on it and the
+            // ordinary interval answers.
+            resting_for: REFRESH_INTERVAL_MILLIS,
             contended: false,
         }),
         // This does not clear itself: a `sessions` directory nobody can read is a machine
@@ -852,50 +849,28 @@ pub struct Round {
     /// [`Fullest::as_a_clause`].
     pub threshold: u8,
     pub outcome: Outcome,
+    /// Which arrangement ran the round, which is what decides whether its line may
+    /// promise a wait: a loop takes the wait it quotes, and a check exits — an
+    /// interval it has no part in would be the one untrue thing on the line.
+    pub watcher: Watcher,
 }
 
 impl Round {
     /// How long the loop leaves it before the next round.
     ///
-    /// Read off the round, so the wait the line promised and the wait taken are the
-    /// same number. A round that read a figure is followed by the ordinary interval
-    /// whatever it decided about it.
+    /// Quoted off the outcome rather than derived from it a second time, so the wait
+    /// the line promised and the wait taken are the same number. A round that read a
+    /// figure is followed by the ordinary interval whatever it decided about it.
     pub fn waiting_for(&self) -> u64 {
         match &self.outcome {
-            Outcome::Held {
-                retrying_in: Some(millis),
-                ..
-            } => *millis,
-            // Read off the round, as the hold's is: they agree today only
-            // because `act` passes this same constant.
-            Outcome::Nowhere {
-                looking_again: Some(millis),
-                ..
-            } => *millis,
-            Outcome::Nowhere {
-                looking_again: None,
-                ..
-            } => NOWHERE_INTERVAL_MILLIS,
-            // Turned away after every candidate was read, which is the burst
-            // `NOWHERE_INTERVAL_MILLIS` exists to stop repeating: an hourly
-            // allowance per Account, spent on a Switch that was refused.
-            Outcome::Refused {
-                after_reading: true,
-                ..
-            } => NOWHERE_INTERVAL_MILLIS,
+            Outcome::Held { retrying_in, .. } => *retrying_in,
+            Outcome::Nowhere { looking_again, .. } => *looking_again,
+            Outcome::Refused { resting_for, .. } => *resting_for,
             // Named one by one rather than caught by a wildcard, so an outcome added
-            // later has to say what the loop does after it. A hold carrying no wait is
-            // a check's, and a check exits rather than asking.
-            Outcome::Held {
-                retrying_in: None, ..
-            }
-            | Outcome::Waiting
+            // later has to say what the loop does after it.
+            Outcome::Waiting
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
-            | Outcome::Refused {
-                after_reading: false,
-                ..
-            }
             // The loop leaves at the top of the next round rather than waiting this
             // out, so the number is only what the line would have promised.
             | Outcome::HandedOver { .. }
@@ -933,27 +908,29 @@ impl Round {
     /// The em dash is the mark of the second kind: prose follows it, and it is on a
     /// line only where something other than the ordinary happened.
     fn tail(&self) -> String {
+        let promising = matches!(self.watcher, Watcher::Loop);
         match &self.outcome {
             Outcome::Waiting => String::new(),
             Outcome::Switched { to, unread } => match unread.is_empty() {
                 true => format!(" → {to}"),
                 false => format!(" → {to}{}", explaining(&unread.join(" "))),
             },
-            // The wait is said, as a hold says its own: these are the two decisions
-            // the loop rests longer than an interval after.
-            Outcome::Nowhere {
+            Outcome::Nowhere { why, looking_again } if promising => explaining(&and_then(
                 why,
-                looking_again: Some(millis),
-            } => explaining(&and_then(
-                why,
-                &format!("Looking again in {}.", how_long(*millis)),
+                &format!("Looking again in {}.", how_long(*looking_again)),
             )),
-            Outcome::Held {
+            Outcome::Held { why, retrying_in } if promising => explaining(&and_then(
                 why,
-                retrying_in: Some(millis),
-            } => explaining(&and_then(
+                &format!("Asking again in {}.", how_long(*retrying_in)),
+            )),
+            // Said only where the rest outlasts the ordinary interval: every round
+            // waits, and the waits worth a sentence are the ones a reader would
+            // otherwise take for a watcher that has stopped deciding.
+            Outcome::Refused {
+                why, resting_for, ..
+            } if promising && *resting_for != REFRESH_INTERVAL_MILLIS => explaining(&and_then(
                 why,
-                &format!("Asking again in {}.", how_long(*millis)),
+                &format!("Looking again in {}.", how_long(*resting_for)),
             )),
             Outcome::Cooling { why }
             | Outcome::Nowhere { why, .. }
@@ -984,18 +961,24 @@ fn explaining(said: &str) -> String {
 }
 
 /// A hold that happened before there was a [`Round`] to hold, because another `perch`
-/// was holding the registry.
-///
-/// Said in the same shape as every other line, with the figure it does not have said as
-/// unread. `retrying_in` is [`Outcome::Held`]'s.
+/// was holding the registry — said in the same shape as every other line, with the
+/// figure it does not have said as unread. `retrying_in` is the promise the line may
+/// make, which is all a caller with no Round has to say: a loop's wait, or nothing
+/// for a check.
 fn held_line(why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> String {
-    before_a_round(
-        Outcome::Held {
+    Round {
+        fullest: None,
+        threshold: 0,
+        outcome: Outcome::Held {
             why: why.to_string(),
-            retrying_in,
+            retrying_in: retrying_in.unwrap_or(REFRESH_INTERVAL_MILLIS),
         },
-        now,
-    )
+        watcher: match retrying_in {
+            Some(_) => Watcher::Loop,
+            None => Watcher::Check,
+        },
+    }
+    .line(now)
 }
 
 /// The outcome for a round that stopped being the one to act while it was reading,
@@ -1028,6 +1011,9 @@ fn before_a_round(outcome: Outcome, now: DateTime<Utc>) -> String {
         fullest: None,
         threshold: 0,
         outcome,
+        // Reached only from a check today, and nothing displaced quotes a wait, so
+        // either arrangement would render the same line.
+        watcher: Watcher::Check,
     }
     .line(now)
 }
@@ -1055,6 +1041,15 @@ mod tests {
             fullest,
             threshold: 80,
             outcome,
+            watcher: Watcher::Loop,
+        }
+    }
+
+    /// The same round, run by a check: the one difference a line may show.
+    fn checked(fullest: Option<Fullest>, outcome: Outcome) -> Round {
+        Round {
+            watcher: Watcher::Check,
+            ..round(fullest, outcome)
         }
     }
 
@@ -1267,7 +1262,7 @@ mod tests {
                     None,
                     Outcome::Held {
                         why: THROTTLED.to_string(),
-                        retrying_in: Some(REFRESH_INTERVAL_MILLIS),
+                        retrying_in: REFRESH_INTERVAL_MILLIS,
                     },
                 ),
                 now() + Duration::milliseconds(REFRESH_INTERVAL_MILLIS as i64),
@@ -1440,7 +1435,7 @@ mod tests {
             at(86.0),
             Outcome::Nowhere {
                 why: "every Account in Group `work` is exhausted.".to_string(),
-                looking_again: Some(NOWHERE_INTERVAL_MILLIS),
+                looking_again: NOWHERE_INTERVAL_MILLIS,
             },
         )
         .line(now());
@@ -1457,7 +1452,7 @@ mod tests {
             at(86.0),
             Outcome::Refused {
                 why: "a client is running against that Profile.".to_string(),
-                after_reading: false,
+                resting_for: REFRESH_INTERVAL_MILLIS,
                 contended: false,
             },
         )
@@ -1490,21 +1485,21 @@ mod tests {
                 at(86.0),
                 Outcome::Nowhere {
                     why: "every Account in Group `work` is exhausted.".to_string(),
-                    looking_again: Some(NOWHERE_INTERVAL_MILLIS),
+                    looking_again: NOWHERE_INTERVAL_MILLIS,
                 },
             ),
             round(
                 None,
                 Outcome::Held {
                     why: "Anthropic could not be reached.".to_string(),
-                    retrying_in: Some(REFRESH_INTERVAL_MILLIS),
+                    retrying_in: REFRESH_INTERVAL_MILLIS,
                 },
             ),
             round(
                 at(86.0),
                 Outcome::Refused {
                     why: "a client is running against that Profile.".to_string(),
-                    after_reading: false,
+                    resting_for: REFRESH_INTERVAL_MILLIS,
                     contended: false,
                 },
             ),
@@ -1521,27 +1516,6 @@ mod tests {
                 },
             ),
         ]
-    }
-
-    /// A check exits rather than asking again, so its `nowhere` round promises
-    /// no interval — and the wait is read off the round, so the arm answering
-    /// for that one has to be the loop's own constant.
-    #[test]
-    fn a_nowhere_round_that_promised_no_interval_still_waits_the_loops_own() {
-        let promised = Outcome::Nowhere {
-            why: String::new(),
-            looking_again: Some(1_234),
-        };
-        let silent = Outcome::Nowhere {
-            why: String::new(),
-            looking_again: None,
-        };
-
-        assert_eq!(round(at(86.0), promised).waiting_for(), 1_234);
-        assert_eq!(
-            round(at(86.0), silent).waiting_for(),
-            NOWHERE_INTERVAL_MILLIS
-        );
     }
 
     /// The column a day of these is skimmed by. Every word is one lowercase token
@@ -1564,7 +1538,7 @@ mod tests {
             None,
             Outcome::Held {
                 why: "Anthropic is rate-limiting reads of this Account.".to_string(),
-                retrying_in: Some(REFRESH_INTERVAL_MILLIS),
+                retrying_in: REFRESH_INTERVAL_MILLIS,
             },
         )
         .line(now());
@@ -1580,7 +1554,7 @@ mod tests {
             None,
             Outcome::Held {
                 why: "Anthropic could not be reached.".to_string(),
-                retrying_in: Some(600_000),
+                retrying_in: 600_000,
             },
         )
         .line(now());
@@ -1590,16 +1564,49 @@ mod tests {
         assert!(line.contains("10m00s"), "and when it comes back: {line}");
     }
 
+    #[test]
+    fn a_refused_round_that_rests_past_the_interval_says_when_it_looks_again() {
+        let resting = round(
+            at(86.0),
+            Outcome::Refused {
+                why: "the Default Profile is mid-write.".to_string(),
+                resting_for: NOWHERE_INTERVAL_MILLIS,
+                contended: true,
+            },
+        )
+        .line(now());
+        assert!(
+            resting.contains("Looking again in 15m00s"),
+            "a rest past the interval reads as a watcher that stopped deciding \
+             unless the line says it: {resting}"
+        );
+
+        let ordinary = round(
+            at(86.0),
+            Outcome::Refused {
+                why: "a client is running against that Profile.".to_string(),
+                resting_for: REFRESH_INTERVAL_MILLIS,
+                contended: false,
+            },
+        )
+        .line(now());
+        assert!(
+            !ordinary.contains("Looking again"),
+            "every round waits an interval, so an ordinary one is not news: \
+             {ordinary}"
+        );
+    }
+
     /// The same rule on the other outcome that names a cadence: a Check exits
     /// after printing, so its scheduler's interval decides when anything looks
     /// again — and a line saying otherwise is the one untrue thing on it.
     #[test]
     fn a_check_that_found_nowhere_to_go_promises_nothing_about_looking_again() {
-        let line = round(
+        let line = checked(
             at(100.0),
             Outcome::Nowhere {
                 why: "Every Account in Group `work` is exhausted.".to_string(),
-                looking_again: None,
+                looking_again: NOWHERE_INTERVAL_MILLIS,
             },
         )
         .line(now());
@@ -1615,11 +1622,11 @@ mod tests {
 
     #[test]
     fn a_held_check_says_what_held_it_and_promises_nothing_about_coming_back() {
-        let line = round(
+        let line = checked(
             None,
             Outcome::Held {
                 why: "Anthropic could not be reached.".to_string(),
-                retrying_in: None,
+                retrying_in: REFRESH_INTERVAL_MILLIS,
             },
         )
         .line(now());
@@ -1641,15 +1648,15 @@ mod tests {
             },
             Outcome::Nowhere {
                 why: String::new(),
-                looking_again: None,
+                looking_again: NOWHERE_INTERVAL_MILLIS,
             },
             Outcome::Held {
                 why: String::new(),
-                retrying_in: None,
+                retrying_in: REFRESH_INTERVAL_MILLIS,
             },
             Outcome::Refused {
                 why: String::new(),
-                after_reading: false,
+                resting_for: REFRESH_INTERVAL_MILLIS,
                 contended: false,
             },
             Outcome::HandedOver { why: String::new() },
@@ -1743,7 +1750,7 @@ mod tests {
             },
             Outcome::Refused {
                 why: String::new(),
-                after_reading: false,
+                resting_for: REFRESH_INTERVAL_MILLIS,
                 contended: false,
             },
         ] {
@@ -1764,7 +1771,7 @@ mod tests {
                 at(86.0),
                 Outcome::Nowhere {
                     why: String::new(),
-                    looking_again: Some(NOWHERE_INTERVAL_MILLIS),
+                    looking_again: NOWHERE_INTERVAL_MILLIS,
                 }
             )
             .waiting_for(),
@@ -1779,7 +1786,7 @@ mod tests {
                 at(86.0),
                 Outcome::Refused {
                     why: String::new(),
-                    after_reading: true,
+                    resting_for: NOWHERE_INTERVAL_MILLIS,
                     contended: false,
                 }
             )
@@ -1793,7 +1800,7 @@ mod tests {
                 None,
                 Outcome::Held {
                     why: String::new(),
-                    retrying_in: Some(600_000),
+                    retrying_in: 600_000,
                 },
             )
             .waiting_for(),
@@ -1866,7 +1873,7 @@ mod tests {
                       nowhere useful to Switch. Nothing was changed.\n\
                       overflow@example.com frees up soonest, at 15:00."
                     .to_string(),
-                looking_again: Some(NOWHERE_INTERVAL_MILLIS),
+                looking_again: NOWHERE_INTERVAL_MILLIS,
             },
         )
         .line(now());

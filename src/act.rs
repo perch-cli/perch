@@ -18,7 +18,7 @@ use crate::probe;
 use crate::registry::Registry;
 use crate::round::{self, Watching};
 use crate::switch::{self, NotSwitched};
-use crate::watch::{self, Cooled, Outcome, Watcher, nothing_was_switched};
+use crate::watch::{self, Cooled, Outcome, nothing_was_switched};
 
 /// The watch this process holds, as one question rather than three.
 ///
@@ -67,7 +67,6 @@ pub struct Acting<'a, 'h> {
     pub perch: &'a mut lock::Held<'h>,
     pub registry: &'a mut Registry,
     pub watching: &'a Watching,
-    pub watcher: Watcher,
     /// What the round already asked the machine and this Act must not ask again.
     pub probed: &'a probe::Installed<'h>,
     pub watching_alone: &'a mut Watch<'h>,
@@ -84,7 +83,6 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
         perch,
         registry,
         watching,
-        watcher,
         probed,
         watching_alone,
     } = acting;
@@ -159,7 +157,7 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
         Err(error @ (PerchError::NoCandidate(_) | PerchError::NothingToDo(_))) => {
             return Ok(Outcome::Nowhere {
                 why: also(error.to_string(), &unread),
-                looking_again: watcher.asking_again(watch::NOWHERE_INTERVAL_MILLIS),
+                looking_again: watch::NOWHERE_INTERVAL_MILLIS,
             });
         }
         Err(error) => return Err(error),
@@ -213,8 +211,10 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
             // figure it had read, which is what tells it from a hold.
             contended: matches!(error, PerchError::Busy(_)),
             why: error.to_string(),
-            // Every candidate was read to get here.
-            after_reading: true,
+            // Every candidate was read to get here, which is the burst the rest
+            // exists to stop repeating: an hourly allowance per Account, spent on
+            // a Switch that was refused.
+            resting_for: watch::NOWHERE_INTERVAL_MILLIS,
         }),
         Err(NotSwitched { error, .. }) => Err(error),
     }
@@ -304,19 +304,13 @@ mod tests {
     }
 
     /// Drives [`run`] with the watch taken and the registry held, as a round would.
-    fn run_the_act(host: &FakeHost, registry: &mut Registry, watcher: Watcher) -> Result<Outcome> {
-        run_the_act_probed(
-            host,
-            registry,
-            watcher,
-            probe::Installed::unknown("2.1.221"),
-        )
+    fn run_the_act(host: &FakeHost, registry: &mut Registry) -> Result<Outcome> {
+        run_the_act_probed(host, registry, probe::Installed::unknown("2.1.221"))
     }
 
     fn run_the_act_probed(
         host: &FakeHost,
         registry: &mut Registry,
-        watcher: Watcher,
         probed: probe::Installed,
     ) -> Result<Outcome> {
         let watching = watching(registry);
@@ -337,7 +331,6 @@ mod tests {
                 perch: &mut perch,
                 registry,
                 watching: &watching,
-                watcher,
                 probed: &probed,
                 watching_alone: &mut watching_alone,
             },
@@ -368,7 +361,6 @@ mod tests {
         let raised = run_the_act_probed(
             &host,
             &mut registry,
-            Watcher::Loop,
             probe::Installed::Absent {
                 why: "no Claude Code here".to_string(),
             },
@@ -388,14 +380,14 @@ mod tests {
         let mut registry = watching_a_pair(5.0);
         make_live(&host, WATCHED);
 
-        let outcome = run_the_act(&host, &mut registry, Watcher::Loop)
-            .expect("a running client is an outcome, not a raise");
+        let outcome =
+            run_the_act(&host, &mut registry).expect("a running client is an outcome, not a raise");
 
         assert!(
             matches!(
                 outcome,
                 Outcome::Refused {
-                    after_reading: false,
+                    resting_for: watch::REFRESH_INTERVAL_MILLIS,
                     contended: false,
                     ..
                 }
@@ -414,8 +406,7 @@ mod tests {
         host.listen_for_interrupts();
         let mut registry = watching_a_pair(5.0);
 
-        let outcome = run_the_act(&host, &mut registry, Watcher::Loop)
-            .expect("a stop is an outcome, not a raise");
+        let outcome = run_the_act(&host, &mut registry).expect("a stop is an outcome, not a raise");
 
         assert!(
             matches!(outcome, Outcome::Stopped { .. }),
@@ -437,8 +428,8 @@ mod tests {
         // burst itself finishes and the loss lands on the last ask before the Switch.
         barely_credentialed(&host, &registry, SPARE);
 
-        let outcome = run_the_act(&host, &mut registry, Watcher::Loop)
-            .expect("a lost watch is an outcome, not a raise");
+        let outcome =
+            run_the_act(&host, &mut registry).expect("a lost watch is an outcome, not a raise");
 
         assert!(
             matches!(outcome, Outcome::Stopped { .. }),
@@ -457,8 +448,8 @@ mod tests {
         let mut registry = watching_a_pair(95.0);
         barely_credentialed(&host, &registry, SPARE);
 
-        let outcome = run_the_act(&host, &mut registry, Watcher::Check)
-            .expect("nowhere to go is an outcome, not a raise");
+        let outcome =
+            run_the_act(&host, &mut registry).expect("nowhere to go is an outcome, not a raise");
 
         let Outcome::Nowhere { why, looking_again } = outcome else {
             panic!("every candidate is set aside: {outcome:?}");
@@ -468,8 +459,10 @@ mod tests {
             "the Margin's sentence is quoted: {why}"
         );
         assert_eq!(
-            looking_again, None,
-            "a Check exits rather than looking again"
+            looking_again,
+            watch::NOWHERE_INTERVAL_MILLIS,
+            "the rest is the round's, and whether a line promises it is the \
+             arrangement's"
         );
     }
 
@@ -483,15 +476,15 @@ mod tests {
         let store = holdings::the_default_profile(&host).expect("home is known");
         let _held = store.seized(&host).expect("nobody holds them yet");
 
-        let outcome = run_the_act(&host, &mut registry, Watcher::Loop)
-            .expect("a held lock is an outcome, not a raise");
+        let outcome =
+            run_the_act(&host, &mut registry).expect("a held lock is an outcome, not a raise");
 
         assert!(
             matches!(
                 outcome,
                 Outcome::Refused {
                     contended: true,
-                    after_reading: true,
+                    resting_for: watch::NOWHERE_INTERVAL_MILLIS,
                     ..
                 }
             ),

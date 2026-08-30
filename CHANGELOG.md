@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A Watcher round whose Switch was turned away after reading every candidate
+  has always rested fifteen minutes rather than an interval; its decision line
+  now says so, ending `Looking again in 15m00s.` like a `nowhere` round's. The
+  wait a line promises and the wait the loop takes come off one value, so the
+  two can no longer differ
+
 ## [0.3.2](https://github.com/perch-cli/perch/compare/v0.3.1...v0.3.2) - 2026-08-29
 
 ### Added
