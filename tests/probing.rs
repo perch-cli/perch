@@ -466,7 +466,7 @@ fn a_watcher_that_moved_something_writes_a_line_and_one_that_looked_does_not() {
     assert!(
         perch::watch::Outcome::Refused {
             why: "a client is running".to_string(),
-            after_reading: false,
+            resting_for: perch::watch::REFRESH_INTERVAL_MILLIS,
             contended: true,
         }
         .what_it_moved()

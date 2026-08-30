@@ -330,7 +330,6 @@ fn one_round<'h>(
                     perch: &mut perch,
                     registry: &mut registry,
                     watching: &watching,
-                    watcher,
                     probed: &installed,
                     watching_alone,
                 },

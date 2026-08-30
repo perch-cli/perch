@@ -123,6 +123,7 @@ pub fn decide(
             fullest: None,
             threshold,
             outcome: nothing_was_switched(lost),
+            watcher,
         });
     }
 
@@ -133,8 +134,9 @@ pub fn decide(
         threshold,
         outcome: Outcome::Held {
             why,
-            retrying_in: watcher.asking_again(waiting_for),
+            retrying_in: waiting_for,
         },
+        watcher,
     };
 
     // Never on a figure it did not just read.
@@ -178,6 +180,7 @@ pub fn decide(
         fullest: Some(fullest),
         threshold,
         outcome,
+        watcher,
     })
 }
 
@@ -534,14 +537,6 @@ mod tests {
         let (account, mut report) = read(WATCHED, 90.0);
         report.attempts[0].outcome = Outcome::Throttled;
 
-        /// A hold is what both arms are; the wait is the half that differs.
-        fn waits(outcome: watch::Outcome) -> Option<Option<u64>> {
-            match outcome {
-                watch::Outcome::Held { retrying_in, .. } => Some(retrying_in),
-                _ => None,
-            }
-        }
-
         let held = |watcher| {
             decide(
                 Reading {
@@ -556,17 +551,15 @@ mod tests {
                 never_acts,
             )
             .expect("a reading nothing could be made of is still a round")
-            .outcome
+            .line(now())
         };
 
-        assert_eq!(
-            waits(held(Watcher::Loop)),
-            Some(Some(watch::REFRESH_INTERVAL_MILLIS)),
+        assert!(
+            held(Watcher::Loop).contains("Asking again in"),
             "a loop takes the wait itself, so it says how long"
         );
-        assert_eq!(
-            waits(held(Watcher::Check)),
-            Some(None),
+        assert!(
+            !held(Watcher::Check).contains("Asking again"),
             "a check exits, so whatever scheduled it decides"
         );
     }
