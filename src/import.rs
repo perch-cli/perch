@@ -160,16 +160,6 @@ impl Placed {
     }
 }
 
-/// Both maps an Export keys on an address, so a rule stated about one is stated
-/// about the other: an Account holds a Credential and a `.claude.json`, and a
-/// file arriving under an address nothing lists is the same failure either way.
-fn every_map(export: &Export) -> [(&'static str, &BTreeMap<String, String>); 2] {
-    [
-        ("a Credential", &export.credentials),
-        ("a `.claude.json`", &export.identity_files),
-    ]
-}
-
 /// What an Import leaves behind when it will not write: nothing at all, an
 /// Import being whole or not having happened.
 const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
@@ -202,7 +192,7 @@ pub fn place(
     // Every Credential in the file belongs to an Account the file lists, or this
     // is not the whole restore it claims to be. `gather` cannot write such an
     // Export, so this is about a file written by something else.
-    for (what, keys) in every_map(export) {
+    for (what, keys) in export.payloads() {
         let unlisted: Vec<&str> = keys
             .keys()
             .map(String::as_str)
@@ -225,7 +215,7 @@ pub fn place(
     // Two keys in either map that fold to one address, refused for the reason
     // above and by the same fold: `credential_for` answers with the first match,
     // so only one of the two is ever placed, under a report saying it was whole.
-    for (what, keys) in every_map(export) {
+    for (what, keys) in export.payloads() {
         let mut held: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
         for key in keys.keys().map(String::as_str) {
             if let Some(clash) = held.insert(name::folded(key), key) {
