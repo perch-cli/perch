@@ -203,7 +203,11 @@ pub fn asked_of_the_machine(host: &dyn Host) -> Result<Standing> {
 /// ADR a-removal-lands-first's shape one level up, and it **refuses rather than
 /// continuing** where the Service will not stop: a Watcher racing a Purge writes a
 /// captured Credential into a Profile directory another process is deleting.
-pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
+pub fn take_back_before_a_purge(
+    host: &dyn Host,
+    out: &mut dyn Write,
+    _fresh: &crate::wait::Fresh,
+) -> Result<bool> {
     let manager = Manager::of(host);
     let at = manager.unit_path(host)?;
 

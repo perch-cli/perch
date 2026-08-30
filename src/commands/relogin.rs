@@ -24,6 +24,7 @@ use crate::registry::{self, Account, Registry};
 use crate::say;
 use crate::switch;
 use crate::target;
+use crate::wait;
 
 /// Why this command writes into the Default Profile, named for the two places
 /// that have to agree about it: the refusal somebody meets *before* the browser
@@ -63,52 +64,64 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         &installed,
     )?;
 
-    let produced = login::perform(
-        host,
-        out,
-        &announcement(&registry, &account, landing_in_the_default_profile),
-    )?;
-    refuse_a_different_account(&registry, &account, &produced.identity)?;
-    drop(registry);
+    // Not `still_ours`, alone among the waits: no hold is taken before the
+    // browser round trip, so the re-establish takes a fresh exclusive lock
+    // rather than renewing a stale one.
+    let (produced, (mut perch, mut registry, landing_in_the_default_profile), fresh) =
+        wait::across(
+            &mut (),
+            |_| {
+                let produced = login::perform(
+                    host,
+                    out,
+                    &announcement(&registry, &account, landing_in_the_default_profile),
+                )?;
+                refuse_a_different_account(&registry, &account, &produced.identity)?;
+                Ok(produced)
+            },
+            |_| {
+                // The registry read before the login is however many commands out
+                // of date, so it is dropped for the one on disk now.
+                let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    // From here the registry is the one on disk now: the copy read before the
-    // login is however many commands out of date.
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
+                // A Switch path, so it resolves a Landing before reading which
+                // Account is active. A Conflict is the one failure this command may
+                // not be stopped by: it offers `perch relogin` as its own way out.
+                if let Err(unresolved) =
+                    crate::commands::a_settled_landing(host, &mut perch, &mut registry)
+                    && !matches!(unresolved, PerchError::Conflict(_))
+                {
+                    // Anything else is a store that would not answer rather than
+                    // evidence that disagrees with itself, and a repair decided on
+                    // a Profile nobody could read is not one to go through with.
+                    return Err(unresolved);
+                }
 
-    // A Switch path, so it resolves a Landing before reading which Account is
-    // active. A Conflict is the one failure this command may not be stopped by:
-    // `perch relogin` is what that state offers as the way out of itself.
-    if let Err(unresolved) = crate::commands::a_settled_landing(host, &mut perch, &mut registry)
-        && !matches!(unresolved, PerchError::Conflict(_))
-    {
-        // Anything else is a store that would not answer rather than evidence
-        // that disagrees with itself, and a repair decided on a Profile nobody
-        // could read is not one to go through with.
-        return Err(unresolved);
-    }
+                if registry.account(account.email()).is_none() {
+                    return Err(PerchError::NotFound(format!(
+                        "{} was removed while that login was happening, so there is \
+                     nothing left to repair.\n\
+                     The login itself worked, and `perch add` holds it as a new \
+                     Account.",
+                        account.email()
+                    )));
+                }
 
-    if registry.account(account.email()).is_none() {
-        return Err(PerchError::NotFound(format!(
-            "{} was removed while that login was happening, so there is nothing \
-             left to repair.\n\
-             The login itself worked, and `perch add` holds it as a new \
-             Account.",
-            account.email()
-        )));
-    }
+                // Whether the Default Profile is among the Profiles written below
+                // is re-read too: another terminal may have switched away.
+                let landing_in_the_default_profile =
+                    will_land_in_the_default_profile(&registry, &account);
+                live::refuse_while_anything_is_running(
+                    host,
+                    &account,
+                    landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
+                    &installed,
+                )?;
+                Ok((perch, registry, landing_in_the_default_profile))
+            },
+        )?;
 
-    // Asked again, because the first answer is minutes old and what follows
-    // writes both Profiles. Whether the Default Profile is one of them is
-    // re-read for the same reason: another terminal may have switched away.
-    let landing_in_the_default_profile = will_land_in_the_default_profile(&registry, &account);
-    live::refuse_while_anything_is_running(
-        host,
-        &account,
-        landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
-        &installed,
-    )?;
-
-    settle_into_its_own_profile(host, &account, &produced)?;
+    settle_into_its_own_profile(host, &account, &produced, &fresh)?;
 
     // Recorded before the Credential is made live, because the repair is true
     // by now whatever happens next: the Account has a working Credential in its
@@ -204,10 +217,15 @@ fn refuse_a_different_account(
 ///
 /// Written rather than replaced: nothing is removed first, so a login producing
 /// something Perch cannot store leaves the Account exactly as broken as it was.
-fn settle_into_its_own_profile(host: &dyn Host, account: &Account, fresh: &Produced) -> Result<()> {
+fn settle_into_its_own_profile(
+    host: &dyn Host,
+    account: &Account,
+    produced: &Produced,
+    _fresh: &wait::Fresh,
+) -> Result<()> {
     let dir = account.profile_dir(host)?;
-    let store = profile::create(host, &dir, fresh.credential.as_str())?;
-    login::carry_identity_file(host, &fresh.identity_json, &store)
+    let store = profile::create(host, &dir, produced.credential.as_str())?;
+    login::carry_identity_file(host, &produced.identity_json, &store)
 }
 
 /// Records the repair, keeping everything about the Account that is not the

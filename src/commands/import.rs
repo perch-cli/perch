@@ -24,6 +24,7 @@ use crate::import;
 use crate::probe::Installed;
 use crate::registry;
 use crate::say;
+use crate::wait;
 
 pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Both before the passphrase, because both are refusals somebody should meet
@@ -36,22 +37,26 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     let held = registry::load(host)?;
     import::refuse_a_machine_that_is_not_empty(held.as_ref())?;
 
-    let passphrase = the_passphrase(host, out)?;
-    let (export, renamed) = export::unseal(&sealed, &passphrase)?;
-    // Before anything is written, so a person who stops here has been told what
-    // the Export would arrive as. `bring_forward` says the same about this
-    // machine's own registry; an Import is the other way a registry moves.
-    if let Some(said) = crate::migration::what_was_renamed_said(&renamed) {
-        host.note(&said);
-    }
-    let mut restored = import::restored(&export, &holdings::registry_path(host)?)?;
-
-    // Nothing above this line has written anything, and the passphrase prompt is
-    // the one wait here with no bound on it — so the hold taken before it may be
-    // one another `perch` has since claimed and put an Account down under.
-    still_ours(&mut perch, "imported")?;
+    let ((export, mut restored), (), fresh) = wait::across(
+        &mut perch,
+        |_| {
+            let passphrase = the_passphrase(host, out)?;
+            let (export, renamed) = export::unseal(&sealed, &passphrase)?;
+            // Before anything is written, so a person who stops here has been
+            // told what the Export would arrive as. `bring_forward` says the
+            // same about this machine's own registry.
+            if let Some(said) = crate::migration::what_was_renamed_said(&renamed) {
+                host.note(&said);
+            }
+            let restored = import::restored(&export, &holdings::registry_path(host)?)?;
+            Ok((export, restored))
+        },
+        // The hold alone: a stale one means another `perch` may have put an
+        // Account down, and re-taking it *is* the empty-machine re-ask.
+        |perch| still_ours(perch, "imported"),
+    )?;
     let installed = Installed::for_a_report(host);
-    import::place(host, &export, &installed, || {
+    import::place(host, &export, &installed, &fresh, || {
         registry::save(host, &mut perch, &mut restored)
     })?;
 

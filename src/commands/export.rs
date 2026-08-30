@@ -22,6 +22,7 @@ use crate::export::{self, Export};
 use crate::host::Host;
 use crate::registry::Registry;
 use crate::say;
+use crate::wait;
 
 pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Before the passphrase, because all three are refusals somebody should meet
@@ -91,20 +92,26 @@ pub fn write_the_export(
         ));
     }
 
-    let passphrase = agreed_passphrase(host, out)?;
-    let export = export::gather(host, registry, installed)?;
-    let sealed = export::seal(&export, &passphrase)?;
-
-    // Asked again, because the check above was two blocking questions ago and the
-    // write below replaces whatever is at the path rather than failing on it.
-    refuse_an_occupied_path(host, path)?;
-
-    // And the hold, over the same window. The registry was read before the
-    // prompts, and sealing a copy another `perch` has since added to writes a
-    // file presenting itself as *everything* Perch holds while being partial.
-    still_ours(perch, "exported")?;
-    host.write_private_file(path, &sealed)
-        .map_err(|err| PerchError::file_write(path.to_path_buf(), err))?;
+    let ((export, sealed), (), fresh) = wait::across(
+        perch,
+        |_| {
+            let passphrase = agreed_passphrase(host, out)?;
+            let export = export::gather(host, registry, installed)?;
+            let sealed = export::seal(&export, &passphrase)?;
+            Ok((export, sealed))
+        },
+        // Liveness deliberately not among these: nothing here writes a Profile.
+        |perch| {
+            // The path again, because the write below replaces whatever is at
+            // it rather than failing on it.
+            refuse_an_occupied_path(host, path)?;
+            // And the hold: the registry was read before the prompts, and
+            // sealing a copy another `perch` has since added to writes a file
+            // presenting itself as *everything* Perch holds while being partial.
+            still_ours(perch, "exported")
+        },
+    )?;
+    write_the_sealed_file(host, path, &sealed, &fresh)?;
 
     // Recorded the instant the bytes land, and before the one fallible thing
     // left: `report` writes to a terminal that may have gone away, and an `Err`
@@ -112,6 +119,18 @@ pub fn write_the_export(
     *landed = Some(path.to_path_buf());
 
     report(out, path, &export)
+}
+
+/// The one write, and the step nothing takes back: the seal is as many
+/// questions old as the passphrase took, so it lands only on [`wait::Fresh`].
+fn write_the_sealed_file(
+    host: &dyn Host,
+    path: &Path,
+    sealed: &str,
+    _fresh: &wait::Fresh,
+) -> Result<()> {
+    host.write_private_file(path, sealed)
+        .map_err(|err| PerchError::file_write(path.to_path_buf(), err))
 }
 
 /// Refuses to write the Export inside Perch's own home.

@@ -50,6 +50,7 @@ pub mod target;
 pub mod trail;
 pub mod upgrade;
 pub mod utilization;
+pub mod wait;
 pub mod watch;
 
 pub use error::{PerchError, Result};

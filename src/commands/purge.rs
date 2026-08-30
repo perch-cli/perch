@@ -22,6 +22,7 @@ use crate::probe::Installed;
 use crate::purge::{self, Purged};
 use crate::registry::{self, Account, Registry};
 use crate::say;
+use crate::wait;
 
 /// The word, typed out. A letter is what fingers answer before eyes have read
 /// anything, and this is the one command nothing undoes.
@@ -57,8 +58,8 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         )));
     }
 
-    let mut perch = holdings::lock(host)?;
-    let (mut registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
+    let perch = holdings::lock(host)?;
+    let (registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
 
     let installed = Installed::for_a_report(host);
 
@@ -78,56 +79,54 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // returning: `write_the_export` reports after the write, and a terminal that
     // has gone away fails that.
     let mut exported = None;
-    if !yes {
-        // The offer's *own* failure carries the note as well, because the bytes
-        // land before the report. Taken as a value first, so the borrow of
-        // `exported` the call holds is over before the note reads it.
-        let offered = offer_an_export(
-            host,
-            &mut perch,
-            &mut registry,
-            &mut exported,
-            &installed,
-            out,
-        );
-        offered.map_err(|error| still_standing(error, exported.as_deref()))?;
-        // The note again, because the question *between* the offer and the
-        // decision is a failure path of its own: `agreed` writes a prompt and
-        // reads an answer, and a terminal that has gone away fails both.
-        if !agreed(host, out).map_err(|error| still_standing(error, exported.as_deref()))? {
-            // What the machine is holding now, which is not always nothing: an
-            // Export written a question ago is a file full of working
-            // Credentials at a path the user is about to stop thinking about.
-            return match exported {
-                Some(path) => say::line(
-                    out,
-                    &format!("Nothing was purged. {}", the_export_is_at(&path)),
-                ),
-                None => say::line(out, "Nothing was purged."),
-            };
-        }
-    }
-
-    // Every failure from here on carries the same note the declined Purge does.
-    // A Purge that finished says it in its own report instead.
+    let mut holding = (perch, registry);
+    let crossed = wait::across_unless_declined(
+        &mut holding,
+        |(perch, registry)| {
+            if yes {
+                return Ok(wait::Asked::Answered(()));
+            }
+            offer_an_export(host, perch, registry, &mut exported, &installed, out)?;
+            Ok(match agreed(host, out)? {
+                true => wait::Asked::Answered(()),
+                false => wait::Asked::Declined,
+            })
+        },
+        |(perch, registry)| {
+            // The hold first, the other way round from `perch remove`: a
+            // registry this Perch may no longer write is one it may no longer
+            // act on either.
+            still_ours(perch, "purged")?;
+            // First *and* last, because the ask before the offer is what stops
+            // five questions to somebody this will refuse.
+            purge::refuse_while_anything_is_running(host, registry, &installed)
+        },
+    );
+    let (mut perch, registry) = holding;
+    // Every failure out of the wait and on from it carries the whereabouts of
+    // the Export, because the bytes land before the offer's report. A Purge
+    // that finished says it in its own report instead.
     let and_the_export = |error: PerchError| still_standing(error, exported.as_deref());
-
-    // The same guard `perch remove` takes, at the same point: the questions above
-    // are the one wait in Perch with no bound on them, and a registry this Perch
-    // may no longer write is one it may no longer act on either.
-    still_ours(&mut perch, "purged").map_err(and_the_export)?;
-
-    // Asked again over the same window as the hold: somebody may have started a
-    // client while the passphrase was being typed. First *and* last, because the
-    // first ask is what stops five questions to somebody this will refuse.
-    purge::refuse_while_anything_is_running(host, &registry, &installed).map_err(and_the_export)?;
+    let Some(((), (), fresh)) = crossed.map_err(and_the_export)? else {
+        // What the machine is holding now, which is not always nothing: an
+        // Export written a question ago is a file full of working
+        // Credentials at a path the user is about to stop thinking about.
+        return match exported {
+            Some(path) => say::line(
+                out,
+                &format!("Nothing was purged. {}", the_export_is_at(&path)),
+            ),
+            None => say::line(out, "Nothing was purged."),
+        };
+    };
 
     // Before anything is deleted, and refused rather than continued if it will
     // not stop — ADR a-removal-lands-first at the scale of the whole machine. A
     // supervised Watcher comes straight back, and writes Credentials unasked.
-    crate::commands::service::take_back_before_a_purge(host, out).map_err(and_the_export)?;
+    crate::commands::service::take_back_before_a_purge(host, out, &fresh)
+        .map_err(and_the_export)?;
 
-    let purged = purge::erase(host, &mut perch, &registry).map_err(and_the_export)?;
+    let purged = purge::erase(host, &mut perch, &registry, &fresh).map_err(and_the_export)?;
     // The Export's whereabouts is the report's *last* line, so a report that
     // failed before it leaves the Holdings gone and the file holding them named
     // nowhere. What the note adds is that there is nothing to run again.
