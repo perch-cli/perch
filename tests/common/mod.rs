@@ -195,6 +195,18 @@ pub fn a_client_running_against(host: &FakeHost, config_dir: impl AsRef<Path>, p
     host.set_live_process(pid);
 }
 
+/// One command run against the machine, with what it printed decoded. The
+/// writer and the UTF-8 read live here, so a `run_*` wrapper is only the
+/// arguments it names.
+pub fn ran<T>(
+    host: &FakeHost,
+    command: impl FnOnce(&FakeHost, &mut Vec<u8>) -> perch::Result<T>,
+) -> (perch::Result<T>, String) {
+    let mut written = Vec::new();
+    let result = command(host, &mut written);
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
 /// Runs `perch run <target>`, returning the status the client exited with — or
 /// Perch's refusal to launch one — alongside what was printed.
 pub fn run_run(host: &FakeHost, target: &str) -> (perch::Result<i32>, String) {
@@ -207,16 +219,13 @@ pub fn run_run_with(
     target: &str,
     command: &[&str],
 ) -> (perch::Result<i32>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::run::run(
-        host,
-        RunArgs {
-            target: target.to_string(),
-            command: command.iter().map(|word| word.to_string()).collect(),
-        },
-        &mut written,
-    );
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    let args = RunArgs {
+        target: target.to_string(),
+        command: command.iter().map(|word| word.to_string()).collect(),
+    };
+    ran(host, |host, written| {
+        perch::commands::run::run(host, args, written)
+    })
 }
 
 pub fn run_status(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
@@ -242,9 +251,9 @@ pub fn run_status_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, St
 }
 
 pub fn run_status_with(host: &FakeHost, args: StatusArgs) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::status::run(host, args, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::status::run(host, args, written)
+    })
 }
 
 pub fn run_list(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
@@ -299,9 +308,9 @@ pub fn run_list_in_refresh(
 }
 
 pub fn run_list_with(host: &FakeHost, args: ListArgs) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::list::run(host, args, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::list::run(host, args, written)
+    })
 }
 
 /// A machine holding two Accounts, neither in a Group and neither named: the
@@ -349,9 +358,9 @@ pub fn three_accounts_in_one_group() -> FakeHost {
 }
 
 pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::add::run(host, args, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::add::run(host, args, written)
+    })
 }
 
 /// Where an Account's Profile keeps its things, derived the way every command
@@ -434,9 +443,9 @@ pub fn move_to_group(host: &FakeHost, target: &str, group: &str) -> (perch::Resu
 }
 
 pub fn run_group(host: &FakeHost, command: GroupCommand) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::group::run(host, command, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::group::run(host, command, written)
+    })
 }
 
 pub fn run_switch(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
@@ -474,9 +483,9 @@ pub fn run_cycle_on_cache(host: &FakeHost) -> (perch::Result<()>, String) {
 }
 
 fn run_switch_with(host: &FakeHost, args: SwitchArgs) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::switch::run(host, args, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::switch::run(host, args, written)
+    })
 }
 
 /// It only ends because somebody stopped it, so a fake nobody interrupts leaves
@@ -496,9 +505,9 @@ pub fn run_watch_once(host: &FakeHost) -> (perch::Result<i32>, String) {
 /// drives the Watcher's other three verbs: an arm wired to the wrong half is
 /// the mistake one noun over five verbs makes possible.
 fn run_watcher(host: &FakeHost, command: WatcherCommand) -> (perch::Result<i32>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::watcher::run(host, command, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::watcher::run(host, command, written)
+    })
 }
 
 /// The Credential the active Account is watched with: months of life left at
@@ -588,9 +597,9 @@ fn is_a_decision(line: &str) -> bool {
 }
 
 pub fn run_alias(host: &FakeHost, command: AliasCommand) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::alias::run(host, command, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::alias::run(host, command, written)
+    })
 }
 
 /// `perch alias <target> <name>`, taken the other way round: flipping the
@@ -625,9 +634,9 @@ pub fn add_to_group(group: &str) -> AddArgs {
 }
 
 pub fn run_enable(host: &FakeHost, command: EnableCommand) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::enable::run(host, command, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::enable::run(host, command, written)
+    })
 }
 
 pub fn disable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
@@ -649,9 +658,9 @@ pub fn enable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, Stri
 }
 
 pub fn run_config(host: &FakeHost, command: ConfigCommand) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::config::run(host, command, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::config::run(host, command, written)
+    })
 }
 
 /// `perch config set <words...>` — the words after `set`, exactly as they would
@@ -697,7 +706,9 @@ pub fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtil
 }
 
 /// Puts figures in the cache for an Account, where a `--refresh` four minutes
-/// ago would have left them.
+/// ago would have left them. Written rather than fetched: the wire refuses a
+/// reply missing either Quota Window, while these call sites cache one-window
+/// shapes and figures with no reset recorded — states no command run now leaves.
 pub fn observed(host: &FakeHost, email: &str, windows: Vec<WindowUtilization>) {
     let observed_at = host.now() - Duration::minutes(4);
     let mut registry = registry_of(host);
@@ -728,8 +739,9 @@ pub fn observed_just_now(host: &FakeHost, email: &str, windows: Vec<WindowUtiliz
 }
 
 /// Marks an Account as one whose Credential can no longer be used and cannot be
-/// recovered — the state a rejected Renewal leaves behind, arrived at directly
-/// for the tests that are about what Perch does with it afterwards.
+/// recovered — the state a rejected Renewal leaves behind. `quarantining.rs`
+/// proves `status --refresh` creates every reason from the wire; this serves
+/// the tests about what Perch does with the state afterwards.
 pub fn quarantine(host: &FakeHost, email: &str) {
     quarantine_for(host, email, Quarantine::RenewalRejected);
 }
@@ -745,15 +757,15 @@ pub fn quarantine_for(host: &FakeHost, email: &str, why: Quarantine) {
 }
 
 pub fn run_export(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::export::run(host, &std::path::PathBuf::from(path), &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::export::run(host, &std::path::PathBuf::from(path), written)
+    })
 }
 
 pub fn run_import(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::import::run(host, &std::path::PathBuf::from(path), &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::import::run(host, &std::path::PathBuf::from(path), written)
+    })
 }
 
 pub fn run_purge(host: &FakeHost) -> (perch::Result<()>, String) {
@@ -762,21 +774,18 @@ pub fn run_purge(host: &FakeHost) -> (perch::Result<()>, String) {
 
 /// The same, for the tests that are about the flag a script purges with.
 pub fn run_purge_with(host: &FakeHost, yes: bool) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::purge::run(host, yes, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::purge::run(host, yes, written)
+    })
 }
 
 pub fn run_relogin(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::relogin::run(
-        host,
-        ReloginArgs {
-            target: target.to_string(),
-        },
-        &mut written,
-    );
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    let args = ReloginArgs {
+        target: target.to_string(),
+    };
+    ran(host, |host, written| {
+        perch::commands::relogin::run(host, args, written)
+    })
 }
 
 pub fn run_remove(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
@@ -791,9 +800,9 @@ pub fn run_remove(host: &FakeHost, target: &str) -> (perch::Result<()>, String) 
 
 /// The same, for the tests that are about the flag a script removes with.
 pub fn run_remove_with(host: &FakeHost, args: RemoveArgs) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::remove::run(host, args, &mut written);
-    (result, String::from_utf8(written).expect("output is UTF-8"))
+    ran(host, |host, written| {
+        perch::commands::remove::run(host, args, written)
+    })
 }
 
 /// Why an Account is Quarantined, as the registry records it.
