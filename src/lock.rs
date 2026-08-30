@@ -15,7 +15,28 @@ use chrono::{DateTime, Utc};
 
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
-use crate::probe::LockSpec;
+
+/// One of the locks Claude Code takes around its own credential work, with the
+/// parameters it treats that lock under: abandoned once its modification time
+/// is older than `stale_millis`, and a holder says it is still there by
+/// touching it every `update_millis`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockSpec {
+    /// How the lock is named when Perch has to say it could not take one.
+    pub name: &'static str,
+    /// Whose lock it is, for the same message: quitting the right program is
+    /// the whole of the advice a contended lock can give.
+    pub held_by: &'static str,
+    pub dir: PathBuf,
+    pub stale_millis: i64,
+    pub update_millis: i64,
+    /// What it costs to have lost this one, said to the user when a renewal
+    /// finds it gone. A takeover means something different for each lock — a
+    /// Switch under Claude Code's locks carries on, where a command that has
+    /// lost Perch's own registry lock stops — and the sentence that explains it
+    /// belongs beside the lock rather than in the code that renews them all.
+    pub lost_means: &'static str,
+}
 
 /// Why a round may not go on, which is the whole of what stops one part way.
 ///
@@ -1143,7 +1164,6 @@ mod exclusivity {
 
     use super::*;
     use crate::host::RealHost;
-    use crate::probe::LockSpec;
 
     #[test]
     fn only_one_of_eight_threads_holds_the_lock_at_a_time() {

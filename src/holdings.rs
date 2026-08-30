@@ -15,8 +15,7 @@ use chrono::{DateTime, Utc};
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::lock;
-use crate::probe::LockSpec;
+use crate::lock::{self, LockSpec};
 
 /// `$PERCH_HOME`, or `~/.config/perch` — an error when neither is knowable,
 /// rather than a registry written into the filesystem root.

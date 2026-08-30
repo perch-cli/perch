@@ -18,6 +18,7 @@ use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError, Platform};
 use crate::json;
+use crate::lock::{self, Held, Holds, LockSpec};
 use crate::secret::Secret;
 
 /// Named assumptions. A refusal quotes one of these, so the failure a user
@@ -810,29 +811,6 @@ pub fn read_identity(
     }))
 }
 
-/// One of the locks Claude Code takes around its own credential work, with the
-/// parameters it treats that lock under. A lock artifact is a **directory**,
-/// because `mkdir` either succeeds or fails with nothing in between; it is
-/// abandoned once its modification time is older than `stale_millis`, and a
-/// holder says it is still there by touching it every `update_millis`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LockSpec {
-    /// How the lock is named when Perch has to say it could not take one.
-    pub name: &'static str,
-    /// Whose lock it is, for the same message: quitting the right program is
-    /// the whole of the advice a contended lock can give.
-    pub held_by: &'static str,
-    pub dir: PathBuf,
-    pub stale_millis: i64,
-    pub update_millis: i64,
-    /// What it costs to have lost this one, said to the user when a renewal
-    /// finds it gone. A takeover means something different for each lock — a
-    /// Switch under Claude Code's locks carries on, where a command that has
-    /// lost Perch's own registry lock stops — and the sentence that explains it
-    /// belongs beside the lock rather than in the code that renews them all.
-    pub lost_means: &'static str,
-}
-
 /// The staleness and update intervals Claude Code uses for the two OAuth
 /// refresh locks.
 const REFRESH_STALE_MILLIS: i64 = 60_000;
@@ -847,7 +825,7 @@ const CONFIG_UPDATE_MILLIS: i64 = 5_000;
 /// preference: any other order is how two processes each hold one of the pair.
 /// Under these locks Claude Code's double-checked re-read sees a swapped,
 /// non-expired Credential and abandons its own refresh.
-pub fn locks_for(store: &Store) -> Vec<LockSpec> {
+fn locks_for(store: &Store) -> Vec<LockSpec> {
     let legacy = {
         let mut path = store.config_dir.clone().into_os_string();
         path.push(".lock");
@@ -888,6 +866,30 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
             lost_means: CARRIES_ON,
         },
     ]
+}
+
+impl Store {
+    /// Runs `work` on this Store under Claude Code's locks, paired with
+    /// Perch's own hold `perch` so either can be renewed around a slow step.
+    /// The one door to a Store's contents, so no caller can read or write one
+    /// having forgotten the locks (ADR a-switch-is-written-down-first).
+    pub fn entered<T, E: From<PerchError>>(
+        &self,
+        host: &dyn Host,
+        perch: &mut Held<'_>,
+        work: impl FnOnce(&mut Holds<'_, '_, '_>) -> std::result::Result<T, E>,
+    ) -> std::result::Result<T, E> {
+        lock::under(host, locks_for(self), |held| {
+            work(&mut Holds::of(held, perch))
+        })
+    }
+
+    /// Takes this Store's locks and keeps them, standing in for a mid-write
+    /// Claude Code: what a test contends `entered` against.
+    #[cfg(test)]
+    pub fn seized<'h>(&self, host: &'h dyn Host) -> Result<Held<'h>> {
+        lock::take_all(host, locks_for(self))
+    }
 }
 
 /// What the directory of session markers is called inside a config directory.

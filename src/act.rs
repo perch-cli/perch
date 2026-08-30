@@ -481,7 +481,7 @@ mod tests {
         // Somebody else is mid-write on the Default Profile, which is where the
         // Switch would land the Credential.
         let store = holdings::the_default_profile(&host).expect("home is known");
-        let _held = lock::take_all(&host, probe::locks_for(&store)).expect("nobody holds them yet");
+        let _held = store.seized(&host).expect("nobody holds them yet");
 
         let outcome = run_the_act(&host, &mut registry, Watcher::Loop)
             .expect("a held lock is an outcome, not a raise");
