@@ -8,6 +8,8 @@
 //! [`crate::commands::watch`]'s; what a round *means* is here, where it can be argued
 //! with in a unit test.
 
+use std::io::Write;
+
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::config::Settings;
@@ -16,6 +18,7 @@ use crate::live::{self, NotIdle};
 use crate::lock::Lost;
 use crate::probe::Installed;
 use crate::registry::{Account, Checked};
+use crate::say;
 
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
@@ -122,7 +125,7 @@ pub const STILL_HOLDING_MILLIS: i64 = 3_600_000;
 /// when it starts, says how long it has been going once an hour, and says what it cost
 /// when it ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Speak {
+enum Speak {
     /// Say the whole line. This hold is new, or it is not the one that was being held a
     /// moment ago.
     InFull,
@@ -138,7 +141,7 @@ pub enum Speak {
 /// second loop's log is not paced by this one's, and a Check says its one line and
 /// leaves.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Holding {
+struct Holding {
     said: Option<Said>,
 }
 
@@ -166,12 +169,12 @@ struct HoldSaid {
 
 impl Holding {
     /// A loop that is holding nothing, which is how one starts.
-    pub fn nothing() -> Holding {
+    fn nothing() -> Holding {
         Holding::default()
     }
 
     /// A round that held, and what to say about it.
-    pub fn holding(&mut self, why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> Speak {
+    fn holding(&mut self, why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> Speak {
         let saying = HoldSaid {
             why: why.to_string(),
             retrying_in,
@@ -211,7 +214,7 @@ impl Holding {
     /// A round that did not hold, and how long the hold it ended had lasted — or `None`
     /// where there was nothing to end, or where nothing went unsaid under it, because
     /// every round of that hold is already in the log.
-    pub fn released(&mut self, now: DateTime<Utc>) -> Option<Duration> {
+    fn released(&mut self, now: DateTime<Utc>) -> Option<Duration> {
         let said = self.said.take()?;
         match said.suppressed {
             true => Some(now - said.since),
@@ -220,8 +223,109 @@ impl Holding {
     }
 }
 
+/// The Watcher's decisions, reaching a person in one voice.
+///
+/// Owns both the wording and the coalescing, so the reason a hold is compared
+/// by is the reason its line prints. A fresh Voice has said nothing, which is
+/// why a Check's one line always comes out in full.
+pub struct Voice {
+    holding: Holding,
+}
+
+impl Voice {
+    /// A Voice that has said nothing yet.
+    pub fn quiet() -> Voice {
+        Voice {
+            holding: Holding::nothing(),
+        }
+    }
+
+    /// Says a round, as much of it as is worth saying: a held round is coalesced
+    /// with the hold it continues, and a decision is always said.
+    pub fn round(&mut self, out: &mut dyn Write, round: &Round, now: DateTime<Utc>) -> Result<()> {
+        let line = round.line(now);
+        match &round.outcome {
+            Outcome::Held { why, retrying_in } => self.hold(out, why, *retrying_in, line, now),
+            Outcome::Waiting
+            | Outcome::Cooling { .. }
+            | Outcome::Switched { .. }
+            | Outcome::Nowhere { .. }
+            | Outcome::Refused { .. }
+            | Outcome::HandedOver { .. }
+            | Outcome::Stopped { .. } => self.decision(out, &line, now),
+        }
+    }
+
+    /// A hold before there was a [`Round`] to hold, said in the round's shape and
+    /// coalesced with the rounds around it. `retrying_in` is [`Outcome::Held`]'s.
+    pub fn held(
+        &mut self,
+        out: &mut dyn Write,
+        why: &str,
+        retrying_in: Option<u64>,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
+        self.hold(out, why, retrying_in, held_line(why, retrying_in, now), now)
+    }
+
+    /// A watch lost before a [`Round`] could be reached, said as the decision it
+    /// stands where: nothing was switched, and the line says why.
+    pub fn lost(&mut self, out: &mut dyn Write, lost: Lost, now: DateTime<Utc>) -> Result<()> {
+        self.decision(out, &before_a_round(nothing_was_switched(lost), now), now)
+    }
+
+    /// What the loop says on the way out when something other than the person at
+    /// the terminal ended it.
+    pub fn left(&self, out: &mut dyn Write, lost: Lost) -> Result<()> {
+        match lost {
+            // A stop nobody asked for, so a refusal says why. The lock is not
+            // given back — it is somebody else's now.
+            Lost::HandedOver => say::line(
+                out,
+                "Stopped: another Watcher has taken the watch over, so this one \
+                 is no longer the only one deciding. Its lock is left where it \
+                 is, no file of its own was written, and the Account you are on \
+                 is the one it last Switched to.",
+            ),
+            Lost::Stopped => self.stopped(out),
+        }
+    }
+
+    /// What the loop says on the way out, which is that it is out. One word,
+    /// because everything else true of a stop is true of every stop.
+    pub fn stopped(&self, out: &mut dyn Write) -> Result<()> {
+        say::line(out, "Stopped.")
+    }
+
+    /// One line for a hold, or less: in full when it is news, once an hour while
+    /// it goes unchanged, and nothing in between.
+    fn hold(
+        &mut self,
+        out: &mut dyn Write,
+        why: &str,
+        retrying_in: Option<u64>,
+        in_full: String,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
+        match self.holding.holding(why, retrying_in, now) {
+            Speak::InFull => say::line(out, &in_full),
+            Speak::StillHolding { since } => say::line(out, &still_holding_line(since, now)),
+            Speak::Nothing => Ok(()),
+        }
+    }
+
+    /// A line that is always said — after the line ending any hold it broke, so
+    /// a log reads in the order the things happened.
+    fn decision(&mut self, out: &mut dyn Write, line: &str, now: DateTime<Utc>) -> Result<()> {
+        if let Some(held_for) = self.holding.released(now) {
+            say::line(out, &released_line(held_for, now))?;
+        }
+        say::line(out, line)
+    }
+}
+
 /// A hold that is still what it was, said as how long rather than as what.
-pub fn still_holding_line(since: DateTime<Utc>, now: DateTime<Utc>) -> String {
+fn still_holding_line(since: DateTime<Utc>, now: DateTime<Utc>) -> String {
     format!(
         "{}  {:<8}  still held, since {} ({}). Nothing has changed, and nothing \
          has been decided in that time.",
@@ -233,7 +337,7 @@ pub fn still_holding_line(since: DateTime<Utc>, now: DateTime<Utc>) -> String {
 }
 
 /// A hold that is over, said before the line of the round that ended it.
-pub fn released_line(held_for: Duration, now: DateTime<Utc>) -> String {
+fn released_line(held_for: Duration, now: DateTime<Utc>) -> String {
     format!(
         "{}  {:<8}  the hold is over after {}, and the watcher is deciding \
          again.",
@@ -789,24 +893,6 @@ impl Round {
         }
     }
 
-    /// What held this round, or `None` where it decided something.
-    ///
-    /// What the loop keys its coalescing on. Read off the outcome rather than kept
-    /// beside it, so the reason that is compared is the reason that would have been
-    /// printed.
-    pub fn held_because(&self) -> Option<&str> {
-        match &self.outcome {
-            Outcome::Held { why, .. } => Some(why),
-            Outcome::Waiting
-            | Outcome::Cooling { .. }
-            | Outcome::Switched { .. }
-            | Outcome::Nowhere { .. }
-            | Outcome::Refused { .. }
-            | Outcome::HandedOver { .. }
-            | Outcome::Stopped { .. } => None,
-        }
-    }
-
     /// The decision line: the stamp, the word it is read by, the figure it was decided
     /// on, and whatever this round has that the opening did not say.
     ///
@@ -892,7 +978,7 @@ fn explaining(said: &str) -> String {
 ///
 /// Said in the same shape as every other line, with the figure it does not have said as
 /// unread. `retrying_in` is [`Outcome::Held`]'s.
-pub fn held_line(why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> String {
+fn held_line(why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> String {
     before_a_round(
         Outcome::Held {
             why: why.to_string(),
@@ -921,12 +1007,6 @@ pub fn nothing_was_switched(lost: Lost) -> Outcome {
                 .to_string(),
         },
     }
-}
-
-/// A stop that happened before there was a [`Round`] to stop, because the walk that
-/// settles a Landing was still going.
-pub fn stopped_line(lost: Lost, now: DateTime<Utc>) -> String {
-    before_a_round(nothing_was_switched(lost), now)
 }
 
 /// The line for something that happened before a [`Round`] could be reached, as the
@@ -1096,6 +1176,157 @@ mod tests {
         holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), now());
 
         assert_eq!(holding.released(now() + Duration::minutes(2)), None);
+    }
+
+    /// The bytes a Voice put at the writer, as lines.
+    fn said(out: Vec<u8>) -> Vec<String> {
+        String::from_utf8(out)
+            .expect("output is UTF-8")
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn the_voice_says_an_unchanged_hold_once_however_many_rounds_repeat_it() {
+        let mut voice = Voice::quiet();
+        let mut out = Vec::new();
+        for round in 0..24 {
+            let at = now() + Duration::milliseconds(REFRESH_INTERVAL_MILLIS as i64 * round);
+            voice
+                .held(&mut out, UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), at)
+                .unwrap();
+        }
+
+        let said = said(out);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains(UNGRANTED), "{}", said[0]);
+    }
+
+    #[test]
+    fn a_decision_ends_a_hold_out_loud_and_the_next_hold_starts_its_own_run() {
+        let mut voice = Voice::quiet();
+        let mut out = Vec::new();
+        voice
+            .held(&mut out, THROTTLED, Some(REFRESH_INTERVAL_MILLIS), now())
+            .unwrap();
+        // A second round under the hold, so it has something to account for when
+        // it ends.
+        voice
+            .held(
+                &mut out,
+                THROTTLED,
+                Some(REFRESH_INTERVAL_MILLIS),
+                now() + Duration::minutes(5),
+            )
+            .unwrap();
+        voice
+            .round(
+                &mut out,
+                &round(at(42.0), Outcome::Waiting),
+                now() + Duration::minutes(10),
+            )
+            .unwrap();
+        voice
+            .held(
+                &mut out,
+                THROTTLED,
+                Some(REFRESH_INTERVAL_MILLIS),
+                now() + Duration::minutes(12),
+            )
+            .unwrap();
+
+        let said = said(out);
+        assert_eq!(said.len(), 4, "{said:?}");
+        assert!(said[1].contains("the hold is over after 10m"), "{said:?}");
+        assert!(said[2].contains("waiting"), "{}", said[2]);
+        assert!(said[3].contains("held"), "news again: {said:?}");
+    }
+
+    #[test]
+    fn a_hold_before_a_round_and_the_held_round_after_it_are_one_hold() {
+        let mut voice = Voice::quiet();
+        let mut out = Vec::new();
+        voice
+            .held(&mut out, THROTTLED, Some(REFRESH_INTERVAL_MILLIS), now())
+            .unwrap();
+        voice
+            .round(
+                &mut out,
+                &round(
+                    None,
+                    Outcome::Held {
+                        why: THROTTLED.to_string(),
+                        retrying_in: Some(REFRESH_INTERVAL_MILLIS),
+                    },
+                ),
+                now() + Duration::milliseconds(REFRESH_INTERVAL_MILLIS as i64),
+            )
+            .unwrap();
+
+        assert_eq!(
+            said(out).len(),
+            1,
+            "the same reason at the same cadence is one hold, whichever shape \
+             said it"
+        );
+    }
+
+    #[test]
+    fn a_hold_whose_cadence_changed_is_said_again_at_the_new_cadence() {
+        let mut voice = Voice::quiet();
+        let mut out = Vec::new();
+        voice
+            .held(&mut out, THROTTLED, Some(REFRESH_INTERVAL_MILLIS), now())
+            .unwrap();
+        voice
+            .held(
+                &mut out,
+                THROTTLED,
+                Some(REFRESH_INTERVAL_MILLIS * 2),
+                now() + Duration::milliseconds(REFRESH_INTERVAL_MILLIS as i64),
+            )
+            .unwrap();
+
+        let said = said(out);
+        assert_eq!(said.len(), 2, "{said:?}");
+        assert!(said[1].contains("5m00s"), "{}", said[1]);
+    }
+
+    #[test]
+    fn an_hour_into_an_unchanged_hold_the_voice_says_it_is_still_holding() {
+        let mut voice = Voice::quiet();
+        let mut out = Vec::new();
+        voice
+            .held(&mut out, UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), now())
+            .unwrap();
+        voice
+            .held(
+                &mut out,
+                UNGRANTED,
+                Some(REFRESH_INTERVAL_MILLIS),
+                now() + Duration::milliseconds(STILL_HOLDING_MILLIS),
+            )
+            .unwrap();
+
+        let said = said(out);
+        assert_eq!(said.len(), 2, "{said:?}");
+        assert!(
+            said[1].contains("still held, since 2026-08-04T12:00:00Z"),
+            "{said:?}"
+        );
+    }
+
+    #[test]
+    fn the_voice_leaving_says_a_stop_as_one_word_and_a_takeover_as_a_refusal() {
+        let voice = Voice::quiet();
+        let mut out = Vec::new();
+        voice.left(&mut out, Lost::Stopped).unwrap();
+        voice.left(&mut out, Lost::HandedOver).unwrap();
+
+        let said = said(out);
+        assert_eq!(said[0], "Stopped.");
+        assert!(said[1].starts_with("Stopped: another Watcher"), "{said:?}");
     }
 
     fn at(used_percent: f64) -> Option<Fullest> {
