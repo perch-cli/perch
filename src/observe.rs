@@ -384,26 +384,17 @@ fn observe(
             spent: false,
         });
     }
-    let asked = &holding(host, registry, account)?;
-    // Taking the `Because` it was reached through, because what it answers with
-    // is a `Failed`, and every `Failed` says whether the round spent a request.
-    let theirs = move |because| {
-        move |outcome| {
-            only_off_a_credential_that_is_theirs(host, outcome, asked, account, installed, because)
-        }
+    let turn = Turn {
+        host,
+        installed,
+        account,
+        asked: holding(host, registry, account)?,
     };
 
-    let asking = usable_token(host, perch, asked, installed, still_ours)
-        .map_err(theirs(Because::ItSaysItRanOut))?;
-    match read_off(
-        host,
-        perch,
-        &asking.token,
-        asked,
-        account,
-        installed,
-        still_ours,
-    ) {
+    let asking = turn
+        .usable_token(perch, still_ours)
+        .map_err(|outcome| turn.only_off_their_credential(outcome, Because::ItSaysItRanOut))?;
+    match turn.read_off(perch, &asking.token, still_ours) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
         Err(Turned::Away) => {}
@@ -419,27 +410,23 @@ fn observe(
     // Anthropic would not take the token, and the Credential holding it did not think
     // it had run out — the state one carrying no `expiresAt` is permanently in. Once,
     // and only off a rejection.
-    refuse_if_live(host, asked, installed, Because::AnthropicRefusedIt)
-        .map_err(theirs(Because::AnthropicRefusedIt))?;
-    let renewed = renew_under_the_lock(
-        host,
-        perch,
-        asked,
-        installed,
-        Because::AnthropicRefusedIt,
-        still_ours,
-    )
-    .map_err(theirs(Because::AnthropicRefusedIt))?;
-    read_off(
-        host,
-        perch,
-        &renewed.token,
-        asked,
-        account,
-        installed,
-        still_ours,
-    )
-    .map_err(Turned::settled)
+    turn.refuse_if_live(Because::AnthropicRefusedIt)
+        .map_err(|outcome| turn.only_off_their_credential(outcome, Because::AnthropicRefusedIt))?;
+    let renewed = turn
+        .renew_under_the_lock(perch, Because::AnthropicRefusedIt, still_ours)
+        .map_err(|outcome| turn.only_off_their_credential(outcome, Because::AnthropicRefusedIt))?;
+    turn.read_off(perch, &renewed.token, still_ours)
+        .map_err(Turned::settled)
+}
+
+/// One Account's turn, as the context every step of it shares: built once where
+/// the turn begins, so a step's signature carries only what varies across it.
+/// The shape [`crate::act::Acting`] set — one door's worth of context.
+struct Turn<'a> {
+    host: &'a dyn Host,
+    installed: &'a Installed<'a>,
+    account: &'a Account,
+    asked: Asked,
 }
 
 /// What one attempt at a reading came to when it did not come to figures.
@@ -470,107 +457,94 @@ impl Turned {
     }
 }
 
-/// Whose the token is, and then what it says about the Account — the pair of questions
-/// one reading asks, off one access token.
-fn read_off(
-    host: &dyn Host,
-    perch: &mut Held<'_>,
-    token: &str,
-    asked: &Asked,
-    account: &Account,
-    installed: &Installed,
-    still_ours: StillOurs<'_>,
-) -> std::result::Result<QuotaWindows, Turned> {
-    confirm(host, token, asked, account, installed, still_ours)?;
-    // Between the two requests, because they are two: an endpoint that accepts a
-    // connection and then says nothing costs thirty seconds each.
-    perch.renew();
-    match anthropic::utilization(host, token, still_ours) {
-        Ok(windows) => Ok(windows),
-        Err(Refused::Rejected) => Err(Turned::Away),
-        Err(why) => Err(Turned::Settled(reading_refused(why))),
+impl Turn<'_> {
+    /// Whose the token is, and then what it says about the Account — the pair of
+    /// questions one reading asks, off one access token.
+    fn read_off(
+        &self,
+        perch: &mut Held<'_>,
+        token: &str,
+        still_ours: StillOurs<'_>,
+    ) -> std::result::Result<QuotaWindows, Turned> {
+        self.confirm(token, still_ours)?;
+        // Between the two requests, because they are two: an endpoint that accepts a
+        // connection and then says nothing costs thirty seconds each.
+        perch.renew();
+        match anthropic::utilization(self.host, token, still_ours) {
+            Ok(windows) => Ok(windows),
+            Err(Refused::Rejected) => Err(Turned::Away),
+            Err(why) => Err(Turned::Settled(reading_refused(why))),
+        }
     }
-}
 
-/// Keeps a Quarantine from being recorded off a Credential never established to be this
-/// Account's.
-///
-/// A Quarantine is a terminal recording, so it is owed what a figure is owed
-/// (ADR a-figure-names-its-account). The evidence for it is local.
-fn only_off_a_credential_that_is_theirs(
-    host: &dyn Host,
-    outcome: Outcome,
-    asked: &Asked,
-    account: &Account,
-    installed: &Installed,
-    because: Because,
-) -> Outcome {
-    let Outcome::Quarantined { why, detail } = &outcome else {
-        return outcome;
-    };
-    // What the failure underneath said, where it said anything. Both sentences below
-    // carry it in the same place, so they read it from the same line.
-    let how = match detail {
-        Some(detail) => format!(" ({detail})"),
-        None => String::new(),
-    };
+    /// Keeps a Quarantine from being recorded off a Credential never established to be
+    /// this Account's, answering with a `Failed` that spends what its `Because` says.
+    ///
+    /// A Quarantine is a terminal recording, so it is owed what a figure is owed
+    /// (ADR a-figure-names-its-account). The evidence for it is local.
+    fn only_off_their_credential(&self, outcome: Outcome, because: Because) -> Outcome {
+        let Outcome::Quarantined { why, detail } = &outcome else {
+            return outcome;
+        };
+        // What the failure underneath said, where it said anything. Both sentences
+        // below carry it in the same place, so they read it from the same line.
+        let how = match detail {
+            Some(detail) => format!(" ({detail})"),
+            None => String::new(),
+        };
 
-    // A Switch written down and never recorded: a Claude Code Renewal may have retired
-    // the copy this reading asked with, so the refusal is evidence about a superseded
-    // Credential rather than a broken Account.
-    if asked.arriving_in_a_landing {
-        return Outcome::Failed {
+        // A Switch written down and never recorded: a Claude Code Renewal may have
+        // retired the copy this reading asked with, so the refusal is evidence about a
+        // superseded Credential rather than a broken Account.
+        if self.asked.arriving_in_a_landing {
+            return Outcome::Failed {
+                why: format!(
+                    "the Credential in this Account's own Profile could not be used: \
+                     {}{how}. A Switch onto it is in flight and was never recorded, \
+                     so the working copy may be the live one, and `perch switch {}` \
+                     settles which.",
+                    why.because(),
+                    self.account.email(),
+                ),
+                spent: because.spent() || why.reached_anthropic(),
+            };
+        }
+
+        if self.theirs_by_what_is_here() {
+            return outcome;
+        }
+
+        Outcome::Failed {
             why: format!(
-                "the Credential in this Account's own Profile could not be used: \
-                 {}{how}. A Switch onto it is in flight and was never recorded, \
-                 so the working copy may be the live one, and `perch switch {}` \
-                 settles which.",
+                "the live Credential could not be used: {}{how}. {} does not name \
+                 {}, so it may belong to a login made outside Perch, and nothing was \
+                 recorded against this Account. `perch switch {}` puts its own \
+                 Credential back in place.",
                 why.because(),
-                account.email(),
+                self.asked.store.identity_file.display(),
+                self.account.email(),
+                self.account.email(),
             ),
             spent: because.spent() || why.reached_anthropic(),
-        };
+        }
     }
 
-    if theirs_by_what_is_here(host, asked, account, installed) {
-        return outcome;
+    /// Whether what this machine holds says the Credential being asked with is this
+    /// Account's — the local evidence, for a recording that must not be made off
+    /// somebody else's Credential and cannot get an answer out of Anthropic. An
+    /// Account's own Profile is a directory only Perch writes into; the Default
+    /// Profile is not, so there it is the Identity beside the Credential that says.
+    fn theirs_by_what_is_here(&self) -> bool {
+        self.asked.its_own_profile || self.named_by_the_identity()
     }
 
-    Outcome::Failed {
-        why: format!(
-            "the live Credential could not be used: {}{how}. {} does not name \
-             {}, so it may belong to a login made outside Perch, and nothing was \
-             recorded against this Account. `perch switch {}` puts its own \
-             Credential back in place.",
-            why.because(),
-            asked.store.identity_file.display(),
-            account.email(),
-            account.email(),
-        ),
-        spent: because.spent() || why.reached_anthropic(),
+    /// Whether the store's Identity names this Account.
+    fn named_by_the_identity(&self) -> bool {
+        probe::read_identity(self.host, &self.asked.store, self.installed)
+            .ok()
+            .flatten()
+            .is_some_and(|identity| name::same_name(&identity.email, self.account.email()))
     }
-}
-
-/// Whether what this machine holds says the Credential being asked with is this
-/// Account's — the local evidence, for a recording that must not be made off
-/// somebody else's Credential and cannot get an answer out of Anthropic. An
-/// Account's own Profile is a directory only Perch writes into; the Default
-/// Profile is not, so there it is the Identity beside the Credential that says.
-fn theirs_by_what_is_here(
-    host: &dyn Host,
-    asked: &Asked,
-    account: &Account,
-    installed: &Installed,
-) -> bool {
-    asked.its_own_profile || names(host, &asked.store, account, installed)
-}
-
-/// Whether a store's Identity names this Account.
-fn names(host: &dyn Host, store: &Store, account: &Account, installed: &Installed) -> bool {
-    probe::read_identity(host, store, installed)
-        .ok()
-        .flatten()
-        .is_some_and(|identity| name::same_name(&identity.email, account.email()))
 }
 
 /// The store an Account is asked about with, and whose it is.
@@ -696,199 +670,177 @@ struct Asking {
     freshly_renewed: bool,
 }
 
-/// An access token that can still be asked a question, renewing the Credential when the
-/// one there is has run out.
-fn usable_token(
-    host: &dyn Host,
-    perch: &mut Held<'_>,
-    asked: &Asked,
-    installed: &Installed,
-    still_ours: StillOurs<'_>,
-) -> Step<Asking> {
-    let credential = credential_in(host, asked, installed, Because::ItSaysItRanOut)?;
-    if credential.usable_at(host.now()) {
-        return Ok(Asking {
-            token: credential.access_token,
-            freshly_renewed: false,
-        });
-    }
-
-    // Asked before the locks are taken, so an Account that was never going to be
-    // renewed says so without queuing, and again under them, where the answer is the
-    // one that counts.
-    refuse_if_live(host, asked, installed, Because::ItSaysItRanOut)?;
-    renew_under_the_lock(
-        host,
-        perch,
-        asked,
-        installed,
-        Because::ItSaysItRanOut,
-        still_ours,
-    )
-}
-
-/// Refuses to renew a Credential something else is holding.
-///
-/// Anthropic retires the old refresh token when it Rotates one, so renewing a
-/// Credential a running Claude Code holds logs that session out mid-task. Asked of
-/// every directory it could be in use from, and told why, since both reasons reach it.
-fn refuse_if_live(
-    host: &dyn Host,
-    asked: &Asked,
-    installed: &Installed,
-    because: Because,
-) -> Step<()> {
-    // Which directory each client is in, and not only that there is one: `in_use_from`
-    // holds two for the active Account, and a refusal naming neither leaves the reader
-    // to guess which to quit.
-    let places: Vec<live::Place> = asked.in_use_from.iter().map(live::Place::at).collect();
-    let running = match live::ask(host, &places) {
-        live::Answer::Idle(_) => return Ok(()),
-        // Its own `spent`, rather than the `false` a `PerchError` folds to: a
-        // doubt met after a request went out is a round that spent one, and the
-        // Back-off paces on that.
-        live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => {
-            return Err(Outcome::Failed {
-                why: unsure.refusal(installed).to_string(),
-                spent: because.spent(),
-            });
-        }
-        live::Answer::NotIdle(live::NotIdle::Live(clients)) => clients,
-    };
-
-    Err(Outcome::Failed {
-        why: format!(
-            "{} and a client is running against it ({}), so renewing it would \
-             log that session out. The cached figure is what you see.",
-            because.clause(),
-            running
-                .iter()
-                .map(|client| format!("pid {} in {}", client.pid, client.whose))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        spent: because.spent(),
-    })
-}
-
-/// The Credential to ask with, or what its absence means.
-///
-/// An Account's own Profile holding nothing is terminal, because that Profile is the
-/// only place its Credential lives. The Default Profile holding nothing is a Claude
-/// Code that has been logged out, and the Account's copy is still there.
-fn credential_in(
-    host: &dyn Host,
-    asked: &Asked,
-    installed: &Installed,
-    because: Because,
-) -> Step<Credential> {
-    probe::read_credential(host, &asked.store, installed)?.ok_or_else(|| {
-        if asked.its_own_profile {
-            Outcome::Quarantined {
-                why: Quarantine::NoCredential,
-                detail: None,
-            }
-        } else {
-            Outcome::Failed {
-                why: "the Default Profile holds no Credential, so Claude Code is \
-                      logged out and there is nothing to ask Anthropic with."
-                    .to_string(),
-                spent: because.spent(),
-            }
-        }
-    })
-}
-
-/// Renews the Credential in a store, and puts the Rotation back before the new token is
-/// used for anything.
-///
-/// Under Claude Code's own locks, in its order, with its double-checked re-read:
-/// whoever held the lock while Perch waited may have renewed this Credential.
-fn renew_under_the_lock(
-    host: &dyn Host,
-    perch: &mut Held<'_>,
-    asked: &Asked,
-    installed: &Installed,
-    because: Because,
-    still_ours: StillOurs<'_>,
-) -> Step<Asking> {
-    // A shared Profile is refused here rather than at the two callers, because this is
-    // the one door every Renewal goes through. For this Account alone: the others are
-    // readable, and their figures are not this one's to lose.
-    if let Some(sharer) = &asked.shares_its_profile_with {
-        return Err(Outcome::Failed {
-            why: format!(
-                "{} and it shares one Credential Store with {sharer}, so Renewing \
-                 may retire a refresh token that is not this Account's to spend. \
-                 The cached figure is what you see.",
-                because.clause(),
-            ),
-            spent: because.spent(),
-        });
-    }
-
-    let store = &asked.store;
-    store.entered(host, perch, |holds| {
-        // Both of the questions asked before the locks were taken, asked again now that
-        // nothing can change the answer underneath Perch.
-        refuse_if_live(host, asked, installed, because)?;
-        // Renewed around the read for the write below's reason: a keychain read is a
-        // `security` subprocess, and one that stops to ask for permission takes as long
-        // as the answer does.
-        let credential = holds.around(|| credential_in(host, asked, installed, because))?;
-        if because == Because::ItSaysItRanOut && credential.usable_at(host.now()) {
-            // Somebody else renewed it while Perch queued for the lock, so this reading
-            // did not: claiming otherwise would report `Turned::Away` about a token
-            // Anthropic did not issue here.
+impl Turn<'_> {
+    /// An access token that can still be asked a question, renewing the Credential
+    /// when the one there is has run out.
+    fn usable_token(&self, perch: &mut Held<'_>, still_ours: StillOurs<'_>) -> Step<Asking> {
+        let credential = self.credential_in(Because::ItSaysItRanOut)?;
+        if credential.usable_at(self.host.now()) {
             return Ok(Asking {
                 token: credential.access_token,
                 freshly_renewed: false,
             });
         }
 
-        // An access token that has run out and no refresh token to buy another with is
-        // the end of what this Credential can do.
-        let refresh_token = credential
-            .refresh_token
-            .clone()
-            .ok_or(Outcome::Quarantined {
-                why: Quarantine::NoRefreshToken,
-                detail: None,
+        // Asked before the locks are taken, so an Account that was never going to be
+        // renewed says so without queuing, and again under them, where the answer is
+        // the one that counts.
+        self.refuse_if_live(Because::ItSaysItRanOut)?;
+        self.renew_under_the_lock(perch, Because::ItSaysItRanOut, still_ours)
+    }
+
+    /// Refuses to renew a Credential something else is holding.
+    ///
+    /// Anthropic retires the old refresh token when it Rotates one, so renewing a
+    /// Credential a running Claude Code holds logs that session out mid-task. Asked
+    /// of every directory it could be in use from, and told why: both reasons reach it.
+    fn refuse_if_live(&self, because: Because) -> Step<()> {
+        // Which directory each client is in, and not only that there is one:
+        // `in_use_from` holds two for the active Account, and a refusal naming neither
+        // leaves the reader to guess which to quit.
+        let places: Vec<live::Place> = self.asked.in_use_from.iter().map(live::Place::at).collect();
+        let running = match live::ask(self.host, &places) {
+            live::Answer::Idle(_) => return Ok(()),
+            // Its own `spent`, rather than the `false` a `PerchError` folds to: a
+            // doubt met after a request went out is a round that spent one, and the
+            // Back-off paces on that.
+            live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => {
+                return Err(Outcome::Failed {
+                    why: unsure.refusal(self.installed).to_string(),
+                    spent: because.spent(),
+                });
+            }
+            live::Answer::NotIdle(live::NotIdle::Live(clients)) => clients,
+        };
+
+        Err(Outcome::Failed {
+            why: format!(
+                "{} and a client is running against it ({}), so renewing it would \
+                 log that session out. The cached figure is what you see.",
+                because.clause(),
+                running
+                    .iter()
+                    .map(|client| format!("pid {} in {}", client.pid, client.whose))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            spent: because.spent(),
+        })
+    }
+
+    /// The Credential to ask with, or what its absence means.
+    ///
+    /// An Account's own Profile holding nothing is terminal, because that Profile is
+    /// the only place its Credential lives. The Default Profile holding nothing is a
+    /// Claude Code that has been logged out, and the Account's copy is still there.
+    fn credential_in(&self, because: Because) -> Step<Credential> {
+        probe::read_credential(self.host, &self.asked.store, self.installed)?.ok_or_else(|| {
+            if self.asked.its_own_profile {
+                Outcome::Quarantined {
+                    why: Quarantine::NoCredential,
+                    detail: None,
+                }
+            } else {
+                Outcome::Failed {
+                    why: "the Default Profile holds no Credential, so Claude Code is \
+                          logged out and there is nothing to ask Anthropic with."
+                        .to_string(),
+                    spent: because.spent(),
+                }
+            }
+        })
+    }
+
+    /// Renews the Credential in the store, and puts the Rotation back before the new
+    /// token is used for anything.
+    ///
+    /// Under Claude Code's own locks, in its order, with its double-checked re-read:
+    /// whoever held the lock while Perch waited may have renewed this Credential.
+    fn renew_under_the_lock(
+        &self,
+        perch: &mut Held<'_>,
+        because: Because,
+        still_ours: StillOurs<'_>,
+    ) -> Step<Asking> {
+        // A shared Profile is refused here rather than at the two callers, because
+        // this is the one door every Renewal goes through. For this Account alone: the
+        // others are readable, and their figures are not this one's to lose.
+        if let Some(sharer) = &self.asked.shares_its_profile_with {
+            return Err(Outcome::Failed {
+                why: format!(
+                    "{} and it shares one Credential Store with {sharer}, so Renewing \
+                     may retire a refresh token that is not this Account's to spend. \
+                     The cached figure is what you see.",
+                    because.clause(),
+                ),
+                spent: because.spent(),
+            });
+        }
+
+        let host = self.host;
+        let store = &self.asked.store;
+        store.entered(host, perch, |holds| {
+            // Both of the questions asked before the locks were taken, asked again now
+            // that nothing can change the answer underneath Perch.
+            self.refuse_if_live(because)?;
+            // Renewed around the read for the write below's reason: a keychain read is
+            // a `security` subprocess, and one that stops to ask for permission takes
+            // as long as the answer does.
+            let credential = holds.around(|| self.credential_in(because))?;
+            if because == Because::ItSaysItRanOut && credential.usable_at(host.now()) {
+                // Somebody else renewed it while Perch queued for the lock, so this
+                // reading did not: claiming otherwise would report `Turned::Away`
+                // about a token Anthropic did not issue here.
+                return Ok(Asking {
+                    token: credential.access_token,
+                    freshly_renewed: false,
+                });
+            }
+
+            // An access token that has run out and no refresh token to buy another
+            // with is the end of what this Credential can do.
+            let refresh_token = credential
+                .refresh_token
+                .clone()
+                .ok_or(Outcome::Quarantined {
+                    why: Quarantine::NoRefreshToken,
+                    detail: None,
+                })?;
+
+            // Renewed before the round trip: the config-file lock goes stale in ten
+            // seconds and one request can take longer. Both holds, because losing
+            // Perch's throws away every figure found.
+            let renewal = holds.around(|| anthropic::renew(host, &refresh_token, still_ours));
+            let fresh = renewal.map_err(not_renewed)?;
+
+            // Inside `around` for the network call's reason: on macOS this is three
+            // subprocesses and a keychain that may stop to ask, so left unrenewed the
+            // lock could be taken during the write nothing can undo.
+            holds.around(|| {
+                let rotated = probe::credential_after_rotation(
+                    &credential,
+                    &fresh.access_token,
+                    fresh.refresh_token.as_ref().map(|token| token.as_str()),
+                    fresh.expires_at,
+                    self.installed,
+                )?;
+                store_it(
+                    host,
+                    store,
+                    &rotated,
+                    rotated_away(
+                        &refresh_token,
+                        fresh.refresh_token.as_ref().map(|token| token.as_str()),
+                    ),
+                )
             })?;
 
-        // Renewed before the round trip: the config-file lock goes stale in ten seconds
-        // and one request can take longer. Both holds, because losing Perch's throws
-        // away every figure found.
-        let renewal = holds.around(|| anthropic::renew(host, &refresh_token, still_ours));
-        let fresh = renewal.map_err(not_renewed)?;
-
-        // Inside `around` for the network call's reason: on macOS this is three
-        // subprocesses and a keychain that may stop to ask, so left unrenewed the lock
-        // could be taken during the write nothing can undo.
-        holds.around(|| {
-            let rotated = probe::credential_after_rotation(
-                &credential,
-                &fresh.access_token,
-                fresh.refresh_token.as_ref().map(|token| token.as_str()),
-                fresh.expires_at,
-                installed,
-            )?;
-            store_it(
-                host,
-                store,
-                &rotated,
-                rotated_away(
-                    &refresh_token,
-                    fresh.refresh_token.as_ref().map(|token| token.as_str()),
-                ),
-            )
-        })?;
-
-        Ok(Asking {
-            token: fresh.access_token,
-            freshly_renewed: true,
+            Ok(Asking {
+                token: fresh.access_token,
+                freshly_renewed: true,
+            })
         })
-    })
+    }
 }
 
 /// Whether the Renewal retired the refresh token that bought it.
@@ -931,61 +883,56 @@ const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
                             this Account could be read. The cached figure is \
                             what you see.";
 
-/// Refuses to record figures against an Account the token does not belong to.
-///
-/// Figures cached under the wrong Account would not look wrong: they would look like
-/// that Account having spent quota it never spent, which is the evidence a Cycle ranks
-/// on.
-fn confirm(
-    host: &dyn Host,
-    token: &str,
-    asked: &Asked,
-    account: &Account,
-    installed: &Installed,
-    still_ours: StillOurs<'_>,
-) -> std::result::Result<(), Turned> {
-    match anthropic::whose(host, token, still_ours) {
-        Ok(email) if !name::same_name(&email, account.email()) => {
-            Err(Turned::Settled(Outcome::Failed {
-                why: format!(
-                    "the Credential Perch would ask with belongs to {email} \
-                     rather than to {}, so no figure was recorded against it.",
-                    account.email()
-                ),
-                spent: true,
-            }))
-        }
-        Ok(_) => Ok(()),
-        // The one refusal worth telling apart, because a Renewal may answer it: a token
-        // Anthropic will not take is the state a Credential that never says when it
-        // expires would otherwise stay in for good.
-        Err(Refused::Rejected) => Err(Turned::Away),
-        // Drift in a reply is no evidence either way, and the carve-out is that and
-        // nothing wider: a 503 from `/api/oauth/profile` while the usage endpoint
-        // answers would cache one Account's figures under another's.
-        Err(Refused::Unrecognized(drift)) => {
-            // Said rather than swallowed, because an endpoint that renames a field
-            // asks this question of the machine for ever after, and silence makes
-            // that indistinguishable from Anthropic answering. `note` says it once.
-            host.note(&Refused::Unrecognized(drift).to_string());
-            if theirs_by_what_is_here(host, asked, account, installed) {
-                return Ok(());
+impl Turn<'_> {
+    /// Refuses to record figures against an Account the token does not belong to.
+    ///
+    /// Figures cached under the wrong Account would not look wrong: they would look
+    /// like that Account having spent quota it never spent, which is the evidence a
+    /// Cycle ranks on.
+    fn confirm(&self, token: &str, still_ours: StillOurs<'_>) -> std::result::Result<(), Turned> {
+        match anthropic::whose(self.host, token, still_ours) {
+            Ok(email) if !name::same_name(&email, self.account.email()) => {
+                Err(Turned::Settled(Outcome::Failed {
+                    why: format!(
+                        "the Credential Perch would ask with belongs to {email} \
+                         rather than to {}, so no figure was recorded against it.",
+                        self.account.email()
+                    ),
+                    spent: true,
+                }))
             }
-            Err(Turned::Settled(Outcome::Failed {
-                why: format!(
-                    "Anthropic no longer says whose an access token is, and {} \
-                     does not name {}, so the live Credential may belong to a \
-                     login made outside Perch and no figure was recorded against \
-                     it. `perch switch {}` puts this Account's own Credential \
-                     back in place.",
-                    asked.store.identity_file.display(),
-                    account.email(),
-                    account.email(),
-                ),
-                spent: true,
-            }))
+            Ok(_) => Ok(()),
+            // The one refusal worth telling apart, because a Renewal may answer it: a
+            // token Anthropic will not take is the state a Credential that never says
+            // when it expires would otherwise stay in for good.
+            Err(Refused::Rejected) => Err(Turned::Away),
+            // Drift in a reply is no evidence either way, and the carve-out is that
+            // and nothing wider: a 503 from `/api/oauth/profile` while the usage
+            // endpoint answers would cache one Account's figures under another's.
+            Err(Refused::Unrecognized(drift)) => {
+                // Said rather than swallowed, because an endpoint that renames a field
+                // asks this question of the machine for ever after, and silence makes
+                // that indistinguishable from Anthropic answering. `note` says it once.
+                self.host.note(&Refused::Unrecognized(drift).to_string());
+                if self.theirs_by_what_is_here() {
+                    return Ok(());
+                }
+                Err(Turned::Settled(Outcome::Failed {
+                    why: format!(
+                        "Anthropic no longer says whose an access token is, and {} \
+                         does not name {}, so the live Credential may belong to a \
+                         login made outside Perch and no figure was recorded against \
+                         it. `perch switch {}` puts this Account's own Credential \
+                         back in place.",
+                        self.asked.store.identity_file.display(),
+                        self.account.email(),
+                        self.account.email(),
+                    ),
+                    spent: true,
+                }))
+            }
+            Err(why) => Err(Turned::Settled(getting_ready_refused(why))),
         }
-        Err(why) => Err(Turned::Settled(getting_ready_refused(why))),
     }
 }
 
@@ -1081,12 +1028,20 @@ mod tests {
             shares_its_profile_with: None,
         };
         let installed = Installed::unknown("2.1.221");
+        let account = crate::cycle::tests::account("someone@example.com", vec![]);
+        let turn = Turn {
+            host: &host,
+            installed: &installed,
+            account: &account,
+            asked,
+        };
 
         for (because, paced) in [
             (Because::ItSaysItRanOut, false),
             (Because::AnthropicRefusedIt, true),
         ] {
-            let refused = refuse_if_live(&host, &asked, &installed, because)
+            let refused = turn
+                .refuse_if_live(because)
                 .expect_err("whether a client is running got no answer");
             assert!(
                 matches!(refused, Outcome::Failed { spent, .. } if spent == paced),
