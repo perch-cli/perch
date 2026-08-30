@@ -60,7 +60,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     let mut perch = holdings::lock(host)?;
     let (mut registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
 
-    let installed = Installed::probed_or_absent(host);
+    let installed = Installed::for_a_report(host);
 
     purge::refuse_while_anything_is_running(host, &registry, &installed)?;
 

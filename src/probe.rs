@@ -56,17 +56,40 @@ pub enum Installed<'h> {
 }
 
 impl<'h> Installed<'h> {
-    /// Asks the installed Claude Code what it is. Once per command: the answer
-    /// cannot change under a process that is already running.
-    pub fn probed(host: &dyn Host) -> Result<Installed<'static>> {
+    // Four constructors, named by what a command will do without Claude Code.
+    // Each answers absence differently, so the name is the whole choice: a
+    // caller never picks mechanics that quietly answer the wrong way.
+
+    /// For a command that will stop without Claude Code. The `Err` is the
+    /// refusal it raises — or, in `perch probe`, the finding it reports.
+    /// Asked once per command: the answer cannot change under a process
+    /// that is already running.
+    pub fn for_a_refusal(host: &dyn Host) -> Result<Installed<'static>> {
         Ok(Installed::Said(claude_version(host)?))
     }
 
-    /// The same for a process that outlives a command, where asking every round
-    /// forks a Node program to quote a string most rounds never quote. Only the
-    /// version waits: a refusal quotes the Claude Code installed when it was
-    /// raised rather than when the process started.
-    pub fn asked_when_needed(host: &'h dyn Host) -> Installed<'h> {
+    /// For a command that reports absence and carries on. A Remove, a Purge,
+    /// an Import and an Export run on a machine whose Claude Code may be gone,
+    /// and refusing for want of a version would hold a Credential hostage to a
+    /// program neither of them needs. Absence reads `(not installed)`.
+    pub fn for_a_report(host: &dyn Host) -> Installed<'static> {
+        Installed::for_a_refusal(host).unwrap_or_else(|_| Installed::unknown("(not installed)"))
+    }
+
+    /// For the figures a command shows. Absence is the state the probe found,
+    /// reason and all, so every Account's turn downstream answers it in its
+    /// own words rather than this read deciding for them.
+    pub fn for_the_figures(host: &dyn Host) -> Installed<'static> {
+        Installed::for_a_refusal(host).unwrap_or_else(|why| Installed::Absent {
+            why: why.to_string(),
+        })
+    }
+
+    /// For a process that outlives a command, where asking every round forks a
+    /// Node program to quote a string most rounds never quote. Only the version
+    /// waits: a refusal quotes the Claude Code installed when it was raised
+    /// rather than when the process started.
+    pub fn for_every_round(host: &'h dyn Host) -> Installed<'h> {
         // Claude Code being *there* is still established now, a round with none
         // having nothing to do — and it is a `PATH` walk rather than a fork.
         match claude_bin(host) {
@@ -92,15 +115,6 @@ impl<'h> Installed<'h> {
     /// `said` is what a refusal will quote.
     pub fn unknown(said: &str) -> Installed<'static> {
         Installed::Said(said.to_string())
-    }
-
-    /// The version, or `(not installed)` where Claude Code will not answer.
-    ///
-    /// A Remove, a Purge, an Import and an Export run on a machine whose Claude
-    /// Code may be gone, and refusing for want of a version would hold a
-    /// Credential hostage to a program neither of them needs.
-    pub fn probed_or_absent(host: &dyn Host) -> Installed<'static> {
-        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"))
     }
 
     /// What a refusal quotes.
@@ -1108,7 +1122,7 @@ impl Identity {
 /// a question about Perch's own layout, and this module is below the one that can
 /// answer it ([`crate::holdings::the_default_profile`]).
 pub fn probe(host: &dyn Host, store: Store) -> Result<Verdict> {
-    let installed = Installed::probed(host)?;
+    let installed = Installed::for_a_refusal(host)?;
     let version = installed.version().to_string();
 
     let credential = read_credential(host, &store, &installed)?;
@@ -1870,7 +1884,7 @@ mod tests {
         assert!(!rotated.contains("expiresAt"), "{}", rotated.as_str());
     }
 
-    /// The whole of what `asked_when_needed` promises: `claude` is established
+    /// The whole of what `for_every_round` promises: `claude` is established
     /// as being there, and its version is read the first time something quotes
     /// one and only once however often it is quoted after that.
     #[test]
@@ -1888,7 +1902,7 @@ mod tests {
                 },
             );
 
-        let installed = Installed::asked_when_needed(&host);
+        let installed = Installed::for_every_round(&host);
         assert_eq!(
             versions_read_by(&host),
             0,
@@ -1909,7 +1923,7 @@ mod tests {
             .with_env("PATH", "/usr/bin")
             .with_file("/usr/bin/claude", "");
 
-        let installed = Installed::asked_when_needed(&host);
+        let installed = Installed::for_every_round(&host);
 
         assert_eq!(installed.version(), "unknown");
     }
@@ -1917,7 +1931,7 @@ mod tests {
     #[test]
     fn a_machine_with_nothing_to_defer_to_is_absent_and_quoted_as_unknown() {
         let host = FakeHost::new();
-        let installed = Installed::asked_when_needed(&host);
+        let installed = Installed::for_every_round(&host);
 
         assert!(installed.absent().is_some(), "no `claude` on an empty PATH");
         assert_eq!(installed.version(), "unknown");
@@ -1930,7 +1944,7 @@ mod tests {
     #[test]
     fn a_machine_with_no_claude_code_is_answered_rather_than_refused() {
         assert_eq!(
-            Installed::probed_or_absent(&FakeHost::new()).version(),
+            Installed::for_a_report(&FakeHost::new()).version(),
             "(not installed)"
         );
     }
@@ -1950,7 +1964,7 @@ mod tests {
                 },
             );
 
-        assert_eq!(Installed::probed_or_absent(&host).version(), "2.1.221");
+        assert_eq!(Installed::for_a_report(&host).version(), "2.1.221");
     }
 
     fn versions_read_by(host: &FakeHost) -> usize {

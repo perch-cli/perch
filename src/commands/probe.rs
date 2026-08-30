@@ -237,7 +237,7 @@ fn gather(host: &dyn Host) -> Seen {
     let mut findings = Vec::new();
     let trail_read = trail::read(host);
 
-    let installed = probe::Installed::probed(host);
+    let installed = probe::Installed::for_a_refusal(host);
     let claude = match &installed {
         Ok(installed) => Ok(installed.version().to_string()),
         Err(err) => {

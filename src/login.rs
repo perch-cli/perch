@@ -37,7 +37,7 @@ pub struct Produced {
 pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Produced> {
     // Everything that can fail without leaving anything behind happens first,
     // so the directory is made only once nothing before it can refuse.
-    let installed = Installed::probed(host)?;
+    let installed = Installed::for_a_refusal(host)?;
     let claude = probe::claude_bin(host)?;
     let dir = holdings::pending_login_dir(host, host.now())?;
     let store = probe::store_for_profile(host, &dir)?;

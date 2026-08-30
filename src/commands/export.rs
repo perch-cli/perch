@@ -34,7 +34,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    let installed = crate::probe::Installed::probed_or_absent(host);
+    let installed = crate::probe::Installed::for_a_report(host);
 
     let mut landed = None;
     let written = write_the_export(

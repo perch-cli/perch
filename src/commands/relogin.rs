@@ -54,7 +54,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
 
     // Asked before the login rather than after: a Profile Perch may not write
     // to is one no browser round trip was going to repair.
-    let installed = Installed::probed(host)?;
+    let installed = Installed::for_a_refusal(host)?;
     let landing_in_the_default_profile = will_land_in_the_default_profile(&registry, &account);
     live::refuse_while_anything_is_running(
         host,
