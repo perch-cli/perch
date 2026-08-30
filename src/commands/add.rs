@@ -17,7 +17,7 @@ use crate::holdings;
 use crate::host::Host;
 use crate::login::{self, Produced};
 use crate::name;
-use crate::name::{NO_GROUP, NameKind};
+use crate::name::NO_GROUP;
 use crate::probe::{Identity, Store};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
@@ -46,18 +46,10 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
-    if let Some(alias) = &args.alias {
-        registry.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, None)?;
-    }
-    // Its shape only, and not whether it is free: naming a Group here *joins*
-    // one, and `ensure_group` declares it if nobody has. The half of the check
-    // that still applies — that it is not an Alias — is the pair check below.
-    if let Some(group) = &args.group {
-        name::validate(NameKind::Group, group)?;
-    }
-    // And the pair against each other, which no check of one name can see: a
-    // command setting both at once could otherwise plant the collision.
-    registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
+    registry.refuse(registry::Claim::Adding {
+        alias: args.alias.as_deref(),
+        group: args.group.as_deref(),
+    })?;
     if args.group.is_none() && !args.no_group && !host.is_interactive() {
         return Err(PerchError::Invalid(
             "There is no terminal to confirm the Group on. Pass `--group <name>` \
@@ -76,7 +68,10 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // revert whatever ran meanwhile (ADR a-switch-is-written-down-first).
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
     refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
-    registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
+    registry.refuse(registry::Claim::Adding {
+        alias: args.alias.as_deref(),
+        group: group.as_deref(),
+    })?;
 
     // Naming a Group on `add` declares it, so an Account is never in a Group
     // `perch group list` cannot show. The declared spelling is what is recorded,
@@ -237,15 +232,18 @@ fn resolve_group(
     }
 
     // Only offered when it would be a usable Group name: an organization Perch
-    // would go on to refuse is no help as a default. Both halves of the
-    // refusal, or accepting the offer re-asks the same question for ever.
+    // would go on to refuse is no help as a default, and accepting the offer
+    // would re-ask the same question for ever.
     let offered = identity
         .organization_name
         .as_deref()
         .and_then(name::offerable_name)
         .filter(|name| {
             registry
-                .refuse_taken_names(args.alias.as_deref(), Some(name))
+                .refuse(registry::Claim::Adding {
+                    alias: args.alias.as_deref(),
+                    group: Some(name),
+                })
                 .is_ok()
         });
 
@@ -278,9 +276,10 @@ fn resolve_group(
 
         match &chosen {
             None => return Ok(None),
-            Some(name) => match name::validate(NameKind::Group, name)
-                .and_then(|()| registry.refuse_taken_names(args.alias.as_deref(), Some(name)))
-            {
+            Some(name) => match registry.refuse(registry::Claim::Adding {
+                alias: args.alias.as_deref(),
+                group: Some(name),
+            }) {
                 Ok(()) => return Ok(chosen),
                 Err(err) => say::line(out, &format!("{err}"))?,
             },
