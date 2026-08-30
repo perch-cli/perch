@@ -108,16 +108,15 @@ pub struct Export {
 
 /// Wiped when it goes out of scope: this is the one shape in Perch carrying
 /// every Credential on the machine at once, and it lives for the whole of an
-/// Export or an Import rather than for a call. Only the two maps that hold
-/// secrets. Hand-written rather than derived, because `ZeroizeOnDrop` would want
+/// Export or an Import rather than for a call. Only the payload maps.
+/// Hand-written rather than derived, because `ZeroizeOnDrop` would want
 /// `Registry` to be `Zeroize`, which is not what it should become for a derive.
 impl Drop for Export {
     fn drop(&mut self) {
-        for held in self.credentials.values_mut() {
-            held.zeroize();
-        }
-        for held in self.identity_files.values_mut() {
-            held.zeroize();
+        for payload in self.payloads_mut() {
+            for held in payload.values_mut() {
+                held.zeroize();
+            }
         }
     }
 }
@@ -129,13 +128,13 @@ impl std::fmt::Debug for Export {
     /// [`crate::probe::Credential`] is — a derived one prints every field, and a
     /// formatting specifier is all that stands between these values and a log.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Export")
-            .field("version", &self.version)
-            .field("registry", &self.registry)
-            .field("credentials for", &self.credentials.keys())
-            .field("identity files for", &self.identity_files.keys())
-            .finish()
+        let mut said = formatter.debug_struct("Export");
+        said.field("version", &self.version)
+            .field("registry", &self.registry);
+        for (what, held) in self.payloads() {
+            said.field(what, &held.keys());
+        }
+        said.finish()
     }
 }
 
@@ -260,6 +259,22 @@ fn read_the_identity_file(host: &dyn Host, account: &Account) -> Option<String> 
 }
 
 impl Export {
+    /// Every per-Account payload, under the noun a sentence about it uses. The one
+    /// list of the maps holding secrets: what has to be true of each — wiped on
+    /// drop, redacted in `Debug`, sized before sealing, validated against the
+    /// Account list — walks this rather than naming the fields again.
+    pub fn payloads(&self) -> [(&'static str, &BTreeMap<String, String>); 2] {
+        [
+            ("a Credential", &self.credentials),
+            ("a `.claude.json`", &self.identity_files),
+        ]
+    }
+
+    /// The same maps, for the wipe.
+    fn payloads_mut(&mut self) -> [&mut BTreeMap<String, String>; 2] {
+        [&mut self.credentials, &mut self.identity_files]
+    }
+
     /// How many Accounts traveled in it.
     pub fn accounts(&self) -> usize {
         self.registry.accounts.len()
@@ -332,9 +347,9 @@ impl Wiping {
     /// about "a little". Growing is still handled, because a guess is a guess.
     fn with_room_for(export: &Export) -> Self {
         let carried: usize = export
-            .credentials
-            .values()
-            .chain(export.identity_files.values())
+            .payloads()
+            .iter()
+            .flat_map(|(_, held)| held.values())
             .map(String::len)
             .sum();
         Self {
