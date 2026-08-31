@@ -316,9 +316,13 @@ fn offer_an_export(
     // The Export's own refusals are about the Export, and every one of them is
     // true. None says what the person typing `perch holdings purge` is waiting to
     // hear, which is whether the Purge happened.
-    export::write_the_export(host, perch, registry, &path, landed, installed, out)
-        .map_err(|error| error.with_note(RUN_IT_AGAIN))?;
-    Ok(())
+    let noted = |error: PerchError| error.with_note(RUN_IT_AGAIN);
+    let mut destination = export::Destination::for_an_export(host, &path).map_err(noted)?;
+    let written = export::write_the_export(host, perch, registry, &mut destination, installed, out);
+    // Read off the Destination whether the call refused or not: the bytes land
+    // before the report, and a terminal that has gone away fails the report.
+    *landed = destination.landed().map(Path::to_path_buf);
+    written.map_err(noted)
 }
 
 /// A path typed at a prompt, where a leading `~/` means what everybody who types
