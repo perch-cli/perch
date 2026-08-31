@@ -94,12 +94,19 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
 
     let installed = Installed::for_a_report(host);
 
-    live::refuse_while_anything_is_running(
-        host,
-        &account,
-        why_the_default_profile(&consequence),
-        &installed,
-    )?;
+    // The liveness first, then the hold — one Standing, so what is re-asked
+    // after the question is what was asked before it.
+    let mut standing = wait::Standing::of()
+        .and(|_: &mut crate::lock::Held<'_>| {
+            live::refuse_while_anything_is_running(
+                host,
+                &account,
+                why_the_default_profile(&consequence),
+                &installed,
+            )
+        })
+        .and(|perch| still_ours(perch, "removed"));
+    standing.establish(&mut perch)?;
 
     let crossed = wait::across_unless_declined(
         &mut perch,
@@ -111,15 +118,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
                 },
             )
         },
-        |perch| {
-            live::refuse_while_anything_is_running(
-                host,
-                &account,
-                why_the_default_profile(&consequence),
-                &installed,
-            )?;
-            still_ours(perch, "removed")
-        },
+        |perch| standing.establish(perch),
     )?;
     let Some(((), (), fresh)) = crossed else {
         return say::line(out, "Nothing was removed.");

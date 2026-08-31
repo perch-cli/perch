@@ -5,7 +5,7 @@
 //! the door: a command hands over the question and the re-asks the wait made
 //! stale, and only a run of both, in that order, yields a [`Fresh`]. Which
 //! preconditions go stale, and in what order to re-take them, stays each
-//! command's own.
+//! command's own — said once, as a [`Standing`] both sides of the wait run.
 
 use crate::error::Result;
 
@@ -21,6 +21,34 @@ impl Fresh {
     #[cfg(test)]
     pub fn for_a_test() -> Self {
         Fresh(())
+    }
+}
+
+/// The preconditions a question lets go stale, named once: the command
+/// establishes them before it asks, and hands the same value to the wait as
+/// its re-establish — the same checks, in the same order, because there is
+/// only one of it.
+pub struct Standing<'a, S> {
+    checks: Vec<Check<'a, S>>,
+}
+
+/// One precondition, asked against whatever the command is holding.
+type Check<'a, S> = Box<dyn FnMut(&mut S) -> Result<()> + 'a>;
+
+impl<'a, S> Standing<'a, S> {
+    pub fn of() -> Standing<'a, S> {
+        Standing { checks: Vec::new() }
+    }
+
+    /// The next check, in the order the command takes and re-takes them.
+    pub fn and(mut self, check: impl FnMut(&mut S) -> Result<()> + 'a) -> Standing<'a, S> {
+        self.checks.push(Box::new(check));
+        self
+    }
+
+    /// Every check, in order.
+    pub fn establish(&mut self, holding: &mut S) -> Result<()> {
+        self.checks.iter_mut().try_for_each(|check| check(holding))
     }
 }
 
