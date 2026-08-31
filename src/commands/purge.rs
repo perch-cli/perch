@@ -63,12 +63,20 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
 
     let installed = Installed::for_a_report(host);
 
-    purge::refuse_while_anything_is_running(host, &registry, &installed)?;
+    let mut holding = (perch, registry);
+    // The hold first, the other way round from `perch remove`: a registry this
+    // Perch may no longer write is one it may no longer act on either.
+    let mut standing = wait::Standing::of()
+        .and(|(perch, _): &mut (crate::lock::Held<'_>, Registry)| still_ours(perch, "purged"))
+        .and(|(_, registry)| purge::refuse_while_anything_is_running(host, registry, &installed));
+    // Before the offer as well as after the question, because the ask up front
+    // is what stops five questions to somebody this will refuse.
+    standing.establish(&mut holding)?;
 
     say::line(
         out,
         &what_will_go(
-            &registry,
+            &holding.1,
             &home,
             purge::profiles_held(host).unwrap_or(0),
             crate::commands::service::is_there(host),
@@ -79,7 +87,6 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // returning: `write_the_export` reports after the write, and a terminal that
     // has gone away fails that.
     let mut exported = None;
-    let mut holding = (perch, registry);
     let crossed = wait::across_unless_declined(
         &mut holding,
         |(perch, registry)| {
@@ -92,15 +99,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
                 false => wait::Asked::Declined,
             })
         },
-        |(perch, registry)| {
-            // The hold first, the other way round from `perch remove`: a
-            // registry this Perch may no longer write is one it may no longer
-            // act on either.
-            still_ours(perch, "purged")?;
-            // First *and* last, because the ask before the offer is what stops
-            // five questions to somebody this will refuse.
-            purge::refuse_while_anything_is_running(host, registry, &installed)
-        },
+        |holding| standing.establish(holding),
     );
     let (mut perch, registry) = holding;
     // Every failure out of the wait and on from it carries the whereabouts of

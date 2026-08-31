@@ -83,6 +83,14 @@ pub fn write_the_export(
         ));
     }
 
+    // Liveness deliberately not among these: nothing here writes a Profile.
+    // The hold is — sealing a copy another `perch` has added to since the
+    // prompts writes a file claiming to be everything Perch holds while partial.
+    let mut standing = wait::Standing::of()
+        .and(|_: &mut crate::lock::Held<'_>| destination.still_free(host))
+        .and(|perch| still_ours(perch, "exported"));
+    standing.establish(perch)?;
+
     let ((export, sealed), (), fresh) = wait::across(
         perch,
         |_| {
@@ -91,15 +99,9 @@ pub fn write_the_export(
             let sealed = export::seal(&export, &passphrase)?;
             Ok((export, sealed))
         },
-        // Liveness deliberately not among these: nothing here writes a Profile.
-        |perch| {
-            destination.still_free(host)?;
-            // And the hold: the registry was read before the prompts, and
-            // sealing a copy another `perch` has since added to writes a file
-            // presenting itself as *everything* Perch holds while being partial.
-            still_ours(perch, "exported")
-        },
+        |perch| standing.establish(perch),
     )?;
+    drop(standing);
     destination.write(host, &sealed, &fresh)?;
 
     report(out, destination.path(), &export)
