@@ -414,9 +414,8 @@ fn asked(host: &dyn Host, findings: &mut Vec<Finding>) -> [Stood; REACHED.len()]
 fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
     let mut said = Vec::new();
     let the_column = crate::column::Labeled::of(0, 14);
-    let column = move |name: &str, value: String| {
-        the_column.row(name, &crate::host::Shown::of(&value))
-    };
+    let column =
+        move |name: &str, value: String| the_column.row(name, &crate::host::Shown::of(&value));
 
     said.push(match seen.findings.is_empty() {
         true => column("Findings", "nothing Perch would refuse over".to_string()),

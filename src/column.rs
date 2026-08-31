@@ -141,7 +141,9 @@ mod tests {
     fn a_labeled_row_is_padded_in_cells_like_every_other_column() {
         let mut written = Vec::new();
         let labeled = Labeled::the_account_column();
-        labeled.write(&mut written, "作業", &Shown::of("Overflow Ltd")).unwrap();
+        labeled
+            .write(&mut written, "作業", &Shown::of("Overflow Ltd"))
+            .unwrap();
         let line = String::from_utf8(written).unwrap();
         assert_eq!(
             line.find("Overflow").unwrap(),
