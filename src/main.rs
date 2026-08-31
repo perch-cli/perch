@@ -286,25 +286,112 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
     }
 }
 
-/// Whether this command comes after a registry migration.
-///
-/// Four do not: each is run when the machine is already misbehaving, and each
-/// promises at `--help` to touch nothing Perch holds. A version carried forward
-/// past a Probe, or past the Triage handing one over, is a finding it destroyed.
-fn migrates(command: &Command) -> bool {
-    !matches!(
-        command,
-        Command::Version | Command::Upgrade(_) | Command::Probe(_) | Command::Triage(_)
-    )
+/// Everything `main` has to know about one command before running it, stated
+/// by the arm that builds it: what runs, whether the registry comes forward
+/// first, and whether the run is written down. One place per command, so a new
+/// command cannot get one of the three right and another silently wrong.
+struct Orders {
+    migrates: bool,
+    trailed: bool,
+    run: Box<Run>,
 }
 
-/// Whether this command writes itself down.
-///
-/// Two do not, for one reason: a Probe renders the Trail and a Triage hands one
-/// over, so a line of their own would push what somebody wanted to see out of
-/// the window every time they re-ran it (ADR a-trail-is-evidence).
-fn leaves_a_trail(command: &Command) -> bool {
-    !matches!(command, Command::Probe(_) | Command::Triage(_))
+/// The dispatch itself: given the machine and the terminal, the command's code.
+type Run = dyn FnOnce(&dyn perch::host::Host, &mut dyn Write) -> perch::Result<i32>;
+
+impl Orders {
+    /// The ordinary command: the registry is brought forward first, and the run
+    /// is written into the Trail.
+    fn of(
+        run: impl FnOnce(&dyn perch::host::Host, &mut dyn Write) -> perch::Result<i32> + 'static,
+    ) -> Orders {
+        Orders {
+            migrates: true,
+            trailed: true,
+            run: Box::new(run),
+        }
+    }
+
+    /// Run when the machine is already misbehaving, and promised at `--help`
+    /// to touch nothing Perch holds — so the registry is not brought forward.
+    /// A version carried forward past a Probe, or past the Triage handing one
+    /// over, is a finding it destroyed.
+    fn touching_nothing_perch_holds(mut self) -> Orders {
+        self.migrates = false;
+        self
+    }
+
+    /// A Probe renders the Trail and a Triage hands one over, so a line of
+    /// their own would push what somebody wanted to see out of the window every
+    /// time they re-ran it (ADR a-trail-is-evidence).
+    fn leaving_no_trail(mut self) -> Orders {
+        self.trailed = false;
+        self
+    }
+}
+
+impl Command {
+    fn orders(self) -> Orders {
+        match self {
+            Command::Add(args) => Orders::of(move |host, out| ok(add::run(host, args, out))),
+            // `--unset` needs no reading of its own: clap requires a name unless
+            // it was passed and refuses both together, so the name's absence is
+            // exactly the flag.
+            Command::Alias {
+                target,
+                name,
+                unset: _,
+            } => Orders::of(move |host, out| {
+                ok(alias::run(
+                    host,
+                    match name {
+                        Some(name) => AliasCommand::Set { target, name },
+                        None => AliasCommand::Unset { target },
+                    },
+                    out,
+                ))
+            }),
+            Command::Config { action } => {
+                Orders::of(move |host, out| ok(config::run(host, action, out)))
+            }
+            Command::Disable { target } => Orders::of(move |host, out| {
+                ok(enable::run(host, EnableCommand::Disable { target }, out))
+            }),
+            Command::Enable { target } => Orders::of(move |host, out| {
+                ok(enable::run(host, EnableCommand::Enable { target }, out))
+            }),
+            Command::Group { action } => {
+                Orders::of(move |host, out| ok(group::run(host, action, out)))
+            }
+            Command::Holdings { action } => {
+                Orders::of(move |host, out| ok(holdings::run(host, action, out)))
+            }
+            Command::List(args) => Orders::of(move |host, out| ok(list::run(host, args, out))),
+            Command::Probe(args) => Orders::of(move |host, out| probe::run(host, args, out))
+                .touching_nothing_perch_holds()
+                .leaving_no_trail(),
+            Command::Relogin(args) => {
+                Orders::of(move |host, out| ok(relogin::run(host, args, out)))
+            }
+            Command::Remove(args) => Orders::of(move |host, out| ok(remove::run(host, args, out))),
+            Command::Run(args) => Orders::of(move |host, out| run::run(host, args, out)),
+            Command::Status(args) => Orders::of(move |host, out| ok(status::run(host, args, out))),
+            Command::Switch(args) => Orders::of(move |host, out| ok(switch::run(host, args, out))),
+            Command::Triage(args) => Orders::of(move |host, out| triage::run(host, args, out))
+                .touching_nothing_perch_holds()
+                .leaving_no_trail(),
+            Command::Upgrade(args) => Orders::of(move |host, out| upgrade::run(host, args, out))
+                .touching_nothing_perch_holds(),
+            Command::Version => Orders::of(move |host, out| ok(version::run(host, out)))
+                .touching_nothing_perch_holds(),
+            // A `check` reports what it decided, so a scheduler tells a Switch
+            // from a figure it could not read without parsing the line
+            // (ADR a-watcher-knob-is-arithmetic).
+            Command::Watcher { action } => {
+                Orders::of(move |host, out| watcher::run(host, action, out))
+            }
+        }
+    }
 }
 
 fn main() {
@@ -328,62 +415,20 @@ fn main() {
 
     let cli = Cli::parse();
 
+    let orders = cli.command.orders();
+
     // Not the command's outcome, deliberately (ADR a-registry-comes-forward): an
     // older registry is read correctly either way, so a lock somebody else holds
     // costs the write-back alone and the next run takes it.
-    if migrates(&cli.command) {
+    if orders.migrates {
         let _ = perch::commands::bring_the_registry_forward(&host);
     }
 
     // After the parse, so a line that was never a command is not written down,
     // and before the dispatch, so a command that hangs has said it started.
-    let invocation = leaves_a_trail(&cli.command).then(|| trail::began(&host, &typed));
+    let invocation = orders.trailed.then(|| trail::began(&host, &typed));
 
-    let outcome = match cli.command {
-        Command::Add(args) => ok(add::run(&host, args, &mut out)),
-        // `--unset` needs no reading of its own: clap requires a name unless
-        // it was passed and refuses both together, so the name's absence is
-        // exactly the flag.
-        Command::Alias {
-            target,
-            name,
-            unset: _,
-        } => ok(alias::run(
-            &host,
-            match name {
-                Some(name) => AliasCommand::Set { target, name },
-                None => AliasCommand::Unset { target },
-            },
-            &mut out,
-        )),
-        Command::Config { action } => ok(config::run(&host, action, &mut out)),
-        Command::Disable { target } => ok(enable::run(
-            &host,
-            EnableCommand::Disable { target },
-            &mut out,
-        )),
-        Command::Enable { target } => ok(enable::run(
-            &host,
-            EnableCommand::Enable { target },
-            &mut out,
-        )),
-        Command::Group { action } => ok(group::run(&host, action, &mut out)),
-        Command::Holdings { action } => ok(holdings::run(&host, action, &mut out)),
-        Command::List(args) => ok(list::run(&host, args, &mut out)),
-        Command::Probe(args) => probe::run(&host, args, &mut out),
-        Command::Relogin(args) => ok(relogin::run(&host, args, &mut out)),
-        Command::Remove(args) => ok(remove::run(&host, args, &mut out)),
-        Command::Run(args) => run::run(&host, args, &mut out),
-        Command::Status(args) => ok(status::run(&host, args, &mut out)),
-        Command::Switch(args) => ok(switch::run(&host, args, &mut out)),
-        Command::Triage(args) => triage::run(&host, args, &mut out),
-        Command::Upgrade(args) => upgrade::run(&host, args, &mut out),
-        Command::Version => ok(version::run(&host, &mut out)),
-        // A `check` reports what it decided, so a scheduler tells a Switch
-        // from a figure it could not read without parsing the line
-        // (ADR a-watcher-knob-is-arithmetic).
-        Command::Watcher { action } => watcher::run(&host, action, &mut out),
-    };
+    let outcome = (orders.run)(&host, &mut out);
 
     let code = ended_as(outcome, &mut out);
     if let Some(invocation) = &invocation {
@@ -405,15 +450,17 @@ mod tests {
     fn neither_a_probe_nor_a_triage_migrates_the_registry_or_writes_itself_down() {
         for line in [["perch", "probe"], ["perch", "triage"]] {
             let command = Cli::try_parse_from(line).expect("the line parses").command;
-            assert!(!migrates(&command), "{line:?}");
-            assert!(!leaves_a_trail(&command), "{line:?}");
+            let orders = command.orders();
+            assert!(!orders.migrates, "{line:?}");
+            assert!(!orders.trailed, "{line:?}");
         }
 
-        let list = Cli::try_parse_from(["perch", "list"])
+        let orders = Cli::try_parse_from(["perch", "list"])
             .expect("the line parses")
-            .command;
-        assert!(migrates(&list));
-        assert!(leaves_a_trail(&list), "every other command is written down");
+            .command
+            .orders();
+        assert!(orders.migrates);
+        assert!(orders.trailed, "every other command is written down");
     }
 
     #[test]
@@ -612,9 +659,9 @@ mod tests {
     /// a read of the registry and a write of it under the lock.
     #[test]
     fn the_two_commands_for_a_misbehaving_machine_skip_the_migration() {
-        assert!(!migrates(&Command::Version));
-        assert!(!migrates(&Command::Upgrade(UpgradeArgs::default())));
-        assert!(migrates(&Command::Status(StatusArgs::default())));
+        assert!(!Command::Version.orders().migrates);
+        assert!(!Command::Upgrade(UpgradeArgs::default()).orders().migrates);
+        assert!(Command::Status(StatusArgs::default()).orders().migrates);
     }
 
     /// The fixtures are a Target and the three flags that would narrow an
