@@ -194,6 +194,67 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
 }
 
 #[test]
+fn installing_carries_the_claude_code_the_install_resolved_into_the_unit() {
+    let host = linux();
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(result.expect("the service manager answered"), EXIT_OK);
+    let unit = host
+        .read_file(std::path::Path::new(UNIT))
+        .expect("the unit is readable");
+    assert!(
+        unit.contains(r#"Environment="PERCH_CLAUDE_BIN=/usr/bin/claude""#),
+        "the unit hands the Watcher the Claude Code the install resolved: {unit}"
+    );
+    assert!(
+        printed.contains("Claude Code at /usr/bin/claude"),
+        "and the install says which one it carried: {printed}"
+    );
+}
+
+#[test]
+fn an_overridden_claude_code_is_carried_into_the_unit_as_itself() {
+    let host = linux().with_env("PERCH_CLAUDE_BIN", "/somewhere/claude-nightly");
+
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("the service manager answered");
+
+    let unit = host
+        .read_file(std::path::Path::new(UNIT))
+        .expect("the unit is readable");
+    assert!(
+        unit.contains(r#"Environment="PERCH_CLAUDE_BIN=/somewhere/claude-nightly""#),
+        "the override passes through verbatim, as it does everywhere else: {unit}"
+    );
+}
+
+#[test]
+fn an_install_finding_no_claude_code_carries_none_and_says_the_service_will_hold() {
+    // A PATH with no `claude` on it, on a machine that is otherwise arranged.
+    let host = linux().with_env("PATH", "/usr/local/bin");
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(
+        result.expect("Claude Code arriving later is ordinary, not a refusal"),
+        EXIT_OK
+    );
+    let unit = host
+        .read_file(std::path::Path::new(UNIT))
+        .expect("the unit is readable");
+    assert!(
+        !unit.contains("PERCH_CLAUDE_BIN"),
+        "nothing resolved, so nothing is baked in: {unit}"
+    );
+    assert!(
+        printed.contains("hold") && printed.contains("perch watcher install"),
+        "the install says the Service will hold, and names the repair: {printed}"
+    );
+}
+
+#[test]
 fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
     let host = watched()
         .with_platform(Platform::Other)

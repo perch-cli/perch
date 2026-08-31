@@ -278,13 +278,17 @@ pub enum Verdict {
     NoLogin { version: String, store: Store },
 }
 
+/// The variable naming Claude Code outright: an override at a terminal, and
+/// what a unit carries so a Service resolves the same `claude` its installer did.
+pub const CLAUDE_BIN_VAR: &str = "PERCH_CLAUDE_BIN";
+
 /// The Claude Code binary Perch runs, resolved by Perch rather than left to
 /// `Command::new`: Rust appends only `.exe` and never consults `PATHEXT`, so the
 /// `claude.cmd` that `npm i -g` installs works in every shell and would be
 /// invisible to a bare `Command::new("claude")`. `$PERCH_CLAUDE_BIN` overrides
 /// the search and passes through verbatim.
 pub fn claude_bin(host: &dyn Host) -> Result<PathBuf> {
-    if let Some(overridden) = host.env_var("PERCH_CLAUDE_BIN") {
+    if let Some(overridden) = host.env_var(CLAUDE_BIN_VAR) {
         return Ok(PathBuf::from(overridden));
     }
 

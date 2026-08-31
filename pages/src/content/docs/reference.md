@@ -105,7 +105,9 @@ Watcher holding the lock exits 20.
   anybody who wants a different one.
 - `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch walks
   `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd` an npm
-  install leaves works from every shell.
+  install leaves works from every shell. `perch watcher install` resolves
+  `claude` the same way and writes the answer into the unit under this name,
+  because the service manager's own `PATH` is not yours.
 - `$PERCH_NO_UPGRADE_CHECK` stops `perch version` asking whether a newer
   Release exists. Checked before the request, so nothing goes out. That check is
   the only place Perch looks for its own updates; `perch status` never touches

@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `prefer-fable` is a Setting a Scope carries, off by default, and the registry moves to version 6 for it. On, the Scope's one ranking — the Cycle's, the Watcher's and the Listing's — becomes two tiers: the Accounts that can serve Fable now come first, ordered by the Fable weekly window so Fable drains evenly across the Scope before anything else is spent, and the rest follow, ordered by their fullest window that is not Fable's — so when Fable is spent everywhere, the Watcher still moves once onto the best of what remains and then holds and says so. A Strategy orders within a tier and never across one, and the landing line names `the most Fable left` where that is what won. The Setting keys on the `7-day-fable` window by name; a Scope where it is on and no observed Account reports that window is told so by the listing and ranks on Headroom alone rather than silently behaving as if the Setting were off (ADR fable-is-spent-first)
 
+### Fixed
+
+- The unit `perch watcher install` writes now carries the Claude Code the
+  install resolved, as `PERCH_CLAUDE_BIN`. A service manager starts the Watcher
+  with almost no PATH of its own — launchd's is `/usr/bin:/bin:/usr/sbin:/sbin`
+  — so on a machine whose `claude` lives anywhere else the Service held on
+  "no `claude` was found on PATH" from its first round, while `perch watcher
+  status` and `perch probe` reported health
+  ([#406](https://github.com/perch-cli/perch/issues/406))
+
+### Changed
+
+- `perch watcher install` now says which Claude Code the unit carries — or that
+  it carries none and the Service will hold until Claude Code is installed and
+  the install is run again
+
 ## [0.3.3](https://github.com/perch-cli/perch/compare/v0.3.2...v0.3.3) - 2026-08-31
 
 ### Other
