@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5](https://github.com/perch-cli/perch/compare/v0.3.4...v0.3.5) - 2026-08-31
+
+### Fixed
+
+- the help names every Setting a Scope carries, and get pages them ([#416](https://github.com/perch-cli/perch/pull/416))
+- a start waits for the booted-out job to leave before bootstrapping ([#415](https://github.com/perch-cli/perch/pull/415))
+- an install carries the first claude that runs where the Service runs ([#413](https://github.com/perch-cli/perch/pull/413))
+
 ### Fixed
 
 - The Service restart `perch upgrade` performs — and every install over a
