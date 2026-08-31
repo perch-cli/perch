@@ -465,7 +465,19 @@ impl Fullest {
     /// Never read as empty: "no figure" and "plenty of room" are opposite pieces of
     /// advice.
     pub fn of(account: &Account) -> Option<Fullest> {
-        crate::cycle::fullest_window_of(account).map(|window| Fullest {
+        Self::read(crate::cycle::fullest_window_of(account))
+    }
+
+    /// The same for a *candidate*, judged by the Scope's Measure: under Fable
+    /// First a fall-through candidate is measured on the windows its tier ranks
+    /// on, so a full Fable weekly does not set aside the one place a
+    /// Fable-spent Scope can still go (ADR fable-is-spent-first).
+    pub fn measured(account: &Account, measure: crate::cycle::Measure) -> Option<Fullest> {
+        Self::read(crate::cycle::measured_fullest_of(account, measure))
+    }
+
+    fn read(window: Option<&crate::registry::WindowUtilization>) -> Option<Fullest> {
+        window.map(|window| Fullest {
             window: window.window.clone(),
             used_percent: window.used_percent,
         })
@@ -2047,6 +2059,41 @@ mod tests {
             set_aside.because.contains("never observed"),
             "{}",
             set_aside.because
+        );
+    }
+
+    /// The window a fall-through candidate is judged on: with the Fable weekly
+    /// spent, the Margin has to read the windows its tier ranks on, or the one
+    /// place a Fable-spent Scope can still go is set aside for a full window
+    /// nothing there would spend from.
+    #[test]
+    fn a_fall_through_candidate_is_measured_without_the_fable_weekly() {
+        let spare = crate::cycle::tests::account(
+            "spare@example.com",
+            vec![
+                crate::registry::WindowUtilization {
+                    window: "5-hour".to_string(),
+                    used_percent: 20.0,
+                    resets_at: None,
+                },
+                crate::registry::WindowUtilization {
+                    window: "7-day-fable".to_string(),
+                    used_percent: 100.0,
+                    resets_at: None,
+                },
+            ],
+        );
+
+        assert_eq!(
+            Fullest::of(&spare).expect("a figure").used_percent,
+            100.0,
+            "every window still decides the Account's own fullness"
+        );
+        let measured = Fullest::measured(&spare, crate::cycle::Measure::FableFirst)
+            .expect("its tier has a figure");
+        assert_eq!(
+            (measured.window.as_str(), measured.used_percent),
+            ("5-hour", 20.0)
         );
     }
 

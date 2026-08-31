@@ -412,6 +412,11 @@ fn render_human(
     // (ADR a-switch-is-written-down-first).
     footer.extend(registry.active().a_switch_in_flight());
     footer.extend(reserve_lines(registry, scope, sections, now));
+    footer.extend(
+        sections
+            .iter()
+            .filter_map(|section| section.preference_note(registry)),
+    );
     if matches!(scope, Scope::Ungrouped) {
         // After the Reserve, because it qualifies it: the count above is over
         // Accounts a Cycle may move between, and this is the sentence saying

@@ -503,7 +503,7 @@ pub(crate) fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
 /// Written down rather than read off `CURRENT_VERSION`: a step that named the
 /// current version would land on it whatever it became, so a shape moving with
 /// no step to carry it would compile.
-const CARRIED_TO: u32 = 5;
+const CARRIED_TO: u32 = 6;
 
 // Short of the shape this build reads, `load` deserializes what the step left
 // behind as a shape it is not. Reading `CURRENT_VERSION` above would make this
@@ -642,7 +642,7 @@ mod tests {
             r#"{"version":4,"accounts":[],"groups":{"work":{"strategy":"soonest-reset","watcher_may_act":true,"watcher_threshold_percent":90}}}"#,
         );
 
-        assert_eq!(moved["version"], Value::from(5));
+        assert_eq!(moved["version"], Value::from(CARRIED_TO));
         assert_eq!(moved["groups"]["work"]["watcher_threshold_percent"], 90);
         assert_eq!(
             moved["groups"]["work"]["watcher_margin_percent"],
@@ -657,6 +657,29 @@ mod tests {
                 .watcher_margin_percent,
             crate::config::DEFAULT_WATCHER_MARGIN_PERCENT,
             "a Scope that never said is the Scope the constant is for"
+        );
+    }
+
+    /// Version 6 moved a Setting rather than a name, so the step is the stamp:
+    /// a Scope that never said `prefer-fable` is read at the compiled-in
+    /// default when the tree is built.
+    #[test]
+    fn a_version_5_registry_comes_forward_preferring_nothing() {
+        let moved = forwarded(
+            r#"{"version":5,"accounts":[],"groups":{"work":{"strategy":"soonest-reset","watcher_may_act":true}}}"#,
+        );
+
+        assert_eq!(moved["version"], Value::from(CARRIED_TO));
+        assert_eq!(moved["groups"]["work"]["prefer_fable"], Value::Null);
+
+        let read: crate::registry::Registry =
+            serde_json::from_value(moved).expect("the shape this build reads");
+        assert!(
+            !read
+                .group("work")
+                .expect("the Group came forward")
+                .prefer_fable,
+            "a Scope that never said is the Scope the default is for"
         );
     }
 
@@ -998,6 +1021,7 @@ mod tests {
         assert_eq!(
             forwarded(V0_2_0)["groups"]["work"],
             serde_json::json!({
+                "prefer_fable": false,
                 "strategy": "most-headroom",
                 "watcher_margin_percent": 10,
                 "watcher_may_act": true,
@@ -1013,6 +1037,7 @@ mod tests {
             serde_json::json!({
                 "interchangeable": true,
                 "settings": {
+                    "prefer_fable": false,
                     "strategy": "soonest-reset",
                     "watcher_margin_percent": 10,
                     "watcher_may_act": false,
@@ -1055,6 +1080,7 @@ mod tests {
         assert_eq!(
             moved["groups"]["work"],
             serde_json::json!({
+                "prefer_fable": false,
                 "strategy": "most-headroom",
                 "watcher_margin_percent": 10,
                 "watcher_may_act": true,

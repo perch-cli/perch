@@ -317,15 +317,18 @@ impl Candidates {
             .collect()
     }
 
-    /// The same candidates, carrying the figures a Refresh has just written.
+    /// The same candidates, carrying the figures a Refresh has just written,
+    /// each judged by the Scope's Measure.
     ///
     /// One gone from the registry between the walk and here carries none, which is
     /// what the Margin sets aside — the same answer a candidate never read gets.
-    pub fn refreshed(self, registry: &Registry) -> Vec<Considered> {
+    pub fn refreshed(self, registry: &Registry, measure: cycle::Measure) -> Vec<Considered> {
         self.0
             .into_iter()
             .map(|candidate| Considered {
-                fullest: registry.account(&candidate.email).and_then(Fullest::of),
+                fullest: registry
+                    .account(&candidate.email)
+                    .and_then(|account| Fullest::measured(account, measure)),
                 email: candidate.email,
                 named: candidate.named,
             })
@@ -771,7 +774,7 @@ mod tests {
             .expect("the spare is held")
             .utilization = ungrouped("spare@example.com", 70.0).utilization;
 
-        let refreshed = candidates.refreshed(&registry);
+        let refreshed = candidates.refreshed(&registry, cycle::Measure::Worst);
 
         assert_eq!(
             refreshed
@@ -791,7 +794,9 @@ mod tests {
         registry.forget("spare@example.com");
 
         assert!(
-            candidates.refreshed(&registry)[0].fullest.is_none(),
+            candidates.refreshed(&registry, cycle::Measure::Worst)[0]
+                .fullest
+                .is_none(),
             "no figure is what the Margin sets aside"
         );
     }

@@ -13,6 +13,7 @@ complete over SSH and in CI.
 | Key | Said about | Values | Default |
 | --- | ---------- | ------ | ------- |
 | `strategy` | any Scope | `most-headroom`, `soonest-reset` | `most-headroom` |
+| `prefer-fable` | any Scope | `true`, `false` | `false` |
 | `watcher-may-act` | any Scope | `true`, `false` | `false` |
 | `watcher-threshold-percent` | any Scope | 0–100 | `80` |
 | `watcher-margin-percent` | any Scope | 1–100 | `10` |
@@ -42,14 +43,17 @@ $ perch config set watcher-threshold-percent 70
 $ perch config get
 ungrouped interchangeable true
 ungrouped strategy most-headroom
+ungrouped prefer-fable false
 ungrouped watcher-may-act false
 ungrouped watcher-threshold-percent 80
 ungrouped watcher-margin-percent 10
 personal strategy most-headroom
+personal prefer-fable false
 personal watcher-may-act false
 personal watcher-threshold-percent 80
 personal watcher-margin-percent 10
 work strategy soonest-reset
+work prefer-fable false
 work watcher-may-act false
 work watcher-threshold-percent 70
 work watcher-margin-percent 10
@@ -94,14 +98,35 @@ The **strategy** is which Account a Cycle prefers when more than one would
 serve. `most-headroom` takes the one with the most room left; `soonest-reset`
 takes the one whose fullest Quota Window comes back soonest, so quota that was
 about to be thrown away is spent rather than wasted. How headroom is *measured*
-is not configurable — it is always the worst window — so a strategy reorders the
-Accounts that have room and can never promote an exhausted one.
+is always the worst window, so a strategy reorders the Accounts that have room
+and can never promote an exhausted one. [`prefer-fable`](#spending-fable-first)
+adds a tier on top of that measurement, and a strategy then orders within a
+tier.
 
 A strategy says which figure to prefer, not which figures to invent. Cached
 figures do not always carry a reset time, and `soonest-reset` ranks an Account
 whose figure does not above nothing at all: an Account that says when it comes
 back is preferred to one that does not, and where none of them says, the Cycle
 falls back to the room it can see and says that is what it did.
+
+## Spending Fable first
+
+`prefer-fable` makes a Scope spend Fable before anything else. Off — the
+default — nothing changes. On, the ranking becomes two tiers: the Accounts that
+can serve a Fable request right now come first, ordered by how much of their
+weekly Fable window is left, so Fable drains evenly across the Scope before
+anything else is touched. Everything else follows, ordered by its fullest
+window that is not Fable's — so when Fable is spent everywhere, the watcher
+still moves you once onto the best of what remains and then holds. `perch list`
+shows the same order the watcher acts on.
+
+The preference keys on the window Anthropic reports for Fable. If it is on and
+no observed Account reports that window — after a model rename, say — the
+listing says so, and Accounts rank on headroom alone rather than the Setting
+silently behaving as if it were off.
+
+Perch supplies Fable *capacity* only: which model a session actually uses stays
+with the session.
 
 ## The watcher's three
 

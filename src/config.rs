@@ -24,6 +24,7 @@ use crate::say;
 pub enum Setting {
     Interchangeable,
     Strategy,
+    PreferFable,
     WatcherMayAct,
     WatcherThresholdPercent,
     WatcherMarginPercent,
@@ -32,9 +33,10 @@ pub enum Setting {
 /// Every Setting there is, in the order every surface offers them. The
 /// declaration a Scope is Cycled within at all comes first, because the rest of
 /// the page says how it is Cycled.
-pub const SETTINGS: [Setting; 5] = [
+pub const SETTINGS: [Setting; 6] = [
     Setting::Interchangeable,
     Setting::Strategy,
+    Setting::PreferFable,
     Setting::WatcherMayAct,
     Setting::WatcherThresholdPercent,
     Setting::WatcherMarginPercent,
@@ -45,6 +47,7 @@ impl Setting {
         match self {
             Setting::Interchangeable => "interchangeable",
             Setting::Strategy => "strategy",
+            Setting::PreferFable => "prefer-fable",
             Setting::WatcherMayAct => "watcher-may-act",
             Setting::WatcherThresholdPercent => "watcher-threshold-percent",
             Setting::WatcherMarginPercent => "watcher-margin-percent",
@@ -107,6 +110,7 @@ impl Setting {
         match self {
             Setting::Interchangeable => registry.ungrouped.interchangeable.to_string(),
             Setting::Strategy => settings.strategy.as_str().to_string(),
+            Setting::PreferFable => settings.prefer_fable.to_string(),
             Setting::WatcherMayAct => settings.watcher_may_act.to_string(),
             Setting::WatcherThresholdPercent => settings.watcher_threshold_percent.to_string(),
             Setting::WatcherMarginPercent => settings.watcher_margin_percent.to_string(),
@@ -132,6 +136,7 @@ impl Setting {
         match self {
             Setting::Interchangeable => interchangeable = yes_or_no(self.as_str(), value)?,
             Setting::Strategy => settings.strategy = strategy(value)?,
+            Setting::PreferFable => settings.prefer_fable = yes_or_no(self.as_str(), value)?,
             Setting::WatcherMayAct => settings.watcher_may_act = yes_or_no(self.as_str(), value)?,
             Setting::WatcherThresholdPercent => {
                 settings.watcher_threshold_percent = percentage(self.as_str(), value)?
@@ -190,6 +195,15 @@ impl Setting {
                      however soon it comes back."
                 ),
             },
+            Setting::PreferFable if settings.prefer_fable => format!(
+                "A Cycle {within} now puts the Accounts that can serve Fable \
+                 first, ranked by the room in their Fable weekly window, and \
+                 falls through to the rest — ranked without that window — only \
+                 when Fable is spent everywhere."
+            ),
+            Setting::PreferFable => {
+                format!("A Cycle {within} ranks on Headroom alone, preferring no model.")
+            }
             Setting::WatcherMayAct if settings.watcher_may_act => format!(
                 "`perch watcher run` may Switch {within} on your behalf when \
                  the Account you are on reaches its threshold.{} {ONLY_WHILE_IT_RUNS}",
@@ -467,6 +481,10 @@ pub fn a_margin() -> String {
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub strategy: Strategy,
+    /// Whether this Scope spends Fable before anything else: the Accounts that
+    /// can serve Fable rank first, by their Fable weekly window. Off unless the
+    /// user says otherwise (ADR fable-is-spent-first).
+    pub prefer_fable: bool,
     /// Whether the watcher may Switch within this Scope unattended. Off unless
     /// the user says otherwise: nothing changes underneath somebody because they
     /// did not say it could. Said about the Scope it grants and nowhere else.
@@ -484,6 +502,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             strategy: Strategy::default(),
+            prefer_fable: false,
             watcher_may_act: false,
             watcher_threshold_percent: DEFAULT_WATCHER_THRESHOLD_PERCENT,
             watcher_margin_percent: DEFAULT_WATCHER_MARGIN_PERCENT,

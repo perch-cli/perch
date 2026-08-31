@@ -16,8 +16,8 @@ somebody was starting. Perch cannot know which model the work will use, and the
 two mistakes do not cost the same: a second Account nobody needed costs a Switch,
 and an Account that dies mid-task costs the session. Ranking on what could block
 rather than on what will is the cheaper mistake, and Perch makes it on purpose. A
-Scope naming which of its windows count is the live alternative, and 1.0 does not
-offer one.
+Scope naming which of its windows count is the live alternative, taken up in its
+narrowest form by ADR fable-is-spent-first; 1.0 offers no general one.
 
 Ranking on the five-hour window alone is refused. It is the window you hit first
 and the simplest to explain, and it will switch you onto an Account about to die
