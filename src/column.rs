@@ -45,15 +45,47 @@ pub fn pad_into(out: &mut String, text: &Shown, measured: usize, width: usize) {
     out.extend(std::iter::repeat_n(' ', width.saturating_sub(measured)));
 }
 
-/// How wide the label column is on the surfaces that answer about one Account —
-/// `status`, and `switch` when it says where you landed. They are read one
-/// after the other, so they line up.
-pub const LABEL_WIDTH: usize = 14;
+/// One aligned label column: every label padded to the same number of cells,
+/// behind the same indent, the value after it. A value rather than a helper
+/// per surface, because the width is the agreement between the rows — spelled
+/// at one site, it cannot drift into a second constant or a `format!` that
+/// counts characters.
+#[derive(Clone, Copy)]
+pub struct Labeled {
+    indent: usize,
+    width: usize,
+}
 
-/// Writes a label and a value in that column, for the surfaces that render an
-/// Account as labeled lines.
-pub fn write_labeled(out: &mut dyn Write, label: &str, value: &Shown) -> Result<()> {
-    writeln!(out, "{}{value}", padded(&Shown::of(label), LABEL_WIDTH)).map_err(say::failed)
+impl Labeled {
+    /// The label column of the surfaces that answer about one Account —
+    /// `status`, and the figures under it. They are read one after the other,
+    /// so they line up.
+    pub fn the_account_column() -> Labeled {
+        Labeled {
+            indent: 0,
+            width: 14,
+        }
+    }
+
+    /// A column `width` cells wide, `indent` spaces in.
+    pub fn of(indent: usize, width: usize) -> Labeled {
+        Labeled { indent, width }
+    }
+
+    /// One row of the column.
+    pub fn row(&self, label: &str, value: &Shown) -> String {
+        let label = Shown::of(label);
+        let mut out = String::with_capacity(self.indent + self.width + value.as_str().len());
+        out.extend(std::iter::repeat_n(' ', self.indent));
+        pad_into(&mut out, &label, cells(&label), self.width);
+        out.push_str(value.as_str());
+        out
+    }
+
+    /// The same row, written.
+    pub fn write(&self, out: &mut dyn Write, label: &str, value: &Shown) -> Result<()> {
+        writeln!(out, "{}", self.row(label, value)).map_err(say::failed)
+    }
 }
 
 #[cfg(test)]
@@ -108,12 +140,22 @@ mod tests {
     #[test]
     fn a_labeled_row_is_padded_in_cells_like_every_other_column() {
         let mut written = Vec::new();
-        write_labeled(&mut written, "作業", &Shown::of("Overflow Ltd")).unwrap();
+        let labeled = Labeled::the_account_column();
+        labeled.write(&mut written, "作業", &Shown::of("Overflow Ltd")).unwrap();
         let line = String::from_utf8(written).unwrap();
         assert_eq!(
             line.find("Overflow").unwrap(),
-            LABEL_WIDTH - cells(&Shown::of("作業")) + "作業".len(),
+            14 - cells(&Shown::of("作業")) + "作業".len(),
             "the value starts in the column every other labeled row starts in"
+        );
+    }
+
+    #[test]
+    fn an_indented_column_pads_its_labels_in_cells_too() {
+        assert_eq!(
+            Labeled::of(2, 9).row("作業", &Shown::of("held")),
+            "  作業     held",
+            "two spaces in, then five cells of padding after four of label"
         );
     }
 }

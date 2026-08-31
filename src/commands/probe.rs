@@ -413,10 +413,13 @@ fn asked(host: &dyn Host, findings: &mut Vec<Finding>) -> [Stood; REACHED.len()]
 /// facts under it standing on their own where the judgment is wrong.
 fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
     let mut said = Vec::new();
-    let column = |name: &str, value: String| format!("{name:<14}{value}");
+    let the_column = crate::column::Labeled::of(0, 14);
+    let column = move |name: &str, value: String| {
+        the_column.row(name, &crate::host::Shown::of(&value))
+    };
 
     said.push(match seen.findings.is_empty() {
-        true => "Findings      nothing Perch would refuse over".to_string(),
+        true => column("Findings", "nothing Perch would refuse over".to_string()),
         false => "Findings".to_string(),
     });
     for finding in &seen.findings {
@@ -541,8 +544,9 @@ fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
 
     said.push(String::new());
     said.push("Assumptions".to_string());
+    let verdicts = crate::column::Labeled::of(2, 9);
     for (assumption, held) in REACHED.iter().zip(seen.assumptions) {
-        said.push(format!("  {:<9}{assumption}", held.said()));
+        said.push(verdicts.row(held.said(), &crate::host::Shown::of(assumption)));
     }
 
     said.push(String::new());

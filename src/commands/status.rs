@@ -107,18 +107,19 @@ fn render_human(
         say::line(out, &said)?;
     }
 
-    column::write_labeled(out, "Account", &Shown::of(account.email()))?;
+    let labeled = column::Labeled::the_account_column();
+    labeled.write(out, "Account", &Shown::of(account.email()))?;
     if let Some(organization) = &account.identity.organization_name {
-        column::write_labeled(out, "Organization", &Shown::of(organization))?;
+        labeled.write(out, "Organization", &Shown::of(organization))?;
     }
     if let Some(plan) = &account.plan {
-        column::write_labeled(out, "Plan", &Shown::of(plan))?;
+        labeled.write(out, "Plan", &Shown::of(plan))?;
     }
     // Above the figures, because a Quarantined Account's figures describe quota
     // it cannot spend: the state is the news and the numbers are the detail.
     // Both halves on one line, since one Account means one copy of the repair.
     if let Some(why) = account.quarantine {
-        column::write_labeled(
+        labeled.write(
             out,
             "Quarantine",
             &Shown::of(&format!(
