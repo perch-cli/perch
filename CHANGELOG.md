@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3](https://github.com/perch-cli/perch/compare/v0.3.2...v0.3.3) - 2026-08-31
+
+### Other
+
+- what a wait re-asks is what was asked, because it is one value ([#404](https://github.com/perch-cli/perch/pull/404))
+- a command states its orders once, at the arm that names it ([#403](https://github.com/perch-cli/perch/pull/403))
+- a labeled row has one spelling, and the column does the measuring ([#402](https://github.com/perch-cli/perch/pull/402))
+- where an Export lands is a value, and the value knows which refusal goes stale ([#401](https://github.com/perch-cli/perch/pull/401))
+- a login is placed through one door, and the door keeps the ledger ([#400](https://github.com/perch-cli/perch/pull/400))
+- how much an Account has left is one vocabulary, not a public mirror of a private one ([#399](https://github.com/perch-cli/perch/pull/399))
+- what Scope a word names is derived once, and each command keeps its sentence ([#397](https://github.com/perch-cli/perch/pull/397))
+- a name is claimed in one sentence, and the registry knows which checks apply ([#396](https://github.com/perch-cli/perch/pull/396))
+- what is true of every secret an Export carries is written once ([#395](https://github.com/perch-cli/perch/pull/395))
+- a Refresh turn builds its context once, and nine steps stop carrying it ([#394](https://github.com/perch-cli/perch/pull/394))
+- the wait a round promises is the wait the loop takes, said once ([#393](https://github.com/perch-cli/perch/pull/393))
+- whether a figure still stands is answered once, where the interval lives ([#392](https://github.com/perch-cli/perch/pull/392))
+- the harness runs a command in one place, and a back door says why the front one cannot ([#389](https://github.com/perch-cli/perch/pull/389))
+- what the Watcher says is one voice, not two files trading lines ([#388](https://github.com/perch-cli/perch/pull/388))
+- a question that waits re-establishes what the wait let go stale ([#387](https://github.com/perch-cli/perch/pull/387))
+- a command asks for Claude Code by what it will do, not how it may fail ([#386](https://github.com/perch-cli/perch/pull/386))
+- a Viewing holds the lock a listing never sees ([#385](https://github.com/perch-cli/perch/pull/385))
+- a Store is entered through one door, and the locks stay home ([#384](https://github.com/perch-cli/perch/pull/384))
+
 ### Changed
 
 - The note left when a Profile is taken back out of a directory the command did
