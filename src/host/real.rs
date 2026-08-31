@@ -188,10 +188,27 @@ fn width_of(request: &HttpRequest<'_>) -> usize {
 /// secret travels, so the choice between a pipe and `/dev/null` is one choice
 /// made once.
 fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Execution> {
+    run_under(program, args, stdin, None)
+}
+
+/// [`run`], under exactly the given environment where one is given: cleared
+/// first, so nothing of this process's own leaks into a rehearsal. The spawn
+/// itself lives here, so [`run`]'s bargain about stdin is still made once.
+fn run_under(
+    program: &Path,
+    args: &[&str],
+    stdin: Option<&str>,
+    env: Option<&[(&str, &str)]>,
+) -> std::io::Result<Execution> {
+    let mut command = Command::new(program);
+    if let Some(env) = env {
+        command.env_clear();
+        command.envs(env.iter().copied());
+    }
     // `Command::spawn`'s error carries no path, so the name is added here
     // rather than by each caller. The kind is kept, so anything matching on
     // `NotFound` still does.
-    let mut child = Command::new(program)
+    let mut child = command
         .args(args)
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -676,6 +693,15 @@ impl Keys for RealHost {
 impl Processes for RealHost {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
         Ok(run(Path::new(program), args, None)?)
+    }
+
+    fn exec_under(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<Execution, HostError> {
+        Ok(run_under(Path::new(program), args, None, Some(env))?)
     }
 
     fn exec_interactive(

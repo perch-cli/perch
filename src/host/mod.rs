@@ -689,6 +689,18 @@ pub trait Keys {
 pub trait Processes {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError>;
 
+    /// Runs a program under exactly the given environment, nothing of this
+    /// process's own carried in. How an install rehearses a resolved `claude`
+    /// where the Service will run it: a shim that re-resolves through the
+    /// shell's PATH answers here as it will answer the unit
+    /// (ADR carried-means-rehearsed).
+    fn exec_under(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<Execution, HostError>;
+
     /// Runs a program with the terminal attached and `env` added to its
     /// environment. The one execution Perch does not capture, because both
     /// callers are somebody's session rather than something Perch reads.

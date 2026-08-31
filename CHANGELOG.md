@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Claude Code `perch watcher install` writes into the unit is now the first
+  `claude` on PATH that actually runs under the environment the unit provides —
+  each hit is rehearsed with `--version` under the service manager's own PATH
+  before it is carried. A first hit that re-resolves through the shell's PATH,
+  such as a terminal app's wrapper, exits 127 the moment the Service runs it;
+  it is now passed over and the install says so. When nothing on PATH runs
+  there, the unit carries none and the install names the exit and the
+  `PERCH_CLAUDE_BIN` repair. An explicit `PERCH_CLAUDE_BIN` still passes
+  through verbatim
+  ([#410](https://github.com/perch-cli/perch/issues/410))
+
+### Changed
+
+- `perch watcher install` — and the re-install `perch upgrade` performs — now
+  say when a `claude` was passed over or when none could be carried, naming the
+  path, the exit, and the repair
+
 ## [0.3.4](https://github.com/perch-cli/perch/compare/v0.3.3...v0.3.4) - 2026-08-31
 
 ### Added

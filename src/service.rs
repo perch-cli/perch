@@ -130,6 +130,21 @@ impl Manager {
         }
     }
 
+    /// The PATH the arrangement gives what it runs, for rehearsing a resolved
+    /// `claude` there before it is written into a unit. Fixed values rather than
+    /// asked of the machine: launchd's is pinned, systemd's is its compiled
+    /// default, and a Scheduled Task inherits the user's registry environment,
+    /// which no fixed value stands for (ADR carried-means-rehearsed).
+    pub fn path_for_services(self) -> Option<&'static str> {
+        match self {
+            Manager::LaunchAgent => Some("/usr/bin:/bin:/usr/sbin:/sbin"),
+            Manager::Systemd => {
+                Some("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+            }
+            Manager::ScheduledTask => None,
+        }
+    }
+
     /// Where the unit file lives.
     pub fn unit_path(self, host: &dyn Host) -> Result<Option<PathBuf>> {
         let home = host.home_dir().map_err(|err| {

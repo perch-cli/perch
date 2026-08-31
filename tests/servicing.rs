@@ -254,6 +254,130 @@ fn an_install_finding_no_claude_code_carries_none_and_says_the_service_will_hold
     );
 }
 
+/// The wrapper a terminal app puts first on PATH: a real, executable file
+/// that re-resolves `claude` through the shell's PATH, so it answers from a
+/// terminal and exits 127 under the PATH the unit provides.
+fn with_a_shim_first_on_path(host: FakeHost, path: &str) -> FakeHost {
+    host.with_env("PATH", path)
+        .with_file(SHIM, "")
+        .with_exec(
+            SHIM,
+            &["--version"],
+            Execution {
+                status: 0,
+                stdout: "2.1.251 (Claude Code)\n".to_string(),
+                stderr: String::new(),
+            },
+        )
+        .with_exec_under(
+            SHIM,
+            &["--version"],
+            Execution {
+                status: 127,
+                stdout: String::new(),
+                stderr: "Error: claude not found in PATH".to_string(),
+            },
+        )
+}
+
+const SHIM: &str = "/Applications/cmux.app/Contents/Resources/bin/claude";
+
+#[test]
+fn an_install_passes_over_a_claude_that_cannot_run_where_the_service_will_run_it() {
+    let host = with_a_shim_first_on_path(
+        mac(),
+        "/Applications/cmux.app/Contents/Resources/bin:/usr/bin",
+    );
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(result.expect("the service manager answered"), EXIT_OK);
+    let unit = host
+        .read_file(&unit_at(&host))
+        .expect("the unit is readable");
+    assert!(
+        unit.contains("<string>/usr/bin/claude</string>"),
+        "the unit carries the first `claude` that runs where the Service \
+         will run it, not the shell's first hit: {unit}"
+    );
+    assert!(!unit.contains("cmux"), "{unit}");
+    assert!(
+        printed.contains("Claude Code at /usr/bin/claude"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains(SHIM) && printed.contains("passed over") && printed.contains("127"),
+        "the install names what it passed over, and the exit that damned it: {printed}"
+    );
+}
+
+#[test]
+fn a_rehearsal_runs_under_the_service_managers_own_path_rather_than_the_shells() {
+    let host = mac();
+
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("the service manager answered");
+
+    let rehearsed = host.effects().iter().any(|effect| {
+        matches!(
+            effect,
+            Effect::ExecUnder { program, env, .. }
+                if program == "/usr/bin/claude"
+                    && env.iter().any(|(key, value)|
+                        key == "PATH" && value == "/usr/bin:/bin:/usr/sbin:/sbin")
+        )
+    });
+    assert!(
+        rehearsed,
+        "the carried `claude` was never run under launchd's own PATH: {:?}",
+        host.effects()
+    );
+}
+
+#[test]
+fn an_install_whose_every_claude_fails_where_the_service_runs_carries_none_and_says_why() {
+    let host = with_a_shim_first_on_path(mac(), "/Applications/cmux.app/Contents/Resources/bin");
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(
+        result.expect("a `claude` that cannot run there is said, not refused"),
+        EXIT_OK
+    );
+    let unit = host
+        .read_file(&unit_at(&host))
+        .expect("the unit is readable");
+    assert!(
+        !unit.contains("PERCH_CLAUDE_BIN"),
+        "a path that exits 127 where the Service runs is not worth carrying: {unit}"
+    );
+    assert!(
+        printed.contains("hold") && printed.contains("127") && printed.contains("PERCH_CLAUDE_BIN"),
+        "the install says the Service will hold, and names the exit and the \
+         repair: {printed}"
+    );
+}
+
+/// The same rehearsal on the other door to a unit: the re-install an Upgrade
+/// performs, whose one message would otherwise read as a clean restart.
+#[test]
+fn an_upgrades_refresh_that_can_carry_no_claude_names_the_exit_and_the_repair() {
+    let host = with_a_shim_first_on_path(mac(), "/Applications/cmux.app/Contents/Resources/bin");
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("the Service is installed first");
+
+    let said = perch::commands::service::refreshed_after_an_upgrade(&host)
+        .expect("a Service is installed, so the refresh says something");
+
+    assert!(said.contains("restarted"), "{said}");
+    assert!(
+        said.contains("127") && said.contains("PERCH_CLAUDE_BIN"),
+        "a refresh that carries no `claude` says why, as an install does: {said}"
+    );
+}
+
 #[test]
 fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
     let host = watched()
