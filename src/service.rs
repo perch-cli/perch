@@ -35,6 +35,20 @@ pub const UNIT_NAME: &str = "perch-watch.service";
 /// Claude Code's locks.
 pub const STOP_GRACE_SECONDS: u32 = 30;
 
+/// How long a start waits for a booted-out job to leave its domain, in seconds.
+///
+/// Wider than [`STOP_GRACE_SECONDS`]: launchd gives a stopping Watcher the whole
+/// grace before killing it, and the label leaves the domain only when the
+/// process is gone.
+pub const LEAVES_WITHIN_SECONDS: u32 = STOP_GRACE_SECONDS + 5;
+
+/// How often that wait asks again, in milliseconds.
+pub const ASKS_AGAIN_MILLIS: u64 = 250;
+
+/// A wait narrower than the stop grace times out on a job stopping cleanly,
+/// which is the collision it exists to prevent.
+const _: () = assert!(LEAVES_WITHIN_SECONDS > STOP_GRACE_SECONDS);
+
 /// How long a supervisor leaves it before starting the Watcher again.
 ///
 /// Rarely reached, because the Watcher holds rather than exiting. What is left is a
@@ -173,8 +187,8 @@ impl Manager {
     pub fn starting(self, unit: &Unit, at: Option<&Path>) -> Vec<Driven> {
         match self {
             // Bootstrapped into the logged-in session rather than `load`ed, the deprecated
-            // spelling since 10.10. `bootout` first, because bootstrapping over something
-            // loaded fails — and allowed to fail on a first install.
+            // spelling since 10.10. `bootout` first, allowed to fail on a first install,
+            // and its landing waited on rather than assumed.
             Manager::LaunchAgent => {
                 let domain = format!("gui/{}", unit.user_id.unwrap_or_default());
                 let path = at
@@ -182,6 +196,7 @@ impl Manager {
                     .unwrap_or_default();
                 vec![
                     Driven::may_fail("launchctl", &["bootout", &format!("{domain}/{LABEL}")]),
+                    Driven::until_gone("launchctl", &["print", &format!("{domain}/{LABEL}")]),
                     Driven::must("launchctl", &["bootstrap", &domain, &path]),
                 ]
             }
@@ -611,6 +626,9 @@ pub struct Driven {
     /// never enabled and `launchctl bootout` on one that is not loaded both fail, and
     /// both mean "it is already not running".
     pub required: bool,
+    /// Whether this step is a wait rather than an act: re-run until it *fails*,
+    /// bounded by [`LEAVES_WITHIN_SECONDS`], and `required` goes unread.
+    pub until_gone: bool,
 }
 
 impl Driven {
@@ -619,12 +637,25 @@ impl Driven {
             program: program.to_string(),
             args: args.iter().map(|arg| arg.to_string()).collect(),
             required: true,
+            until_gone: false,
         }
     }
 
     fn may_fail(program: &str, args: &[&str]) -> Driven {
         Driven {
             required: false,
+            ..Driven::must(program, args)
+        }
+    }
+
+    /// A wait on something leaving: the step succeeding means "still there",
+    /// so its failure is what is waited for. `launchctl bootout` returns
+    /// while the job spends [`STOP_GRACE_SECONDS`] winding down, and a
+    /// `bootstrap` over a label still in its domain is refused with `EIO` —
+    /// so the leaving is asked about rather than assumed done.
+    fn until_gone(program: &str, args: &[&str]) -> Driven {
+        Driven {
+            until_gone: true,
             ..Driven::must(program, args)
         }
     }
@@ -1330,9 +1361,18 @@ mod tests {
         );
         assert_eq!(
             driven[1].as_typed(),
+            "launchctl print gui/501/cli.perch.watch"
+        );
+        assert!(
+            driven[1].until_gone,
+            "`bootout` returns while the job spends its stop grace, so the \
+             label's leaving is waited for rather than assumed"
+        );
+        assert_eq!(
+            driven[2].as_typed(),
             "launchctl bootstrap gui/501 /tmp/x.plist"
         );
-        assert!(driven[1].required, "this one is the install");
+        assert!(driven[2].required, "this one is the install");
     }
 
     #[test]

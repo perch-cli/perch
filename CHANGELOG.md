@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Service restart `perch upgrade` performs — and every install over a
+  running Service — now waits for the booted-out job to leave its domain
+  before bootstrapping the new one. `launchctl bootout` returns while the
+  stopping job spends its grace, so the bootstrap straight after it collided
+  with the label still in `gui/<uid>` and launchd refused it with
+  `Bootstrap failed: 5: Input/output error` on every machine where the Service
+  was already up. A job that has not left after 35 seconds is now refused in
+  Perch's own words, naming the old Service, rather than relaying launchctl's
+  suggestion to re-run as root — which `perch watcher install` refuses
+  ([#411](https://github.com/perch-cli/perch/issues/411))
+
 - The Claude Code `perch watcher install` writes into the unit is now the first
   `claude` on PATH that actually runs under the environment the unit provides —
   each hit is rehearsed with `--version` under the service manager's own PATH

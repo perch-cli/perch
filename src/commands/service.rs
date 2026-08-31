@@ -626,6 +626,10 @@ fn any_scope_may_act(host: &dyn Host) -> Option<bool> {
 fn drive(host: &dyn Host, steps: Vec<Driven>) -> Result<()> {
     for step in steps {
         let args: Vec<&str> = step.args.iter().map(String::as_str).collect();
+        if step.until_gone {
+            gone_or_refused(host, &step, &args)?;
+            continue;
+        }
         let ran = host.exec(&located(host, &step.program), &args);
         if !step.required {
             continue;
@@ -645,6 +649,31 @@ fn drive(host: &dyn Host, steps: Vec<Driven>) -> Result<()> {
             "`{}` failed: {failed}",
             step.as_typed(),
         )));
+    }
+    Ok(())
+}
+
+/// Drives a wait step: asks until the machine answers no, and refuses when
+/// [`service::LEAVES_WITHIN_SECONDS`] runs out — in Perch's words rather than
+/// the service manager's, because what failed is the old Service stopping, and
+/// launchctl's own line about a refused bootstrap suggests root, which
+/// `install` refuses.
+fn gone_or_refused(host: &dyn Host, step: &Driven, args: &[&str]) -> Result<()> {
+    let mut waited = 0;
+    while host
+        .exec(&located(host, &step.program), args)
+        .is_ok_and(|ran| ran.succeeded())
+    {
+        if waited >= u64::from(service::LEAVES_WITHIN_SECONDS) * 1000 {
+            return Err(PerchError::Busy(format!(
+                "the old Service had not stopped after {} seconds (`{}` still \
+                 answers), so nothing was started over it",
+                service::LEAVES_WITHIN_SECONDS,
+                step.as_typed(),
+            )));
+        }
+        host.sleep(service::ASKS_AGAIN_MILLIS);
+        waited += service::ASKS_AGAIN_MILLIS;
     }
     Ok(())
 }
