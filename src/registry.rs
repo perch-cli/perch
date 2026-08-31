@@ -23,7 +23,7 @@ use crate::probe::Identity;
 ///
 /// A registry claiming a higher one is refused rather than silently misread, and
 /// the guard is only worth having if this moves whenever the shape does.
-pub const CURRENT_VERSION: u32 = 5;
+pub const CURRENT_VERSION: u32 = 6;
 
 /// A version is a row of name rules, so the table's length is this number: a row
 /// joining without this moving, or this moving without a row, fails the build

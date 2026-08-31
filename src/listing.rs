@@ -61,6 +61,15 @@ impl<'a> Section<'a> {
         self.ranked.then(|| Reserve::of(registry, &self.scope))
     }
 
+    /// The sentence a Scope preferring Fable is owed where the preference
+    /// matches nothing. Beside the ranking, because the Listing is where the
+    /// ranking is said (ADR fable-is-spent-first).
+    pub fn preference_note(&self, registry: &Registry) -> Option<String> {
+        self.ranked
+            .then(|| cycle::fable_unmatched(registry, &self.scope))
+            .flatten()
+    }
+
     pub fn document(
         &self,
         host: &dyn Host,

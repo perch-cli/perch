@@ -295,6 +295,14 @@ most headroom, or the one whose Quota Window resets soonest so perishable quota
 is not wasted. Each Scope carries its own.
 _Avoid_: policy, mode, algorithm, preference
 
+**Fable First**:
+A Scope choosing to spend Fable before anything else. Accounts that can serve a
+Fable request now rank ahead of every Account that cannot, the Fable weekly
+window orders the former and the fullest window that is not Fable's orders the
+latter, and a Strategy orders within a tier, never across one. Off unless the
+Scope's `prefer-fable` Setting says otherwise.
+_Avoid_: model priority, preferred model, fable mode
+
 **Watcher**:
 The process that Cycles on your behalf when the Account you are on runs low. It
 acts only within a Scope that has been told it may, and only above that Scope's

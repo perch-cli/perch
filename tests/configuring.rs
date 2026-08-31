@@ -426,6 +426,32 @@ fn a_scope_sets_how_empty_a_candidate_has_to_be_apart_from_when_it_is_moved() {
 }
 
 #[test]
+fn a_scope_says_it_spends_fable_first_and_reads_it_back() {
+    let host = three_accounts_in_one_group();
+
+    let (result, said) = config_set(&host, &["work", "prefer-fable", "true"]);
+
+    result.expect("`prefer-fable` is a Setting a Group carries");
+    assert!(group_config(&host, "work").prefer_fable);
+    assert!(
+        said.contains("Fable"),
+        "and the line says what the Scope now does: {said}"
+    );
+
+    let (result, printed) = config_get(&host, &["work"]);
+    result.expect("it reads back");
+    assert!(
+        printed.contains("prefer-fable true"),
+        "every line `get` prints is the tail of the `set` that restores it: \
+         {printed}"
+    );
+
+    let (result, _) = config_set(&host, &["work", "prefer-fable", "sometimes"]);
+    let error = result.expect_err("`sometimes` is not a value it takes");
+    assert_eq!(error.exit_code(), EXIT_INVALID, "{error}");
+}
+
+#[test]
 fn a_margin_that_is_not_a_number_is_refused_with_the_range_it_takes() {
     let host = three_accounts_in_one_group();
 

@@ -141,7 +141,7 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
     let set_aside = watch::set_aside(
         &watching.policy,
         &watching.scope,
-        &candidates.refreshed(registry),
+        &candidates.refreshed(registry, cycle::measure_of(registry, &scope)),
     );
 
     let choice = match cycle::choose(
@@ -463,6 +463,49 @@ mod tests {
             watch::NOWHERE_INTERVAL_MILLIS,
             "the rest is the round's, and whether a line promises it is the \
              arrangement's"
+        );
+    }
+
+    /// The endgame `prefer-fable` promises: every Fable weekly is spent, and
+    /// the round still lands on the best of what remains rather than setting
+    /// every candidate aside for a window its tier never reads.
+    #[test]
+    fn a_fable_spent_scope_still_switches_to_the_best_of_what_remains() {
+        let host = host();
+        let mut registry = Registry::default();
+        registry.declare_group("work").expect("a usable name");
+        let fable_spent = |email: &str, five_hour: f64| {
+            crate::cycle::tests::account(
+                email,
+                vec![
+                    WindowUtilization {
+                        window: "5-hour".to_string(),
+                        used_percent: five_hour,
+                        resets_at: None,
+                    },
+                    WindowUtilization {
+                        window: "7-day-fable".to_string(),
+                        used_percent: 100.0,
+                        resets_at: None,
+                    },
+                ],
+            )
+        };
+        registry.upsert(fable_spent(WATCHED, 30.0));
+        registry.upsert(fable_spent(SPARE, 20.0));
+        registry.settle(Some(WATCHED.to_string()));
+        registry
+            .groups
+            .get_mut("work")
+            .expect("declared")
+            .prefer_fable = true;
+        barely_credentialed(&host, &registry, SPARE);
+
+        let outcome = run_the_act(&host, &mut registry).expect("somewhere remains");
+
+        assert!(
+            matches!(outcome, Outcome::Switched { .. }),
+            "the fall-through tier is measured without the Fable weekly: {outcome:?}"
         );
     }
 

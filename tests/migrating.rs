@@ -1414,7 +1414,7 @@ fn a_name_rule_that_moves_takes_the_registry_version_with_it() {
             what_the_table_holds(),
             what_the_name_rules_answer()
         ),
-        (5, 0x33db_f1d3_4cc6_b249, 0xedc6_ef37_3813_2c93),
+        (6, 0x4b78_d674_e43b_3d43, 0xedc6_ef37_3813_2c93),
         "the name rules and the registry version have to move together: give \
          `migration::forward` a step for the shape below this one if the shape \
          moved, add the `name::Rules` row that says what the version below \

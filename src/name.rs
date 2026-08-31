@@ -426,9 +426,22 @@ pub const ROWS: &[Rules] = &[
         ],
         fold: Fold::OneSigma,
     },
-    // Version 5, this build. Version 4's rules, because the shape that moved was
+    // Version 5. Version 4's rules, because the shape that moved was
     // a Setting rather than a name — written out rather than aliased, or the
     // next divergence would be an edit to two versions.
+    Rules {
+        rules: &[
+            Rule::Empty,
+            Rule::Unshowable(crate::host::UNSHOWABLE),
+            Rule::NotAnIdentifier,
+            Rule::OpensWrong,
+            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
+            Rule::MeansEveryScope(&[GLOBAL]),
+        ],
+        fold: Fold::OneSigma,
+    },
+    // Version 6, this build. Version 5's rules: the shape that moved was again a
+    // Setting, `prefer-fable` (ADR fable-is-spent-first).
     Rules {
         rules: &[
             Rule::Empty,
