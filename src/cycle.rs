@@ -48,14 +48,16 @@ pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
 }
 
 /// How full an Account is: by the Quota Window that is fullest.
+///
+/// One value rather than a number and a second question beside it: two
+/// predicates that have to stay in agreement are a tally that stops adding up.
 #[derive(Debug, Clone, PartialEq)]
-enum Headroom<'a> {
+pub enum Headroom<'a> {
     /// Every Quota Window has at least this much room left.
     Room {
         percent: f64,
-        /// Borrowed from the Account it was measured on: two of the three
-        /// callers read only the percentage, and a listing computes one of these
-        /// per row.
+        /// Borrowed from the Account it was measured on: most callers read only
+        /// the percentage, and a listing computes one of these per row.
         fullest_window: &'a str,
         /// When the fullest window comes back, if the observation carried it.
         resets_at: Option<DateTime<Utc>>,
@@ -200,7 +202,8 @@ pub fn fullest_window_of(account: &Account) -> Option<&WindowUtilization> {
     account.observed_utilization().and_then(fullest_window)
 }
 
-fn headroom_of(account: &Account) -> Headroom<'_> {
+/// Which of [`Headroom`]'s three answers an Account is.
+pub fn headroom_of(account: &Account) -> Headroom<'_> {
     let Some(cached) = account.observed_utilization() else {
         return Headroom::Unobserved;
     };
@@ -632,41 +635,16 @@ pub fn headroom_phrase(account: &Account) -> String {
     }
 }
 
-/// The three answers there are to "how much has this Account left", for the
-/// callers that have to tell them apart rather than print them.
-///
-/// One value rather than a number and a second question beside it: two
-/// predicates that have to stay in agreement are a tally that stops adding up.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum HowMuchIsLeft {
-    /// Every Quota Window has at least this much room left.
-    Room(f64),
-    /// A Quota Window is full, so the Account is blocked whatever its others
-    /// say.
-    Exhausted,
-    /// No figure has ever been read.
-    NeverObserved,
-}
-
-/// Which of those three an Account is.
-pub fn how_much_is_left(account: &Account) -> HowMuchIsLeft {
-    match headroom_of(account) {
-        Headroom::Room { percent, .. } => HowMuchIsLeft::Room(percent),
-        Headroom::Exhausted { .. } => HowMuchIsLeft::Exhausted,
-        Headroom::Unobserved => HowMuchIsLeft::NeverObserved,
-    }
-}
-
 /// The same three answers as a script reads them.
 ///
 /// Two keys rather than a bare number, because only one of the three answers is
 /// a number and the other two are not nought. Unrounded, like every percentage
 /// in a document: rounding is what a column does to fit.
 pub fn headroom_document(account: &Account) -> serde_json::Value {
-    let (state, percent) = match how_much_is_left(account) {
-        HowMuchIsLeft::Room(percent) => ("room", Some(percent)),
-        HowMuchIsLeft::Exhausted => ("exhausted", None),
-        HowMuchIsLeft::NeverObserved => ("never-observed", None),
+    let (state, percent) = match headroom_of(account) {
+        Headroom::Room { percent, .. } => ("room", Some(percent)),
+        Headroom::Exhausted { .. } => ("exhausted", None),
+        Headroom::Unobserved => ("never-observed", None),
     };
     serde_json::json!({ "state": state, "percent": percent })
 }
@@ -1322,22 +1300,6 @@ pub(crate) mod tests {
             headroom_phrase(&account("a@example.com", vec![])),
             "never observed",
             "'no figure' and 'plenty of room' are opposite pieces of advice",
-        );
-    }
-
-    #[test]
-    fn how_much_is_left_tells_the_three_answers_apart_in_one_pass() {
-        assert_eq!(
-            how_much_is_left(&account("a@example.com", vec![window("5-hour", 40.0)])),
-            HowMuchIsLeft::Room(60.0)
-        );
-        assert_eq!(
-            how_much_is_left(&account("a@example.com", vec![window("5-hour", 100.0)])),
-            HowMuchIsLeft::Exhausted
-        );
-        assert_eq!(
-            how_much_is_left(&account("a@example.com", vec![])),
-            HowMuchIsLeft::NeverObserved
         );
     }
 

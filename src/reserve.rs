@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::config::Scope;
-use crate::cycle::{self, HowMuchIsLeft};
+use crate::cycle::{self, Headroom};
 use crate::registry::{Account, Registry};
 use crate::say;
 use crate::utilization;
@@ -46,7 +46,7 @@ pub struct Reserve<'a> {
 impl<'a> Reserve<'a> {
     /// What one Scope has left, read from the cache alone
     /// (ADR a-figure-carries-its-age). Every candidate is classified exactly
-    /// once into one of [`HowMuchIsLeft`]'s three answers, which is what makes
+    /// once into one of [`Headroom`]'s three answers, which is what makes
     /// the counts add up to the Accounts on screen.
     pub fn of(registry: &'a Registry, scope: &Scope) -> Reserve<'a> {
         let accounts = scope.accounts(registry);
@@ -61,10 +61,10 @@ impl<'a> Reserve<'a> {
         let mut exhausted = 0;
         let mut unobserved = 0;
         for account in &candidates {
-            match cycle::how_much_is_left(account) {
-                HowMuchIsLeft::Room(percent) => with_headroom.push((*account, percent)),
-                HowMuchIsLeft::Exhausted => exhausted += 1,
-                HowMuchIsLeft::NeverObserved => unobserved += 1,
+            match cycle::headroom_of(account) {
+                Headroom::Room { percent, .. } => with_headroom.push((*account, percent)),
+                Headroom::Exhausted { .. } => exhausted += 1,
+                Headroom::Unobserved => unobserved += 1,
             }
         }
         // Best first, stable, so a tie keeps the registry's order. Deliberately
