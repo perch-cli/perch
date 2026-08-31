@@ -198,6 +198,7 @@ same decision log. Perch writes the unit and hands the job over.
 ```
 $ perch watcher install
 Installed the Service. It runs /opt/homebrew/bin/perch as a LaunchAgent.
+It finds Claude Code at /Users/you/.local/bin/claude, carried in the unit rather than looked up on the service manager's own PATH.
 Its decisions go to /Users/you/.config/perch/watch.log.
 
 $ perch watcher status
@@ -221,6 +222,13 @@ found it.
 never at boot: every Profile Perch holds is under your home directory, and on
 macOS there is no unlocked keychain before somebody logs in. Installing it under
 `sudo` is refused for that reason.
+
+**Claude Code travels in the unit.** A service manager starts the Watcher with
+almost no PATH of its own, so `install` finds `claude` the way every other
+command does — your PATH, or `$PERCH_CLAUDE_BIN` if you set it — and writes the
+answer into the unit. An install that finds none still succeeds, says the
+Service will hold, and re-running `perch watcher install` once Claude Code is
+there carries it in.
 
 **Where the decisions go** differs by platform, because the log is the service
 manager's job rather than Perch's. On Linux systemd captures standard output

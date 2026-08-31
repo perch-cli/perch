@@ -15,6 +15,7 @@ use crate::cycle;
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::holdings;
 use crate::host::{Host, Platform};
+use crate::probe;
 use crate::say;
 use crate::service::{self, Driven, Manager, Standing, Unit};
 use crate::{registry, upgrade};
@@ -86,6 +87,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             manager.described(),
         ),
     )?;
+    say::line(out, &said_about_claude(&unit))?;
     say::line(
         out,
         &format!(
@@ -336,17 +338,29 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
     })
 }
 
-/// Everything a unit would be written from, as this machine stands now.
+/// Everything a unit would be written from, as this machine stands now —
+/// Claude Code included, carried under [`probe::CLAUDE_BIN_VAR`].
 fn describe(host: &dyn Host) -> Result<Unit> {
     let exe = host
         .current_exe()
         .map_err(|err| PerchError::Other(format!("could not find Perch's own binary: {err}")))?;
+
+    // `claude_bin` answers an override verbatim, so an installing shell that
+    // has one set is carried as itself. Finding none is not a refusal: Claude
+    // Code arriving later is ordinary, and `install` says the Service will hold.
+    let claude = probe::claude_bin(host).ok();
 
     Ok(Unit {
         binary: service::binary_for_the_unit(&exe, upgrade::channel(host)?.as_ref()),
         environment: service::CARRIED
             .iter()
             .filter_map(|key| host.env_var(key).map(|value| (key.to_string(), value)))
+            .chain(claude.map(|at| {
+                (
+                    probe::CLAUDE_BIN_VAR.to_string(),
+                    at.to_string_lossy().into_owned(),
+                )
+            }))
             .collect(),
         log: Manager::of(host).log_path(host)?,
         user_id: host.user_id(),
@@ -354,6 +368,26 @@ fn describe(host: &dyn Host) -> Result<Unit> {
         // this": `%USERNAME%` is `cmd.exe`'s, expanded by a shell that is not there.
         user_name: host.env_var("USERNAME"),
     })
+}
+
+/// Which Claude Code the unit carries, or that it carries none and the
+/// Service will hold.
+fn said_about_claude(unit: &Unit) -> String {
+    match unit
+        .environment
+        .iter()
+        .find(|(key, _)| key == probe::CLAUDE_BIN_VAR)
+    {
+        Some((_, at)) => format!(
+            "It finds Claude Code at {at}, carried in the unit rather than \
+             looked up on the service manager's own PATH."
+        ),
+        None => "No `claude` was found from this shell, so the unit carries \
+                 none and the Service will hold, saying why in its log. Once \
+                 Claude Code is installed, `perch watcher install` again \
+                 carries it."
+            .to_string(),
+    }
 }
 
 /// Whether a Service is installed, asked of whatever this arrangement keeps one in: a

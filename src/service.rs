@@ -381,8 +381,9 @@ pub fn binary_for_the_unit(exe: &Path, channel: Option<&Channel>) -> PathBuf {
 pub struct Unit {
     /// The binary the service manager will run, absolute and stable.
     pub binary: PathBuf,
-    /// The environment carried over from the shell that installed it, in [`CARRIED`]
-    /// order and only where actually set.
+    /// The environment carried over from the shell that installed it: [`CARRIED`]
+    /// where actually set, then the Claude Code the install resolved as
+    /// `PERCH_CLAUDE_BIN`.
     pub environment: Vec<(String, String)>,
     /// Where standard output goes, or `None` where the service manager keeps it (which
     /// is Linux, and the journal).
