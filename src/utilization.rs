@@ -55,9 +55,10 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
     // One Account's block, so the set to lay the names out across is that
     // Account alone.
     let width = window_width_across([account]);
+    let labeled = column::Labeled::the_account_column();
     for (index, figure) in lines(account, now, width).iter().enumerate() {
         let label = if index == 0 { "Utilization" } else { "" };
-        column::write_labeled(out, label, &Shown::of(figure))?;
+        labeled.write(out, label, &Shown::of(figure))?;
     }
     Ok(())
 }

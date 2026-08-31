@@ -60,8 +60,6 @@ pub enum GroupCommand {
     List,
 }
 
-const LABEL_WIDTH: usize = 13;
-
 pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Result<()> {
     // `perch group list` writes nothing, and taking the write lock to read
     // means waiting out a `perch watcher run` round and then failing as though
@@ -340,11 +338,7 @@ fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
 }
 
 fn labeled(label: &str, value: &str) -> String {
-    // Measured in cells rather than `char`s, for the reason
-    // `column::padded` was written: a column counted in characters steps
-    // out of line the first time something wide goes through it.
-    format!(
-        "  {}{value}",
-        crate::column::padded(&Shown::of(label), LABEL_WIDTH)
-    )
+    // Narrower than the Account column and indented: a Group's settings are
+    // facts about the Group named above them.
+    crate::column::Labeled::of(2, 13).row(label, &Shown::of(value))
 }
