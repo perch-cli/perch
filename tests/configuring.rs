@@ -67,9 +67,9 @@ fn a_groups_setting_is_set_from_a_script_and_read_back() {
     result.expect("what was set can be read");
     assert_eq!(
         printed.trim(),
-        "work strategy soonest-reset",
-        "a value read back is the tail of the `set` that would restore it, so \
-         reading and writing are one vocabulary"
+        "soonest-reset",
+        "naming the Scope and the key reads back the value alone, so a script \
+         needs no parser"
     );
 }
 
@@ -87,11 +87,11 @@ fn the_declaration_the_ungrouped_accounts_carry_is_set_and_read_back() {
     let (result, printed) = config_get(&host, &["ungrouped", "interchangeable"]);
 
     result.expect("what was set can be read");
-    assert_eq!(printed.trim(), "ungrouped interchangeable true");
+    assert_eq!(printed.trim(), "true");
 }
 
 #[test]
-fn every_setting_reads_back_in_the_form_that_would_set_it_again() {
+fn every_scope_reads_back_as_a_page_that_set_takes_back() {
     let host = three_accounts_in_one_group();
     config_set(&host, &["work", "watcher-threshold-percent", "90"])
         .0
@@ -101,34 +101,47 @@ fn every_setting_reads_back_in_the_form_that_would_set_it_again() {
 
     result.expect("naming nothing asks about everything");
     assert!(
-        printed.contains("ungrouped interchangeable false"),
-        "the declaration only the Accounts in no Group carry is shown against \
-         them: {printed}"
+        row(&page_of(&printed, "ungrouped"), "interchangeable", "false"),
+        "the declaration only the Accounts in no Group carry is shown under \
+         their header: {printed}"
     );
     assert!(
-        printed.contains("ungrouped strategy most-headroom"),
-        "every Scope's Config in full, each line naming its Scope: {printed}"
+        row(&page_of(&printed, "ungrouped"), "strategy", "most-headroom"),
+        "every Scope's Config in full, each page under its Scope's name: \
+         {printed}"
     );
     assert!(
-        printed.contains("work watcher-threshold-percent 90"),
+        row(
+            &page_of(&printed, "work"),
+            "watcher-threshold-percent",
+            "90"
+        ),
         "including the one that was set: {printed}"
     );
     assert!(
-        printed.contains("work strategy most-headroom"),
+        row(&page_of(&printed, "work"), "strategy", "most-headroom"),
         "and the ones nobody has said anything about, because a Scope holds \
          every Setting there is rather than falling back for them: {printed}"
     );
     assert!(
-        !printed.contains("work interchangeable"),
-        "and no line a Group could not take back: a Group is the declaration \
+        !page_of(&printed, "work").contains("interchangeable"),
+        "and no row a Group could not take back: a Group is the declaration \
          that its Accounts are interchangeable: {printed}"
     );
-    for line in printed.lines().filter(|line| !line.trim().is_empty()) {
-        let words: Vec<&str> = line.split_whitespace().collect();
-        let (result, _) = config_set(&host, &words);
-        result.unwrap_or_else(|err| {
-            panic!("`perch config set {line}` should set what `get` just said: {err}")
-        });
+    for scope in scopes_in(&printed) {
+        for line in page_of(&printed, &scope).lines() {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let [key, value] = words[..] else {
+                panic!("a row is a key and a value: {line}")
+            };
+            let (result, _) = config_set(&host, &[&scope, key, value]);
+            result.unwrap_or_else(|err| {
+                panic!(
+                    "`perch config set {scope} {key} {value}` should set what \
+                     `get` just said: {err}"
+                )
+            });
+        }
     }
 }
 
@@ -269,7 +282,7 @@ fn cycling_among_ungrouped_accounts_is_off_until_it_is_turned_on() {
     result.expect("a setting nobody has touched still reads back");
     assert_eq!(
         printed.trim(),
-        "ungrouped interchangeable false",
+        "false",
         "being ungrouped is the absence of a declaration that Accounts are \
          interchangeable, not a weaker form of one"
     );
@@ -327,9 +340,9 @@ fn the_watchers_may_act_field_is_off_until_it_is_asked_for() {
     result.expect("a field nobody has touched still reads back");
     assert_eq!(
         printed.trim(),
-        "work watcher-may-act false",
+        "false",
         "a Group only ever changes underneath someone because they said it \
-         could, and the line says which Group that is"
+         could, and off is what nobody having said so reads as"
     );
 }
 
@@ -342,8 +355,8 @@ fn a_group_starts_with_the_watcher_policy_the_adr_names() {
 
     result.expect("naming a Group asks about every Setting it holds");
     assert!(
-        printed.contains("work watcher-threshold-percent 80"),
-        "the default, said as the `set` that would restore it: {printed}"
+        row(&printed, "watcher-threshold-percent", "80"),
+        "the default, on the Group's page: {printed}"
     );
 }
 
@@ -419,9 +432,8 @@ fn a_scope_sets_how_empty_a_candidate_has_to_be_apart_from_when_it_is_moved() {
     let (result, printed) = config_get(&host, &["work"]);
     result.expect("it reads back");
     assert!(
-        printed.contains("watcher-margin-percent 40"),
-        "every line `get` prints is the tail of the `set` that restores it: \
-         {printed}"
+        row(&printed, "watcher-margin-percent", "40"),
+        "the Group's page carries the row: {printed}"
     );
 }
 
@@ -441,9 +453,8 @@ fn a_scope_says_it_spends_fable_first_and_reads_it_back() {
     let (result, printed) = config_get(&host, &["work"]);
     result.expect("it reads back");
     assert!(
-        printed.contains("prefer-fable true"),
-        "every line `get` prints is the tail of the `set` that restores it: \
-         {printed}"
+        row(&printed, "prefer-fable", "true"),
+        "the Group's page carries the row: {printed}"
     );
 
     let (result, _) = config_set(&host, &["work", "prefer-fable", "sometimes"]);
@@ -815,7 +826,7 @@ fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let (result, printed) = config_get(&host, &["work", "strategy"]);
 
     result.expect("a read does not wait on a writer");
-    assert_eq!(printed.trim(), "work strategy most-headroom", "{printed}");
+    assert_eq!(printed.trim(), "most-headroom", "{printed}");
     drop(held);
 }
 
@@ -896,7 +907,7 @@ fn a_group_declared_after_a_grant_is_not_covered_by_it() {
 }
 
 #[test]
-fn every_line_names_the_scope_it_is_about() {
+fn a_scope_and_a_key_read_back_the_value_alone() {
     let host = three_accounts_in_one_group();
     config_set(&host, &["work", "strategy", "soonest-reset"])
         .0
@@ -905,20 +916,18 @@ fn every_line_names_the_scope_it_is_about() {
     let (_, said) = config_get(&host, &["work", "strategy"]);
     let (_, untouched) = config_get(&host, &["work", "watcher-may-act"]);
 
-    assert_eq!(said.trim(), "work strategy soonest-reset");
+    assert_eq!(
+        said.trim(),
+        "soonest-reset",
+        "both words were typed, so echoing them back would only be noise \
+         between a script and the value"
+    );
     assert_eq!(
         untouched.trim(),
-        "work watcher-may-act false",
+        "false",
         "a Setting nobody has said anything about is still this Group's, at the \
          compiled-in default"
     );
-    for line in [said.trim(), untouched.trim()] {
-        assert_eq!(
-            line.split_whitespace().count(),
-            3,
-            "every line is the whole of the `set` that would restore it: {line}"
-        );
-    }
 }
 
 #[test]
@@ -937,7 +946,7 @@ fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed() {
     );
 
     let (_, read_back) = config_get(&host, &["ungrouped", "strategy"]);
-    assert_eq!(read_back.trim(), "ungrouped strategy soonest-reset");
+    assert_eq!(read_back.trim(), "soonest-reset");
 }
 
 /// Both words are refused as a name everywhere, so both address the Scope
@@ -977,7 +986,7 @@ fn a_group_cannot_take_the_name_that_addresses_the_ungrouped_scope() {
 }
 
 #[test]
-fn the_ungrouped_scopes_settings_read_back_in_the_form_that_would_set_them() {
+fn the_ungrouped_scope_has_a_page_of_its_own_where_every_scope_is_read() {
     let host = machine_with_two_accounts();
     config_set(&host, &["ungrouped", "watcher-threshold-percent", "45"])
         .0
@@ -987,7 +996,11 @@ fn the_ungrouped_scopes_settings_read_back_in_the_form_that_would_set_them() {
 
     result.expect("naming nothing asks about everything");
     assert!(
-        printed.contains("ungrouped watcher-threshold-percent 45"),
+        row(
+            &page_of(&printed, "ungrouped"),
+            "watcher-threshold-percent",
+            "45"
+        ),
         "{printed}"
     );
 }
@@ -999,14 +1012,8 @@ fn the_ungrouped_page_shows_the_declaration_it_carries() {
     let (result, printed) = config_get(&host, &["ungrouped"]);
 
     result.expect("`ungrouped` is a Scope");
-    assert!(
-        printed.contains("ungrouped interchangeable false"),
-        "{printed}"
-    );
-    assert!(
-        printed.contains("ungrouped strategy most-headroom"),
-        "{printed}"
-    );
+    assert!(row(&printed, "interchangeable", "false"), "{printed}");
+    assert!(row(&printed, "strategy", "most-headroom"), "{printed}");
 }
 
 #[test]

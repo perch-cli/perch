@@ -1,9 +1,9 @@
 //! `perch config` — changing the rules Perch chooses Accounts by, from a
 //! script.
 //!
-//! The **grammar** only: which word goes where, which form somebody seems to
-//! have meant when the words were not one, and the line that reads back as the
-//! `set` that would restore it. What a Setting *is* is [`crate::config`]'s,
+//! The **grammar** and the page: which word goes where, which form somebody
+//! seems to have meant when the words were not one, and each Scope's Settings
+//! laid out under its name. What a Setting *is* is [`crate::config`]'s,
 //! because surfaces that are not this command name keys too.
 //!
 //! Every `set` is `<scope> <key> <value>` and reading is not writing
@@ -12,11 +12,12 @@
 use std::io::Write;
 
 use crate::adopt;
+use crate::column::{self, Labeled};
 use crate::commands::{group, only_the_registry};
 use crate::config::Scope;
 use crate::config::{NotAScope, SETTINGS, Setting};
 use crate::error::{PerchError, Result};
-use crate::host::Host;
+use crate::host::{Host, Shown};
 use crate::name::UNGROUPED;
 use crate::registry::Registry;
 use crate::say;
@@ -28,22 +29,18 @@ use crate::say;
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum ConfigCommand {
     /// Set one Setting on one Scope, and say what it now means.
-    ///
-    /// A Scope is a Group by name, or `ungrouped` for the Accounts in no Group.
-    /// Every Scope carries `strategy` and the watcher's `watcher-may-act` and
-    /// `watcher-threshold-percent`; the Accounts in no Group also carry
-    /// `interchangeable`, which is the declaration that they may be Cycled
-    /// among at all.
+    #[command(long_about = how_a_setting_is_set())]
     Set {
         /// `<scope> <key> <value>`.
         #[arg(value_name = "WORDS", num_args = 1.., required = true, allow_hyphen_values = true)]
         words: Vec<String>,
     },
 
-    /// Read Settings back, each one in the form that would set it again.
+    /// Read Settings back.
     ///
-    /// With nothing named it prints every Scope's Config in full. A Scope prints
-    /// every Setting it holds, and a Scope and a key print the one line.
+    /// With nothing named it prints every Scope's Config in full, each Scope's
+    /// page under its name. A Scope prints its own page, and a Scope and a key
+    /// print the value alone.
     Get {
         /// Nothing, `<scope>`, or `<scope> <key>`.
         #[arg(value_name = "WORDS", num_args = 0.., allow_hyphen_values = true)]
@@ -120,48 +117,96 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
     }
 }
 
-/// Reads Settings back, in the form that would set them again.
+/// Reads Settings back: pages for a Scope or for all of them, and the bare
+/// value where the words already name the rest of the line.
 fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
     match words {
         [] => Ok(everything(registry)),
         [one] => {
             let scope = addressed(registry, one)?;
-            Ok(scope_lines(registry, &scope))
+            Ok(page(registry, &scope))
         }
         [scope, key] => {
             let scope = addressed(registry, scope)?;
             let key = Setting::parse(key, &scope)?;
-            Ok(vec![line(&scope, key, &key.of(registry, &scope))])
+            Ok(vec![key.of(registry, &scope)])
         }
         _ => Err(how_get_is_addressed(words)),
     }
 }
 
-/// Every Setting Perch holds, Scope by Scope, and no shorter than that: a line
-/// left out here is a line nothing else prints. [`scope_lines`] over every Scope
-/// rather than a second idea of what a Config is.
+/// Every Setting Perch holds, Scope by Scope, and no shorter than that: a row
+/// left out here is a row nothing else prints. [`page`] under every Scope's
+/// name rather than a second idea of what a Config is.
 fn everything(registry: &Registry) -> Vec<String> {
-    registry
-        .scopes()
-        .iter()
-        .flat_map(|scope| scope_lines(registry, scope))
-        .collect()
+    let mut lines = Vec::new();
+    for scope in registry.scopes() {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(format!("{}:", scope.word()));
+        lines.extend(page(registry, &scope));
+    }
+    lines
 }
 
-/// Every Setting one Scope holds, each as the tail of the `set` that would
-/// restore it.
-fn scope_lines(registry: &Registry, scope: &Scope) -> Vec<String> {
+/// Every Setting one Scope holds, each a row of key and value. The key is the
+/// word `set` takes and the value is the one it would take back, so the page
+/// still reads as the vocabulary that writes it.
+fn page(registry: &Registry, scope: &Scope) -> Vec<String> {
+    let column = key_column(0);
     SETTINGS
         .into_iter()
         .filter(|key| key.carried_by(scope))
-        .map(|key| line(scope, key, &key.of(registry, scope)))
+        .map(|key| column.row(key.as_str(), &Shown::of(&key.of(registry, scope))))
         .collect()
 }
 
-/// One Setting as `get` prints it and `set` would take it back: the whole of the
-/// command, minus the command.
-fn line(scope: &Scope, key: Setting, value: &str) -> String {
-    format!("{} {} {value}", scope.word(), key.as_str())
+/// The key column wherever Settings are laid out as a page: the widest key
+/// there is, and two cells of gutter. Measured over the whole vocabulary rather
+/// than over the Scope's own keys, so two Scopes' pages line up with each other.
+fn key_column(indent: usize) -> Labeled {
+    let widest = SETTINGS
+        .into_iter()
+        .map(|key| column::cells(&Shown::of(key.as_str())))
+        .max()
+        .unwrap_or(0);
+    Labeled::of(indent, widest + 2)
+}
+
+/// `set`'s long help, built from the vocabulary the refusals read, so one
+/// binary has one account of what a Scope carries and what each Setting takes.
+fn how_a_setting_is_set() -> String {
+    let column = key_column(2);
+    let rows: Vec<String> = SETTINGS
+        .into_iter()
+        .map(|key| column.row(key.as_str(), &Shown::of(&key.takes())))
+        .collect();
+    format!(
+        "Set one Setting on one Scope, and say what it now means.\n\
+         \n\
+         A Scope is a Group by name, or `{UNGROUPED}` for the Accounts in no \
+         Group.\n\
+         \n\
+         The Settings, and the values each takes:\n\
+         {rows}\n\
+         \n\
+         Every Scope carries all of them but `{interchangeable}`, which the \
+         Accounts in no Group alone carry: the declaration that they may be \
+         Cycled among at all.\n\
+         \n\
+         The Strategies:\n\
+         {strategies}\n\
+         \n\
+         `perch config get` reads every Setting back.",
+        interchangeable = Setting::Interchangeable.as_str(),
+        rows = rows.join("\n"),
+        strategies = crate::config::the_strategies()
+            .iter()
+            .map(|line| format!("  {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 /// What a Setting is now, said as a change or as something that was already so.
@@ -339,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn every_line_get_prints_is_a_set_that_would_restore_it() {
+    fn a_scopes_page_and_its_name_are_the_set_that_restores_it() {
         let mut registry = holding_a_group();
         set(
             &mut registry,
@@ -357,28 +402,55 @@ mod tests {
         )
         .unwrap();
 
-        let printed = get(&registry, &[]).unwrap();
-
         let mut restored = Registry::default();
         restored.declare_group("work").unwrap();
-        for line in &printed {
-            set(&mut restored, &words(&line.split(' ').collect::<Vec<_>>())).unwrap();
+        for scope in registry.scopes() {
+            for line in page(&registry, &scope) {
+                let row: Vec<&str> = line.split_whitespace().collect();
+                let [key, value] = row[..] else {
+                    panic!("a row is a key and a value: {line}")
+                };
+                set(&mut restored, &words(&[scope.word(), key, value])).unwrap();
+            }
         }
         assert_eq!(restored.groups, registry.groups);
         assert_eq!(restored.ungrouped, registry.ungrouped);
     }
 
+    /// The header is what carries the Scope where the words did not name one,
+    /// so a bare `get` is the one form whose rows do not say what they are about.
     #[test]
-    fn every_line_names_the_scope_it_is_about() {
+    fn a_bare_get_names_every_scope_above_its_page() {
+        let registry = holding_a_group();
+
+        let printed = get(&registry, &[]).unwrap();
+
+        for scope in registry.scopes() {
+            assert!(
+                printed.contains(&format!("{}:", scope.word())),
+                "{scope:?} is missing its header: {printed:?}"
+            );
+        }
+        assert!(
+            !get(&registry, &words(&["work"]))
+                .unwrap()
+                .iter()
+                .any(|line| line.ends_with(':')),
+            "while a Scope that was named carries no header of its own"
+        );
+    }
+
+    #[test]
+    fn a_scope_and_a_key_read_back_the_value_alone() {
         let registry = holding_a_group();
 
         assert_eq!(
             get(&registry, &words(&["work", "strategy"])).unwrap(),
-            vec!["work strategy most-headroom".to_string()],
+            vec!["most-headroom".to_string()],
         );
         assert_eq!(
             get(&registry, &words(&["ungrouped", "strategy"])).unwrap(),
-            vec!["ungrouped strategy most-headroom".to_string()],
+            vec!["most-headroom".to_string()],
         );
     }
 
@@ -405,7 +477,10 @@ mod tests {
         assert!(
             get(&registry, &words(&["ungrouped"]))
                 .unwrap()
-                .contains(&"ungrouped interchangeable false".to_string()),
+                .iter()
+                .any(|line| {
+                    line.split_whitespace().collect::<Vec<_>>() == ["interchangeable", "false"]
+                }),
             "while the Scope that does carry it prints it"
         );
     }
@@ -431,7 +506,7 @@ mod tests {
         );
         assert_eq!(
             get(&registry, &words(&["strategy", "strategy"])).unwrap(),
-            vec!["strategy strategy most-headroom".to_string()],
+            vec!["most-headroom".to_string()],
             "and the key is still reachable, in the place a key goes"
         );
     }

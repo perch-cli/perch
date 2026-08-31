@@ -119,17 +119,17 @@ fn every_setting_arrives_where_the_old_registry_put_it() {
     let (outcome, printed) = run_config(&host, ConfigCommand::Get { words: Vec::new() });
 
     outcome.expect("it reads");
-    for line in [
-        "ungrouped interchangeable true",
-        "ungrouped strategy soonest-reset",
-        "ungrouped watcher-threshold-percent 85",
-        "work strategy most-headroom",
-        "work watcher-may-act true",
-        "work watcher-threshold-percent 80",
+    for (scope, key, value) in [
+        ("ungrouped", "interchangeable", "true"),
+        ("ungrouped", "strategy", "soonest-reset"),
+        ("ungrouped", "watcher-threshold-percent", "85"),
+        ("work", "strategy", "most-headroom"),
+        ("work", "watcher-may-act", "true"),
+        ("work", "watcher-threshold-percent", "80"),
     ] {
         assert!(
-            printed.contains(line),
-            "`{line}` is missing from:\n{printed}"
+            row(&page_of(&printed, scope), key, value),
+            "`{key} {value}` is missing from {scope}:\n{printed}"
         );
     }
 }
@@ -143,14 +143,18 @@ fn the_older_shape_gains_the_scope_it_never_had() {
     let (outcome, printed) = run_config(&host, ConfigCommand::Get { words: Vec::new() });
 
     outcome.expect("it reads");
-    for line in [
-        "ungrouped interchangeable true".to_string(),
-        format!("ungrouped watcher-threshold-percent {DEFAULT_WATCHER_THRESHOLD_PERCENT}"),
-        "work watcher-may-act true".to_string(),
+    for (scope, key, value) in [
+        ("ungrouped", "interchangeable", "true".to_string()),
+        (
+            "ungrouped",
+            "watcher-threshold-percent",
+            DEFAULT_WATCHER_THRESHOLD_PERCENT.to_string(),
+        ),
+        ("work", "watcher-may-act", "true".to_string()),
     ] {
         assert!(
-            printed.contains(&line),
-            "`{line}` is missing from:\n{printed}"
+            row(&page_of(&printed, scope), key, &value),
+            "`{key} {value}` is missing from {scope}:\n{printed}"
         );
     }
 }

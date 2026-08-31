@@ -689,8 +689,8 @@ mod tests {
                 "Ungrouped",
                 " work",
                 "work ",
-                // Not only at the ends: a `perch config get` line is read back
-                // a word at a time, so no line of it could name this.
+                // Not only at the ends: a `perch config set` is read a word
+                // at a time, so no `set` could address this.
                 "my work",
                 "Overflow Ltd",
                 "two\twords",
