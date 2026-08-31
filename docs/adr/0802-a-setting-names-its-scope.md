@@ -68,6 +68,22 @@ it is refusing over.
 in full. A read has no subject to be wrong about; a write does. That is the rule
 rather than an exception to it.
 
+**A read prints what the words did not already say.** `get` lays a Scope's
+Settings out as a page — the keys in one column, the values in another, under the
+Scope's name wherever the words named no Scope — and `get <scope> <key>`
+prints the value alone. The vocabulary is unchanged: the header and the row
+between them spell the `set` that restores the line, and a `$(perch config get
+work strategy)` needs no field to be cut out of it.
+
+The rejected alternative is the flat `<scope> <key> <value>` line, one per
+Setting, which reads back as a whole `set` minus the command. It is refused
+because the two things a reader is doing — finding a key, and comparing
+two Scopes — both work by scanning a column, and a repeated Scope name in front
+of every value is the thing that has to be read past to do either. What it bought
+was `perch config get | xargs -L1 perch config set`, which restores a Config
+nobody asked it to change; `perch export` is what backs a Config up
+(ADR the-holdings-go-out-sealed).
+
 **An implicit Scope is refused.** A missing Scope could mean the Scope of the
 Account somebody is on — the shallow end restored without a layer. Elision works
 where the unsaid noun is *always the same one* (ADR a-command-names-its-noun);
@@ -90,12 +106,11 @@ it recasts a declaration as a grant. The distinction is the whole reason the two
 yeses are two rather than one thing said twice: two grants side by side read as
 redundant, and a declaration beside a grant does not.
 
-Printing `work interchangeable true` and then refusing to set it would break the
-invariant everything here rests on — every line `perch config get` prints is the
-tail of the `perch config set` that would restore it — so the honest form is
-silence. One Scope carrying a key the others do not is an asymmetry that sits at
-the Scope where it takes effect, rather than at a layer where it would mean
-nothing.
+Printing an `interchangeable` row on a Group's page and then refusing to set it
+would break the invariant everything here rests on — a Scope's page and the `set`
+that restores it are one vocabulary — so the honest form is silence. One Scope
+carrying a key the others do not is an asymmetry that sits at the Scope where it
+takes effect, rather than at a layer where it would mean nothing.
 
 ## Nothing clears a Setting
 
@@ -127,16 +142,16 @@ to learn it than that.
 
 ## Consequences
 
-`perch config` keeps three Settings and a fourth on one Scope. Every `set` is
-three words, and every line `get` prints is the tail of the `set` that would
-restore it. A `set` that names no Scope is refused rather than landing somewhere,
-and a key typed where a Scope goes is answered as the missing subject it is
-rather than as a mistyped Group.
+Every Setting `perch config` keeps is carried by every Scope, bar the one only
+the Accounts in no Group carry. Every `set` is three words, and `set`'s own
+`--help` names every Setting and the values each takes, built from the vocabulary
+the refusals read so the two cannot come to disagree. A `set` that names no Scope
+is refused rather than landing somewhere, and a key typed where a Scope goes is
+answered as the missing subject it is rather than as a mistyped Group.
 
-A Group name therefore cannot hold a space. `get` prints `<scope> <key> <value>`
-and `set` reads it back by counting words, so a Group called `my work` would print
-a four-word line that `set` cannot take. It is refused at the one moment somebody
-can still choose another name.
+A Group name therefore cannot hold a space. `set` reads `<scope> <key> <value>`
+by counting words, so a Group called `my work` is one no `set` could address. It
+is refused at the one moment somebody can still choose another name.
 
 The registry holds a map of `Settings` per Group and one record for the Accounts
 in no Group, which carries their declaration beside their Settings. A Cycle and a

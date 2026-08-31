@@ -33,6 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `perch config set --help` now names every Setting a Scope carries and the
+  values each one takes, built from the same vocabulary the refusals read. It
+  had named four where the binary carried six — `prefer-fable` and
+  `watcher-margin-percent` appeared in no help text at all — and no value
+  domain appeared anywhere, so the documented way to find out what a Setting
+  accepts was to type an invalid one on purpose
+  ([#412](https://github.com/perch-cli/perch/issues/412))
+
+- `perch config get` now lays each Scope's Settings out as a page — the keys in
+  one column and the values in another, each page under its Scope's name where
+  the words named no Scope — rather than repeating `<scope> <key>` in front of
+  every value. `perch config get <scope> <key>` prints the value alone, so
+  `$(perch config get work strategy)` needs no field cut out of it
+  ([#412](https://github.com/perch-cli/perch/issues/412))
+
 - `perch watcher install` — and the re-install `perch upgrade` performs — now
   say when a `claude` was passed over or when none could be carried, naming the
   path, the exit, and the repair

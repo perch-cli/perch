@@ -56,8 +56,8 @@ impl Setting {
 
     /// `interchangeable` is the Accounts in no Group's alone, because a Group
     /// **is** that declaration (ADR a-group-is-a-declaration). Printed against
-    /// a Group and refused, it would break the invariant the command rests on:
-    /// every line `get` prints is the tail of the `set` that restores it.
+    /// a Group and refused, it would put a row on a Group's page that `set`
+    /// refuses to take back.
     pub fn carried_by(self, scope: &Scope) -> bool {
         self != Setting::Interchangeable || *scope == Scope::Ungrouped
     }
@@ -101,6 +101,20 @@ impl Setting {
         SETTINGS
             .into_iter()
             .find(|key| name.eq_ignore_ascii_case(key.as_str()))
+    }
+
+    /// The values this Setting takes, as the clause a sentence offers them in.
+    /// The one statement of each domain, so the refusal that meets a wrong
+    /// value and the help offering the right ones cannot name different sets.
+    pub fn takes(self) -> String {
+        match self {
+            Setting::Interchangeable | Setting::PreferFable | Setting::WatcherMayAct => {
+                A_YES_OR_NO.to_string()
+            }
+            Setting::Strategy => one_of_the_strategies(),
+            Setting::WatcherThresholdPercent => a_percentage(),
+            Setting::WatcherMarginPercent => a_margin(),
+        }
     }
 
     /// The value this Scope holds, as `get` prints it and `set` would take it
@@ -315,11 +329,17 @@ fn strategy(value: &str) -> Result<Strategy> {
             PerchError::Invalid(format!(
                 "`{value}` is not a Strategy Perch implements. The ones it \
                  implements are:\n  {}",
-                Strategy::ALL
-                    .map(|strategy| format!("{} — {}", strategy.as_str(), gloss(strategy)))
-                    .join("\n  "),
+                the_strategies().join("\n  "),
             ))
         })
+}
+
+/// Each Strategy and what it prefers, a line apiece. The one list, because the
+/// refusal and `set`'s help both offer it and two would drift.
+pub fn the_strategies() -> Vec<String> {
+    Strategy::ALL
+        .map(|strategy| format!("{} — {}", strategy.as_str(), gloss(strategy)))
+        .to_vec()
 }
 
 /// What each Strategy prefers, in a clause. Built by matching every Strategy
@@ -341,9 +361,21 @@ fn yes_or_no(key: &str, value: &str) -> Result<bool> {
         "true" => Ok(true),
         "false" => Ok(false),
         _ => Err(PerchError::Invalid(format!(
-            "`{value}` is not a value `{key}` takes. It is either `true` or `false`."
+            "`{value}` is not a value `{key}` takes. It is either {A_YES_OR_NO}."
         ))),
     }
+}
+
+/// What a yes-or-no Setting takes, said once for [`a_percentage`]'s reason: the
+/// refusal and the help are one sentence.
+pub const A_YES_OR_NO: &str = "`true` or `false`";
+
+/// The Strategies as a choice between values. The refusal that meets a wrong
+/// one glosses each; a sentence offering the domain only names them.
+pub fn one_of_the_strategies() -> String {
+    Strategy::ALL
+        .map(|strategy| format!("`{}`", strategy.as_str()))
+        .join(" or ")
 }
 
 /// A percentage, refused with the numbers that would have been accepted.

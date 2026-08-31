@@ -13,7 +13,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use perch::config::Settings;
+use perch::config::{SETTINGS, Settings};
 use perch::error::{
     EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_UNDERSTOOD, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
@@ -23,6 +23,14 @@ use perch::registry::{Account, CURRENT_VERSION, Registry};
 /// The Account every scratch machine holds, and the Group declared beside it.
 const SOMEONE: &str = "someone@example.com";
 const GROUP: &str = "work";
+
+/// True where a `perch config get` page holds this key against this value. Read
+/// as words, because the gutter between the columns is a width no test knows.
+fn paged(printed: &str, key: &str, value: &str) -> bool {
+    printed
+        .lines()
+        .any(|line| line.split_whitespace().collect::<Vec<_>>() == [key, value])
+}
 
 /// What one run of the binary said, and what it ended as.
 struct Ran {
@@ -588,9 +596,9 @@ fn the_config_arms_read_a_setting_and_change_one() {
     let ran = perch(&machine, &["config", "get"]);
 
     assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
+    assert!(ran.out.contains(&format!("{GROUP}:")), "{}", ran.out);
     assert!(
-        ran.out
-            .contains(&format!("{GROUP} watcher-threshold-percent 80")),
+        paged(&ran.out, "watcher-threshold-percent", "80"),
         "{}",
         ran.out
     );
@@ -606,7 +614,7 @@ fn the_config_arms_read_a_setting_and_change_one() {
 
     assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
     assert!(
-        ran.out.contains(&format!("{GROUP} watcher-may-act true")),
+        paged(&ran.out, "watcher-may-act", "true"),
         "the Group holds what was said about it:\n{}",
         ran.out
     );
@@ -756,4 +764,28 @@ fn a_registry_a_published_perch_wrote_is_read_and_written_forward() {
         "and the next run has nothing to say: {:?}",
         again.err
     );
+}
+
+#[test]
+fn the_help_for_a_set_names_every_setting_the_binary_carries_and_what_each_takes() {
+    let machine = Scratch::holding_an_account("settings");
+
+    let ran = perch(&machine, &["config", "set", "--help"]);
+
+    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
+    for key in SETTINGS {
+        assert!(
+            ran.out.contains(key.as_str()),
+            "`{}` is a Setting the binary takes and the help does not name:\n{}",
+            key.as_str(),
+            ran.out
+        );
+        assert!(
+            ran.out.contains(&key.takes()),
+            "and the values `{}` takes are only reachable by provoking a \
+             refusal:\n{}",
+            key.as_str(),
+            ran.out
+        );
+    }
 }

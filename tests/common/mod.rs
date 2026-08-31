@@ -687,6 +687,36 @@ fn worded(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| word.to_string()).collect()
 }
 
+/// True where `printed` holds a page row of exactly this key and value. Read as
+/// words rather than as a substring, because the column between them is a width
+/// no test should have to know.
+pub fn row(printed: &str, key: &str, value: &str) -> bool {
+    printed
+        .lines()
+        .any(|line| line.split_whitespace().collect::<Vec<_>>() == [key, value])
+}
+
+/// Every Scope a bare `perch config get` named, in the order it printed them.
+pub fn scopes_in(printed: &str) -> Vec<String> {
+    printed
+        .lines()
+        .filter_map(|line| line.strip_suffix(':'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// The rows under one Scope's header, where a bare `perch config get` pages
+/// every Scope: what a reader looking that Scope up would have in front of them.
+pub fn page_of(printed: &str, scope: &str) -> String {
+    printed
+        .lines()
+        .skip_while(|line| *line != format!("{scope}:"))
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// One Quota Window, as full as the test says and with no reset time recorded.
 pub fn window(name: &str, used_percent: f64) -> WindowUtilization {
     WindowUtilization {

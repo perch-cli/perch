@@ -70,6 +70,9 @@ enum Command {
     /// A bare `perch config get` reads every Scope there is; a `set` that names
     /// none is refused, because a rule with no subject is a rule about
     /// nothing.
+    ///
+    /// `perch config set --help` names every Setting there is and the values
+    /// each one takes.
     Config {
         #[command(subcommand)]
         action: ConfigCommand,

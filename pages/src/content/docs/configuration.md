@@ -19,6 +19,9 @@ complete over SSH and in CI.
 | `watcher-margin-percent` | any Scope | 1–100 | `10` |
 | `interchangeable` | `ungrouped` only | `true`, `false` | `false` |
 
+`perch config set --help` names the same list and the same values, so the table
+here is somewhere to read more rather than the only place they are written down.
+
 ## A Setting is said about the Scope it governs
 
 A **Scope** — each Group, and the Accounts in no Group taken together — holds
@@ -41,29 +44,38 @@ $ perch config set watcher-threshold-percent 70
 `perch config set watcher-threshold-percent 70` names no Scope, and every Setting is said about the Scope it governs — there is nothing above them for a value to be set at. `perch config set <scope> watcher-threshold-percent 70` sets one. `ungrouped` addresses the Accounts in no Group. Groups Perch holds: personal, work.   # exit 14
 
 $ perch config get
-ungrouped interchangeable true
-ungrouped strategy most-headroom
-ungrouped prefer-fable false
-ungrouped watcher-may-act false
-ungrouped watcher-threshold-percent 80
-ungrouped watcher-margin-percent 10
-personal strategy most-headroom
-personal prefer-fable false
-personal watcher-may-act false
-personal watcher-threshold-percent 80
-personal watcher-margin-percent 10
-work strategy soonest-reset
-work prefer-fable false
-work watcher-may-act false
-work watcher-threshold-percent 70
-work watcher-margin-percent 10
+ungrouped:
+interchangeable            true
+strategy                   most-headroom
+prefer-fable               false
+watcher-may-act            false
+watcher-threshold-percent  80
+watcher-margin-percent     10
+
+personal:
+strategy                   most-headroom
+prefer-fable               false
+watcher-may-act            false
+watcher-threshold-percent  80
+watcher-margin-percent     10
+
+work:
+strategy                   soonest-reset
+prefer-fable               false
+watcher-may-act            false
+watcher-threshold-percent  70
+watcher-margin-percent     10
+
+$ perch config get work strategy
+soonest-reset
 ```
 
 **Reading is not writing.** A bare `perch config get` prints every Scope's
 Config in full, and `perch config get <scope>` prints one Scope's: a read has no
-subject to be wrong about, and a write does. Every line is the whole of the
-`perch config set` that would restore it, so reading the Config and writing it
-back are the same vocabulary and a script needs no parser.
+subject to be wrong about, and a write does. A Scope's name and a row under it
+are the `perch config set` that would restore the line, so reading the Config
+and writing it back are the same vocabulary — and naming both words prints the
+value alone, which is what `$(perch config get work strategy)` wants.
 
 There is no `perch config unset`. With nothing above a Scope there is nothing to
 clear — a value is simply set to what it should be. (`perch alias <target>
@@ -176,10 +188,13 @@ offered:**
 
 ## Reading it back
 
-Every line `perch config get` prints is the whole of the `perch config set` that
-would restore it, so reading the Config and writing it back are the same
-vocabulary and a script needs no parser. Naming a Scope and a key prints that one
-line. An unknown key or a value that means nothing is refused with exit code 14
-and the ones that do mean something, so a script that mistyped a Setting does not
+`perch config get` lays each Scope's Settings out as a page: the keys in one
+column and the values in another. A bare `perch config get` names each Scope
+above its page, because the words did not; `perch config get <scope>` prints the
+page alone. Naming a Scope and a key prints the value alone, with no field to
+cut out of it.
+
+An unknown key or a value that means nothing is refused with exit code 14 and
+the ones that do mean something, so a script that mistyped a Setting does not
 go on believing it took — and so is a `set` with no Scope in it, which is the
 same mistake made about the subject rather than the value.
