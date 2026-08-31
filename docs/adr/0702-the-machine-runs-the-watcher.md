@@ -178,7 +178,7 @@ Purge with everything else Perch holds.
 ## What the unit records, and why it is not what you would guess
 
 A unit file names an absolute path and is read by a service manager with almost
-no environment, so two things are captured at install time.
+no environment, so three things are captured at install time.
 
 The **binary**: not `argv[0]`, and not always the fully resolved target either.
 Under npm the thing on `PATH` is a JavaScript shim that execs a platform
@@ -196,14 +196,27 @@ process environment and are typically set in a shell profile no service manager
 will ever source. A Service silently watching `~/.config/perch` while its owner
 works out of `PERCH_HOME=~/work/perch` would be reporting, correctly and
 uselessly, that there is nothing to do. Both are written into the unit when — and
-only when — they are actually set, and nothing else is: a unit that captured the
-whole environment would bake a `PATH`, an `SSH_AUTH_SOCK` and whatever secret
-the installing shell was holding into a file on disk.
+only when — they are actually set, and nothing else from the shell is: a unit
+that captured the whole environment would bake a `PATH`, an `SSH_AUTH_SOCK` and
+whatever secret the installing shell was holding into a file on disk.
 
-`perch watcher status` reads both back out of the installed unit rather than
-recomputing them, because whether the unit and the machine have come apart is
-the whole of what it is asking, and a value worked out again from the machine
-would agree with the machine by construction.
+The **Claude Code**: resolved at install time by the same search every command
+uses — so an explicit `PERCH_CLAUDE_BIN` passes through as itself — and written
+into the unit under that name. The service manager's `PATH` is not the
+installer's: launchd hands a LaunchAgent `/usr/bin:/bin:/usr/sbin:/sbin`, which
+holds no `claude` anybody installs today, so a unit carrying no answer leaves
+the Service holding on "no `claude` was found on PATH" from its first round
+while `install`, `probe` and `watcher status` all report health. `PATH` itself
+is still not carried: the one thing the Watcher needs from it is where `claude`
+is, and that fits in a variable the idempotent `install` re-resolves. An
+install that finds none writes none and says the Service will hold, rather than
+refusing — Claude Code arriving later is ordinary, and the repair is the same
+one command.
+
+`perch watcher status` reads the binary and the log back out of the installed
+unit rather than recomputing them, because whether the unit and the machine
+have come apart is the whole of what it is asking, and a value worked out again
+from the machine would agree with the machine by construction.
 
 Every one of these formats is line-oriented or shell-parsed, so a value that
 cannot be held in one is refused before anything is written: a `PERCH_HOME` with
