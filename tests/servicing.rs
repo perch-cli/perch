@@ -1176,13 +1176,30 @@ fn an_upgrade_restarts_the_service_onto_the_binary_it_just_moved() {
 
     outcome.expect("the Upgrade ran");
     let after: Vec<String> = ran(&host).into_iter().skip(before).collect();
+    let bootstrap = after
+        .iter()
+        .position(|line| {
+            line == &format!("launchctl bootstrap gui/501 {}", unit_at(&host).display())
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "the Service is started again, onto the binary that is there \
+                 now: {after:?}"
+            )
+        });
+    let asked = after
+        .iter()
+        .position(|line| line == "launchctl print gui/501/cli.perch.watch")
+        .unwrap_or_else(|| {
+            panic!(
+                "the label is asked about before anything is bootstrapped over \
+                 it: {after:?}"
+            )
+        });
     assert!(
-        after.contains(&format!(
-            "launchctl bootstrap gui/501 {}",
-            unit_at(&host).display()
-        )),
-        "the Service is started again, onto the binary that is there now: \
-         {after:?}"
+        asked < bootstrap,
+        "asked first, because `bootout` returns while the job is still \
+         leaving the domain: {after:?}"
     );
     assert!(
         said.contains("The Service was restarted"),
@@ -1216,6 +1233,49 @@ fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
     assert!(
         said.contains("perch watcher install"),
         "and the repair is one command: {said}"
+    );
+}
+
+/// The fixture's surprise: `launchctl print` going on answering is a job that
+/// never finishes leaving its domain, which nothing may be bootstrapped over.
+#[test]
+fn an_upgrades_restart_waits_out_a_label_that_never_leaves_rather_than_colliding() {
+    let host = upgradable();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("a Service is installed before the Upgrade");
+    host.set_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
+    let before = ran(&host).len();
+
+    let (outcome, said) = upgrading(&host);
+
+    assert_eq!(
+        outcome.expect("the binary really is newer, so the Upgrade succeeded"),
+        EXIT_OK
+    );
+    let after: Vec<String> = ran(&host).into_iter().skip(before).collect();
+    assert!(
+        !after.iter().any(|line| line.contains("bootstrap")),
+        "bootstrapping over a loaded label is what launchd refuses, so it is \
+         never tried: {after:?}"
+    );
+    assert!(
+        after
+            .iter()
+            .filter(|line| line.contains("launchctl print"))
+            .count()
+            > 1,
+        "asked again rather than judged once, because leaving takes the stop \
+         grace: {after:?}"
+    );
+    assert!(
+        said.contains("could not be restarted") && said.contains("perch watcher install"),
+        "a warning with the one-command repair: {said}"
+    );
+    assert!(
+        !said.contains("root"),
+        "launchctl's own line about a refused bootstrap suggests root, which \
+         `perch watcher install` refuses — so the sentence is Perch's: {said}"
     );
 }
 
@@ -1270,14 +1330,14 @@ fn an_upgrade_with_no_service_installed_says_nothing_about_one() {
 #[test]
 fn the_binary_is_read_back_out_of_a_plist_that_had_to_be_escaped_to_write() {
     let awkward = "/Users/some & one/bin/perch";
-    let host = mac()
-        .with_file(awkward, "")
-        .installed_at(awkward)
-        .with_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
+    let host = mac().with_file(awkward, "").installed_at(awkward);
 
     run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
+    // Loaded now that the install is done: registered earlier, the label would
+    // read as one that never left, which the install waits out and refuses.
+    host.set_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
 
     let plist = host
         .read_file(&unit_at(&host))
@@ -1399,14 +1459,16 @@ fn a_launch_agent_launchd_is_only_holding_is_not_reported_as_running() {
         stdout: "cli.perch.watch = {\n\tstate = not running\n\tlast exit code = 78\n}".to_string(),
         stderr: String::new(),
     };
-    let host = mac().with_exec(
+    let host = mac();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+    // Registered only after the install, which would otherwise wait this out.
+    host.set_exec(
         "launchctl",
         &["print", "gui/501/cli.perch.watch"],
         loaded_but_down,
     );
-    run_service(&host, WatcherCommand::Install)
-        .0
-        .expect("installed");
 
     let (result, said) = run_service(&host, WatcherCommand::Status { json: false });
 
@@ -1435,11 +1497,12 @@ fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
     // `status_says_when_the_unit_names_a_binary_that_is_no_longer_there` covers.
     let host = mac()
         .with_file("/usr/local/bin/perch", "")
-        .installed_at("/usr/local/bin/perch")
-        .with_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
+        .installed_at("/usr/local/bin/perch");
     run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
+    // Registered only after the install, which would otherwise wait this out.
+    host.set_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
     config_set(&host, &["work", "watcher-may-act", "false"])
         .0
         .expect("the Group takes the permission back");
