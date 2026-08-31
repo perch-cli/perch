@@ -12,15 +12,13 @@
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 
-use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::holdings;
 use crate::host::Host;
 use crate::live;
-use crate::login;
 use crate::name;
-use crate::probe::{self, Installed, Store};
+use crate::probe::{self, Installed};
 use crate::profile;
 use crate::registry::{self, Registry};
 use crate::say;
@@ -86,80 +84,6 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
         .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))
 }
 
-/// One Profile an Import has written into, and whether the Import is what
-/// brought it into being.
-#[derive(Debug)]
-struct Touched {
-    store: Store,
-    /// Whether the Profile's directory was already on the machine. An Import
-    /// runs on a machine holding no *Accounts*, which is not the same as a
-    /// machine holding no Profiles: a `perch add` that died at the browser step,
-    /// or a Purge that could not empty a store, leaves a directory the registry
-    /// never named.
-    was_already_there: bool,
-    /// Whether this Import wrote a Credential into that store. A Quarantined
-    /// Account travels with none, so the Profile is made for its `.claude.json`
-    /// alone — and forgetting a store this Import never wrote to would destroy a
-    /// refresh token nothing here put there and nothing can recover.
-    wrote_a_credential: bool,
-    /// Whether this Import wrote the `.claude.json`. Recorded for the same
-    /// reason and set the same way: the Account that *fails* is the last one
-    /// recorded, and what it did not manage to write is not the undo's to take.
-    wrote_the_identity_file: bool,
-}
-
-/// The Profiles an Import has touched, so they can be taken back out if
-/// anything after them fails. Never leaves [`place`], which is what makes the
-/// taking-back an obligation nothing outside can drop.
-#[derive(Debug, Default)]
-struct Placed {
-    touched: Vec<Touched>,
-}
-
-impl Placed {
-    /// Takes back what this Import *made*, best-effort.
-    ///
-    /// Made rather than written into: it is the *registry* an Import needs empty,
-    /// and a Profile directory nothing names outlives every command that would
-    /// have named it — on macOS, the only name reaching a live Credential.
-    fn undo(&self, host: &dyn Host) {
-        for touched in &self.touched {
-            if !touched.was_already_there {
-                profile::discard(host, &touched.store);
-                continue;
-            }
-            // The directory stays and neither thing this Import wrote into it
-            // does: a `.claude.json` holds an API key in an MCP server's `env`
-            // block, so `profile::discard` prevents it as much as a Credential.
-            if touched.wrote_a_credential {
-                for kept_in in credentials::stores_for(host, &touched.store) {
-                    let _ = kept_in.forget(host);
-                }
-            }
-            if touched.wrote_the_identity_file {
-                let _ = host.remove_file(&touched.store.identity_file);
-            }
-            let taken_back = match (touched.wrote_a_credential, touched.wrote_the_identity_file) {
-                (true, true) => "the Credential and the `.claude.json`",
-                (true, false) => "the Credential",
-                // This Account travels with no Credential, so whatever is in that
-                // store belongs to whoever left the directory behind.
-                (false, true) => "the `.claude.json`",
-                // The Account this Import stopped on: nothing of its own landed,
-                // so the directory is exactly as its owner left it.
-                (false, false) => continue,
-            };
-            host.note(&format!(
-                "{} was already on this machine, so it was left where it is \
-                 rather than removed with the Profiles this Import made. \
-                 {taken_back} this Import wrote into it has been taken back out, \
-                 and the Export still holds it.",
-                touched.store.config_dir.display(),
-            ));
-        }
-    }
-}
-
 /// What an Import leaves behind when it will not write: nothing at all, an
 /// Import being whole or not having happened.
 const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
@@ -172,7 +96,7 @@ const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
 /// belongs to, wherever this machine keeps one, then runs `save` — the caller's
 /// registry write — and takes everything back out where that refuses, so an
 /// Import that does not finish cannot leave a Credential behind. Through
-/// [`profile::store_credential`] so an Import gets the read-back guard.
+/// [`profile::place`], for the read-back guard and the ledger of the taking-back.
 pub fn place(
     host: &dyn Host,
     export: &Export,
@@ -318,50 +242,41 @@ pub fn place(
         return Err(not_idle.refusal(installed, &NOTHING_WAS_IMPORTED));
     }
 
-    let mut placed = Placed::default();
+    let mut placed: Vec<profile::Placed> = Vec::new();
     for (email, store, credential, identity_file) in placements {
-        // Recorded before it is written, because what has to come back out is
-        // everything this made — and asked before the directory is made, which
-        // is the only moment the answer is still knowable.
-        let at = placed.touched.len();
-        placed.touched.push(Touched {
-            was_already_there: host.path_exists(&store.config_dir),
-            wrote_a_credential: false,
-            wrote_the_identity_file: false,
-            store: store.clone(),
-        });
-        let a_credential_traveled = credential.is_some();
         // A Quarantined Account travels with no Credential and with the
         // `.claude.json` that names it, so the Profile is made for the file
         // alone: dropped, it is a re-Export smaller than the one that made it.
-        let stored = profile::make_dir(host, &store.config_dir).and_then(|()| match credential {
-            Some(credential) => profile::store_credential(host, &store, credential),
-            None => Ok(()),
-        });
-        // Asked rather than inferred from the `Ok`: `store_credential` refuses
-        // when the store read first will not give up the copy it replaces, and
-        // the Credential is in the other one by then.
-        placed.touched[at].wrote_a_credential = a_credential_traveled
-            && (stored.is_ok() || credential.is_some_and(|carried| landed(host, &store, carried)));
-        let landed = stored.and_then(|()| login::carry_identity_file(host, &identity_file, &store));
-        placed.touched[at].wrote_the_identity_file = landed.is_ok();
-        if let Err(error) = landed {
-            placed.undo(host);
-            // Said as "every Profile this had made" rather than as a count: the
-            // count is nothing when the first Account is the one that fails, and
-            // "the 0 already imported" is not a sentence.
-            return Err(error.with_note(&format!(
-                "Nothing was imported. {email}'s Credential could not be stored, \
-                 and every Profile this had already made has been taken back out \
-                 again: a machine holding some of an Export is the partial \
-                 restore this file exists to prevent."
-            )));
+        match profile::place(
+            host,
+            &store.config_dir,
+            credential.map(String::as_str),
+            Some(&identity_file),
+            profile::IfItFails::TakeBack,
+        ) {
+            Ok(one) => placed.push(one),
+            Err(error) => {
+                for earlier in &placed {
+                    earlier.take_back(host);
+                }
+                // Said as "every Profile this had made" rather than as a count:
+                // the count is nothing when the first Account is the one that
+                // fails, and "the 0 already imported" is not a sentence.
+                return Err(error.with_note(&format!(
+                    "Nothing was imported. {email}'s Credential could not be stored, \
+                     and every Profile this had already made has been taken back out \
+                     again: a machine holding some of an Export is the partial \
+                     restore this file exists to prevent."
+                )));
+            }
         }
     }
     // The save is this Import's to run: held outside, the taking-back was an
     // ordering one caller remembered in prose.
     if let Err(error) = save() {
-        placed.undo(host);
+        for earlier in &placed {
+            earlier.take_back(host);
+        }
         return Err(error.with_note(
             "Nothing was imported. The Credentials this had already restored \
              have been taken back out again, and the file can be imported \
@@ -369,17 +284,6 @@ pub fn place(
         ));
     }
     Ok(())
-}
-
-/// Whether a store holds the Credential this Import was writing into it.
-///
-/// A store that will not answer says nothing, and the undo leaves it: what it
-/// might hold is a Credential this Import did not put there.
-fn landed(host: &dyn Host, store: &Store, carried: &str) -> bool {
-    credentials::read(host, store)
-        .ok()
-        .flatten()
-        .is_some_and(|held| *held.credential == *carried)
 }
 
 #[cfg(test)]

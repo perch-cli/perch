@@ -133,16 +133,6 @@ fn what_the_login_left(
     })
 }
 
-/// Keeps the `.claude.json` a login wrote in the Profile the Account settles
-/// into. The Identity travels with the Credential it describes.
-///
-/// Through the same write `switch` patches the Default Profile's copy with,
-/// which is what creates the file closed rather than at the process umask.
-pub fn carry_identity_file(host: &dyn Host, contents: &str, store: &probe::Store) -> Result<()> {
-    crate::host::write_atomically(host, &store.identity_file, contents)
-        .map_err(|err| PerchError::file_write(store.identity_file.clone(), err))
-}
-
 /// How long a pending login is left alone before it is taken to have been
 /// abandoned. Generous, because what is on the other side of it is a person
 /// finding their password.

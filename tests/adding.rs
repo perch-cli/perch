@@ -590,11 +590,10 @@ fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
     assert_the_active_account_survived(&host);
 }
 
-/// One step *earlier* than either: the Credential itself will not go down.
-/// `profile::create` sat outside every caller's undo, because each one opens
-/// its undo with the Store this hands back — so what it left was a directory,
-/// and on the path where the fallback store takes the Credential and the
-/// preferred one keeps the copy it replaces, a live Credential inside it.
+/// One step *earlier* than either: the Credential itself will not go down. On
+/// the path where the fallback store takes the Credential and the preferred one
+/// keeps the copy it replaces, the placement's ledger is what knows a live
+/// Credential landed — so its take-back walks the directory out with it.
 #[test]
 fn a_profile_whose_credential_would_not_go_down_is_not_left_behind() {
     let host = logged_in_machine();

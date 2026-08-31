@@ -552,8 +552,14 @@ fn a_profile_the_machine_does_not_have_is_still_refused_where_the_keychain_kept_
 
     host.lock_keychain("User interaction is not allowed");
     host.forget_notes();
-    perch::profile::create(&host, &store.config_dir, STALE)
-        .expect_err("the copy behind the lock wins every read after it opens");
+    perch::profile::place(
+        &host,
+        &store.config_dir,
+        Some(STALE),
+        None,
+        perch::profile::IfItFails::TakeBack,
+    )
+    .expect_err("the copy behind the lock wins every read after it opens");
 }
 
 /// A store that refuses the removal and then says it holds nothing is a remark

@@ -212,11 +212,11 @@ fn refuse_a_different_account(
     )))
 }
 
-/// Puts the fresh Credential where this Account's Credential lives, which is the
-/// Profile it already had.
-///
-/// Written rather than replaced: nothing is removed first, so a login producing
-/// something Perch cannot store leaves the Account exactly as broken as it was.
+/// Puts the fresh Credential where this Account's Credential lives, which is
+/// the Profile it already had. `KeepWhatLanded`, alone among the placements:
+/// the write goes over the broken Credential, so there is no old copy an undo
+/// could put back, and taking the fresh one out would leave the Account more
+/// broken than it was.
 fn settle_into_its_own_profile(
     host: &dyn Host,
     account: &Account,
@@ -224,8 +224,14 @@ fn settle_into_its_own_profile(
     _fresh: &wait::Fresh,
 ) -> Result<()> {
     let dir = account.profile_dir(host)?;
-    let store = profile::create(host, &dir, produced.credential.as_str())?;
-    login::carry_identity_file(host, &produced.identity_json, &store)
+    profile::place(
+        host,
+        &dir,
+        Some(produced.credential.as_str()),
+        Some(&produced.identity_json),
+        profile::IfItFails::KeepWhatLanded,
+    )
+    .map(|_| ())
 }
 
 /// Records the repair, keeping everything about the Account that is not the
