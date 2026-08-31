@@ -317,7 +317,17 @@ pub fn claude_bin(host: &dyn Host) -> Result<PathBuf> {
 /// `npm.cmd` is the same problem. The name is taken as given: no extension is
 /// stripped and none is required.
 pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
-    let path = host.env_var("PATH")?;
+    all_on_path(host, name).into_iter().next()
+}
+
+/// Every program of this name on `PATH`, in `PATH`'s own order, each path once
+/// however many times its directory appears. What an install rehearses in
+/// order, carrying the first that runs where the Service will run it
+/// (ADR carried-means-rehearsed).
+pub fn all_on_path(host: &dyn Host, name: &str) -> Vec<PathBuf> {
+    let Some(path) = host.env_var("PATH") else {
+        return Vec::new();
+    };
 
     let on_windows = host.platform() == crate::host::Platform::Windows;
     let separator = if on_windows { ';' } else { ':' };
@@ -342,18 +352,19 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
     // Rooted directories only, as `curl_at` takes them: an empty element and a
     // `.` both mean the working directory, and `perch upgrade` runs what it
     // finds here.
+    let mut found = Vec::new();
     for dir in path.split(separator).filter(|dir| rooted(dir, on_windows)) {
         for extension in &extensions {
             // Joined with '/' rather than `Path::join`, which picks the
             // separator of whatever platform this build runs on: Windows
             // accepts either, and two spellings are two machines.
             let candidate = PathBuf::from(format!("{dir}/{name}{extension}"));
-            if host.is_file(&candidate) {
-                return Some(candidate);
+            if host.is_file(&candidate) && !found.contains(&candidate) {
+                found.push(candidate);
             }
         }
     }
-    None
+    found
 }
 
 /// Whether a path names a place from the root rather than from wherever Perch
@@ -1347,6 +1358,23 @@ mod tests {
             .with_file("C:/npm/npm.cmd", "");
 
         assert_eq!(on_path(&host, "npm"), Some(PathBuf::from("C:/npm/npm.cmd")));
+    }
+
+    #[test]
+    fn every_hit_on_path_is_answered_once_each_in_paths_own_order() {
+        let host = FakeHost::new()
+            // `/first` twice, as a shell that sources two profiles leaves it.
+            .with_env("PATH", "/first:/second:/first")
+            .with_file("/first/claude", "")
+            .with_file("/second/claude", "");
+
+        assert_eq!(
+            all_on_path(&host, "claude"),
+            vec![
+                PathBuf::from("/first/claude"),
+                PathBuf::from("/second/claude")
+            ],
+        );
     }
 
     #[test]

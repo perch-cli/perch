@@ -29,7 +29,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     refuse_as_root(host)?;
     let manager = Manager::of(host);
 
-    let unit = describe(host)?;
+    let (unit, claude) = describe(host)?;
     // Before the machine is asked anything and before anything is written: a value no
     // format can hold is a refusal about the Unit rather than a half-finished install,
     // and `is_installed` below runs `schtasks` on Windows.
@@ -87,7 +87,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             manager.described(),
         ),
     )?;
-    say::line(out, &said_about_claude(&unit))?;
+    say::line(out, &said_about_claude(&claude))?;
     say::line(
         out,
         &format!(
@@ -317,17 +317,33 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
         return None;
     }
 
-    let refreshed = describe(host).and_then(|unit| {
+    let refreshed = describe(host).and_then(|(unit, claude)| {
         let at = Manager::of(host).unit_path(host)?;
         write_and_start(host, &unit, at.as_deref())?;
-        Ok(unit.binary)
+        Ok((unit.binary, claude))
     });
 
     Some(match refreshed {
-        Ok(binary) => format!(
-            "The Service was restarted, and now runs {}.",
-            binary.display(),
-        ),
+        Ok((binary, claude)) => {
+            let mut said = format!(
+                "The Service was restarted, and now runs {}.",
+                binary.display()
+            );
+            // Said as an install says it: a refresh that quietly dropped the
+            // carried `claude` leaves the Service holding with nothing naming
+            // the exit or the repair.
+            if !matches!(
+                claude,
+                ResolvedClaude::Carried {
+                    passed_over: None,
+                    ..
+                }
+            ) {
+                said.push(' ');
+                said.push_str(&said_about_claude(&claude));
+            }
+            said
+        }
         // A warning with its repair, because the old binary may be gone and the Service
         // may not come up at the next login.
         Err(why) => format!(
@@ -339,53 +355,165 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
 }
 
 /// Everything a unit would be written from, as this machine stands now —
-/// Claude Code included, carried under [`probe::CLAUDE_BIN_VAR`].
-fn describe(host: &dyn Host) -> Result<Unit> {
+/// Claude Code included, carried under [`probe::CLAUDE_BIN_VAR`] — and which
+/// `claude` that is, for the sentence that says so.
+fn describe(host: &dyn Host) -> Result<(Unit, ResolvedClaude)> {
     let exe = host
         .current_exe()
         .map_err(|err| PerchError::Other(format!("could not find Perch's own binary: {err}")))?;
 
-    // `claude_bin` answers an override verbatim, so an installing shell that
-    // has one set is carried as itself. Finding none is not a refusal: Claude
-    // Code arriving later is ordinary, and `install` says the Service will hold.
-    let claude = probe::claude_bin(host).ok();
+    let carried: Vec<(String, String)> = service::CARRIED
+        .iter()
+        .filter_map(|key| host.env_var(key).map(|value| (key.to_string(), value)))
+        .collect();
+    let claude = resolved_claude(host, Manager::of(host), &carried);
 
-    Ok(Unit {
+    let unit = Unit {
         binary: service::binary_for_the_unit(&exe, upgrade::channel(host)?.as_ref()),
-        environment: service::CARRIED
-            .iter()
-            .filter_map(|key| host.env_var(key).map(|value| (key.to_string(), value)))
-            .chain(claude.map(|at| {
-                (
+        environment: carried
+            .into_iter()
+            .chain(match &claude {
+                ResolvedClaude::Carried { at, .. } => Some((
                     probe::CLAUDE_BIN_VAR.to_string(),
                     at.to_string_lossy().into_owned(),
-                )
-            }))
+                )),
+                _ => None,
+            })
             .collect(),
         log: Manager::of(host).log_path(host)?,
         user_id: host.user_id(),
         // Off the machine, because `schtasks` has no notation for "whoever is running
         // this": `%USERNAME%` is `cmd.exe`'s, expanded by a shell that is not there.
         user_name: host.env_var("USERNAME"),
-    })
+    };
+    Ok((unit, claude))
+}
+
+/// Which Claude Code the unit carries, and why that one
+/// (ADR carried-means-rehearsed).
+enum ResolvedClaude {
+    /// Runs where the Service will run it, so the unit carries it — naming
+    /// what stood ahead of it on the shell's PATH and could not.
+    Carried {
+        at: PathBuf,
+        passed_over: Option<(PathBuf, i32)>,
+    },
+    /// Nothing on the shell's PATH answers to the name. Not a refusal: Claude
+    /// Code arriving later is ordinary, and `install` says the Service will hold.
+    NoneFound,
+    /// Everything on the shell's PATH fails where the Service would run it, so
+    /// the unit carries none rather than a path that cannot work.
+    NoneRuns { at: PathBuf, status: i32 },
+}
+
+/// Rehearses each `claude` on this shell's PATH where the Service will run it,
+/// and carries the first that answers. An override passes through verbatim, as
+/// it does everywhere else — it is somebody's word, and it is also the repair
+/// this command names.
+fn resolved_claude(
+    host: &dyn Host,
+    manager: Manager,
+    carried: &[(String, String)],
+) -> ResolvedClaude {
+    if let Some(overridden) = host.env_var(probe::CLAUDE_BIN_VAR) {
+        return ResolvedClaude::Carried {
+            at: PathBuf::from(overridden),
+            passed_over: None,
+        };
+    }
+
+    let candidates = probe::all_on_path(host, "claude");
+    let Some(first) = candidates.first() else {
+        return ResolvedClaude::NoneFound;
+    };
+    let Some(path) = manager.path_for_services() else {
+        return ResolvedClaude::Carried {
+            at: first.clone(),
+            passed_over: None,
+        };
+    };
+
+    let mut passed_over = None;
+    for candidate in &candidates {
+        match rehearsed(host, candidate, path, carried) {
+            Ok(()) => {
+                return ResolvedClaude::Carried {
+                    at: candidate.clone(),
+                    passed_over,
+                };
+            }
+            Err(status) => {
+                passed_over.get_or_insert((candidate.clone(), status));
+            }
+        }
+    }
+    let (at, status) = passed_over.expect("every candidate failed, and there was at least one");
+    ResolvedClaude::NoneRuns { at, status }
+}
+
+/// Runs a candidate exactly as the unit will: its absolute path, the unit's
+/// own environment, and the service manager's PATH rather than this shell's.
+/// `Err` carries the exit it would die with there.
+fn rehearsed(
+    host: &dyn Host,
+    candidate: &Path,
+    service_path: &str,
+    carried: &[(String, String)],
+) -> std::result::Result<(), i32> {
+    let candidate = candidate.to_string_lossy();
+    let home = host.home_dir().ok();
+    let home = home.as_deref().map(Path::to_string_lossy);
+    let mut env: Vec<(&str, &str)> = vec![("PATH", service_path)];
+    if let Some(home) = home.as_deref() {
+        env.push(("HOME", home));
+    }
+    env.extend(
+        carried
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
+
+    match host.exec_under(&candidate, &["--version"], &env) {
+        Ok(ran) if ran.succeeded() => Ok(()),
+        Ok(ran) => Err(ran.status),
+        // Could not even be spawned there, said with `Execution`'s own
+        // stand-in for "never ran".
+        Err(_) => Err(-1),
+    }
 }
 
 /// Which Claude Code the unit carries, or that it carries none and the
 /// Service will hold.
-fn said_about_claude(unit: &Unit) -> String {
-    match unit
-        .environment
-        .iter()
-        .find(|(key, _)| key == probe::CLAUDE_BIN_VAR)
-    {
-        Some((_, at)) => format!(
-            "It finds Claude Code at {at}, carried in the unit rather than \
-             looked up on the service manager's own PATH."
+fn said_about_claude(claude: &ResolvedClaude) -> String {
+    match claude {
+        ResolvedClaude::Carried { at, passed_over } => format!(
+            "It finds Claude Code at {}, carried in the unit rather than \
+             looked up on the service manager's own PATH.{}",
+            at.display(),
+            match passed_over {
+                None => String::new(),
+                Some((skipped, status)) => format!(
+                    " The `claude` ahead of it on this shell's PATH, {}, was \
+                     passed over: run with the Service's own PATH, it exits {} \
+                     instead of answering `--version`.",
+                    skipped.display(),
+                    status,
+                ),
+            },
         ),
-        None => "No `claude` was found from this shell, so the unit carries \
-                 none and the Service will hold, saying why in its log. Once \
-                 Claude Code is installed, `perch watcher install` again \
-                 carries it."
+        ResolvedClaude::NoneRuns { at, status } => format!(
+            "A `claude` was found at {}, but run with the Service's own PATH \
+             it exits {} instead of answering `--version`, so the unit carries \
+             none and the Service will hold, saying why in its log. Point \
+             PERCH_CLAUDE_BIN at a Claude Code that runs on its own, and \
+             `perch watcher install` again carries it.",
+            at.display(),
+            status,
+        ),
+        ResolvedClaude::NoneFound => "No `claude` was found from this shell, so the unit carries \
+             none and the Service will hold, saying why in its log. Once \
+             Claude Code is installed, `perch watcher install` again \
+             carries it."
             .to_string(),
     }
 }

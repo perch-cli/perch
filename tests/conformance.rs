@@ -1484,6 +1484,11 @@ const WHOLE_HOST_CASES: &[WholeHostCase] = &[
                  failure — an exit code here is a Run, a login or an Upgrade \
                  reporting a success nothing had"
             );
+            assert!(
+                host.exec_under(nowhere, &[], &[]).is_err(),
+                "{adapter}: {nowhere} is not a program under any environment, \
+                 so a rehearsal of it is a failure and not a status"
+            );
         },
     },
     WholeHostCase {

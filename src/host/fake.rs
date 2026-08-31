@@ -83,6 +83,14 @@ pub enum Effect {
         program: String,
         args: Vec<String>,
     },
+    /// A program run under exactly the given environment: a rehearsal. The
+    /// environment is kept whole, so a test can hold an install to the PATH
+    /// it claims to rehearse against.
+    ExecUnder {
+        program: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+    },
     ExecInteractive {
         program: String,
         args: Vec<String>,
@@ -281,6 +289,9 @@ struct Keys {
 /// What other programs are, and what happens when Perch runs one.
 struct Processes {
     executions: RefCell<BTreeMap<String, Execution>>,
+    /// What a program answers when run under exactly a given environment,
+    /// where that differs from [`Processes::executions`]' answer.
+    executions_under: RefCell<BTreeMap<String, Execution>>,
     login: RefCell<Option<Login>>,
     /// The running processes, each with when it began — or `None` for one whose
     /// start the operating system will not say.
@@ -417,6 +428,7 @@ impl FakeHost {
             },
             processes: Processes {
                 executions: RefCell::new(BTreeMap::new()),
+                executions_under: RefCell::new(BTreeMap::new()),
                 login: RefCell::new(None),
                 // This Perch, running since before any session a fixture
                 // records, so a marker a Run writes for itself corroborates the
@@ -786,6 +798,18 @@ impl FakeHost {
             .executions
             .borrow_mut()
             .insert(exec_key(program, args), execution);
+    }
+
+    /// A program whose answer depends on where it is run: [`FakeHost::with_exec`]
+    /// is what it says from a shell, and this is what it says under exactly the
+    /// environment a unit provides — a shim resolving through the shell's PATH
+    /// answers the two differently.
+    pub fn with_exec_under(self, program: &str, args: &[&str], execution: Execution) -> Self {
+        self.processes
+            .executions_under
+            .borrow_mut()
+            .insert(exec_key(program, args), execution);
+        self
     }
 
     /// What an interactive login leaves behind in the directory it was pointed
@@ -2208,6 +2232,34 @@ impl port::Processes for FakeHost {
             .executions
             .borrow()
             .get(&exec_key(program, args))
+            .cloned()
+            .ok_or_else(|| HostError::Other(format!("no such program: {program}")))
+    }
+
+    fn exec_under(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<Execution, HostError> {
+        self.record(Effect::ExecUnder {
+            program: program.to_string(),
+            args: args.iter().map(|arg| arg.to_string()).collect(),
+            env: env
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
+        });
+        let key = exec_key(program, args);
+        if let Some(arranged) = self.processes.executions_under.borrow().get(&key) {
+            return Ok(arranged.clone());
+        }
+        // Most programs answer the same wherever they are run, so the ordinary
+        // table answers unless a test arranged the difference.
+        self.processes
+            .executions
+            .borrow()
+            .get(&key)
             .cloned()
             .ok_or_else(|| HostError::Other(format!("no such program: {program}")))
     }
