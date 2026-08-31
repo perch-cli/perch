@@ -23,25 +23,173 @@ pub fn make_dir(host: &dyn Host, dir: &Path) -> Result<()> {
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))
 }
 
-/// Creates `dir` and stores `credential` where the Claude Code on this machine
-/// would keep it, returning the store that now holds it.
-pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
+/// What a placement that cannot finish does with whatever landed before it
+/// stopped.
+pub enum IfItFails {
+    /// Exactly what this placement made comes back out ([`Placed::take_back`]).
+    TakeBack,
+    /// Everything stays: the write went over what the Profile held before, so
+    /// there is no old copy to put back, and taking the fresh one out would
+    /// leave less than the caller started with. A directory this placement made
+    /// and put nothing into still goes — nobody had it.
+    KeepWhatLanded,
+}
+
+/// One Profile a placement has written into, and exactly what it made there:
+/// the ledger bounds the undo — take back only what this write made, and only
+/// if it made it. A Profile nothing records holds a live refresh token that
+/// `reap_abandoned` never walks, so a caller whose record fails owes this a
+/// [`Placed::take_back`].
+#[derive(Debug)]
+pub struct Placed {
+    store: Store,
+    /// Whether the Profile's directory was already on the machine: a
+    /// `perch add` that died at the browser step, or a Purge that could not
+    /// empty a store, leaves a directory the registry never named.
+    was_already_there: bool,
+    /// Whether this placement wrote a Credential into that store. A Quarantined
+    /// Account travels with none, and forgetting a store this never wrote to
+    /// would destroy a refresh token nothing here put there.
+    wrote_a_credential: bool,
+    /// Whether this placement wrote the `.claude.json`, set the same way and
+    /// for the same reason.
+    wrote_the_identity_file: bool,
+}
+
+/// Creates `dir` if it has to and puts a login into it: the Credential where
+/// the Claude Code on this machine would keep it, and the `.claude.json`
+/// beside it. Either may be absent — a Quarantined Account travels with no
+/// Credential, and an adoption may find no identity block to carry.
+pub fn place(
+    host: &dyn Host,
+    dir: &Path,
+    credential: Option<&str>,
+    identity_file: Option<&str>,
+    if_it_fails: IfItFails,
+) -> Result<Placed> {
     // Asked before the directory is made, which is the only moment the answer
     // is knowable.
-    let made_here = !host.path_exists(dir);
+    let was_already_there = host.path_exists(dir);
     make_dir(host, dir)?;
-
-    let store = probe::store_for_profile(host, dir)?;
-    if let Err(error) = store_credential(host, &store, credential) {
-        // Here rather than at the callers, all three of which open their undo
-        // with the Store this hands back — so this failure is outside every one
-        // of them, and what it leaves nothing walks. Only a directory this made.
-        if made_here {
-            discard(host, &store);
+    let store = match probe::store_for_profile(host, dir) {
+        Ok(store) => store,
+        Err(error) => {
+            // No store to speak of yet, so the only thing to take back is a
+            // directory this just made — empty, whatever the policy says.
+            if !was_already_there {
+                let _ = host.remove_dir_all(dir);
+            }
+            return Err(error);
         }
-        return Err(error);
+    };
+
+    let mut placed = Placed {
+        store,
+        was_already_there,
+        wrote_a_credential: false,
+        wrote_the_identity_file: false,
+    };
+    if let Some(credential) = credential {
+        if let Err(error) = store_credential(host, &placed.store, credential) {
+            // Asked rather than inferred from the `Err`: `store_credential`
+            // refuses when the store read first will not give up the copy it
+            // replaces, and the Credential is in the other one by then.
+            placed.wrote_a_credential = landed(host, &placed.store, credential);
+            placed.did_not_finish(host, if_it_fails);
+            return Err(error);
+        }
+        placed.wrote_a_credential = true;
     }
-    Ok(store)
+    if let Some(contents) = identity_file {
+        if let Err(error) = carry_identity_file(host, contents, &placed.store) {
+            placed.did_not_finish(host, if_it_fails);
+            return Err(error);
+        }
+        placed.wrote_the_identity_file = true;
+    }
+    Ok(placed)
+}
+
+impl Placed {
+    /// The Store the Profile keeps its Credential in.
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// Takes back what this placement *made*, best-effort.
+    ///
+    /// Made rather than written into: a Profile directory nothing names
+    /// outlives every command that would have named it — on macOS, the only
+    /// name reaching a live Credential.
+    pub fn take_back(&self, host: &dyn Host) {
+        if !self.was_already_there {
+            discard(host, &self.store);
+            return;
+        }
+        // The directory stays and neither thing written into it does: a
+        // `.claude.json` holds an API key in an MCP server's `env` block, so
+        // taking it back prevents as much as taking the Credential back.
+        if self.wrote_a_credential {
+            for kept_in in credentials::stores_for(host, &self.store) {
+                let _ = kept_in.forget(host);
+            }
+        }
+        if self.wrote_the_identity_file {
+            let _ = host.remove_file(&self.store.identity_file);
+        }
+        let taken_back = match (self.wrote_a_credential, self.wrote_the_identity_file) {
+            (true, true) => "The Credential and the `.claude.json`",
+            (true, false) => "The Credential",
+            // Whatever the store holds belongs to whoever left the directory
+            // behind.
+            (false, true) => "The `.claude.json`",
+            // Nothing of this placement's landed, so the directory is exactly
+            // as its owner left it.
+            (false, false) => return,
+        };
+        host.note(&format!(
+            "{} was already on this machine, so it was left where it is rather \
+             than removed with what was placed here. {taken_back} written into \
+             it has been taken back out.",
+            self.store.config_dir.display(),
+        ));
+    }
+
+    /// What a placement that stopped does with its ledger, per [`IfItFails`].
+    fn did_not_finish(&self, host: &dyn Host, if_it_fails: IfItFails) {
+        match if_it_fails {
+            IfItFails::TakeBack => self.take_back(host),
+            IfItFails::KeepWhatLanded => {
+                if !self.was_already_there
+                    && !self.wrote_a_credential
+                    && !self.wrote_the_identity_file
+                {
+                    discard(host, &self.store);
+                }
+            }
+        }
+    }
+}
+
+/// Whether a store holds the Credential this placement was writing into it.
+///
+/// A store that will not answer says nothing, and the undo leaves it: what it
+/// might hold is a Credential this placement did not put there.
+fn landed(host: &dyn Host, store: &Store, carried: &str) -> bool {
+    credentials::read(host, store)
+        .ok()
+        .flatten()
+        .is_some_and(|held| *held.credential == *carried)
+}
+
+/// Keeps the `.claude.json` in the Profile the Account settles into: the
+/// Identity travels with the Credential it describes.
+///
+/// Through the same write `switch` patches the Default Profile's copy with,
+/// which is what creates the file closed rather than at the process umask.
+fn carry_identity_file(host: &dyn Host, contents: &str, store: &Store) -> Result<()> {
+    crate::host::write_atomically(host, &store.identity_file, contents)
+        .map_err(|err| PerchError::file_write(store.identity_file.clone(), err))
 }
 
 /// Writes a Credential into a Profile's Store and reads it back before trusting

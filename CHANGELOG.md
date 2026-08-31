@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The note left when a Profile is taken back out of a directory the command did
+  not make now has one wording, shared by `perch add`, `perch holdings import`
+  and adoption; it no longer ends by saying the Export still holds what came
+  back out, because the failure's own note already says the file can be
+  imported again
+
 - A Watcher round whose Switch was turned away after reading every candidate
   has always rested fifteen minutes rather than an interval; its decision line
   now says so, ending `Looking again in 15m00s.` like a `nowhere` round's. The

@@ -8,7 +8,7 @@ use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
 use crate::login;
-use crate::probe::{self, Findings, Store, Verdict};
+use crate::probe::{self, Findings, Verdict};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
 use crate::say;
@@ -75,14 +75,19 @@ fn store_as_first_profile(
     findings: &Findings,
 ) -> Result<Registry> {
     let dir = holdings::profile_dir_for(host, &findings.identity.email)?;
-    let store = profile::create(host, &dir, findings.credential.as_str())?;
+    let identity_file = carried_identity_block(host, findings);
+    let placed = profile::place(
+        host,
+        &dir,
+        Some(findings.credential.as_str()),
+        identity_file.as_ref().map(|contents| contents.as_str()),
+        profile::IfItFails::TakeBack,
+    )?;
 
     // Undone if it fails, because a Profile nothing records is worse than none:
     // it holds a copy of the live Credential that no registry names and that
     // `reap_abandoned` never walks, since that only walks `pending/`.
     let made = (|| {
-        carry_the_identity_block(host, findings, &store)?;
-
         let mut registry = Registry::default();
         registry.upsert(Account {
             identity: findings.identity.clone(),
@@ -99,34 +104,25 @@ fn store_as_first_profile(
     })();
 
     if made.is_err() {
-        profile::discard(host, &store);
+        placed.take_back(host);
     }
     made
 }
 
-/// Keeps the `oauthAccount` block Claude Code wrote for the adopted Account in
-/// that Account's own Profile.
-///
-/// Without it, the Account everybody starts with is the one a Switch describes
-/// by the four fields Perch records rather than in Claude Code's own terms.
-fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store) -> Result<()> {
-    let contents = match host.read_file(&findings.store.identity_file) {
-        Ok(contents) => zeroize::Zeroizing::new(contents),
-        // The probe read an Identity out of this file moments ago, so it has
-        // gone away underneath us. Adoption still holds the Credential, which
-        // is the part that cannot be reconstructed.
-        Err(_) => return Ok(()),
-    };
-    let Some(block) = probe::oauth_account_block(&contents) else {
-        return Ok(());
-    };
-
-    let kept = store.identity_file.clone();
-    // The write `login::carry_identity_file` uses, for the reason written there:
-    // a Profile's `.claude.json` is created closed rather than at the umask
-    // (ADR claude-code-chooses-the-store).
-    crate::host::write_atomically(host, &kept, &probe::fresh_identity_file(block))
-        .map_err(|err| PerchError::file_write(kept, err))
+/// The `oauthAccount` block Claude Code wrote for the adopted Account, as the
+/// `.claude.json` its own Profile keeps: without it, the Account everybody
+/// starts with is the one a Switch describes by the four fields Perch records
+/// rather than in Claude Code's own terms.
+fn carried_identity_block(
+    host: &dyn Host,
+    findings: &Findings,
+) -> Option<zeroize::Zeroizing<String>> {
+    // A file that has gone away underneath the probe, or holds no block, is no
+    // reason to stop: adoption still holds the Credential, which is the part
+    // that cannot be reconstructed.
+    let contents = zeroize::Zeroizing::new(host.read_file(&findings.store.identity_file).ok()?);
+    let block = probe::oauth_account_block(&contents)?;
+    Some(zeroize::Zeroizing::new(probe::fresh_identity_file(block)))
 }
 
 /// Says what was adopted, so somebody can confirm Perch picked up the right

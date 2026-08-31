@@ -18,7 +18,7 @@ use crate::host::Host;
 use crate::login::{self, Produced};
 use crate::name;
 use crate::name::NO_GROUP;
-use crate::probe::{Identity, Store};
+use crate::probe::Identity;
 use crate::profile;
 use crate::registry::{self, Account, Registry};
 use crate::say;
@@ -98,7 +98,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     })(&mut registry);
 
     if let Err(error) = recorded {
-        profile::discard(host, &placed);
+        placed.take_back(host);
         return Err(error.with_note(&format!(
             "Nothing was added, and the Profile this had made for {email} has \
              been taken back out again: a Credential Perch holds and does not \
@@ -124,25 +124,23 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     })
 }
 
-/// Gives the Account a Profile of its own and returns the entry that records it,
-/// alongside the Store that Profile keeps its Credential in.
-///
-/// The Store is handed back rather than derived again, because deriving it is
-/// fallible and the caller needs it precisely in order to undo this.
+/// Gives the Account a Profile of its own and returns the entry that records
+/// it, alongside the ledger the caller needs precisely in order to undo this.
 fn settle_into_a_profile(
     host: &dyn Host,
     pending: Produced,
     group: Option<String>,
-) -> Result<(Account, Store)> {
+) -> Result<(Account, profile::Placed)> {
     let dir = holdings::profile_dir_for(host, &pending.identity.email)?;
-    let store = profile::create(host, &dir, pending.credential.as_str())?;
-
-    // The Identity travels with the Credential it describes: the file the login
-    // wrote is already exactly what belongs in the Account's own directory.
-    if let Err(err) = login::carry_identity_file(host, &pending.identity_json, &store) {
-        profile::discard(host, &store);
-        return Err(err);
-    }
+    // The file the login wrote is already exactly what belongs in the Account's
+    // own directory.
+    let placed = profile::place(
+        host,
+        &dir,
+        Some(pending.credential.as_str()),
+        Some(&pending.identity_json),
+        profile::IfItFails::TakeBack,
+    )?;
 
     Ok((
         Account {
@@ -153,7 +151,7 @@ fn settle_into_a_profile(
             group,
             utilization: None,
         },
-        store,
+        placed,
     ))
 }
 
