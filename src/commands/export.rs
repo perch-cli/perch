@@ -25,29 +25,25 @@ use crate::say;
 use crate::wait;
 
 pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
-    // Before the passphrase, because all three are refusals somebody should meet
+    // Before the passphrase, because the refusals are ones somebody should meet
     // before typing one twice — and before the registry is read, since reading it
     // adopts the login on a fresh machine (ADR a-login-perch-does-not-need).
     ask::needs_a_terminal(host, "perch holdings export")?;
-    refuse_a_directory_that_is_not_there(host, path)?;
-    refuse_an_occupied_path(host, path)?;
-    refuse_a_path_perchs_home_would_take(host, path)?;
+    let mut destination = Destination::for_an_export(host, path)?;
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     let installed = crate::probe::Installed::for_a_report(host);
 
-    let mut landed = None;
     let written = write_the_export(
         host,
         &mut perch,
         &mut registry,
-        path,
-        &mut landed,
+        &mut destination,
         &installed,
         out,
     );
-    match (written, landed) {
+    match (written, destination.landed()) {
         // The bytes land before the report, so a terminal that has gone away
         // fails a command whose file is there — and a re-run is refused for the
         // path being taken, which reads as somebody else's file.
@@ -61,8 +57,8 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     }
 }
 
-/// Everything an Export is, given a registry somebody else has read: the path
-/// refusals, the passphrase, the gather, the seal, the file and the report.
+/// Everything an Export is, given a registry somebody else has read and a
+/// [`Destination`] already proven fit: passphrase, gather, seal, file, report.
 ///
 /// Shared with `perch holdings purge`, which holds the registry lock across the
 /// offer it makes — so it cannot go through [`run`] and wait out its own hold.
@@ -70,15 +66,10 @@ pub fn write_the_export(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
     registry: &mut Registry,
-    path: &Path,
-    landed: &mut Option<PathBuf>,
+    destination: &mut Destination,
     installed: &crate::probe::Installed,
     out: &mut dyn Write,
 ) -> Result<()> {
-    refuse_a_directory_that_is_not_there(host, path)?;
-    refuse_an_occupied_path(host, path)?;
-    refuse_a_path_perchs_home_would_take(host, path)?;
-
     // Before a Credential Store is read: during a Landing the live one may be
     // either Account's, so each Credential would be gathered out of its own
     // Profile — where the outgoing Account's is the copy a Rotation retired.
@@ -102,35 +93,65 @@ pub fn write_the_export(
         },
         // Liveness deliberately not among these: nothing here writes a Profile.
         |perch| {
-            // The path again, because the write below replaces whatever is at
-            // it rather than failing on it.
-            refuse_an_occupied_path(host, path)?;
+            destination.still_free(host)?;
             // And the hold: the registry was read before the prompts, and
             // sealing a copy another `perch` has since added to writes a file
             // presenting itself as *everything* Perch holds while being partial.
             still_ours(perch, "exported")
         },
     )?;
-    write_the_sealed_file(host, path, &sealed, &fresh)?;
+    destination.write(host, &sealed, &fresh)?;
 
-    // Recorded the instant the bytes land, and before the one fallible thing
-    // left: `report` writes to a terminal that may have gone away, and an `Err`
-    // there is not the same thing as an Export that was never written.
-    *landed = Some(path.to_path_buf());
-
-    report(out, path, &export)
+    report(out, destination.path(), &export)
 }
 
-/// The one write, and the step nothing takes back: the seal is as many
-/// questions old as the passphrase took, so it lands only on [`wait::Fresh`].
-fn write_the_sealed_file(
-    host: &dyn Host,
-    path: &Path,
-    sealed: &str,
-    _fresh: &wait::Fresh,
-) -> Result<()> {
-    host.write_private_file(path, sealed)
-        .map_err(|err| PerchError::file_write(path.to_path_buf(), err))
+/// The path an Export lands at, proven fit before anything is spent on it.
+///
+/// The refusals of the path's shape run once, in the constructor. Which of them
+/// survives a wait is the type's to know: only [`Destination::still_free`] can
+/// go stale, and [`Destination::write`] is the only way to the bytes.
+pub struct Destination {
+    path: PathBuf,
+    landed: bool,
+}
+
+impl Destination {
+    /// A path an Export may land at: a directory that exists, nothing already
+    /// at it, and outside the home a Purge deletes whole.
+    pub fn for_an_export(host: &dyn Host, path: &Path) -> Result<Destination> {
+        refuse_a_directory_that_is_not_there(host, path)?;
+        refuse_an_occupied_path(host, path)?;
+        refuse_a_path_perchs_home_would_take(host, path)?;
+        Ok(Destination {
+            path: path.to_path_buf(),
+            landed: false,
+        })
+    }
+
+    /// The one refusal a wait lets go stale: the path again, because the write
+    /// replaces whatever is at it rather than failing on it.
+    pub fn still_free(&self, host: &dyn Host) -> Result<()> {
+        refuse_an_occupied_path(host, &self.path)
+    }
+
+    /// The one write, and the step nothing takes back: the seal is as many
+    /// questions old as the passphrase took, so it lands only on [`wait::Fresh`].
+    pub fn write(&mut self, host: &dyn Host, sealed: &str, _fresh: &wait::Fresh) -> Result<()> {
+        host.write_private_file(&self.path, sealed)
+            .map_err(|err| PerchError::file_write(self.path.clone(), err))?;
+        self.landed = true;
+        Ok(())
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Where the bytes are, once they are: recorded the instant they land,
+    /// because a report failing afterwards is not an Export never written.
+    pub fn landed(&self) -> Option<&Path> {
+        self.landed.then_some(self.path.as_path())
+    }
 }
 
 /// Refuses to write the Export inside Perch's own home.
