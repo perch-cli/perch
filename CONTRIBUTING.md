@@ -51,6 +51,8 @@ that exists to be written to.
 ## What CI checks
 
 Run these before you push and the pull request goes green on the first try.
+`typos` is the one tool of them rustup does not bring:
+`cargo install typos-cli`.
 
 ```sh
 cargo fmt --all -- --check

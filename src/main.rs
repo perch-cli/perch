@@ -144,7 +144,7 @@ enum Command {
 
     /// Log an Account in again, in place.
     ///
-    /// The way back from a Quarantine — the state of an Account whose
+    /// The way back from a Quarantine, the state of an Account whose
     /// Credential stopped working: the Account keeps its Alias, its Group,
     /// whether Cycling may choose it and its place in the listing, and only its
     /// Credential is replaced. The Account you are working in is untouched,

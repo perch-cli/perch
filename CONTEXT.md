@@ -128,8 +128,9 @@ _Avoid_: global, main, root
 
 **Group**:
 A set of Accounts you have declared interchangeable, such as several
-subscriptions belonging to the same person. Perch only ever Cycles within a
-Group, and a Group carries the settings that govern when it may do so unasked.
+subscriptions belonging to the same person. Perch only ever Cycles within one
+Scope — a Group, or Ungrouped once it is declared interchangeable — and a Group
+carries the settings that govern when it may do so unasked.
 _Avoid_: flock, team, org, pool
 
 **Rename**:
@@ -182,8 +183,8 @@ _Avoid_: copy, merge, seed, sync
 
 **Quota Window**:
 A rolling period Anthropic meters an Account's usage over. An Account has
-several at once — a five-hour and a seven-day window, and a weekly window per
-model — and is limited by whichever fills first.
+several at once — a five-hour and a seven-day window, and for some models a
+weekly window of its own — and is limited by whichever fills first.
 _Avoid_: limit, budget, allowance
 
 **Utilization**:
@@ -278,7 +279,7 @@ _Avoid_: result, outcome, attempt
 
 **Cycle**:
 Choosing which Account to Switch to rather than being told — by Utilization,
-within a Group. What Perch does when you name no target, and what the watcher
+within one Scope. What Perch does when you name no target, and what the Watcher
 does on your behalf.
 _Avoid_: rotate, next, advance
 
@@ -408,7 +409,7 @@ _Avoid_: lock, pid file, session file, heartbeat, sentinel
 
 **Setting**:
 One named rule governing how Perch behaves rather than what it holds — which
-Account a Cycle prefers, whether the watcher may act, at what Utilization. A
+Account a Cycle prefers, whether the Watcher may act, at what Utilization. A
 Setting reaches no further than the registry, which is what separates it from
 everything else Perch can be told to do.
 _Avoid_: option, preference, flag, toggle, parameter
@@ -470,6 +471,9 @@ _Avoid_: version, build, drop, publish
 One machine shape Perch is built for — an architecture and an operating system,
 named as the Rust toolchain names it. Five of them, each built on a machine of
 its own architecture. Not a platform: macOS is a platform and has two Targets.
+Shares a word with the Target a command acts on deliberately and knowingly:
+that one names an Account on a command line, this one names bytes in a Release,
+and no sentence holds room for both.
 _Avoid_: platform, arch, triple, variant
 
 **Artifact**:

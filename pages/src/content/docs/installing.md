@@ -57,8 +57,9 @@ older version instead of a newer one.
 ## By hand
 
 From [the releases page](https://github.com/perch-cli/perch/releases). Every
-release carries one archive per platform, a `SHA256SUMS`, and signed build
-provenance. The checksums say which bytes; the provenance says which workflow,
+release carries one archive per platform and a `SHA256SUMS`; the signed build
+provenance is an attestation GitHub holds rather than a file among the assets.
+The checksums say which bytes; the provenance says which workflow,
 in which repository, at which commit produced them, which is the stronger claim:
 
 ```sh
