@@ -22,9 +22,9 @@ Findings
   <account 3> is Quarantined, so Cycling will not choose it and a Switch to it
   refuses. `perch relogin <account 3>` is the way back. (exit 19)
 
-Perch         0.2.0 (linux x86_64), installed by npm
+Perch         0.3.5 (linux x86_64), installed by npm
 Claude Code   2.1.221, at <home>/.local/share/claude/bin/claude
-Home          <home>/.config/perch, registry version 5
+Home          <home>/.config/perch, registry version 6
 Active        <account 1>
 Holdings      4 Accounts in 2 Groups, 1 Quarantined, 0 Disabled
 Watcher       installed, running, may act somewhere

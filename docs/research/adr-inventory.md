@@ -1,10 +1,12 @@
 # ADR inventory — what each of the 63 decides, and whether it still holds
 
-Evidence for [The target ADR set: what survives, what merges, what dies](https://github.com/perch-cli/perch/issues/246).
-Produced by [Inventory all 63 ADRs](https://github.com/perch-cli/perch/issues/243).
+> **Historical snapshot (noted 2026-09-01).** This inventory predates the
+> renumbering of `docs/adr/` — the flat 0001–0063 numbers it cites no longer
+> resolve. `docs/adr/` is current; this document is kept as evidence for
+> [the target ADR set](https://github.com/perch-cli/perch/issues/246).
 
 **This document decides nothing.** Every ADR was read in full and checked against
-the code that implements it, by eight readers working one area each. Where a
+the code that implements it. Where a
 reader judged rather than observed, the judgment is labeled. Where two readers
 disagreed, both readings are kept.
 

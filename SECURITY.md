@@ -14,7 +14,7 @@ Every release is built by a public workflow in this repository, and every
 archive carries signed build provenance. If you have `gh`:
 
 ```sh
-gh attestation verify perch-v0.1.0-<target>.tar.gz --repo perch-cli/perch
+gh attestation verify perch-v<version>-<target>.tar.gz --repo perch-cli/perch
 ```
 
 That says which workflow, in which repository, at which commit produced the

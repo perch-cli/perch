@@ -306,7 +306,7 @@ check saying what it decided:
 | 15 | nothing to do now — under the threshold, inside the cooldown, a client was holding the Profile, or the Account it went to turned out to be Quarantined |
 | 17 | a Switch was wanted and every candidate was exhausted |
 | 18 | the Account it is on is in no Group, so nothing carries permission |
-| 20 | held: the figures were stale and the Refresh that would have replaced them failed |
+| 20 | held: a lock somebody else has — a Watcher was already running — or the figures were stale and the Refresh that would have replaced them failed. Nothing is wrong and nothing was changed — ask again shortly |
 
 Three more are the machine not being arranged for a check at all, and a cron
 wrapper meets the first of them before anything else:

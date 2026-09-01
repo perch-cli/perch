@@ -27,3 +27,13 @@ semver_check = false
 # dependency bump arriving in the release pull request is a change to the built
 # artifact at the moment nobody is reading for one.
 dependencies_update = false
+
+# The heading alone, no generated sections. The entries under a version are
+# written by hand, so a section built from pull request titles doubles every
+# heading — the same change described twice under one release. The heading
+# stays release-plz's because `release.yml` finds a Release's notes by it.
+[changelog]
+body = """
+
+## [{{ version | trim_start_matches(pat="v") }}]{%- if release_link -%}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+"""

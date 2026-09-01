@@ -32,8 +32,9 @@ the prompt says while you are still choosing one, and why the report does not
 say it again.
 
 **It takes everything and has no target.** There is no per-Account and no
-per-Group form, because a selective export is a partial restore — which is the
-failure the file exists to prevent, wearing a feature's clothes.
+per-Group form, because a selective export can only ever restore part of your
+Holdings — and a partial restore is exactly the loss this file exists to
+prevent, however deliberately it was asked for.
 
 **The passphrase is required rather than offered**, prompted, confirmed, and
 never shown as you type it. It cannot be passed as an argument and there is no
