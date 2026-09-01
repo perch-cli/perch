@@ -137,13 +137,15 @@ enum Command {
     /// what this is for is being pasted somewhere else.
     ///
     /// Reads and judges, and repairs nothing. It reaches no network, brings no
-    /// registry forward and adds no line to the Trail, so running it never
-    /// changes the machine it is describing. Exits `0` whatever it finds.
+    /// registry forward and adds no line to the Trail — the log of what Perch
+    /// was asked and what it decided — so running it never changes the machine
+    /// it is describing. Exits `0` whatever it finds.
     Probe(ProbeArgs),
 
     /// Log an Account in again, in place.
     ///
-    /// The way back from a Quarantine: the Account keeps its Alias, its Group,
+    /// The way back from a Quarantine — the state of an Account whose
+    /// Credential stopped working: the Account keeps its Alias, its Group,
     /// whether Cycling may choose it and its place in the listing, and only its
     /// Credential is replaced. The Account you are working in is untouched,
     /// unless it is the one being repaired — then its fresh Credential becomes
@@ -183,8 +185,9 @@ enum Command {
     /// without. A candidate that would lose even if its quota had refilled
     /// entirely is not worth a round trip, and is not read.
     ///
-    /// The Credential you are leaving is Captured back into its own Profile
-    /// first, so a Rotation that happened while it was active is not lost. Your
+    /// The Credential you are leaving is Captured — copied back into its own
+    /// Profile — first, so a refresh token Anthropic replaced while it was
+    /// active is not lost. Your
     /// memory, settings, plugins and project history are untouched.
     Switch(SwitchArgs),
 
@@ -257,6 +260,20 @@ enum Command {
         #[command(subcommand)]
         action: WatcherCommand,
     },
+}
+
+/// The flag clap once generated, caught before the parser so the refusal can
+/// name the command that answers it. The parser would only say the word is one
+/// it has never heard of.
+fn refuse_the_version_flag(typed: &[String]) -> perch::Result<()> {
+    if matches!(typed.first().map(String::as_str), Some("--version" | "-V")) {
+        return Err(perch::error::PerchError::NotUnderstood(
+            "That is a command here: `perch version` says which Perch is \
+             installed, and whether a newer Release exists."
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Nought for having worked, and otherwise whatever the failure earned.
@@ -411,6 +428,9 @@ fn main() {
         .map(|word| word.to_string_lossy().into_owned())
         .collect();
     if let Err(refusal) = run::refuse_a_flag_without_the_separator(&typed) {
+        std::process::exit(ended_as(Err(refusal), &mut out));
+    }
+    if let Err(refusal) = refuse_the_version_flag(&typed) {
         std::process::exit(ended_as(Err(refusal), &mut out));
     }
 
@@ -655,6 +675,11 @@ mod tests {
                 "`{}` should not parse",
                 typed.join(" ")
             );
+
+            let said = refuse_the_version_flag(&[typed[1].to_string()])
+                .expect_err("the flag is caught before the parser")
+                .to_string();
+            assert!(said.contains("perch version"), "{said}");
         }
     }
 

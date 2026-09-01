@@ -176,8 +176,9 @@ fn the_version_question_is_answered_by_the_process_in_one_line() {
 }
 
 /// The flag is gone rather than kept beside the command: two spellings of one
-/// capability are two, and neither is ever retired. clap offers no tip towards
-/// the command, its suggestions running from an unknown flag to other flags.
+/// capability are two, and neither is ever retired. The refusal names
+/// `perch version` itself, because clap's would run from an unknown flag to
+/// other flags and never towards the command that answers the question.
 #[test]
 fn the_flag_the_command_replaced_is_no_longer_a_second_spelling_of_it() {
     let machine = Scratch::holding_an_account("version-flag");
@@ -187,11 +188,7 @@ fn the_flag_the_command_replaced_is_no_longer_a_second_spelling_of_it() {
 
         assert_ne!(ran.code, EXIT_OK, "{asked:?}");
         assert!(ran.out.is_empty(), "{asked:?} said nothing: {}", ran.out);
-        assert!(
-            ran.err.contains("unexpected argument"),
-            "{asked:?}: {}",
-            ran.err
-        );
+        assert!(ran.err.contains("perch version"), "{asked:?}: {}", ran.err);
     }
 }
 
