@@ -14,13 +14,17 @@ import { rewriteGuideLinks } from "./src/plugins/guide-links";
 // Said once: it is `base` below, and it is the prefix the guide's relative
 // markdown links are rewritten onto.
 const base = "/perch";
+const site = "https://perch-cli.github.io";
+// Where the site is, with the slash a fetcher of `og:image` cannot resolve for
+// itself.
+const root = `${site}${base}/`;
 
 export default defineConfig({
   // Both halves have to be said, and they are not the same thing. `site` is what
   // absolute URLs — the sitemap, the canonical tags — are built from; `base` is
   // the prefix every path carries, because this repository is served from a
   // subdirectory of the organization's domain rather than from a root of its own.
-  site: "https://perch-cli.github.io",
+  site,
   base,
   // Sätteri is Astro's own pipeline and its default; naming it here is what gives
   // it a plugin, and `markdown.rehypePlugins` is the deprecated way to do this.
@@ -42,13 +46,48 @@ export default defineConfig({
       // the default left implicit is what shows a tab a broken image.
       favicon: "/favicon.svg",
       customCss: ["./src/styles/perch.css"],
-      // Starlight declares a large-image card by default, and this site carries
-      // no og:image — that pairing renders an oversized empty slot on every
-      // shared link. `summary` is the card the head can honestly fill.
+      // What Starlight leaves out and a crawler asks for: the icon as PNG and
+      // ICO for Google and iOS, a manifest for Android, the card a shared link
+      // shows. Every path is `base`-prefixed by hand, because a `head` entry is
+      // emitted as written.
       head: [
+        { tag: "link", attrs: { rel: "icon", href: `${base}/favicon.ico`, sizes: "any" } },
+        {
+          tag: "link",
+          attrs: {
+            rel: "icon",
+            type: "image/png",
+            sizes: "32x32",
+            href: `${base}/favicon-32x32.png`,
+          },
+        },
+        {
+          tag: "link",
+          attrs: {
+            rel: "apple-touch-icon",
+            sizes: "180x180",
+            href: `${base}/apple-touch-icon.png`,
+          },
+        },
+        { tag: "link", attrs: { rel: "manifest", href: `${base}/site.webmanifest` } },
+        { tag: "meta", attrs: { property: "og:image", content: `${root}og.png` } },
+        { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+        { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+        { tag: "meta", attrs: { property: "og:image:alt", content: "The Perch icon" } },
+        { tag: "meta", attrs: { name: "twitter:image", content: `${root}og.png` } },
+        // Starlight's own backgrounds, one per theme. Two entries survive
+        // Starlight's merge, which only drops a default a user entry matches.
         {
           tag: "meta",
-          attrs: { name: "twitter:card", content: "summary" },
+          attrs: {
+            name: "theme-color",
+            media: "(prefers-color-scheme: light)",
+            content: "#ffffff",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: { name: "theme-color", media: "(prefers-color-scheme: dark)", content: "#17181c" },
         },
       ],
       // Both exist for the client-side router: one to put `<ClientRouter />` in

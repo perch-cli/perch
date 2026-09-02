@@ -12,6 +12,7 @@
   "dependencies": {
     "@astrojs/markdown-satteri": "^0.3.6",
     "@astrojs/starlight": "^0.41.7",
+    "@resvg/resvg-js": "^2.6.2",
     "astro": "^7.2.3"
   },
   "devDependencies": {
