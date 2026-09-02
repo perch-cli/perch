@@ -18,7 +18,7 @@ use crate::probe;
 use crate::registry::Registry;
 use crate::round::{self, Watching};
 use crate::switch::{self, NotSwitched};
-use crate::watch::{self, Cooled, Outcome, nothing_was_switched};
+use crate::watch::{self, Cooled, Outcome, Pacing, nothing_was_switched};
 
 /// The watch this process holds, as one question rather than three.
 ///
@@ -73,11 +73,11 @@ pub struct Acting<'a, 'h> {
 }
 
 /// The Account is full enough to move off, so this is the whole of what the watcher
-/// does about it: read the candidates, choose, and Switch.
-///
-/// Read here rather than kept warm — the only moment their figures are worth
-/// anything, and the moment they are cheapest to get.
-pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
+/// does about it: read the candidates, choose, and Switch. Read here rather than kept
+/// warm — the only moment their figures are worth anything, and the moment they are
+/// cheapest to get. What the burst could not read and what it found is charged to
+/// `pacing` here, where it is known.
+pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> Result<Outcome> {
     let Acting {
         host,
         perch,
@@ -132,17 +132,23 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
         return Ok(nothing_was_switched(lost));
     }
 
+    let considered = candidates.refreshed(registry, cycle::measure_of(registry, &scope), &read);
+
+    // Never on a figure it did not just read, and a candidate's figure is one: with
+    // none of them read there is nothing to decide on, and the hold is paced as the
+    // Account's own would be.
+    if let Some(refused) = round::refused_the_candidates(&considered, &read) {
+        return Ok(Outcome::Held {
+            retrying_in: refused.charged(pacing),
+            why: refused.why,
+        });
+    }
     // What could not be read, carried into the sentence that says where the watcher
-    // went: an Account ranked on a figure from an hour ago is the one thing that can
-    // make this Switch land somewhere worse than it left.
-    let unread = read.notes();
+    // went: the Margin set it aside, and the line says why it was not in the running.
+    let unread = read.unread();
 
     // The margin, applied to the figures the burst above has just written.
-    let set_aside = watch::set_aside(
-        &watching.policy,
-        &watching.scope,
-        &candidates.refreshed(registry, cycle::measure_of(registry, &scope)),
-    );
+    let set_aside = watch::set_aside(&watching.policy, &watching.scope, &considered);
 
     let choice = match cycle::choose(
         registry,
@@ -153,12 +159,14 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
     ) {
         Ok(choice) => choice,
         // Nowhere worth going is an answer rather than a failure, and both ways of
-        // getting there are resolved by waiting.
+        // getting there are resolved by waiting. The burst rests too, where there was
+        // one: no candidates at all read nobody.
         Err(error @ (PerchError::NoCandidate(_) | PerchError::NothingToDo(_))) => {
-            return Ok(Outcome::Nowhere {
-                why: also(error.to_string(), &unread),
-                looking_again: watch::NOWHERE_INTERVAL_MILLIS,
-            });
+            let why = also(error.to_string(), &unread);
+            if !considered.is_empty() {
+                pacing.rest.found_nowhere(host.now(), &why);
+            }
+            return Ok(Outcome::Nowhere { why });
         }
         Err(error) => return Err(error),
     };
@@ -211,10 +219,6 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>) -> Result<Outcome> {
             // figure it had read, which is what tells it from a hold.
             contended: matches!(error, PerchError::Busy(_)),
             why: error.to_string(),
-            // Every candidate was read to get here, which is the burst the rest
-            // exists to stop repeating: an hourly allowance per Account, spent on
-            // a Switch that was refused.
-            resting_for: watch::NOWHERE_INTERVAL_MILLIS,
         }),
         Err(NotSwitched { error, .. }) => Err(error),
     }
@@ -246,10 +250,49 @@ mod tests {
     /// it at all means Renewing it first — which sends a request.
     const SPENT: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spent","refreshToken":"sk-ant-ort01-spent","expiresAt":1}}"#;
 
+    /// The spare's Credential with its access token still good, so a Refresh asks
+    /// with it directly.
+    const SPARE_CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spare","refreshToken":"sk-ant-ort01-spare","expiresAt":1790000000000,"subscriptionType":"max"}}"#;
+    const SPARE_TOKEN: &str = "sk-ant-oat01-spare";
+
     fn host() -> FakeHost {
         FakeHost::new()
             .with_env("HOME", "/Users/someone")
             .with_env("USER", "someone")
+    }
+
+    /// A machine where the spare answers about itself: `used_percent` on its
+    /// 5-hour window, whatever the cache said before the burst.
+    fn host_where_the_spare_reads(used_percent: f64) -> FakeHost {
+        host()
+            .with_reply_to(
+                crate::anthropic::PROFILE_URL,
+                SPARE_TOKEN,
+                200,
+                &format!(r#"{{"account": {{"email_address": "{SPARE}"}}}}"#),
+            )
+            .with_reply_to(
+                crate::anthropic::USAGE_URL,
+                SPARE_TOKEN,
+                200,
+                &format!(
+                    r#"{{"five_hour": {{"utilization": {used_percent}, "resets_at": "2026-08-04T14:30:00Z"}},
+                        "seven_day": {{"utilization": 0, "resets_at": "2026-08-09T00:00:00Z"}}}}"#
+                ),
+            )
+    }
+
+    /// The spare's Credential, good to ask with.
+    fn credentialed(host: &FakeHost, registry: &Registry, email: &str) {
+        let store = registry
+            .account(email)
+            .expect("it was just added")
+            .store(host)
+            .expect("home is known");
+        let [primary, _] = crate::credentials::stores_for(host, &store);
+        primary
+            .write(host, SPARE_CREDENTIAL)
+            .expect("the store takes it");
     }
 
     fn account(email: &str, used_percent: f64) -> crate::registry::Account {
@@ -313,6 +356,15 @@ mod tests {
         registry: &mut Registry,
         probed: probe::Installed,
     ) -> Result<Outcome> {
+        run_the_act_paced(host, registry, probed, &mut Pacing::none())
+    }
+
+    fn run_the_act_paced(
+        host: &FakeHost,
+        registry: &mut Registry,
+        probed: probe::Installed,
+        pacing: &mut Pacing,
+    ) -> Result<Outcome> {
         let watching = watching(registry);
         let fullest = Fullest::of(&watching.account).expect("a figure was cached");
         let crossed = fullest.crossed(80).expect("90 is over 80");
@@ -335,6 +387,7 @@ mod tests {
                 watching_alone: &mut watching_alone,
             },
             &cooled,
+            pacing,
         )
     }
 
@@ -387,7 +440,6 @@ mod tests {
             matches!(
                 outcome,
                 Outcome::Refused {
-                    resting_for: watch::REFRESH_INTERVAL_MILLIS,
                     contended: false,
                     ..
                 }
@@ -421,12 +473,12 @@ mod tests {
 
     #[test]
     fn a_watch_lost_after_the_burst_switches_nothing() {
-        let host = host().with_interrupt_after_requests(1);
+        let host = host_where_the_spare_reads(5.0).with_interrupt_after_requests(1);
         host.listen_for_interrupts();
         let mut registry = watching_a_pair(5.0);
-        // The spare's Renewal sends the one request the interrupt counts, so the
-        // burst itself finishes and the loss lands on the last ask before the Switch.
-        barely_credentialed(&host, &registry, SPARE);
+        // The spare's read sends the request the interrupt counts, so the loss lands
+        // on an ask before the Switch.
+        credentialed(&host, &registry, SPARE);
 
         let outcome =
             run_the_act(&host, &mut registry).expect("a lost watch is an outcome, not a raise");
@@ -439,30 +491,63 @@ mod tests {
         assert!(still_on(&registry, WATCHED), "the Credential never moved");
     }
 
+    /// The spare's cached figure sits under the ceiling, and its Refresh fails on
+    /// the unarranged endpoint: a round that judged the cache would Switch onto it.
     #[test]
-    fn nowhere_worth_going_carries_what_could_not_be_read() {
+    fn a_burst_that_read_no_candidate_holds_rather_than_judging_the_cache() {
         let host = host();
-        // The spare's cached figure sits over the ceiling of 70, and its Refresh
-        // fails on the unarranged endpoint — so it is set aside on the old figure
-        // and the sentence has to say the figure is old.
-        let mut registry = watching_a_pair(95.0);
+        let mut registry = watching_a_pair(5.0);
         barely_credentialed(&host, &registry, SPARE);
+        let mut pacing = Pacing::none();
 
-        let outcome =
-            run_the_act(&host, &mut registry).expect("nowhere to go is an outcome, not a raise");
+        let outcome = run_the_act_paced(
+            &host,
+            &mut registry,
+            probe::Installed::unknown("2.1.221"),
+            &mut pacing,
+        )
+        .expect("a candidate that could not be read is a hold, not a raise");
 
-        let Outcome::Nowhere { why, looking_again } = outcome else {
-            panic!("every candidate is set aside: {outcome:?}");
+        let Outcome::Held { why, retrying_in } = outcome else {
+            panic!("nothing was read to decide on: {outcome:?}");
         };
-        assert!(
-            why.contains("worth Switching to"),
-            "the Margin's sentence is quoted: {why}"
+        assert!(why.contains("no candidate could be read"), "{why}");
+        assert!(why.contains(SPARE), "and which: {why}");
+        assert_eq!(
+            retrying_in,
+            watch::REFRESH_INTERVAL_MILLIS,
+            "the first failure is charged and the wait is the first step"
         );
         assert_eq!(
-            looking_again,
-            watch::NOWHERE_INTERVAL_MILLIS,
-            "the rest is the round's, and whether a line promises it is the \
-             arrangement's"
+            pacing.rest.resting(host.now()),
+            None,
+            "a burst that read nothing is not resting: it is what the Back-off paces"
+        );
+        assert!(still_on(&registry, WATCHED), "nothing was changed");
+    }
+
+    #[test]
+    fn nowhere_worth_going_rests_the_burst_and_carries_what_could_not_be_read() {
+        let host = host_where_the_spare_reads(75.0);
+        let mut registry = watching_a_pair(5.0);
+        credentialed(&host, &registry, SPARE);
+        let mut pacing = Pacing::none();
+
+        let outcome = run_the_act_paced(
+            &host,
+            &mut registry,
+            probe::Installed::unknown("2.1.221"),
+            &mut pacing,
+        )
+        .expect("nowhere to go is an outcome, not a raise");
+
+        let Outcome::Nowhere { why } = outcome else {
+            panic!("the spare was read at 75, over the ceiling of 70: {outcome:?}");
+        };
+        assert!(why.contains("75%"), "judged on the figure just read: {why}");
+        assert!(
+            pacing.rest.resting(host.now()).is_some(),
+            "the burst went out, so it rests"
         );
     }
 
@@ -471,7 +556,7 @@ mod tests {
     /// every candidate aside for a window its tier never reads.
     #[test]
     fn a_fable_spent_scope_still_switches_to_the_best_of_what_remains() {
-        let host = host();
+        let host = host_where_the_spare_reads(20.0);
         let mut registry = Registry::default();
         registry.declare_group("work").expect("a usable name");
         let fable_spent = |email: &str, five_hour: f64| {
@@ -499,7 +584,7 @@ mod tests {
             .get_mut("work")
             .expect("declared")
             .prefer_fable = true;
-        barely_credentialed(&host, &registry, SPARE);
+        credentialed(&host, &registry, SPARE);
 
         let outcome = run_the_act(&host, &mut registry).expect("somewhere remains");
 
@@ -511,9 +596,9 @@ mod tests {
 
     #[test]
     fn a_switch_turned_away_by_a_held_lock_is_refused_as_contended() {
-        let host = host();
+        let host = host_where_the_spare_reads(5.0);
         let mut registry = watching_a_pair(5.0);
-        barely_credentialed(&host, &registry, SPARE);
+        credentialed(&host, &registry, SPARE);
         // Somebody else is mid-write on the Default Profile, which is where the
         // Switch would land the Credential.
         let store = holdings::the_default_profile(&host).expect("home is known");
@@ -527,7 +612,6 @@ mod tests {
                 outcome,
                 Outcome::Refused {
                     contended: true,
-                    resting_for: watch::NOWHERE_INTERVAL_MILLIS,
                     ..
                 }
             ),

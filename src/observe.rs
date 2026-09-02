@@ -179,6 +179,15 @@ impl Attempt {
         }
     }
 
+    /// The same, for a reader who will not use the cached figure: the reason, and no
+    /// word about what the cache holds.
+    fn why_unread(&self) -> Option<String> {
+        match &self.outcome {
+            Outcome::Throttled => Some(format!("{}: {}.", self.named, Refused::Throttled)),
+            _ => self.note(),
+        }
+    }
+
     /// The same, for a surface that is about to print the Quarantine itself.
     ///
     /// A Quarantined Account carries the reason and the repair on its own line there,
@@ -235,6 +244,19 @@ impl Report {
     /// candidate was passed over.
     pub fn notes(&self) -> Vec<String> {
         self.said(Attempt::note)
+    }
+
+    /// The same for a Watcher, which decides on nothing it did not just read and so
+    /// has no cached figure to point at.
+    pub fn unread(&self) -> Vec<String> {
+        self.said(Attempt::why_unread)
+    }
+
+    /// Whether `email` came back with a figure this time.
+    pub fn observed(&self, email: &str) -> bool {
+        self.attempts.iter().any(|attempt| {
+            name::same_name(&attempt.email, email) && attempt.outcome == Outcome::Observed
+        })
     }
 
     /// Says them, before whatever figures they explain — for a surface that goes on to

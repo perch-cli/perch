@@ -50,13 +50,6 @@ pub fn figure_stands(cached: &CachedUtilization, now: DateTime<Utc>) -> bool {
     (0..REFRESH_INTERVAL_MILLIS as i64).contains(&age)
 }
 
-/// How long the loop rests after a round that found nowhere to go.
-///
-/// The ordinary interval Refreshes one Account and such a round read every
-/// candidate, so that cadence spends each of their allowances on Accounts it
-/// just refused. The Cooldown: none of them becomes a candidate in 150 seconds.
-pub const NOWHERE_INTERVAL_MILLIS: u64 = COOLDOWN_MINUTES as u64 * 60_000;
-
 /// How often that is, for the line that says what the loop is about to do.
 ///
 /// Derived rather than written out, so the sentence and the constant cannot come to
@@ -119,6 +112,58 @@ impl Backoff {
         REFRESH_INTERVAL_MILLIS
             .saturating_mul(factor)
             .min(LONGEST_WAIT_MILLIS)
+    }
+}
+
+/// A burst that found nowhere to go is not repeated for the Cooldown's fifteen
+/// minutes: the interval is one Account's allowance, and a burst at the interval
+/// spends every candidate's on Accounts the round just refused. In memory and
+/// nowhere else, and apart from the [`Backoff`]: every candidate answered.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rest {
+    found_nowhere: Option<(DateTime<Utc>, String)>,
+}
+
+impl Rest {
+    pub fn none() -> Rest {
+        Rest::default()
+    }
+
+    /// A burst that read every candidate and found nowhere to go, and why.
+    pub fn found_nowhere(&mut self, now: DateTime<Utc>, why: &str) {
+        self.found_nowhere = Some((now, why.to_string()));
+    }
+
+    /// Why the candidates are not read this round, or `None` when they may be. The
+    /// burst's own reason, so a line inside the rest still says what was found.
+    pub fn resting(&self, now: DateTime<Utc>) -> Option<String> {
+        let (spent_at, why) = self.found_nowhere.as_ref()?;
+        let elapsed = now - *spent_at;
+        let left = cooldown() - elapsed;
+        (left > Duration::zero()).then(|| {
+            and_then(
+                why,
+                &format!(
+                    "The candidates were read {} ago, so they are not asked again {}.",
+                    minutes(elapsed.max(Duration::zero())),
+                    still_to_wait(left),
+                ),
+            )
+        })
+    }
+}
+
+/// What a loop carries from one round to the next about when to ask again. In memory
+/// and nowhere else: a Check starts with none of it and exits with whatever it earned.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Pacing {
+    pub backoff: Backoff,
+    pub rest: Rest,
+}
+
+impl Pacing {
+    pub fn none() -> Pacing {
+        Pacing::default()
     }
 }
 
@@ -660,12 +705,23 @@ fn still_to_wait(left: Duration) -> String {
 pub struct Considered {
     pub email: String,
     pub named: String,
-    pub fullest: Option<Fullest>,
+    pub figure: Figure,
+}
+
+/// What this round knows of a candidate's fullness, which is only ever what it just
+/// read: a cached figure is not carried here, so nothing below can judge on one.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Figure {
+    Read(Fullest),
+    /// Read, and no Quota Window came back — or gone from the Registry between the
+    /// walk and the reading.
+    Unobserved,
+    /// Not read this round, whatever the cache holds.
+    Unread,
 }
 
 /// The Accounts a Switch may not land on this round, and the one sentence saying why.
-/// Set aside before the Strategy ranks them rather than by second-guessing the winner,
-/// and a candidate whose Refresh merely failed is judged on what was cached.
+/// Set aside before the Strategy ranks them rather than by second-guessing the winner.
 pub fn set_aside(
     policy: &Policy,
     scope: &crate::config::Scope,
@@ -674,17 +730,24 @@ pub fn set_aside(
     let mut emails = Vec::new();
     let mut clauses = Vec::new();
     for candidate in considered {
-        let why = match &candidate.fullest {
-            Some(fullest) if fullest.used_percent > f64::from(policy.ceiling()) => format!(
-                "{} is at {}% used and nothing over {}% is worth moving to",
-                candidate.named,
-                crate::utilization::percentage_against(fullest.used_percent, policy.ceiling()),
-                policy.ceiling(),
-            ),
-            Some(_) => continue,
-            None => format!(
+        let why = match &candidate.figure {
+            Figure::Read(fullest) if fullest.used_percent > f64::from(policy.ceiling()) => {
+                format!(
+                    "{} is at {}% used and nothing over {}% is worth moving to",
+                    candidate.named,
+                    crate::utilization::percentage_against(fullest.used_percent, policy.ceiling()),
+                    policy.ceiling(),
+                )
+            }
+            Figure::Read(_) => continue,
+            Figure::Unobserved => format!(
                 "Perch has never observed how full {} is, and a Switch onto \
                  a figure it has not got is a Switch made blind",
+                candidate.named,
+            ),
+            Figure::Unread => format!(
+                "{} could not be read this round, and a Switch onto a figure \
+                 it has not just read is a Switch made blind",
                 candidate.named,
             ),
         };
@@ -724,10 +787,10 @@ pub enum Outcome {
     /// `unread` is what could not be re-read, and it stays: a candidate ranked on an
     /// old figure can make a Switch land somewhere worse than it left.
     Switched { to: String, unread: Vec<String> },
-    /// It was, and there was nowhere worth going — every candidate exhausted, or none
-    /// of them a candidate at all. Nothing to fix and nothing to retry: the answer is
-    /// to wait, so the loop does, for `looking_again`.
-    Nowhere { why: String, looking_again: u64 },
+    /// It was, and there was nowhere worth going — every candidate exhausted, none of
+    /// them a candidate at all, or the burst that reads them still resting. Nothing to
+    /// fix and nothing to retry: the answer is to wait, so the loop does.
+    Nowhere { why: String },
     /// The figures could not be read, so nothing was decided on the ones Perch already
     /// had. `retrying_in` is the wait the failure was charged for, set where it was
     /// charged.
@@ -735,13 +798,9 @@ pub enum Outcome {
     /// A Switch was wanted, attempted, and turned away without changing anything — most
     /// often a client running against the Profile the Capture would write into
     /// (ADR a-profile-is-live-by-evidence). Only where waiting is an answer: a failure
-    /// that does not clear itself is reported as itself instead. `resting_for` is set
-    /// where it is known what the round spent, and `contended` decides the exit code.
-    Refused {
-        why: String,
-        resting_for: u64,
-        contended: bool,
-    },
+    /// that does not clear itself is reported as itself instead. `contended` decides
+    /// the exit code.
+    Refused { why: String, contended: bool },
     /// The watch was taken over between the reading and the Switch. Its own outcome
     /// rather than a [`Outcome::Refused`], because a scheduler branching on "nothing
     /// to do" would record a round that was in fact displaced.
@@ -835,9 +894,6 @@ pub fn refused_or_raised(not_idle: NotIdle, installed: &Installed) -> Result<Out
             why: running
                 .refusal(installed, &live::NOTHING_WAS_CHANGED)
                 .to_string(),
-            // Asked before the burst, so nothing has been spent on it and the
-            // ordinary interval answers.
-            resting_for: REFRESH_INTERVAL_MILLIS,
             contended: false,
         }),
         // This does not clear itself: a `sessions` directory nobody can read is a machine
@@ -868,21 +924,21 @@ pub struct Round {
 }
 
 impl Round {
-    /// How long the loop leaves it before the next round.
-    ///
-    /// Quoted off the outcome rather than derived from it a second time, so the wait
-    /// the line promised and the wait taken are the same number. A round that read a
-    /// figure is followed by the ordinary interval whatever it decided about it.
+    /// How long the loop leaves it before the next round. Quoted off the outcome
+    /// rather than derived from it a second time, so the wait the line promised and
+    /// the wait taken are the same number. A round that read a figure is followed by
+    /// the interval whatever it decided: `perch status` serves what this loop last
+    /// read.
     pub fn waiting_for(&self) -> u64 {
         match &self.outcome {
             Outcome::Held { retrying_in, .. } => *retrying_in,
-            Outcome::Nowhere { looking_again, .. } => *looking_again,
-            Outcome::Refused { resting_for, .. } => *resting_for,
             // Named one by one rather than caught by a wildcard, so an outcome added
             // later has to say what the loop does after it.
             Outcome::Waiting
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
+            | Outcome::Nowhere { .. }
+            | Outcome::Refused { .. }
             // The loop leaves at the top of the next round rather than waiting this
             // out, so the number is only what the line would have promised.
             | Outcome::HandedOver { .. }
@@ -927,22 +983,11 @@ impl Round {
                 true => format!(" → {to}"),
                 false => format!(" → {to}{}", explaining(&unread.join(" "))),
             },
-            Outcome::Nowhere { why, looking_again } if promising => explaining(&and_then(
-                why,
-                &format!("Looking again in {}.", how_long(*looking_again)),
-            )),
+            // The one wait said on a line: every round waits the interval, and a hold
+            // is the round that waits something else.
             Outcome::Held { why, retrying_in } if promising => explaining(&and_then(
                 why,
                 &format!("Asking again in {}.", how_long(*retrying_in)),
-            )),
-            // Said only where the rest outlasts the ordinary interval: every round
-            // waits, and the waits worth a sentence are the ones a reader would
-            // otherwise take for a watcher that has stopped deciding.
-            Outcome::Refused {
-                why, resting_for, ..
-            } if promising && *resting_for != REFRESH_INTERVAL_MILLIS => explaining(&and_then(
-                why,
-                &format!("Looking again in {}.", how_long(*resting_for)),
             )),
             Outcome::Cooling { why }
             | Outcome::Nowhere { why, .. }
@@ -1447,7 +1492,6 @@ mod tests {
             at(86.0),
             Outcome::Nowhere {
                 why: "every Account in Group `work` is exhausted.".to_string(),
-                looking_again: NOWHERE_INTERVAL_MILLIS,
             },
         )
         .line(now());
@@ -1464,7 +1508,6 @@ mod tests {
             at(86.0),
             Outcome::Refused {
                 why: "a client is running against that Profile.".to_string(),
-                resting_for: REFRESH_INTERVAL_MILLIS,
                 contended: false,
             },
         )
@@ -1497,7 +1540,6 @@ mod tests {
                 at(86.0),
                 Outcome::Nowhere {
                     why: "every Account in Group `work` is exhausted.".to_string(),
-                    looking_again: NOWHERE_INTERVAL_MILLIS,
                 },
             ),
             round(
@@ -1511,7 +1553,6 @@ mod tests {
                 at(86.0),
                 Outcome::Refused {
                     why: "a client is running against that Profile.".to_string(),
-                    resting_for: REFRESH_INTERVAL_MILLIS,
                     contended: false,
                 },
             ),
@@ -1577,36 +1618,23 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_round_that_rests_past_the_interval_says_when_it_looks_again() {
-        let resting = round(
-            at(86.0),
+    fn a_round_that_read_its_figure_promises_no_wait_because_the_interval_is_not_news() {
+        for outcome in [
             Outcome::Refused {
                 why: "the Default Profile is mid-write.".to_string(),
-                resting_for: NOWHERE_INTERVAL_MILLIS,
                 contended: true,
             },
-        )
-        .line(now());
-        assert!(
-            resting.contains("Looking again in 15m00s"),
-            "a rest past the interval reads as a watcher that stopped deciding \
-             unless the line says it: {resting}"
-        );
-
-        let ordinary = round(
-            at(86.0),
-            Outcome::Refused {
-                why: "a client is running against that Profile.".to_string(),
-                resting_for: REFRESH_INTERVAL_MILLIS,
-                contended: false,
+            Outcome::Nowhere {
+                why: "Every Account in Group `work` is exhausted.".to_string(),
             },
-        )
-        .line(now());
-        assert!(
-            !ordinary.contains("Looking again"),
-            "every round waits an interval, so an ordinary one is not news: \
-             {ordinary}"
-        );
+        ] {
+            let line = round(at(86.0), outcome).line(now());
+            assert!(
+                !line.contains("again in"),
+                "every round waits an interval, so a round that read is not \
+                 news: {line}"
+            );
+        }
     }
 
     /// The same rule on the other outcome that names a cadence: a Check exits
@@ -1618,7 +1646,6 @@ mod tests {
             at(100.0),
             Outcome::Nowhere {
                 why: "Every Account in Group `work` is exhausted.".to_string(),
-                looking_again: NOWHERE_INTERVAL_MILLIS,
             },
         )
         .line(now());
@@ -1658,17 +1685,13 @@ mod tests {
                 to: String::new(),
                 unread: Vec::new(),
             },
-            Outcome::Nowhere {
-                why: String::new(),
-                looking_again: NOWHERE_INTERVAL_MILLIS,
-            },
+            Outcome::Nowhere { why: String::new() },
             Outcome::Held {
                 why: String::new(),
                 retrying_in: REFRESH_INTERVAL_MILLIS,
             },
             Outcome::Refused {
                 why: String::new(),
-                resting_for: REFRESH_INTERVAL_MILLIS,
                 contended: false,
             },
             Outcome::HandedOver { why: String::new() },
@@ -1762,7 +1785,6 @@ mod tests {
             },
             Outcome::Refused {
                 why: String::new(),
-                resting_for: REFRESH_INTERVAL_MILLIS,
                 contended: false,
             },
         ] {
@@ -1775,37 +1797,6 @@ mod tests {
                 round.outcome,
             );
         }
-
-        // The one decision that read *every* candidate, so keeping the ordinary
-        // cadence spends each of their allowances on Accounts it just refused.
-        assert_eq!(
-            round(
-                at(86.0),
-                Outcome::Nowhere {
-                    why: String::new(),
-                    looking_again: NOWHERE_INTERVAL_MILLIS,
-                }
-            )
-            .waiting_for(),
-            NOWHERE_INTERVAL_MILLIS,
-            "nowhere to go rests for the Cooldown rather than an interval"
-        );
-
-        // And the other one: a Switch turned away *after* the burst has spent
-        // every candidate's allowance costs exactly what nowhere-to-go costs.
-        assert_eq!(
-            round(
-                at(86.0),
-                Outcome::Refused {
-                    why: String::new(),
-                    resting_for: NOWHERE_INTERVAL_MILLIS,
-                    contended: false,
-                }
-            )
-            .waiting_for(),
-            NOWHERE_INTERVAL_MILLIS,
-            "a refusal that read the candidates rests for the Cooldown too"
-        );
 
         assert_eq!(
             round(
@@ -1885,7 +1876,6 @@ mod tests {
                       nowhere useful to Switch. Nothing was changed.\n\
                       overflow@example.com frees up soonest, at 15:00."
                     .to_string(),
-                looking_again: NOWHERE_INTERVAL_MILLIS,
             },
         )
         .line(now());
@@ -2018,15 +2008,19 @@ mod tests {
         );
     }
 
-    fn considered(named: &str, used_percent: Option<f64>) -> Considered {
+    fn considered(named: &str, figure: Figure) -> Considered {
         Considered {
             email: format!("{named}@example.com"),
             named: format!("{named}@example.com"),
-            fullest: used_percent.map(|used_percent| Fullest {
-                window: "5-hour".to_string(),
-                used_percent,
-            }),
+            figure,
         }
+    }
+
+    fn read(used_percent: f64) -> Figure {
+        Figure::Read(Fullest {
+            window: "5-hour".to_string(),
+            used_percent,
+        })
     }
 
     #[test]
@@ -2035,9 +2029,9 @@ mod tests {
             &policy(),
             &work(),
             &[
-                considered("just-under", Some(74.0)),
-                considered("at-the-bar", Some(70.0)),
-                considered("roomy", Some(5.0)),
+                considered("just-under", read(74.0)),
+                considered("at-the-bar", read(70.0)),
+                considered("roomy", read(5.0)),
             ],
         );
 
@@ -2052,7 +2046,11 @@ mod tests {
 
     #[test]
     fn a_candidate_no_figure_was_ever_read_of_is_set_aside_rather_than_read_as_empty() {
-        let set_aside = set_aside(&policy(), &work(), &[considered("unseen", None)]);
+        let set_aside = set_aside(
+            &policy(),
+            &work(),
+            &[considered("unseen", Figure::Unobserved)],
+        );
 
         assert_eq!(set_aside.emails, vec!["unseen@example.com".to_string()]);
         assert!(
@@ -2060,6 +2058,49 @@ mod tests {
             "{}",
             set_aside.because
         );
+    }
+
+    #[test]
+    fn a_candidate_that_could_not_be_read_this_round_is_set_aside_whatever_the_cache_holds() {
+        let set_aside = set_aside(
+            &policy(),
+            &work(),
+            &[
+                considered("throttled", Figure::Unread),
+                considered("roomy", read(5.0)),
+            ],
+        );
+
+        assert_eq!(set_aside.emails, vec!["throttled@example.com".to_string()]);
+        assert!(
+            set_aside.because.contains("could not be read this round"),
+            "{}",
+            set_aside.because
+        );
+        assert!(
+            !set_aside.because.contains('%'),
+            "no cached figure is quoted, because none was judged: {}",
+            set_aside.because
+        );
+    }
+
+    #[test]
+    fn a_burst_rests_for_the_cooldown_and_the_line_says_how_much_is_left() {
+        let mut rest = Rest::none();
+        assert_eq!(rest.resting(now()), None, "a loop starts owing nothing");
+
+        rest.found_nowhere(now(), "Every Account in Group `work` is exhausted");
+
+        let why = rest
+            .resting(now() + Duration::minutes(2))
+            .expect("two minutes into a fifteen minute rest");
+        assert!(
+            why.starts_with("Every Account in Group `work` is exhausted. The candidates"),
+            "the burst's reason still opens the line: {why}"
+        );
+        assert!(why.contains("2 minutes ago"), "{why}");
+        assert!(why.contains("another 13 minutes"), "{why}");
+        assert_eq!(rest.resting(now() + Duration::minutes(15)), None);
     }
 
     /// The window a fall-through candidate is judged on: with the Fable weekly

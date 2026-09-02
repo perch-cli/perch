@@ -753,11 +753,10 @@ fn a_destination_nearly_as_full_as_the_account_being_left_is_refused() {
 }
 
 /// The other round that has read every candidate: one that wanted a Switch,
-/// attempted it, and was turned away. At the ordinary interval that repeats the
-/// burst twenty-four times an hour per candidate, against the 28-30 Anthropic
-/// allows — the same cost nowhere-to-go rests to avoid, for the same reason.
+/// attempted it, and was turned away. A refusal clears itself — the lock is given
+/// back, the client exits — so the next round is read at the interval like any other.
 #[test]
-fn a_switch_the_machine_turned_away_is_looked_at_again_at_the_cooldown() {
+fn a_switch_the_machine_turned_away_is_looked_at_again_at_the_interval() {
     let now = watched().now();
     let outgoing = store_of(&watched(), EMAIL).config_dir;
     let host = watching(&[86.0, 40.0], 5.0)
@@ -777,53 +776,115 @@ fn a_switch_the_machine_turned_away_is_looked_at_again_at_the_cooldown() {
     let (result, printed) = run_watch(&host);
 
     result.expect("a Switch the machine turned away does not end the watch");
-    let waits: Vec<u64> = host
-        .effects()
-        .into_iter()
-        .filter_map(|effect| match effect {
-            Effect::Waited { millis } => Some(millis),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        waits.first().copied(),
-        Some(perch::watch::NOWHERE_INTERVAL_MILLIS),
-        "the round after the refusal rests for the Cooldown: {waits:?}\n{printed}"
+    assert!(
+        waits(&host)
+            .iter()
+            .all(|millis| *millis == REFRESH_INTERVAL_MILLIS),
+        "every round that read waits the interval: {:?}\n{printed}",
+        waits(&host)
     );
 }
 
 /// Nowhere to go is the one steady state a Threshold crossing can sit in for hours,
-/// and the round that reaches it read every candidate. At the ordinary interval that is
-/// twenty-four reads an hour *per candidate*, against the 28-30 Anthropic allows — so
-/// the loop spends the allowance that `perch status --refresh` needs, on Accounts it
-/// has already refused.
+/// and the round that reaches it read every candidate. Repeating that at the interval
+/// is twenty-four reads an hour *per candidate*, against the 28-30 Anthropic allows —
+/// so the burst rests for the Cooldown while the loop goes on reading the Account it
+/// is on at the interval, because that figure is the one `perch status` serves.
 #[test]
-fn a_dead_end_is_looked_at_again_at_the_cooldown_rather_than_at_the_interval() {
+fn a_dead_end_rests_the_burst_for_the_cooldown_and_the_loop_keeps_its_interval() {
     // Every round over the Threshold, and the only candidate barely emptier — so
-    // every one of them crosses, reads, and finds nowhere worth going.
-    let host = watching_both(&[82.0, 83.0, 81.0, 84.0, 85.0, 86.0], &[78.0], 6);
+    // every one of them crosses and finds nowhere worth going. Seven rounds: six
+    // inside the rest, and the seventh reads the candidate again.
+    let host = watching_both(
+        &[82.0, 83.0, 81.0, 84.0, 85.0, 86.0, 87.0],
+        &[78.0, 78.0],
+        7,
+    );
 
     let (result, printed) = run_watch(&host);
 
     result.expect("it was stopped");
-    let waits: Vec<u64> = host
-        .effects()
-        .into_iter()
-        .filter_map(|effect| match effect {
-            Effect::Waited { millis } => Some(millis),
-            _ => None,
-        })
-        .collect();
     assert!(
-        waits
+        waits(&host)
             .iter()
-            .all(|millis| *millis == perch::watch::NOWHERE_INTERVAL_MILLIS),
-        "every round found nowhere to go, so every wait is the Cooldown: {waits:?}"
+            .all(|millis| *millis == REFRESH_INTERVAL_MILLIS),
+        "every round read its figure, so every wait is the interval: {:?}",
+        waits(&host)
+    );
+    let asked = asked_by(&host);
+    assert_eq!(
+        asked.iter().filter(|token| *token == ACTIVE_TOKEN).count(),
+        7,
+        "the Account being watched is read every round: {asked:?}"
+    );
+    assert_eq!(
+        asked.iter().filter(|token| *token == SPARE_TOKEN).count(),
+        2,
+        "and the candidate once per Cooldown: {asked:?}"
+    );
+    let decisions = decisions(&printed);
+    assert_eq!(decisions.len(), 7, "{printed}");
+    assert!(
+        decisions[1].contains("nowhere") && decisions[1].contains("not asked again"),
+        "a round inside the rest says what is resting: {}",
+        decisions[1]
     );
     assert!(
-        printed.contains("Looking again in 15m"),
-        "and the line says the loop is resting longer than an interval: {printed}"
+        decisions[6].contains("78%"),
+        "and the round after it read the candidate again: {}",
+        decisions[6]
     );
+}
+
+/// The contract of #48, on the candidates: a Refresh failure holds the decision, and
+/// no Switch is considered — or refused — on a cached figure. The candidate here was
+/// last read at 95% and is now empty, which the cached figure cannot say.
+#[test]
+fn a_candidate_anthropic_refused_to_let_it_read_holds_the_round_rather_than_judging_the_cache() {
+    let readable = usage(2.0);
+    let host = answering(watched(), ACTIVE_TOKEN, EMAIL, &[86.0, 87.0, 88.0])
+        .with_reply_to(PROFILE_URL, SPARE_TOKEN, 200, &profile_of(SECOND_EMAIL))
+        .with_replies_to(
+            USAGE_URL,
+            SPARE_TOKEN,
+            &[(429, "{}"), (429, "{}"), (200, &readable)],
+        )
+        .with_interrupt_after(3);
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 95.0)]);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    let decisions = decisions(&printed);
+    assert_eq!(decisions.len(), 3, "{printed}");
+    for held in &decisions[..2] {
+        assert!(held.contains("held"), "{held}");
+        assert!(
+            held.contains("86% used") || held.contains("87% used"),
+            "{held}"
+        );
+        assert!(held.contains("rate-limiting"), "and why: {held}");
+        assert!(
+            !held.contains("95%"),
+            "the two-day-old figure is not judged, so it is not quoted: {held}"
+        );
+        assert!(
+            !held.contains("cached figure"),
+            "and nothing points at a figure the round did not use: {held}"
+        );
+    }
+    assert_eq!(
+        waits(&host)[..2],
+        [REFRESH_INTERVAL_MILLIS, REFRESH_INTERVAL_MILLIS * 2],
+        "each refusal is charged to the Back-off: {:?}",
+        waits(&host)
+    );
+    assert!(
+        decisions[2].contains("switched"),
+        "the first read that works finds the candidate empty and moves: {}",
+        decisions[2]
+    );
+    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
 }
 
 /// A machine where the Account being watched fills up, the watcher moves off it, and

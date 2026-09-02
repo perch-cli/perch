@@ -83,6 +83,43 @@ could set it could set it to nothing, and nothing is what the endpoint is
 already refusing. A Cooldown paces Switches the Watcher makes; a Back-off paces
 questions nobody is answering.
 
+**The candidates are figures too.** A round over the Threshold reads every
+candidate before it chooses, and one that could not be read is set aside
+whatever the cache holds for it — a Switch onto a figure the round has not
+just read is the Switch this record forbids, and a refusal on that figure is a
+decision taken on it too. With none of them read the round holds, names the
+candidates and what refused each, and is paced by the Back-off where a request
+went out. The alternative — judging an unread candidate on its cached figure —
+was what the Watcher did, and it set a candidate aside on a two-day-old 95%
+that a read fifteen minutes later put at 23%.
+
+## A burst that found nowhere to go rests for the Cooldown
+
+The interval is one Account's allowance. A round over the Threshold reads every
+candidate on top of it, and nowhere to go is the one state a crossing can sit
+in for hours — so at the interval that burst repeats twenty-four times an hour
+against every candidate's allowance, spent on Accounts the round just refused.
+The burst rests instead: for the Cooldown's fifteen minutes, a round that would
+read the candidates again reports what the last burst found and when it will
+ask them again, and reads nothing but the Account it is on.
+
+The loop's cadence does not move. Utilization is served from the cache
+(ADR a-figure-carries-its-age) and the Watcher's round is what refills it, so a
+loop that slept out the rest left every `perch status` in those fifteen minutes
+reporting a figure up to fifteen minutes old — the Account it was watching went
+from 26% to 87% behind a `status` that said 26% the whole way. Resting the
+burst and not the loop keeps the figure the person reads at most one interval
+old, which is the bargain the interval was set for.
+
+Fifteen minutes because the Cooldown's arithmetic holds here unchanged: a
+five-hour window moves slowly enough that fifteen minutes never misses a real
+crossing, and a candidate that was refused is not going to clear the Margin
+inside one. In memory and nowhere else, like the Back-off: a Check has no last
+round to remember, and reads the candidates every time it is over the
+Threshold. It is not a Back-off, because every candidate answered, and a round
+inside it is `nowhere` rather than `held`: the figures were read, and the
+answer stands until they are read again.
+
 ## The Margin refuses a destination nearly as full as the one being left
 
 Usage on the Account you are on climbs. Usage on the Accounts you are not on

@@ -20,7 +20,7 @@ use crate::observe::{self, Attempt};
 use crate::registry::Settled;
 use crate::registry::{Account, Registry};
 use crate::watch::{
-    self, Backoff, Considered, Cooled, Fullest, Outcome, Policy, Recently, Round, Watcher,
+    self, Considered, Cooled, Figure, Fullest, Outcome, Pacing, Policy, Recently, Round, Watcher,
     nothing_was_switched,
 };
 
@@ -103,16 +103,16 @@ pub struct Reading<'a> {
     pub now: DateTime<Utc>,
 }
 
-/// What one reading comes to, decided here and nowhere else.
-///
-/// `act` is handed a [`Cooled`], which is the only way to have one — so a round
-/// that may not act cannot call it, and what decides that is this function rather
-/// than the order of statements around it.
+/// What one reading comes to, decided here and nowhere else. `act` is handed a
+/// [`Cooled`], which is the only way to have one — so a round that may not act
+/// cannot call it, and what decides that is this function rather than the order of
+/// statements around it — and the [`Pacing`], because what it spends and what it
+/// cannot read are charged where they happen.
 pub fn decide(
     reading: Reading<'_>,
     watcher: Watcher,
-    backoff: &mut Backoff,
-    act: impl FnOnce(&Cooled<'_>) -> Result<Outcome>,
+    pacing: &mut Pacing,
+    act: impl FnOnce(&Cooled<'_>, &mut Pacing) -> Result<Outcome>,
 ) -> Result<Round> {
     let threshold = reading.policy.threshold;
 
@@ -141,10 +141,7 @@ pub fn decide(
 
     // Never on a figure it did not just read.
     if let Some(refused) = refused_the_reading(&reading.report.attempts) {
-        let waiting_for = match refused.paced {
-            true => backoff.could_not_read(),
-            false => watch::REFRESH_INTERVAL_MILLIS,
-        };
+        let waiting_for = refused.charged(pacing);
         return Ok(held(refused.why, waiting_for));
     }
 
@@ -156,12 +153,9 @@ pub fn decide(
             "Anthropic answered without a Quota Window Perch could read, so \
              there was no figure to decide on."
                 .to_string(),
-            backoff.could_not_read(),
+            pacing.backoff.could_not_read(),
         ));
     };
-    // A figure, so whatever was wrong is over. Said here rather than at the end of the
-    // round: a round that finds nowhere to go has read perfectly well.
-    backoff.read();
 
     // Two asks that hand on what they earned, and the figure comes back out of each.
     let (fullest, outcome) = match fullest.crossed(threshold) {
@@ -173,9 +167,29 @@ pub fn decide(
                 crossed.fullest().clone(),
                 Outcome::Cooling { why: cooling.why },
             ),
-            Ok(cooled) => (cooled.fullest().clone(), act(&cooled)?),
+            Ok(cooled) => (
+                cooled.fullest().clone(),
+                match pacing.rest.resting(reading.now) {
+                    // Before the candidates are read, for the same reason as the
+                    // cooldown: the burst that read them last is what is resting.
+                    Some(why) => Outcome::Nowhere { why },
+                    None => act(&cooled, pacing)?,
+                },
+            ),
         },
     };
+    // A round that read everything it asked for, so whatever was wrong is over. A
+    // hold from the Act is the one round that asked and was not answered.
+    match &outcome {
+        Outcome::Held { .. } => {}
+        Outcome::Waiting
+        | Outcome::Cooling { .. }
+        | Outcome::Switched { .. }
+        | Outcome::Nowhere { .. }
+        | Outcome::Refused { .. }
+        | Outcome::HandedOver { .. }
+        | Outcome::Stopped { .. } => pacing.backoff.read(),
+    }
     Ok(Round {
         fullest: Some(fullest),
         threshold,
@@ -217,32 +231,79 @@ pub fn refused_the_reading(attempts: &[Attempt]) -> Option<Refusal> {
             .to_string(),
         ));
     };
-    match &attempt.outcome {
-        observe::Outcome::Observed => None,
-        observe::Outcome::Throttled => Some(Refusal::paced(
-            "Anthropic is rate-limiting reads of this Account's usage, so \
-             nothing current could be read."
-                .to_string(),
-        )),
-        // Paced only where the round asked Anthropic something: a Renewal refused
-        // because a client is holding the Profile, or an Account sharing one, sent
-        // nothing, and a Back-off paces questions nobody is answering.
-        observe::Outcome::Failed { why, spent } => Some(match spent {
-            true => Refusal::paced(why.clone()),
-            false => Refusal::unpaced(why.clone()),
-        }),
-        // An Account already Quarantined is not asked at all (`observe` returns
-        // before the first request), so this round spent nothing and a Back-off
-        // paces questions nobody is answering.
-        observe::Outcome::Quarantined { why, .. } => Some(Refusal::unpaced(format!(
-            "{}. {}",
-            why.because(),
-            crate::registry::how_to_repair(&attempt.email),
-        ))),
-        // Neither reaches an `Attempt` here: a round that stopped is reported
-        // through `Report::stopped`, and a round reads under `Spending::ItsOwn`,
-        // so the Watcher is never told to stand aside for itself.
-        observe::Outcome::Stopped(_) | observe::Outcome::JustRead => None,
+    Refusal::of(attempt)
+}
+
+/// Why no candidate's figure can be acted on, or `None` while any was read.
+///
+/// One unread candidate among read ones is set aside by the Margin; every one unread
+/// is a round with no figure to decide on, and a hold is what that is. The reasons
+/// are `read.unread()`'s, so the line says which candidate and why.
+pub fn refused_the_candidates(
+    considered: &[Considered],
+    read: &observe::Report,
+) -> Option<Refusal> {
+    let none_read = !considered.is_empty()
+        && considered
+            .iter()
+            .all(|candidate| candidate.figure == Figure::Unread);
+    if !none_read {
+        return None;
+    }
+    let paced = read
+        .attempts
+        .iter()
+        .filter_map(Refusal::of)
+        .any(|refusal| refusal.paced);
+    Some(Refusal {
+        why: format!(
+            "no candidate could be read, so nothing was decided on the figures \
+             Perch already had. {}",
+            read.unread().join(" "),
+        ),
+        paced,
+    })
+}
+
+impl Refusal {
+    /// Why one reading cannot be acted on, or `None` when it can.
+    fn of(attempt: &Attempt) -> Option<Refusal> {
+        match &attempt.outcome {
+            observe::Outcome::Observed => None,
+            observe::Outcome::Throttled => Some(Refusal::paced(
+                "Anthropic is rate-limiting reads of this Account's usage, so \
+                 nothing current could be read."
+                    .to_string(),
+            )),
+            // Paced only where the round asked Anthropic something: a Renewal refused
+            // because a client is holding the Profile, or an Account sharing one, sent
+            // nothing, and a Back-off paces questions nobody is answering.
+            observe::Outcome::Failed { why, spent } => Some(match spent {
+                true => Refusal::paced(why.clone()),
+                false => Refusal::unpaced(why.clone()),
+            }),
+            // An Account already Quarantined is not asked at all (`observe` returns
+            // before the first request), so this round spent nothing and a Back-off
+            // paces questions nobody is answering.
+            observe::Outcome::Quarantined { why, .. } => Some(Refusal::unpaced(format!(
+                "{}. {}",
+                why.because(),
+                crate::registry::how_to_repair(&attempt.email),
+            ))),
+            // Neither reaches an `Attempt` here: a round that stopped is reported
+            // through `Report::stopped`, and a round reads under `Spending::ItsOwn`,
+            // so the Watcher is never told to stand aside for itself.
+            observe::Outcome::Stopped(_) | observe::Outcome::JustRead => None,
+        }
+    }
+
+    /// The wait this refusal earns, charged where it is paced: a hold cannot be
+    /// reported against a wait it has not just paid for.
+    pub fn charged(&self, pacing: &mut Pacing) -> u64 {
+        match self.paced {
+            true => pacing.backoff.could_not_read(),
+            false => watch::REFRESH_INTERVAL_MILLIS,
+        }
     }
 }
 
@@ -317,18 +378,26 @@ impl Candidates {
             .collect()
     }
 
-    /// The same candidates, carrying the figures a Refresh has just written,
-    /// each judged by the Scope's Measure.
-    ///
-    /// One gone from the Registry between the walk and here carries none, which is
-    /// what the Margin sets aside — the same answer a candidate never read gets.
-    pub fn refreshed(self, registry: &Registry, measure: cycle::Measure) -> Vec<Considered> {
+    /// The same candidates, carrying the figures the Refresh in `read` has just
+    /// written, each judged by the Scope's Measure. Only those: one the Refresh did
+    /// not read is [`Figure::Unread`] whatever the cache holds, and one gone from the
+    /// Registry since the walk carries none — both what the Margin sets aside.
+    pub fn refreshed(
+        self,
+        registry: &Registry,
+        measure: cycle::Measure,
+        read: &observe::Report,
+    ) -> Vec<Considered> {
         self.0
             .into_iter()
             .map(|candidate| Considered {
-                fullest: registry
-                    .account(&candidate.email)
-                    .and_then(|account| Fullest::measured(account, measure)),
+                figure: match read.observed(&candidate.email) {
+                    false => Figure::Unread,
+                    true => registry
+                        .account(&candidate.email)
+                        .and_then(|account| Fullest::measured(account, measure))
+                        .map_or(Figure::Unobserved, Figure::Read),
+                },
                 email: candidate.email,
                 named: candidate.named,
             })
@@ -409,7 +478,7 @@ mod tests {
 
     /// What every arm that may not act is handed. Being called is the failure, so
     /// this says so rather than each test carrying a flag to check afterwards.
-    fn never_acts(_: &Cooled<'_>) -> Result<watch::Outcome> {
+    fn never_acts(_: &Cooled<'_>, _: &mut Pacing) -> Result<watch::Outcome> {
         panic!("this reading may not act")
     }
 
@@ -434,7 +503,7 @@ mod tests {
                 now: now(),
             },
             Watcher::Loop,
-            &mut Backoff::none(),
+            &mut Pacing::none(),
             // Nothing may act on an Account it may stay on.
             never_acts,
         )
@@ -461,7 +530,7 @@ mod tests {
                 now: now(),
             },
             Watcher::Loop,
-            &mut Backoff::none(),
+            &mut Pacing::none(),
             // It spends nothing finding out where it would have gone.
             never_acts,
         )
@@ -492,8 +561,8 @@ mod tests {
                 now: now(),
             },
             Watcher::Loop,
-            &mut Backoff::none(),
-            |_cooled| {
+            &mut Pacing::none(),
+            |_cooled, _pacing| {
                 acted.set(true);
                 Ok(switched())
             },
@@ -510,7 +579,7 @@ mod tests {
     fn a_round_that_lost_the_watch_decides_on_no_figure_and_charges_nothing() {
         let (account, mut report) = read(WATCHED, 90.0);
         report.stopped = Some(Lost::HandedOver);
-        let mut backoff = Backoff::none();
+        let mut pacing = Pacing::none();
 
         let round = decide(
             Reading {
@@ -521,16 +590,100 @@ mod tests {
                 now: now(),
             },
             Watcher::Loop,
-            &mut backoff,
+            &mut pacing,
             never_acts,
         )
         .expect("a round that stopped is still a round");
 
         assert!(round.fullest.is_none(), "it read no figure to decide on");
         assert_eq!(
-            backoff.could_not_read(),
-            Backoff::none().could_not_read(),
+            pacing.backoff.could_not_read(),
+            Pacing::none().backoff.could_not_read(),
             "and nothing was charged against a question it never asked"
+        );
+    }
+
+    /// The burst is the one thing a round spends on more than one Account, and the
+    /// rest is asked before it for the reason the cooldown is: a round that will not
+    /// read the candidates has no business finding out where it would have gone.
+    #[test]
+    fn a_burst_that_went_out_is_not_repeated_inside_the_cooldown_and_the_round_says_so() {
+        let (account, report) = read(WATCHED, 90.0);
+        let mut pacing = Pacing::none();
+        pacing.rest.found_nowhere(
+            now() - chrono::Duration::minutes(2),
+            "Every Account in Group `work` is exhausted.",
+        );
+
+        let round = decide(
+            Reading {
+                account: &account,
+                report: &report,
+                policy: &at(80),
+                recently: &Recently::nothing(),
+                now: now(),
+            },
+            Watcher::Loop,
+            &mut pacing,
+            never_acts,
+        )
+        .expect("a resting burst is still a round");
+
+        let watch::Outcome::Nowhere { why } = &round.outcome else {
+            panic!(
+                "nowhere to go, on the burst that said so: {:?}",
+                round.outcome
+            );
+        };
+        assert!(why.contains("is exhausted"), "the burst's reason: {why}");
+        assert!(why.contains("2 minutes ago"), "{why}");
+        assert_eq!(
+            round.waiting_for(),
+            watch::REFRESH_INTERVAL_MILLIS,
+            "the Account being watched is still read at the interval"
+        );
+        assert_eq!(
+            round.fullest.as_ref().expect("it read one").used_percent,
+            90.0,
+            "and the figure it read is the one on the line"
+        );
+    }
+
+    /// The Act reads the candidates, and a hold it reports is one it charged: the
+    /// Back-off doubles across rounds whose own reading was fine.
+    #[test]
+    fn a_hold_from_the_act_keeps_its_charge_where_a_round_that_read_drops_it() {
+        let (account, report) = read(WATCHED, 90.0);
+        let policy = at(80);
+        let recently = Recently::nothing();
+        let mut pacing = Pacing::none();
+        let reading = || Reading {
+            account: &account,
+            report: &report,
+            policy: &policy,
+            recently: &recently,
+            now: now(),
+        };
+        let held = |_: &Cooled<'_>, pacing: &mut Pacing| {
+            Ok(watch::Outcome::Held {
+                why: "no candidate could be read.".to_string(),
+                retrying_in: pacing.backoff.could_not_read(),
+            })
+        };
+
+        let first = decide(reading(), Watcher::Loop, &mut pacing, held).expect("a round");
+        let second = decide(reading(), Watcher::Loop, &mut pacing, held).expect("a round");
+        let read_through =
+            decide(reading(), Watcher::Loop, &mut pacing, |_, _| Ok(switched())).expect("a round");
+        let after = decide(reading(), Watcher::Loop, &mut pacing, held).expect("a round");
+
+        assert_eq!(first.waiting_for(), watch::REFRESH_INTERVAL_MILLIS);
+        assert_eq!(second.waiting_for(), watch::REFRESH_INTERVAL_MILLIS * 2);
+        assert_eq!(read_through.waiting_for(), watch::REFRESH_INTERVAL_MILLIS);
+        assert_eq!(
+            after.waiting_for(),
+            watch::REFRESH_INTERVAL_MILLIS,
+            "the burst that read dropped the whole of it"
         );
     }
 
@@ -550,7 +703,7 @@ mod tests {
                     now: now(),
                 },
                 watcher,
-                &mut Backoff::none(),
+                &mut Pacing::none(),
                 never_acts,
             )
             .expect("a reading nothing could be made of is still a round")
@@ -576,7 +729,6 @@ mod tests {
         let mut account = cycle::tests::account(WATCHED, vec![]);
         account.group = None;
         let (_, report) = read(WATCHED, 90.0);
-        let mut backoff = Backoff::none();
 
         let round = decide(
             Reading {
@@ -587,7 +739,7 @@ mod tests {
                 now: now(),
             },
             Watcher::Loop,
-            &mut backoff,
+            &mut Pacing::none(),
             never_acts,
         )
         .expect("a reading with nothing in it is still a round");
@@ -774,16 +926,21 @@ mod tests {
             .expect("the spare is held")
             .utilization = ungrouped("spare@example.com", 70.0).utilization;
 
-        let refreshed = candidates.refreshed(&registry, cycle::Measure::Worst);
+        let refreshed = candidates.refreshed(
+            &registry,
+            cycle::Measure::Worst,
+            &observed("spare@example.com"),
+        );
 
+        let Figure::Read(fullest) = &refreshed
+            .first()
+            .expect("the spare is still a candidate")
+            .figure
+        else {
+            panic!("the spare was read: {refreshed:?}");
+        };
         assert_eq!(
-            refreshed
-                .first()
-                .expect("the spare is still a candidate")
-                .fullest
-                .as_ref()
-                .map(|fullest| fullest.used_percent),
-            Some(70.0),
+            fullest.used_percent, 70.0,
             "the walk saw 10, and the Refresh wrote 70"
         );
     }
@@ -793,11 +950,88 @@ mod tests {
         let (mut registry, candidates) = walked();
         registry.forget("spare@example.com");
 
-        assert!(
-            candidates.refreshed(&registry, cycle::Measure::Worst)[0]
-                .fullest
-                .is_none(),
+        assert_eq!(
+            candidates.refreshed(
+                &registry,
+                cycle::Measure::Worst,
+                &observed("spare@example.com")
+            )[0]
+            .figure,
+            Figure::Unobserved,
             "no figure is what the Margin sets aside"
+        );
+    }
+
+    /// A Report saying `email` was read this round.
+    fn observed(email: &str) -> observe::Report {
+        observe::Report {
+            attempts: vec![Attempt {
+                email: email.to_string(),
+                named: email.to_string(),
+                outcome: Outcome::Observed,
+            }],
+            asked: true,
+            ..observe::Report::default()
+        }
+    }
+
+    /// The figure the cache holds is not the figure a candidate is judged on: a
+    /// read that failed leaves the candidate unread, whatever was cached.
+    #[test]
+    fn a_candidate_whose_read_failed_is_unread_whatever_the_cache_holds() {
+        let (registry, candidates) = walked();
+        let throttled = observe::Report {
+            attempts: vec![Attempt {
+                email: "spare@example.com".to_string(),
+                named: "spare@example.com".to_string(),
+                outcome: Outcome::Throttled,
+            }],
+            asked: true,
+            ..observe::Report::default()
+        };
+
+        let considered = candidates.refreshed(&registry, cycle::Measure::Worst, &throttled);
+
+        assert_eq!(
+            considered[0].figure,
+            Figure::Unread,
+            "the cached 10% is not it"
+        );
+        let refusal = refused_the_candidates(&considered, &throttled).expect("nothing was read");
+        assert!(refusal.paced, "the request went out");
+        assert!(refusal.why.contains("rate-limiting"), "{}", refusal.why);
+        assert!(
+            !refusal.why.contains("cached figure is what you see"),
+            "a Watcher decides on no cached figure, so it points at none: {}",
+            refusal.why
+        );
+    }
+
+    #[test]
+    fn one_candidate_read_among_unread_ones_is_a_decision_rather_than_a_hold() {
+        let considered = vec![
+            Considered {
+                email: "a@example.com".to_string(),
+                named: "a@example.com".to_string(),
+                figure: Figure::Unread,
+            },
+            Considered {
+                email: "b@example.com".to_string(),
+                named: "b@example.com".to_string(),
+                figure: Figure::Read(Fullest {
+                    window: "5-hour".to_string(),
+                    used_percent: 5.0,
+                }),
+            },
+        ];
+
+        assert!(
+            refused_the_candidates(&considered, &observed("b@example.com")).is_none(),
+            "the Margin sets the unread one aside, and the round chooses among the rest"
+        );
+        assert!(
+            refused_the_candidates(&[], &observe::Report::asked_for()).is_none(),
+            "no candidates at all is nowhere to go, not a failure to read"
         );
     }
 }
