@@ -199,7 +199,41 @@ jobs:
           sha256sum perch-* > SHA256SUMS
           cat SHA256SUMS
 
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      # Sigstore issues the signing certificate and can refuse with a 403 that a
+      # second request does not get. Retried here rather than by re-running the
+      # tag: the archives exist by this point and the Release page does not, so
+      # seconds of Sigstore being unreachable otherwise cost the whole job. A
+      # second attestation over the same archives is redundant, never wrong.
+      - name: Attest
+        id: attest
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/perch-*
+
+      - name: Wait for Sigstore
+        if: steps.attest.outcome == 'failure'
+        run: sleep 30
+
+      # `attest_again` rather than `attest-again`: a hyphen inside a step id is
+      # subtraction to the expression parser, and `steps.attest-again` is empty.
+      - name: Attest, second attempt
+        id: attest_again
+        if: steps.attest.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/perch-*
+
+      - name: Wait for Sigstore, longer
+        if: steps.attest_again.outcome == 'failure'
+        run: sleep 90
+
+      # The last one, so no `continue-on-error`: an unattested archive is not a
+      # Release this repository publishes.
+      - name: Attest, last attempt
+        if: steps.attest_again.outcome == 'failure'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/perch-*
 
