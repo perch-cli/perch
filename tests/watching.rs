@@ -785,11 +785,6 @@ fn a_switch_the_machine_turned_away_is_looked_at_again_at_the_interval() {
     );
 }
 
-/// Nowhere to go is the one steady state a Threshold crossing can sit in for hours,
-/// and the round that reaches it read every candidate. Repeating that at the interval
-/// is twenty-four reads an hour *per candidate*, against the 28-30 Anthropic allows —
-/// so the burst rests for the Cooldown while the loop goes on reading the Account it
-/// is on at the interval, because that figure is the one `perch status` serves.
 #[test]
 fn a_dead_end_rests_the_burst_for_the_cooldown_and_the_loop_keeps_its_interval() {
     // Every round over the Threshold, and the only candidate barely emptier — so
@@ -836,9 +831,7 @@ fn a_dead_end_rests_the_burst_for_the_cooldown_and_the_loop_keeps_its_interval()
     );
 }
 
-/// The contract of #48, on the candidates: a Refresh failure holds the decision, and
-/// no Switch is considered — or refused — on a cached figure. The candidate here was
-/// last read at 95% and is now empty, which the cached figure cannot say.
+/// The candidate is cached at 95% and answers 2% the first time it can be read.
 #[test]
 fn a_candidate_anthropic_refused_to_let_it_read_holds_the_round_rather_than_judging_the_cache() {
     let readable = usage(2.0);

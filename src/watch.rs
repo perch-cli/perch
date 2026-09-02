@@ -121,7 +121,17 @@ impl Backoff {
 /// nowhere else, and apart from the [`Backoff`]: every candidate answered.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Rest {
-    found_nowhere: Option<(DateTime<Utc>, String)>,
+    found_nowhere: Option<FoundNowhere>,
+}
+
+/// The burst that is resting: when it went out, from which Account, and what it found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FoundNowhere {
+    at: DateTime<Utc>,
+    /// The Account it was watching. A Switch the person makes changes who the
+    /// candidates are, and a rest carried across one names the wrong ones.
+    watching: String,
+    why: String,
 }
 
 impl Rest {
@@ -129,16 +139,27 @@ impl Rest {
         Rest::default()
     }
 
-    /// A burst that read every candidate and found nowhere to go, and why.
-    pub fn found_nowhere(&mut self, now: DateTime<Utc>, why: &str) {
-        self.found_nowhere = Some((now, why.to_string()));
+    /// A burst that read every candidate of `watching` and found nowhere to go.
+    pub fn found_nowhere(&mut self, now: DateTime<Utc>, watching: &str, why: &str) {
+        self.found_nowhere = Some(FoundNowhere {
+            at: now,
+            watching: watching.to_string(),
+            why: why.to_string(),
+        });
     }
 
-    /// Why the candidates are not read this round, or `None` when they may be. The
-    /// burst's own reason, so a line inside the rest still says what was found.
-    pub fn resting(&self, now: DateTime<Utc>) -> Option<String> {
-        let (spent_at, why) = self.found_nowhere.as_ref()?;
-        let elapsed = now - *spent_at;
+    /// Why `watching`'s candidates are not read this round, or `None` when they may
+    /// be. The burst's own reason, so a line inside the rest still says what it found.
+    pub fn resting(&self, now: DateTime<Utc>, watching: &str) -> Option<String> {
+        let FoundNowhere {
+            at,
+            watching: from,
+            why,
+        } = self.found_nowhere.as_ref()?;
+        if !crate::name::same_name(from, watching) {
+            return None;
+        }
+        let elapsed = now - *at;
         let left = cooldown() - elapsed;
         (left > Duration::zero()).then(|| {
             and_then(
@@ -784,8 +805,8 @@ pub enum Outcome {
     /// It was, and this is where it went: the Account by name and nothing about the
     /// ranking (ADR perch-says-what-it-did).
     ///
-    /// `unread` is what could not be re-read, and it stays: a candidate ranked on an
-    /// old figure can make a Switch land somewhere worse than it left.
+    /// `unread` is what could not be read, and it stays: those were set aside, and
+    /// where the watcher went is read beside what it did not consider.
     Switched { to: String, unread: Vec<String> },
     /// It was, and there was nowhere worth going — every candidate exhausted, none of
     /// them a candidate at all, or the burst that reads them still resting. Nothing to
@@ -924,11 +945,11 @@ pub struct Round {
 }
 
 impl Round {
-    /// How long the loop leaves it before the next round. Quoted off the outcome
-    /// rather than derived from it a second time, so the wait the line promised and
-    /// the wait taken are the same number. A round that read a figure is followed by
-    /// the interval whatever it decided: `perch status` serves what this loop last
-    /// read.
+    /// How long the loop leaves it before the next round.
+    ///
+    /// Quoted off the outcome rather than derived from it a second time, so the wait
+    /// the line promised and the wait taken are the same number. A round that read a
+    /// figure is followed by the ordinary interval whatever it decided about it.
     pub fn waiting_for(&self) -> u64 {
         match &self.outcome {
             Outcome::Held { retrying_in, .. } => *retrying_in,
@@ -2087,12 +2108,20 @@ mod tests {
     #[test]
     fn a_burst_rests_for_the_cooldown_and_the_line_says_how_much_is_left() {
         let mut rest = Rest::none();
-        assert_eq!(rest.resting(now()), None, "a loop starts owing nothing");
+        assert_eq!(
+            rest.resting(now(), "you@example.com"),
+            None,
+            "a loop starts owing nothing"
+        );
 
-        rest.found_nowhere(now(), "Every Account in Group `work` is exhausted");
+        rest.found_nowhere(
+            now(),
+            "you@example.com",
+            "Every Account in Group `work` is exhausted",
+        );
 
         let why = rest
-            .resting(now() + Duration::minutes(2))
+            .resting(now() + Duration::minutes(2), "you@example.com")
             .expect("two minutes into a fifteen minute rest");
         assert!(
             why.starts_with("Every Account in Group `work` is exhausted. The candidates"),
@@ -2100,7 +2129,15 @@ mod tests {
         );
         assert!(why.contains("2 minutes ago"), "{why}");
         assert!(why.contains("another 13 minutes"), "{why}");
-        assert_eq!(rest.resting(now() + Duration::minutes(15)), None);
+        assert_eq!(
+            rest.resting(now() + Duration::minutes(15), "you@example.com"),
+            None
+        );
+        assert_eq!(
+            rest.resting(now() + Duration::minutes(2), "other@example.com"),
+            None,
+            "a Switch the person made changes who the candidates are"
+        );
     }
 
     /// The window a fall-through candidate is judged on: with the Fable weekly

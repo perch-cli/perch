@@ -26,9 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the Account it reported climbed from 26% to 87%. The loop now reads
   the Account it is on at the interval whatever the round decided; what rests
   for the fifteen minutes is the reading of the candidates, and a round inside
-  that rest says what the last one found and when they are asked again. The
-  `Looking again in 15m00s` tail is gone from `nowhere` and `refused` lines:
-  a wait at the interval is not news, and only a `held` line names a wait
+  that rest says what the last one found and when they are asked again
+  ([#423](https://github.com/perch-cli/perch/issues/423))
+
+### Changed
+
+- `nowhere` and `refused` lines in the Watcher's log no longer end in
+  `Looking again in 15m00s`: a wait at the interval is not news, and only a
+  `held` line names a wait
   ([#423](https://github.com/perch-cli/perch/issues/423))
 
 ## [0.3.7](https://github.com/perch-cli/perch/compare/v0.3.6...v0.3.7) - 2026-09-02

@@ -73,10 +73,10 @@ pub struct Acting<'a, 'h> {
 }
 
 /// The Account is full enough to move off, so this is the whole of what the watcher
-/// does about it: read the candidates, choose, and Switch. Read here rather than kept
-/// warm — the only moment their figures are worth anything, and the moment they are
-/// cheapest to get. What the burst could not read and what it found is charged to
-/// `pacing` here, where it is known.
+/// does about it: read the candidates, choose, and Switch.
+///
+/// Read here rather than kept warm — the only moment their figures are worth
+/// anything, and the moment they are cheapest to get.
 pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> Result<Outcome> {
     let Acting {
         host,
@@ -159,12 +159,14 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
     ) {
         Ok(choice) => choice,
         // Nowhere worth going is an answer rather than a failure, and both ways of
-        // getting there are resolved by waiting. The burst rests too, where there was
-        // one: no candidates at all read nobody.
+        // getting there are resolved by waiting. The burst rests only where there was
+        // one: a Scope with no candidates spent nothing.
         Err(error @ (PerchError::NoCandidate(_) | PerchError::NothingToDo(_))) => {
             let why = also(error.to_string(), &unread);
             if !considered.is_empty() {
-                pacing.rest.found_nowhere(host.now(), &why);
+                pacing
+                    .rest
+                    .found_nowhere(host.now(), outgoing.email(), &why);
             }
             return Ok(Outcome::Nowhere { why });
         }
@@ -519,7 +521,7 @@ mod tests {
             "the first failure is charged and the wait is the first step"
         );
         assert_eq!(
-            pacing.rest.resting(host.now()),
+            pacing.rest.resting(host.now(), WATCHED),
             None,
             "a burst that read nothing is not resting: it is what the Back-off paces"
         );
@@ -546,7 +548,7 @@ mod tests {
         };
         assert!(why.contains("75%"), "judged on the figure just read: {why}");
         assert!(
-            pacing.rest.resting(host.now()).is_some(),
+            pacing.rest.resting(host.now(), WATCHED).is_some(),
             "the burst went out, so it rests"
         );
     }

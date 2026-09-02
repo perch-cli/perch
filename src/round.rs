@@ -103,11 +103,11 @@ pub struct Reading<'a> {
     pub now: DateTime<Utc>,
 }
 
-/// What one reading comes to, decided here and nowhere else. `act` is handed a
-/// [`Cooled`], which is the only way to have one — so a round that may not act
-/// cannot call it, and what decides that is this function rather than the order of
-/// statements around it — and the [`Pacing`], because what it spends and what it
-/// cannot read are charged where they happen.
+/// What one reading comes to, decided here and nowhere else.
+///
+/// `act` is handed a [`Cooled`], which is the only way to have one — so a round
+/// that may not act cannot call it, and what decides that is this function rather
+/// than the order of statements around it.
 pub fn decide(
     reading: Reading<'_>,
     watcher: Watcher,
@@ -169,7 +169,7 @@ pub fn decide(
             ),
             Ok(cooled) => (
                 cooled.fullest().clone(),
-                match pacing.rest.resting(reading.now) {
+                match pacing.rest.resting(reading.now, reading.account.email()) {
                     // Before the candidates are read, for the same reason as the
                     // cooldown: the burst that read them last is what is resting.
                     Some(why) => Outcome::Nowhere { why },
@@ -603,15 +603,13 @@ mod tests {
         );
     }
 
-    /// The burst is the one thing a round spends on more than one Account, and the
-    /// rest is asked before it for the reason the cooldown is: a round that will not
-    /// read the candidates has no business finding out where it would have gone.
     #[test]
     fn a_burst_that_went_out_is_not_repeated_inside_the_cooldown_and_the_round_says_so() {
         let (account, report) = read(WATCHED, 90.0);
         let mut pacing = Pacing::none();
         pacing.rest.found_nowhere(
             now() - chrono::Duration::minutes(2),
+            WATCHED,
             "Every Account in Group `work` is exhausted.",
         );
 
@@ -649,8 +647,6 @@ mod tests {
         );
     }
 
-    /// The Act reads the candidates, and a hold it reports is one it charged: the
-    /// Back-off doubles across rounds whose own reading was fine.
     #[test]
     fn a_hold_from_the_act_keeps_its_charge_where_a_round_that_read_drops_it() {
         let (account, report) = read(WATCHED, 90.0);
