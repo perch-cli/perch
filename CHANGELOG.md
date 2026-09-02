@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7](https://github.com/perch-cli/perch/compare/v0.3.6...v0.3.7) - 2026-09-02
 ### Other
 
 - a signing certificate Sigstore refuses no longer costs a release ([#420](https://github.com/perch-cli/perch/pull/420))
