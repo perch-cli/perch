@@ -93,15 +93,21 @@ went out. Judging an unread candidate on its cached figure is the alternative,
 and it is refused: the cache can be days old, and the figure it holds is one
 the person can already see.
 
-## A burst that found nowhere to go rests for the Cooldown
+## A burst that did not move rests, and the loop does not
 
 The interval is one Account's allowance, and a round over the Threshold reads
 every candidate on top of it. Nowhere to go is the one state a crossing can sit
-in for hours, so at the interval that burst repeats twenty-four times an hour
-against every candidate's allowance, spent on Accounts the round just refused.
-The burst rests instead: for the Cooldown's fifteen minutes, a round that would
-read the candidates again reports what the last burst found and when it will
-ask them again, and reads nothing but the Account it is on.
+in for hours, and a Switch turned away by a client on the destination lasts as
+long as that session — so at the interval that burst repeats twenty-four times
+an hour against every candidate's allowance, spent on Accounts the round cannot
+move to. The burst rests instead: for the Cooldown's fifteen minutes after
+either, a round that would read the candidates again reports what the last
+burst found and when it will ask them again, and reads nothing but the Account
+it is on. A burst no candidate answered rests on a Back-off of its own, from
+one interval and doubling, kept apart from the Account's: the Account's read
+worked, and its Back-off is dropped by it. A burst one candidate answered and
+another did not rests on nothing, because the rest would hold an answer it
+never got.
 
 The loop's cadence does not move. Utilization is served from the cache
 (ADR a-figure-carries-its-age) and the Watcher's round is what refills it, so a
@@ -113,11 +119,12 @@ one interval old, which is the bargain the interval is set for.
 Fifteen minutes because the Cooldown's arithmetic holds unchanged: a candidate
 that was refused does not clear the Margin inside one. In memory and nowhere
 else, like the Back-off: a Check has no last round to remember, and reads the
-candidates every time it is over the Threshold. Keyed to the Account being
-watched, because a Switch the person makes changes who the candidates are. It
-is not a Back-off, because every candidate answered, and a round inside it is
-`nowhere` rather than `held`: the figures were read, and the answer stands
-until they are read again.
+candidates every time it is over the Threshold. Keyed to the candidates the
+burst read, because a login, a Group move or a Switch the person makes changes
+who they are, and a rest carried across that would hold an answer about
+different Accounts. A round inside the rest keeps the burst's word — `nowhere`,
+`refused` or `held` — because that answer stands until the candidates are read
+again.
 
 ## The Margin refuses a destination nearly as full as the one being left
 

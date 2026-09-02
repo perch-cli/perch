@@ -18,7 +18,7 @@ use crate::probe;
 use crate::registry::Registry;
 use crate::round::{self, Watching};
 use crate::switch::{self, NotSwitched};
-use crate::watch::{self, Cooled, Outcome, Pacing, nothing_was_switched};
+use crate::watch::{self, Cooled, Figure, Outcome, Pacing, nothing_was_switched};
 
 /// The watch this process holds, as one question rather than three.
 ///
@@ -111,6 +111,13 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
     // The set a Refresh cannot move, walked once: what changes under one is the
     // figures, and those come back out of `refreshed` below.
     let candidates = round::Candidates::of(registry, watching, cooled, &idle);
+    let addresses = candidates.addresses();
+
+    // Asked after the walk and before the burst, for the reason the cooldown is asked
+    // before it: what is resting is the last reading of these candidates.
+    if let Some(resting) = pacing.burst.resting(host.now(), &addresses) {
+        return Ok(resting);
+    }
 
     // The burst, and the longest thing a round does: one read per candidate, each
     // bounded only at thirty seconds, over as many as the Scope holds. It takes the
@@ -119,7 +126,7 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
         host,
         perch,
         registry,
-        &candidates.addresses(),
+        &addresses,
         probed,
         observe::Spending::ItsOwn {
             still_ours: &mut || watching_alone.goes_on(),
@@ -135,14 +142,25 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
     let considered = candidates.refreshed(registry, cycle::measure_of(registry, &scope), &read);
 
     // Never on a figure it did not just read, and a candidate's figure is one: with
-    // none of them read there is nothing to decide on, and the hold is paced as the
-    // Account's own would be.
+    // none of them read there is nothing to decide on. The loop keeps its interval,
+    // because this Account was read; the burst is what backs off.
     if let Some(refused) = round::refused_the_candidates(&considered, &read) {
+        if refused.paced {
+            pacing
+                .burst
+                .could_not_read(host.now(), &addresses, &refused.why);
+        }
         return Ok(Outcome::Held {
-            retrying_in: refused.charged(pacing),
             why: refused.why,
+            retrying_in: watch::REFRESH_INTERVAL_MILLIS,
         });
     }
+    // Whether the burst may rest on what it found: one candidate nobody answered is
+    // asked again at the interval, and a rest would hold the answer it never got.
+    let every_candidate_answered = considered
+        .iter()
+        .all(|candidate| !matches!(candidate.figure, Figure::Unread { .. }));
+
     // What could not be read, carried into the sentence that says where the watcher
     // went: the Margin set it aside, and the line says why it was not in the running.
     let unread = read.unread();
@@ -162,11 +180,13 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
         // getting there are resolved by waiting. The burst rests only where there was
         // one: a Scope with no candidates spent nothing.
         Err(error @ (PerchError::NoCandidate(_) | PerchError::NothingToDo(_))) => {
-            let why = also(error.to_string(), &unread);
-            if !considered.is_empty() {
-                pacing
-                    .rest
-                    .found_nowhere(host.now(), outgoing.email(), &why);
+            let why = match error {
+                // The Margin's sentence already says why each was set aside.
+                PerchError::NoCandidate(_) => error.to_string(),
+                _ => also(error.to_string(), &unread),
+            };
+            if every_candidate_answered && !considered.is_empty() {
+                pacing.burst.found_nowhere(host.now(), &addresses, &why);
             }
             return Ok(Outcome::Nowhere { why });
         }
@@ -199,10 +219,13 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
     match switched {
         // Where it went, and nothing about why it won: nobody is at the terminal to be
         // owed a reason. Named as the person named it.
-        Ok(_switched) => Ok(Outcome::Switched {
-            to: registry.named_for_the_user(choice.account.email()),
-            unread,
-        }),
+        Ok(_switched) => {
+            pacing.burst.read();
+            Ok(Outcome::Switched {
+                to: registry.named_for_the_user(choice.account.email()),
+                unread,
+            })
+        }
         // The machine is part way through a Switch, so it is answered before the
         // refusals below whatever the failure was.
         Err(NotSwitched { error, moved: true }) => Err(error),
@@ -215,13 +238,19 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
                 | PerchError::ProfileLive(_)
                 | PerchError::Busy(_)),
             ..
-        }) => Ok(Outcome::Refused {
-            // A lock is the one of the three a scheduler should come straight back
-            // for, and the round is read as `refused` either way: it decided on a
-            // figure it had read, which is what tells it from a hold.
-            contended: matches!(error, PerchError::Busy(_)),
-            why: error.to_string(),
-        }),
+        }) => {
+            // Every candidate was read to get here, and none of the three is cleared
+            // by reading them again.
+            let why = error.to_string();
+            pacing.burst.refused(host.now(), &addresses, &why);
+            Ok(Outcome::Refused {
+                // A lock is the one of the three a scheduler should come straight back
+                // for, and the round is read as `refused` either way: it decided on a
+                // figure it had read, which is what tells it from a hold.
+                contended: matches!(error, PerchError::Busy(_)),
+                why,
+            })
+        }
         Err(NotSwitched { error, .. }) => Err(error),
     }
 }
@@ -286,15 +315,17 @@ mod tests {
 
     /// The spare's Credential, good to ask with.
     fn credentialed(host: &FakeHost, registry: &Registry, email: &str) {
+        credentialed_with(host, registry, email, SPARE_CREDENTIAL);
+    }
+
+    fn credentialed_with(host: &FakeHost, registry: &Registry, email: &str, credential: &str) {
         let store = registry
             .account(email)
             .expect("it was just added")
             .store(host)
             .expect("home is known");
         let [primary, _] = crate::credentials::stores_for(host, &store);
-        primary
-            .write(host, SPARE_CREDENTIAL)
-            .expect("the store takes it");
+        primary.write(host, credential).expect("the store takes it");
     }
 
     fn account(email: &str, used_percent: f64) -> crate::registry::Account {
@@ -323,13 +354,7 @@ mod tests {
     /// fails on the unarranged endpoint, and leaves it a candidate on its cached
     /// figure rather than Quarantining it.
     fn barely_credentialed(host: &FakeHost, registry: &Registry, email: &str) {
-        let store = registry
-            .account(email)
-            .expect("it was just added")
-            .store(host)
-            .expect("home is known");
-        let [primary, _] = crate::credentials::stores_for(host, &store);
-        primary.write(host, SPENT).expect("the store takes it");
+        credentialed_with(host, registry, email, SPENT);
     }
 
     fn watching(registry: &Registry) -> Watching {
@@ -515,17 +540,96 @@ mod tests {
         };
         assert!(why.contains("no candidate could be read"), "{why}");
         assert!(why.contains(SPARE), "and which: {why}");
+        assert!(
+            !why.contains("cached figure"),
+            "nothing points at a figure the round did not use: {why}"
+        );
         assert_eq!(
             retrying_in,
             watch::REFRESH_INTERVAL_MILLIS,
-            "the first failure is charged and the wait is the first step"
+            "the loop keeps its interval: this Account was read"
         );
-        assert_eq!(
-            pacing.rest.resting(host.now(), WATCHED),
-            None,
-            "a burst that read nothing is not resting: it is what the Back-off paces"
+        assert!(
+            matches!(
+                pacing.burst.resting(host.now(), &[SPARE.to_string()]),
+                Some(Outcome::Held { .. })
+            ),
+            "and the burst is what backs off"
         );
         assert!(still_on(&registry, WATCHED), "nothing was changed");
+    }
+
+    #[test]
+    fn a_resting_burst_answers_the_round_without_a_request() {
+        let host = host_where_the_spare_reads(75.0);
+        let mut registry = watching_a_pair(5.0);
+        credentialed(&host, &registry, SPARE);
+        let mut pacing = Pacing::none();
+        pacing.burst.found_nowhere(
+            host.now(),
+            &[SPARE.to_string()],
+            "Nothing in Group `work` is worth Switching to yet.",
+        );
+
+        let outcome = run_the_act_paced(
+            &host,
+            &mut registry,
+            probe::Installed::unknown("2.1.221"),
+            &mut pacing,
+        )
+        .expect("a resting burst is an outcome");
+
+        let Outcome::Nowhere { why } = outcome else {
+            panic!("the last burst's answer stands: {outcome:?}");
+        };
+        assert!(why.contains("not asked again"), "{why}");
+        assert!(
+            host.sent_to(crate::anthropic::USAGE_URL).is_empty(),
+            "and nothing was read"
+        );
+    }
+
+    /// A third Account beside the pair, unreadable, so a burst has one candidate that
+    /// answers and one that does not.
+    const THIRD: &str = "third@example.com";
+
+    #[test]
+    fn a_candidate_nobody_answered_is_set_aside_with_its_reason_and_the_burst_does_not_rest() {
+        let host = host_where_the_spare_reads(75.0);
+        let mut registry = watching_a_pair(5.0);
+        registry.upsert(account(THIRD, 5.0));
+        credentialed(&host, &registry, SPARE);
+        barely_credentialed(&host, &registry, THIRD);
+        let mut pacing = Pacing::none();
+
+        let outcome = run_the_act_paced(
+            &host,
+            &mut registry,
+            probe::Installed::unknown("2.1.221"),
+            &mut pacing,
+        )
+        .expect("nowhere to go is an outcome, not a raise");
+
+        let Outcome::Nowhere { why } = outcome else {
+            panic!("75 is over the ceiling and the third was not read: {outcome:?}");
+        };
+        assert!(why.contains("75%"), "{why}");
+        assert!(
+            why.contains("third@example.com was not considered"),
+            "the unread one is named: {why}"
+        );
+        assert_eq!(
+            why.matches("third@example.com").count(),
+            1,
+            "and explained once: {why}"
+        );
+        assert_eq!(
+            pacing
+                .burst
+                .resting(host.now(), &[SPARE.to_string(), THIRD.to_string()]),
+            None,
+            "a candidate nobody answered is asked again at the interval"
+        );
     }
 
     #[test]
@@ -548,8 +652,11 @@ mod tests {
         };
         assert!(why.contains("75%"), "judged on the figure just read: {why}");
         assert!(
-            pacing.rest.resting(host.now(), WATCHED).is_some(),
-            "the burst went out, so it rests"
+            matches!(
+                pacing.burst.resting(host.now(), &[SPARE.to_string()]),
+                Some(Outcome::Nowhere { .. })
+            ),
+            "every candidate answered, so the burst rests"
         );
     }
 

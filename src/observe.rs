@@ -156,18 +156,15 @@ impl Attempt {
     fn note(&self) -> Option<String> {
         match &self.outcome {
             Outcome::Observed => None,
-            Outcome::Throttled => Some(format!(
-                "{}: {}. The cached figure is what you see.",
-                self.named,
-                Refused::Throttled
-            )),
+            Outcome::Throttled | Outcome::Failed { .. } => self
+                .why_unread()
+                .map(|why| format!("{why} {THE_CACHE_ANSWERS}")),
             Outcome::JustRead => Some(format!(
                 "{}: a Watcher is reading this Account every {}, and read it \
                  less than that ago. The figure it read is what you see.",
                 self.named,
                 crate::watch::how_often(),
             )),
-            Outcome::Failed { why, .. } => Some(format!("{}: {why}", self.named)),
             // `refresh` breaks on this rather than recording it, so no `Attempt`
             // carries one; the arm is here because the type allows it.
             Outcome::Stopped(_) => None,
@@ -183,8 +180,27 @@ impl Attempt {
     /// word about what the cache holds.
     fn why_unread(&self) -> Option<String> {
         match &self.outcome {
-            Outcome::Throttled => Some(format!("{}: {}.", self.named, Refused::Throttled)),
-            _ => self.note(),
+            // Names itself, with the raw address as the Target to type.
+            Outcome::Quarantined { .. } => self.reason_unread(),
+            Outcome::Observed
+            | Outcome::Throttled
+            | Outcome::JustRead
+            | Outcome::Failed { .. }
+            | Outcome::Stopped(_) => self
+                .reason_unread()
+                .map(|reason| format!("{}: {reason}", self.named)),
+        }
+    }
+
+    /// Why this Account was not read, for a sentence that has already named it.
+    pub fn reason_unread(&self) -> Option<String> {
+        match &self.outcome {
+            Outcome::Observed | Outcome::JustRead | Outcome::Stopped(_) => None,
+            Outcome::Throttled => Some(format!("{}.", Refused::Throttled)),
+            Outcome::Failed { why, .. } => Some(with_a_stop(why)),
+            Outcome::Quarantined { why, detail } => {
+                Some(why.said_of(&self.named, &self.email, detail.as_deref()))
+            }
         }
     }
 
@@ -252,11 +268,10 @@ impl Report {
         self.said(Attempt::why_unread)
     }
 
-    /// Whether `email` came back with a figure this time.
-    pub fn observed(&self, email: &str) -> bool {
-        self.attempts.iter().any(|attempt| {
-            name::same_name(&attempt.email, email) && attempt.outcome == Outcome::Observed
-        })
+    pub fn attempt_for(&self, email: &str) -> Option<&Attempt> {
+        self.attempts
+            .iter()
+            .find(|attempt| name::same_name(&attempt.email, email))
     }
 
     /// Says them, before whatever figures they explain — for a surface that goes on to
@@ -470,7 +485,7 @@ impl Turned {
             Turned::Away => Outcome::Failed {
                 why: "Anthropic renewed this Account's Credential and then would \
                       not accept the token it had just issued, so nothing about \
-                      it could be read. The cached figure is what you see."
+                      it could be read."
                     .to_string(),
                 spent: true,
             },
@@ -738,7 +753,7 @@ impl Turn<'_> {
         Err(Outcome::Failed {
             why: format!(
                 "{} and a client is running against it ({}), so renewing it would \
-                 log that session out. The cached figure is what you see.",
+                 log that session out.",
                 because.clause(),
                 running
                     .iter()
@@ -791,8 +806,7 @@ impl Turn<'_> {
             return Err(Outcome::Failed {
                 why: format!(
                     "{} and it shares one Credential Store with {sharer}, so Renewing \
-                     may retire a refresh token that is not this Account's to spend. \
-                     The cached figure is what you see.",
+                     may retire a refresh token that is not this Account's to spend.",
                     because.clause(),
                 ),
                 spent: because.spent(),
@@ -902,8 +916,22 @@ fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -
 }
 
 const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
-                            this Account could be read. The cached figure is \
-                            what you see.";
+                            this Account could be read.";
+
+/// What a surface showing figures adds to every read that failed. Added at that
+/// surface rather than written into each reason, because a Watcher says the same
+/// reasons and uses no cached figure.
+const THE_CACHE_ANSWERS: &str = "The cached figure is what you see.";
+
+/// A reason as a sentence a second one can follow: a failure wrapped from elsewhere
+/// does not always end in a stop.
+fn with_a_stop(why: &str) -> String {
+    let why = why.trim_end();
+    match why.ends_with(['.', '!', '?']) {
+        true => why.to_string(),
+        false => format!("{why}."),
+    }
+}
 
 impl Turn<'_> {
     /// Refuses to record figures against an Account the token does not belong to.
@@ -1323,7 +1351,18 @@ mod tests {
         assert_eq!(notes.len(), 2);
         assert!(notes[0].starts_with("someone@example.com: "), "{notes:?}");
         assert!(notes[0].contains("cached figure"), "{notes:?}");
-        assert_eq!(notes[1], "overflow@example.com: no token");
+        assert_eq!(
+            notes[1], "overflow@example.com: no token. The cached figure is what you see.",
+            "every read that failed leaves the cache answering, and the note says so"
+        );
+        assert_eq!(
+            report.unread(),
+            vec![
+                format!("someone@example.com: {}.", Refused::Throttled),
+                "overflow@example.com: no token.".to_string(),
+            ],
+            "and a Watcher, which uses no cached figure, gets the reasons alone"
+        );
     }
 
     #[test]

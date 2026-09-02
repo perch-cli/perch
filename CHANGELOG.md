@@ -24,9 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fifteen minutes rather than the 2m30s interval the guide documents, so every
   `perch status` in that window served a figure up to fifteen minutes old
   while the Account it reported climbed from 26% to 87%. The loop now reads
-  the Account it is on at the interval whatever the round decided; what rests
-  for the fifteen minutes is the reading of the candidates, and a round inside
-  that rest says what the last one found and when they are asked again
+  the Account it is on at the interval whatever the round decided. What rests
+  is the reading of the candidates: for the fifteen minutes after a round that
+  found nowhere to go or whose Switch was turned away, and on a Back-off of
+  its own after one no candidate answered. A round inside that rest says what
+  the last reading found and when the candidates are asked again, and a login,
+  a Group move or a Switch you make yourself ends it
   ([#423](https://github.com/perch-cli/perch/issues/423))
 
 ### Changed

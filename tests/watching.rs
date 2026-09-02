@@ -752,9 +752,6 @@ fn a_destination_nearly_as_full_as_the_account_being_left_is_refused() {
     );
 }
 
-/// The other round that has read every candidate: one that wanted a Switch,
-/// attempted it, and was turned away. A refusal clears itself — the lock is given
-/// back, the client exits — so the next round is read at the interval like any other.
 #[test]
 fn a_switch_the_machine_turned_away_is_looked_at_again_at_the_interval() {
     let now = watched().now();
@@ -835,26 +832,28 @@ fn a_dead_end_rests_the_burst_for_the_cooldown_and_the_loop_keeps_its_interval()
 #[test]
 fn a_candidate_anthropic_refused_to_let_it_read_holds_the_round_rather_than_judging_the_cache() {
     let readable = usage(2.0);
-    let host = answering(watched(), ACTIVE_TOKEN, EMAIL, &[86.0, 87.0, 88.0])
+    let host = answering(watched(), ACTIVE_TOKEN, EMAIL, &[86.0, 87.0, 88.0, 89.0])
         .with_reply_to(PROFILE_URL, SPARE_TOKEN, 200, &profile_of(SECOND_EMAIL))
         .with_replies_to(
             USAGE_URL,
             SPARE_TOKEN,
             &[(429, "{}"), (429, "{}"), (200, &readable)],
         )
-        .with_interrupt_after(3);
+        .with_interrupt_after(4);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 95.0)]);
 
     let (result, printed) = run_watch(&host);
 
     result.expect("a held decision is not a failure");
     let decisions = decisions(&printed);
+    // Three of four rounds are held, and the second says what the first said, so the
+    // voice leaves it unsaid.
     assert_eq!(decisions.len(), 3, "{printed}");
     for held in &decisions[..2] {
         assert!(held.contains("held"), "{held}");
         assert!(
-            held.contains("86% used") || held.contains("87% used"),
-            "{held}"
+            held.contains("% used"),
+            "the Account being watched was read: {held}"
         );
         assert!(held.contains("rate-limiting"), "and why: {held}");
         assert!(
@@ -866,11 +865,26 @@ fn a_candidate_anthropic_refused_to_let_it_read_holds_the_round_rather_than_judg
             "and nothing points at a figure the round did not use: {held}"
         );
     }
-    assert_eq!(
-        waits(&host)[..2],
-        [REFRESH_INTERVAL_MILLIS, REFRESH_INTERVAL_MILLIS * 2],
-        "each refusal is charged to the Back-off: {:?}",
+    assert!(
         waits(&host)
+            .iter()
+            .all(|millis| *millis == REFRESH_INTERVAL_MILLIS),
+        "the loop keeps its interval, because the Account it is on was read: {:?}",
+        waits(&host)
+    );
+    assert!(
+        decisions[1].contains("not asked again"),
+        "the second refusal rests the burst for two intervals, and the round says so: {}",
+        decisions[1]
+    );
+    assert_eq!(
+        asked_by(&host)
+            .iter()
+            .filter(|token| *token == SPARE_TOKEN)
+            .count(),
+        3,
+        "asked, asked again, rested, asked: {:?}",
+        asked_by(&host)
     );
     assert!(
         decisions[2].contains("switched"),

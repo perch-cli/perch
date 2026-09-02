@@ -156,6 +156,9 @@ pub fn decide(
             pacing.backoff.could_not_read(),
         ));
     };
+    // A figure, so whatever was wrong is over. Said here rather than at the end of the
+    // round: what the Act cannot read is the burst's to pace, not this Account's.
+    pacing.backoff.read();
 
     // Two asks that hand on what they earned, and the figure comes back out of each.
     let (fullest, outcome) = match fullest.crossed(threshold) {
@@ -167,29 +170,9 @@ pub fn decide(
                 crossed.fullest().clone(),
                 Outcome::Cooling { why: cooling.why },
             ),
-            Ok(cooled) => (
-                cooled.fullest().clone(),
-                match pacing.rest.resting(reading.now, reading.account.email()) {
-                    // Before the candidates are read, for the same reason as the
-                    // cooldown: the burst that read them last is what is resting.
-                    Some(why) => Outcome::Nowhere { why },
-                    None => act(&cooled, pacing)?,
-                },
-            ),
+            Ok(cooled) => (cooled.fullest().clone(), act(&cooled, pacing)?),
         },
     };
-    // A round that read everything it asked for, so whatever was wrong is over. A
-    // hold from the Act is the one round that asked and was not answered.
-    match &outcome {
-        Outcome::Held { .. } => {}
-        Outcome::Waiting
-        | Outcome::Cooling { .. }
-        | Outcome::Switched { .. }
-        | Outcome::Nowhere { .. }
-        | Outcome::Refused { .. }
-        | Outcome::HandedOver { .. }
-        | Outcome::Stopped { .. } => pacing.backoff.read(),
-    }
     Ok(Round {
         fullest: Some(fullest),
         threshold,
@@ -246,15 +229,11 @@ pub fn refused_the_candidates(
     let none_read = !considered.is_empty()
         && considered
             .iter()
-            .all(|candidate| candidate.figure == Figure::Unread);
+            .all(|candidate| matches!(candidate.figure, Figure::Unread { .. }));
     if !none_read {
         return None;
     }
-    let paced = read
-        .attempts
-        .iter()
-        .filter_map(Refusal::of)
-        .any(|refusal| refusal.paced);
+    let paced = read.attempts.iter().any(spent_a_request);
     Some(Refusal {
         why: format!(
             "no candidate could be read, so nothing was decided on the figures \
@@ -263,6 +242,18 @@ pub fn refused_the_candidates(
         ),
         paced,
     })
+}
+
+/// Whether a candidate's attempt asked Anthropic anything. A Quarantine here is one
+/// the burst discovered by asking: the walk leaves out an Account already Quarantined.
+fn spent_a_request(attempt: &Attempt) -> bool {
+    match &attempt.outcome {
+        observe::Outcome::Throttled | observe::Outcome::Quarantined { .. } => true,
+        observe::Outcome::Failed { spent, .. } => *spent,
+        observe::Outcome::Observed | observe::Outcome::JustRead | observe::Outcome::Stopped(_) => {
+            false
+        }
+    }
 }
 
 impl Refusal {
@@ -391,12 +382,19 @@ impl Candidates {
         self.0
             .into_iter()
             .map(|candidate| Considered {
-                figure: match read.observed(&candidate.email) {
-                    false => Figure::Unread,
-                    true => registry
+                figure: match read.attempt_for(&candidate.email) {
+                    Some(attempt) if attempt.outcome == observe::Outcome::Observed => registry
                         .account(&candidate.email)
                         .and_then(|account| Fullest::measured(account, measure))
                         .map_or(Figure::Unobserved, Figure::Read),
+                    Some(attempt) => Figure::Unread {
+                        why: attempt
+                            .reason_unread()
+                            .unwrap_or_else(|| "it was not read this round.".to_string()),
+                    },
+                    None => Figure::Unread {
+                        why: "nothing was read at all.".to_string(),
+                    },
                 },
                 email: candidate.email,
                 named: candidate.named,
@@ -604,14 +602,10 @@ mod tests {
     }
 
     #[test]
-    fn a_burst_that_went_out_is_not_repeated_inside_the_cooldown_and_the_round_says_so() {
+    fn a_hold_from_the_act_leaves_the_account_its_own_back_off_dropped() {
         let (account, report) = read(WATCHED, 90.0);
         let mut pacing = Pacing::none();
-        pacing.rest.found_nowhere(
-            now() - chrono::Duration::minutes(2),
-            WATCHED,
-            "Every Account in Group `work` is exhausted.",
-        );
+        pacing.backoff.could_not_read();
 
         let round = decide(
             Reading {
@@ -623,63 +617,20 @@ mod tests {
             },
             Watcher::Loop,
             &mut pacing,
-            never_acts,
+            |_, _| {
+                Ok(watch::Outcome::Held {
+                    why: "no candidate could be read.".to_string(),
+                    retrying_in: watch::REFRESH_INTERVAL_MILLIS,
+                })
+            },
         )
-        .expect("a resting burst is still a round");
+        .expect("a round");
 
-        let watch::Outcome::Nowhere { why } = &round.outcome else {
-            panic!(
-                "nowhere to go, on the burst that said so: {:?}",
-                round.outcome
-            );
-        };
-        assert!(why.contains("is exhausted"), "the burst's reason: {why}");
-        assert!(why.contains("2 minutes ago"), "{why}");
+        assert_eq!(round.waiting_for(), watch::REFRESH_INTERVAL_MILLIS);
         assert_eq!(
-            round.waiting_for(),
-            watch::REFRESH_INTERVAL_MILLIS,
-            "the Account being watched is still read at the interval"
-        );
-        assert_eq!(
-            round.fullest.as_ref().expect("it read one").used_percent,
-            90.0,
-            "and the figure it read is the one on the line"
-        );
-    }
-
-    #[test]
-    fn a_hold_from_the_act_keeps_its_charge_where_a_round_that_read_drops_it() {
-        let (account, report) = read(WATCHED, 90.0);
-        let policy = at(80);
-        let recently = Recently::nothing();
-        let mut pacing = Pacing::none();
-        let reading = || Reading {
-            account: &account,
-            report: &report,
-            policy: &policy,
-            recently: &recently,
-            now: now(),
-        };
-        let held = |_: &Cooled<'_>, pacing: &mut Pacing| {
-            Ok(watch::Outcome::Held {
-                why: "no candidate could be read.".to_string(),
-                retrying_in: pacing.backoff.could_not_read(),
-            })
-        };
-
-        let first = decide(reading(), Watcher::Loop, &mut pacing, held).expect("a round");
-        let second = decide(reading(), Watcher::Loop, &mut pacing, held).expect("a round");
-        let read_through =
-            decide(reading(), Watcher::Loop, &mut pacing, |_, _| Ok(switched())).expect("a round");
-        let after = decide(reading(), Watcher::Loop, &mut pacing, held).expect("a round");
-
-        assert_eq!(first.waiting_for(), watch::REFRESH_INTERVAL_MILLIS);
-        assert_eq!(second.waiting_for(), watch::REFRESH_INTERVAL_MILLIS * 2);
-        assert_eq!(read_through.waiting_for(), watch::REFRESH_INTERVAL_MILLIS);
-        assert_eq!(
-            after.waiting_for(),
-            watch::REFRESH_INTERVAL_MILLIS,
-            "the burst that read dropped the whole of it"
+            pacing.backoff,
+            crate::watch::Backoff::none(),
+            "the Account read, so its Back-off is dropped whatever the burst found"
         );
     }
 
@@ -856,6 +807,23 @@ mod tests {
     }
 
     #[test]
+    fn a_candidate_quarantined_by_the_burst_spent_a_request() {
+        let attempt = Attempt {
+            email: "spare@example.com".to_string(),
+            named: "spare@example.com".to_string(),
+            outcome: Outcome::Quarantined {
+                why: Quarantine::RenewalRejected,
+                detail: None,
+            },
+        };
+
+        assert!(
+            spent_a_request(&attempt),
+            "the walk left out any already Quarantined"
+        );
+    }
+
+    #[test]
     fn a_quarantine_is_unpaced_and_says_how_to_end_it() {
         let refusal = refused_the_reading(&attempt(Outcome::Quarantined {
             why: Quarantine::RenewalRejected,
@@ -988,10 +956,10 @@ mod tests {
 
         let considered = candidates.refreshed(&registry, cycle::Measure::Worst, &throttled);
 
-        assert_eq!(
-            considered[0].figure,
-            Figure::Unread,
-            "the cached 10% is not it"
+        assert!(
+            matches!(&considered[0].figure, Figure::Unread { why } if why.contains("rate-limiting")),
+            "the cached 10% is not it: {:?}",
+            considered[0].figure
         );
         let refusal = refused_the_candidates(&considered, &throttled).expect("nothing was read");
         assert!(refusal.paced, "the request went out");
@@ -1009,7 +977,9 @@ mod tests {
             Considered {
                 email: "a@example.com".to_string(),
                 named: "a@example.com".to_string(),
-                figure: Figure::Unread,
+                figure: Figure::Unread {
+                    why: "nobody answered.".to_string(),
+                },
             },
             Considered {
                 email: "b@example.com".to_string(),

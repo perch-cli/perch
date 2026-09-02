@@ -115,63 +115,117 @@ impl Backoff {
     }
 }
 
-/// A burst that found nowhere to go is not repeated for the Cooldown's fifteen
-/// minutes: the interval is one Account's allowance, and a burst at the interval
-/// spends every candidate's on Accounts the round just refused. In memory and
-/// nowhere else, and apart from the [`Backoff`]: every candidate answered.
+/// What the burst that read every candidate last found, and how long it rests on it:
+/// nowhere to go and a Switch turned away rest for the Cooldown, and a burst nobody
+/// answered backs off as the Account's own read does. In memory and nowhere else,
+/// and keyed to the candidates it read: a login or a Switch the person makes changes
+/// who they are.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Rest {
-    found_nowhere: Option<FoundNowhere>,
+pub struct Burst {
+    unanswered: Backoff,
+    last: Option<LastBurst>,
 }
 
-/// The burst that is resting: when it went out, from which Account, and what it found.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FoundNowhere {
+struct LastBurst {
     at: DateTime<Utc>,
-    /// The Account it was watching. A Switch the person makes changes who the
-    /// candidates are, and a rest carried across one names the wrong ones.
-    watching: String,
-    why: String,
+    candidates: Vec<String>,
+    found: Found,
 }
 
-impl Rest {
-    pub fn none() -> Rest {
-        Rest::default()
+/// What the burst came to, said again by every round inside its rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Found {
+    Nowhere(String),
+    Refused(String),
+    Unread(String),
+}
+
+impl Burst {
+    pub fn none() -> Burst {
+        Burst::default()
     }
 
-    /// A burst that read every candidate of `watching` and found nowhere to go.
-    pub fn found_nowhere(&mut self, now: DateTime<Utc>, watching: &str, why: &str) {
-        self.found_nowhere = Some(FoundNowhere {
+    /// Every candidate answered and none was worth moving to.
+    pub fn found_nowhere(&mut self, now: DateTime<Utc>, candidates: &[String], why: &str) {
+        self.unanswered.read();
+        self.last = Some(LastBurst {
             at: now,
-            watching: watching.to_string(),
-            why: why.to_string(),
+            candidates: candidates.to_vec(),
+            found: Found::Nowhere(why.to_string()),
         });
     }
 
-    /// Why `watching`'s candidates are not read this round, or `None` when they may
-    /// be. The burst's own reason, so a line inside the rest still says what it found.
-    pub fn resting(&self, now: DateTime<Utc>, watching: &str) -> Option<String> {
-        let FoundNowhere {
-            at,
-            watching: from,
-            why,
-        } = self.found_nowhere.as_ref()?;
-        if !crate::name::same_name(from, watching) {
+    /// A candidate was chosen and the Switch onto it was turned away.
+    pub fn refused(&mut self, now: DateTime<Utc>, candidates: &[String], why: &str) {
+        self.unanswered.read();
+        self.last = Some(LastBurst {
+            at: now,
+            candidates: candidates.to_vec(),
+            found: Found::Refused(why.to_string()),
+        });
+    }
+
+    /// No candidate answered, and a request went out asking.
+    pub fn could_not_read(&mut self, now: DateTime<Utc>, candidates: &[String], why: &str) {
+        self.unanswered.failed();
+        self.last = Some(LastBurst {
+            at: now,
+            candidates: candidates.to_vec(),
+            found: Found::Unread(why.to_string()),
+        });
+    }
+
+    /// A burst that read and moved: nothing is resting.
+    pub fn read(&mut self) {
+        self.unanswered.read();
+        self.last = None;
+    }
+
+    /// What the round says instead of reading `candidates` again, or `None` when it
+    /// may read them. The last burst's own reason, so a line inside the rest still
+    /// says what it found.
+    pub fn resting(&self, now: DateTime<Utc>, candidates: &[String]) -> Option<Outcome> {
+        let last = self.last.as_ref()?;
+        if !same_set(&last.candidates, candidates) {
             return None;
         }
-        let elapsed = now - *at;
-        let left = cooldown() - elapsed;
-        (left > Duration::zero()).then(|| {
-            and_then(
+        let (why, span) = match &last.found {
+            Found::Nowhere(why) | Found::Refused(why) => (why, cooldown()),
+            Found::Unread(why) => (
                 why,
-                &format!(
-                    "The candidates were read {} ago, so they are not asked again {}.",
-                    minutes(elapsed.max(Duration::zero())),
-                    still_to_wait(left),
-                ),
-            )
+                Duration::milliseconds(self.unanswered.waiting_for() as i64),
+            ),
+        };
+        let (elapsed, left) = left_of(last.at, span, now)?;
+        let said = and_then(
+            why,
+            &format!(
+                "The candidates were read {} ago, so they are not asked again {}.",
+                minutes(elapsed),
+                still_to_wait(left),
+            ),
+        );
+        Some(match last.found {
+            Found::Nowhere(_) => Outcome::Nowhere { why: said },
+            Found::Refused(_) => Outcome::Refused {
+                why: said,
+                contended: false,
+            },
+            Found::Unread(_) => Outcome::Held {
+                why: said,
+                retrying_in: REFRESH_INTERVAL_MILLIS,
+            },
         })
     }
+}
+
+/// Whether two walks found the same candidates, by the Registry's own idea of a name.
+fn same_set(left: &[String], right: &[String]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .all(|l| right.iter().any(|r| crate::name::same_name(l, r)))
 }
 
 /// What a loop carries from one round to the next about when to ask again. In memory
@@ -179,7 +233,7 @@ impl Rest {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Pacing {
     pub backoff: Backoff,
-    pub rest: Rest,
+    pub burst: Burst,
 }
 
 impl Pacing {
@@ -684,15 +738,18 @@ impl Recently {
 
     /// How long ago the Switch was and how much of the cooldown is left — both, because
     /// the sentence that quotes one quotes the other.
-    ///
-    /// The elapsed span is floored, so a stamp left in the future is not said as "-55
-    /// minutes ago"; the span *left* is not, or the line would promise less.
     fn left_of_the_cooldown(&self, now: DateTime<Utc>) -> Option<(Duration, Duration)> {
-        let switched = self.switched?;
-        let elapsed = now - switched;
-        let left = cooldown() - elapsed;
-        (left > Duration::zero()).then_some((elapsed.max(Duration::zero()), left))
+        left_of(self.switched?, cooldown(), now)
     }
+}
+
+/// How long ago `at` was and how much of `span` from it is left, or `None` once none
+/// is. The elapsed span is floored, so a stamp left in the future is not said as
+/// "-55 minutes ago"; the span left is not, or the line would promise less.
+fn left_of(at: DateTime<Utc>, span: Duration, now: DateTime<Utc>) -> Option<(Duration, Duration)> {
+    let elapsed = now - at;
+    let left = span - elapsed;
+    (left > Duration::zero()).then_some((elapsed.max(Duration::zero()), left))
 }
 
 /// A span as a count of minutes, for the sentences that quote one. Rounded down,
@@ -737,8 +794,10 @@ pub enum Figure {
     /// Read, and no Quota Window came back — or gone from the Registry between the
     /// walk and the reading.
     Unobserved,
-    /// Not read this round, whatever the cache holds.
-    Unread,
+    /// Not read this round, whatever the cache holds, and why not.
+    Unread {
+        why: String,
+    },
 }
 
 /// The Accounts a Switch may not land on this round, and the one sentence saying why.
@@ -766,10 +825,11 @@ pub fn set_aside(
                  a figure it has not got is a Switch made blind",
                 candidate.named,
             ),
-            Figure::Unread => format!(
-                "{} could not be read this round, and a Switch onto a figure \
-                 it has not just read is a Switch made blind",
+            Figure::Unread { why } => format!(
+                "{} was not considered, because a Switch onto a figure it has \
+                 not just read is a Switch made blind: {}",
                 candidate.named,
+                why.trim_end_matches('.'),
             ),
         };
         emails.push(candidate.email.clone());
@@ -2087,15 +2147,27 @@ mod tests {
             &policy(),
             &work(),
             &[
-                considered("throttled", Figure::Unread),
+                considered(
+                    "throttled",
+                    Figure::Unread {
+                        why: "Anthropic is rate-limiting reads.".to_string(),
+                    },
+                ),
                 considered("roomy", read(5.0)),
             ],
         );
 
         assert_eq!(set_aside.emails, vec!["throttled@example.com".to_string()]);
         assert!(
-            set_aside.because.contains("could not be read this round"),
+            set_aside.because.contains("was not considered"),
             "{}",
+            set_aside.because
+        );
+        assert!(
+            set_aside
+                .because
+                .ends_with("Switch made blind: Anthropic is rate-limiting reads."),
+            "the reason, once, with one stop: {}",
             set_aside.because
         );
         assert!(
@@ -2105,38 +2177,81 @@ mod tests {
         );
     }
 
+    fn spare() -> Vec<String> {
+        vec!["spare@example.com".to_string()]
+    }
+
     #[test]
-    fn a_burst_rests_for_the_cooldown_and_the_line_says_how_much_is_left() {
-        let mut rest = Rest::none();
+    fn a_burst_that_found_nowhere_rests_for_the_cooldown_and_says_what_it_found() {
+        let mut burst = Burst::none();
         assert_eq!(
-            rest.resting(now(), "you@example.com"),
+            burst.resting(now(), &spare()),
             None,
             "a loop starts owing nothing"
         );
 
-        rest.found_nowhere(
+        burst.found_nowhere(
             now(),
-            "you@example.com",
+            &spare(),
             "Every Account in Group `work` is exhausted",
         );
 
-        let why = rest
-            .resting(now() + Duration::minutes(2), "you@example.com")
-            .expect("two minutes into a fifteen minute rest");
+        let Some(Outcome::Nowhere { why }) = burst.resting(now() + Duration::minutes(2), &spare())
+        else {
+            panic!("two minutes into a fifteen minute rest");
+        };
         assert!(
             why.starts_with("Every Account in Group `work` is exhausted. The candidates"),
             "the burst's reason still opens the line: {why}"
         );
         assert!(why.contains("2 minutes ago"), "{why}");
         assert!(why.contains("another 13 minutes"), "{why}");
+        assert_eq!(burst.resting(now() + Duration::minutes(15), &spare()), None);
         assert_eq!(
-            rest.resting(now() + Duration::minutes(15), "you@example.com"),
-            None
-        );
-        assert_eq!(
-            rest.resting(now() + Duration::minutes(2), "other@example.com"),
+            burst.resting(
+                now() + Duration::minutes(2),
+                &[
+                    "spare@example.com".to_string(),
+                    "new@example.com".to_string()
+                ]
+            ),
             None,
-            "a Switch the person made changes who the candidates are"
+            "a login changes who the candidates are"
+        );
+    }
+
+    #[test]
+    fn a_burst_nobody_answered_backs_off_and_the_first_that_reads_drops_it() {
+        let mut burst = Burst::none();
+        burst.could_not_read(now(), &spare(), "no candidate could be read.");
+
+        assert!(
+            matches!(
+                burst.resting(now() + Duration::minutes(1), &spare()),
+                Some(Outcome::Held { .. })
+            ),
+            "one failure rests one interval"
+        );
+        assert_eq!(burst.resting(now() + Duration::minutes(3), &spare()), None);
+
+        burst.could_not_read(now() + Duration::minutes(3), &spare(), "still nobody.");
+        let Some(Outcome::Held { why, retrying_in }) =
+            burst.resting(now() + Duration::minutes(7), &spare())
+        else {
+            panic!("two failures rest two intervals");
+        };
+        assert!(why.contains("another 1 minute"), "{why}");
+        assert_eq!(
+            retrying_in, REFRESH_INTERVAL_MILLIS,
+            "the loop itself keeps its interval"
+        );
+
+        burst.found_nowhere(now() + Duration::minutes(8), &spare(), "nowhere");
+        burst.could_not_read(now() + Duration::minutes(23), &spare(), "nobody.");
+        assert_eq!(
+            burst.resting(now() + Duration::minutes(26), &spare()),
+            None,
+            "the burst that read dropped the whole of the back-off"
         );
     }
 
