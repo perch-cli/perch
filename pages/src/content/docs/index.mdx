@@ -20,10 +20,35 @@ sidebar:
   # page of the guide the sidebar lists.
   hidden: true
 # Every other page's tab reads `<page> | Perch`, which on the page named Perch is
-# `Perch | Perch`. A `title` here replaces Starlight's rather than adding to it.
+# `Perch | Perch`. A `title` here replaces Starlight's rather than adding to it,
+# and says what Perch does, which is what a search result and a shared card show.
 head:
   - tag: title
-    content: Perch
+    content: "Perch: run Claude Code as any Claude account you hold"
+  - tag: meta
+    attrs:
+      property: og:title
+      content: "Perch: run Claude Code as any Claude account you hold"
+  - tag: meta
+    attrs:
+      property: og:type
+      content: website
+  - tag: script
+    attrs:
+      type: application/ld+json
+    content: |
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Perch",
+        "description": "Run Claude Code as whichever Claude account you want, without going through the login flow again.",
+        "url": "https://perch-cli.github.io/perch/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Linux, Windows",
+        "license": "https://github.com/perch-cli/perch/blob/main/LICENSE-MIT",
+        "downloadUrl": "https://github.com/perch-cli/perch/releases",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
 ---
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
