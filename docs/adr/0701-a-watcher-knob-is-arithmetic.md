@@ -83,6 +83,49 @@ could set it could set it to nothing, and nothing is what the endpoint is
 already refusing. A Cooldown paces Switches the Watcher makes; a Back-off paces
 questions nobody is answering.
 
+**The candidates are figures too.** A round over the Threshold reads every
+candidate before it chooses, and one that could not be read is set aside
+whatever the cache holds for it — a Switch onto a figure the round has not
+just read is the Switch this record forbids, and a refusal on that figure is a
+decision taken on it too. With none of them read the round holds, names the
+candidates and what refused each, and is paced by the Back-off where a request
+went out. Judging an unread candidate on its cached figure is the alternative,
+and it is refused: the cache can be days old, and the figure it holds is one
+the person can already see.
+
+## A burst that did not move rests, and the loop does not
+
+The interval is one Account's allowance, and a round over the Threshold reads
+every candidate on top of it. Nowhere to go is the one state a crossing can sit
+in for hours, and a Switch turned away by a client on the destination lasts as
+long as that session — so at the interval that burst repeats twenty-four times
+an hour against every candidate's allowance, spent on Accounts the round cannot
+move to. The burst rests instead: for the Cooldown's fifteen minutes after
+either, a round that would read the candidates again reports what the last
+burst found and when it will ask them again, and reads nothing but the Account
+it is on. A burst no candidate answered rests on a Back-off of its own, from
+one interval and doubling, kept apart from the Account's: the Account's read
+worked, and its Back-off is dropped by it. A burst one candidate answered and
+another did not rests on nothing, because the rest would hold an answer it
+never got.
+
+The loop's cadence does not move. Utilization is served from the cache
+(ADR a-figure-carries-its-age) and the Watcher's round is what refills it, so a
+loop that sleeps out the rest leaves every `perch status` in those fifteen
+minutes reporting a figure up to fifteen minutes old, on the one Account whose
+figure is moving. Resting the burst and not the loop keeps that figure at most
+one interval old, which is the bargain the interval is set for.
+
+Fifteen minutes because the Cooldown's arithmetic holds unchanged: a candidate
+that was refused does not clear the Margin inside one. In memory and nowhere
+else, like the Back-off: a Check has no last round to remember, and reads the
+candidates every time it is over the Threshold. Keyed to the candidates the
+burst read, because a login, a Group move or a Switch the person makes changes
+who they are, and a rest carried across that would hold an answer about
+different Accounts. A round inside the rest keeps the burst's word — `nowhere`,
+`refused` or `held` — because that answer stands until the candidates are read
+again.
+
 ## The Margin refuses a destination nearly as full as the one being left
 
 Usage on the Account you are on climbs. Usage on the Accounts you are not on

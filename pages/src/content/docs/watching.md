@@ -95,6 +95,14 @@ the one reading that could never be over any threshold.
 Neither of those ends the watch. Nowhere to go is resolved by waiting, which is
 what the loop is already doing.
 
+The same rule covers the Accounts it would move to. A round over the threshold
+reads every candidate before it chooses, and a candidate whose read fails is
+set aside, whatever Perch last cached for it: a Switch onto a figure the round
+has not just read is a Switch made blind. Where no candidate could be read the
+round is `held`, says which candidates and why, and is paced by the Back-off
+below like any other read that failed. The figure on that line is the Account
+you are on, which the round did read.
+
 **A failing read is asked about less and less often, and never more often than
 a working one.** That growing wait is the **Back-off**: it doubles with each
 failure — 2m30s, 5m, 10m — and stops at twenty minutes, so a transient failure
@@ -131,6 +139,27 @@ already allowed. Each is printed when it is what decided a round:
 2026-08-04T12:02:30Z  nowhere   86% used, fullest 5-hour — Nothing in Group `work` is worth Switching to yet: overflow@example.com is at 74% used and nothing over 70% is worth moving to.
 2026-08-04T12:05:00Z  cooling   86% used, fullest 5-hour — the last Switch was 2 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
 ```
+
+**A round that read the candidates and did not move does not read them again
+for fifteen minutes.** The interval is one Account's allowance, and reading
+every candidate on top of it every 2m30s spends each candidate's allowance on
+Accounts the round just refused. So a round that found nowhere to go, or whose
+Switch was turned away, rests the candidates for the cooldown's fifteen
+minutes; one that no candidate answered rests them on the Back-off, doubling
+from one interval. The loop keeps reading the Account you are on at the
+interval either way — that figure is what `perch status` shows you — and a
+round inside the rest says what the last reading of the candidates found and
+when they will be asked again:
+
+```
+2026-08-04T12:05:00Z  nowhere   88% used, fullest 5-hour — Nothing in Group `work` is worth Switching to yet: overflow@example.com is at 74% used and nothing over 70% is worth moving to. The candidates were read 2 minutes ago, so they are not asked again for another 12 minutes.
+```
+
+It is the cooldown's fifteen minutes, for the cooldown's reason. The rest is
+about the candidates it read: a login, a Group move or a Switch you make
+yourself changes who they are, and the next round reads the new set. A
+scheduled check has no memory of its last round and reads the candidates every
+time it is over the threshold.
 
 An Account Perch has never read a figure for is set aside the same way. A
 [Cycle](switching.md#cycling) you asked for will land on one — an unknown beats a

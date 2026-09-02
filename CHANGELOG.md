@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- [**breaking**] The Watcher no longer judges a candidate on a cached figure.
+  A round over the threshold reads every candidate before it chooses, and one
+  Anthropic refused to let it read was set aside on whatever Perch had cached
+  — a two-day-old 95% for an Account a read fifteen minutes later put at 23%
+  — and the round was typed `nowhere`. Now a candidate that could not be read
+  is set aside without a figure, whatever the cache holds, and a round that
+  could read no candidate at all is `held`, names each one and what refused
+  it, and is paced by the Back-off like any other read that failed. A
+  `perch watcher check` in that state exits `20` where it exited `17`
+  ([#423](https://github.com/perch-cli/perch/issues/423))
+
+- A round that found nowhere to go paced the whole loop at the Cooldown's
+  fifteen minutes rather than the 2m30s interval the guide documents, so every
+  `perch status` in that window served a figure up to fifteen minutes old
+  while the Account it reported climbed from 26% to 87%. The loop now reads
+  the Account it is on at the interval whatever the round decided. What rests
+  is the reading of the candidates: for the fifteen minutes after a round that
+  found nowhere to go or whose Switch was turned away, and on a Back-off of
+  its own after one no candidate answered. A round inside that rest says what
+  the last reading found and when the candidates are asked again, and a login,
+  a Group move or a Switch you make yourself ends it
+  ([#423](https://github.com/perch-cli/perch/issues/423))
+
+### Changed
+
+- `nowhere` and `refused` lines in the Watcher's log no longer end in
+  `Looking again in 15m00s`: a wait at the interval is not news, and only a
+  `held` line names a wait
+  ([#423](https://github.com/perch-cli/perch/issues/423))
+
 ## [0.3.7](https://github.com/perch-cli/perch/compare/v0.3.6...v0.3.7) - 2026-09-02
 ### Other
 

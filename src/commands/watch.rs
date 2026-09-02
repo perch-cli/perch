@@ -26,7 +26,7 @@ use crate::round::{self, Verdict};
 use crate::say;
 use crate::switch::{self, Resolved};
 use crate::trail;
-use crate::watch::{self, Backoff, Recently, Voice, Watcher};
+use crate::watch::{self, Pacing, Recently, Voice, Watcher};
 
 /// One round, for whatever scheduled it.
 ///
@@ -53,11 +53,11 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     let mut watching_alone = Watch::taken(host, watching_alone);
 
     // Nothing carried in: the cooldown comes off the Registry inside the round, and a
-    // back-off would pace a loop this process does not have.
+    // back-off or a rest would pace a loop this process does not have.
     let verdict = match one_round(
         host,
         Watcher::Check,
-        &mut Backoff::none(),
+        &mut Pacing::none(),
         &mut watching_alone,
     ) {
         Ok(verdict) => verdict,
@@ -96,7 +96,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // The two things carried from one round to the next, both in memory and nowhere
     // else: what the loop is waiting out and what it has already said belong to the
     // loop. What paces a Switch does not — it is read off the Registry each round.
-    let mut backoff = Backoff::none();
+    let mut pacing = Pacing::none();
     let mut voice = Voice::quiet();
 
     // Exactly one Watcher per person per machine. Kept by name rather than dropped into
@@ -115,7 +115,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             return voice.left(out, lost);
         }
 
-        let waiting_for = match one_round(host, Watcher::Loop, &mut backoff, &mut watching_alone) {
+        let waiting_for = match one_round(host, Watcher::Loop, &mut pacing, &mut watching_alone) {
             Ok(Verdict::Decided(round)) => {
                 voice.round(out, &round, host.now())?;
                 round.waiting_for()
@@ -239,7 +239,7 @@ fn opening(host: &dyn Host) -> Result<String> {
 fn one_round<'h>(
     host: &'h dyn Host,
     watcher: Watcher,
-    backoff: &mut Backoff,
+    pacing: &mut Pacing,
     watching_alone: &mut Watch<'h>,
 ) -> Result<Verdict> {
     // A machine with no Claude Code login has nothing to adopt. `Busy` is passed
@@ -320,10 +320,10 @@ fn one_round<'h>(
             now: host.now(),
         },
         watcher,
-        backoff,
+        pacing,
         // Reached only through a `Cooled`, which is the whole of what the decision
         // above is for: the one irreversible thing a round does is behind it.
-        |cooled| {
+        |cooled, pacing| {
             act::run(
                 Acting {
                     host,
@@ -334,6 +334,7 @@ fn one_round<'h>(
                     watching_alone,
                 },
                 cooled,
+                pacing,
             )
         },
     )?;
