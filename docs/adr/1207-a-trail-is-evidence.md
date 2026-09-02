@@ -8,7 +8,7 @@ leak what it never recorded.
 
 What it costs is every bug report. A report arrives as prose from somebody who
 has already closed the terminal, and the four things that would identify the
-failure — which Perch, which Claude Code, which Channel, what the registry
+failure — which Perch, which Claude Code, which Channel, what the Registry
 looked like — are asked for by hand in a form and answered partly or not at all.
 Meanwhile `probe.rs` knows more about the machine than any report has ever
 carried: six named assumptions, each gating a dangerous operation
@@ -30,7 +30,7 @@ subprocess.
 ## Why it is not a Holding
 
 The test is the one `CLAUDE.md` states: the Holdings are what a changelog entry
-cannot give back. A Profile, a Credential, the registry naming them and an Export
+cannot give back. A Profile, a Credential, the Registry naming them and an Export
 carrying all three are gone for good when a build reads one wrong. A lost Trail
 costs a person nothing they cannot have again by running the commands again.
 
@@ -75,7 +75,7 @@ The Trail holds emails, Aliases, Group names and paths as they were typed. It
 holds no Credential, ever, which `CONTEXT.md` already binds rather than this
 document.
 
-Storing them raw is not new exposure: the registry sits in the same directory at
+Storing them raw is not new exposure: the Registry sits in the same directory at
 the same permissions and holds every email, organization and Alias in plaintext
 already. Redacting at write time would destroy information permanently, and the
 one person entitled to it is the machine's owner, who is also the only one who
@@ -83,7 +83,7 @@ can read the file. Every rendering is redacted instead, so what leaves the
 machine is `<account 3>` and the raw form is a decision made once, by the person
 who knows what is private, with `--raw`.
 
-Placeholders number by the Account's position in the registry, so `<account 3>`
+Placeholders number by the Account's position in the Registry, so `<account 3>`
 means the same Account everywhere in one rendering and in every rendering
 afterwards. Two probes pasted a week apart stay comparable, which is what makes
 "it was fine on Tuesday" a checkable claim. The kind survives redaction where the
@@ -99,7 +99,7 @@ warns, and never moves an exit code — a full disk, a read-only home or a
 A diary that can refuse `perch switch` is a new way for every command in the
 product to fail, bought for a feature nobody invoked. The failure surfaces where
 it is useful instead, and the signal for it is one Perch already holds: a
-registry written *after* the Trail's last line means a command ran and wrote
+Registry written *after* the Trail's last line means a command ran and wrote
 nothing down, since every command writes both.
 
 ## What is rejected
@@ -121,12 +121,12 @@ A Probe names the journal and the log file instead, and reads neither.
 
 **The Trail as the Watcher's log.** The inverse of the same argument. A round
 that looked and did nothing is not an event, and neither is one that could not
-read a figure: what a Quarantine leaves is in the registry, where a Probe reads
+read a figure: what a Quarantine leaves is in the Registry, where a Probe reads
 it as a finding of its own.
 
 **`perch probe` writing its own lines.** It would push the lines somebody wanted
 out of the window every time they re-ran it. For the same reason it is exempt
-from bringing the registry forward, joining `version` and `upgrade`: a registry
+from bringing the Registry forward, joining `version` and `upgrade`: a Registry
 at version 3 that no command has carried forward is a *finding*, and a probe that
 quietly fixes it can never report it.
 

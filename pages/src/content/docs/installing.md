@@ -4,9 +4,8 @@ sidebar:
   order: 1
 ---
 
-Perch is pre-1.0. Every release is real and works, but the command line may
-still change between them, and the changelog marks every change that breaks
-something. macOS, Linux and Windows, on both Arm and Intel except Windows,
+Perch is pre-1.0: the command line may still change between releases, and the
+changelog marks every change that breaks something. macOS, Linux and Windows, on both Arm and Intel except Windows,
 which is x64 only. Claude Code has to be installed for Perch to have anything
 to switch between.
 
@@ -113,7 +112,7 @@ perch upgrade --release v0.2.0
 ```
 
 Going backwards is allowed and is confirmed first, because a Perch older than
-the one that last wrote your registry will refuse to read it — `--yes` says you
+the one that last wrote your Registry will refuse to read it — `--yes` says you
 have accounted for that. Homebrew installs whatever its formula names and cannot
 be pointed at an older release, so `--release` is refused there rather than
 quietly ignored; the installer script takes `PERCH_VERSION` if you need to hold

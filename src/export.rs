@@ -1,7 +1,7 @@
 //! Everything Perch holds, as one `age` file (ADR the-holdings-go-out-sealed).
 //!
 //! Two halves, and they are separate on purpose. **Gathering** reads the
-//! registry and every Credential out of the stores they live in, and is the
+//! Registry and every Credential out of the stores they live in, and is the
 //! only part of an Export that touches the machine. **Sealing** turns what was
 //! gathered into the bytes that go in the file, and is arithmetic: given an
 //! Export and a passphrase it is the same answer on every machine, so it is
@@ -22,11 +22,11 @@ use crate::registry::{self, Account, Registry};
 
 /// The version this build writes, and the only one there has ever been.
 ///
-/// The envelope's own. The registry travels inside carrying its own version,
+/// The envelope's own. The Registry travels inside carrying its own version,
 /// which answers the same question about its own shape.
 pub const CURRENT_VERSION: u32 = 1;
 
-/// The registry half of an Export, in the shape this build reads
+/// The Registry half of an Export, in the shape this build reads
 /// (ADR a-registry-comes-forward).
 ///
 /// On the field rather than the unsealed document: this half holds no secret,
@@ -43,7 +43,7 @@ where
     // shape, and an Import writes what it read back out under the current one.
     if crate::migration::below_the_earliest(&text) {
         return Err(D::Error::custom(format!(
-            "the registry inside says it is a version no Perch has written, so \
+            "the Registry inside says it is a version no Perch has written, so \
              Perch will not read it as version {}",
             crate::registry::CURRENT_VERSION,
         )));
@@ -73,9 +73,9 @@ const _: () = assert!(WORK_FACTOR < MAX_WORK_FACTOR);
 
 /// The oldest envelope shape any Perch has stamped; below it names no shape.
 ///
-/// The Export's own rather than the registry's, which it equals by coincidence:
+/// The Export's own rather than the Registry's, which it equals by coincidence:
 /// the day that floor moves, every Export ever written claims a version the
-/// registry's number says nothing wrote.
+/// Registry's number says nothing wrote.
 const EARLIEST_VERSION: u32 = 1;
 
 const _: () = assert!(EARLIEST_VERSION <= CURRENT_VERSION);
@@ -85,7 +85,7 @@ const _: () = assert!(EARLIEST_VERSION <= CURRENT_VERSION);
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Export {
     pub version: u32,
-    /// The whole registry — every Account, its Alias, its Group, whether
+    /// The whole Registry — every Account, its Alias, its Group, whether
     /// Cycling may choose it, why it is Quarantined, and what each Group
     /// carries. Written whole rather than field by field, so a Setting added to
     /// a Group is in the next Export without anybody putting it there.
@@ -100,7 +100,7 @@ pub struct Export {
     /// Each Account's own `.claude.json`, by the address it belongs to.
     ///
     /// The half of a Profile that cannot be reconstructed *faithfully*: Claude
-    /// Code's `oauthAccount` block carries fields beyond the registry's four,
+    /// Code's `oauthAccount` block carries fields beyond the Registry's four,
     /// and a Run Carries from it (ADR everything-but-the-account).
     #[serde(default)]
     pub identity_files: BTreeMap<String, String>,
@@ -138,7 +138,7 @@ impl std::fmt::Debug for Export {
     }
 }
 
-/// Reads everything Perch holds: the registry it was handed, and the Credential
+/// Reads everything Perch holds: the Registry it was handed, and the Credential
 /// in each Account's Credential Store.
 ///
 /// Nothing is Renewed and nothing is Rotated. A store that will not say what it
@@ -165,7 +165,7 @@ pub fn gather(
                 .insert(account.email().to_string(), credential);
         }
         // Unlike the Credential, an identity file that will not be read does not
-        // stop the Export: an Import composes one from the Identity the registry
+        // stop the Export: an Import composes one from the Identity the Registry
         // carries, so the whole file is worth more than one Profile's fidelity.
         if let Some(contents) = read_the_identity_file(host, account) {
             gathered
@@ -197,7 +197,7 @@ fn read_the_credential(
         return Ok(Some(credential));
     }
     // An address no Profile could be named after has no store to read, and it
-    // reaches the registry only by hand. `perch holdings purge` takes such an
+    // reaches the Registry only by hand. `perch holdings purge` takes such an
     // Account out and offers an Export on the way, so this must not stop either.
     let Ok(store) = account.store(host) else {
         return Ok(None);
@@ -216,7 +216,7 @@ fn the_live_store(
     account: &Account,
     installed: &crate::probe::Installed,
 ) -> Result<Option<crate::probe::Store>> {
-    // A *settled* registry rather than `is_active`, which during a Landing
+    // A *settled* Registry rather than `is_active`, which during a Landing
     // answers with the Account being **left** while the live store may hold the
     // arriving one's — one token under two addresses, and a Renewal kills one.
     if !matches!(
@@ -411,7 +411,7 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<(Export, Vec<crate::migr
     Ok((export, renamed_coming_forward(&plain)))
 }
 
-/// What bringing an Export's registry forward had to rename, for the Import to
+/// What bringing an Export's Registry forward had to rename, for the Import to
 /// say before it writes.
 ///
 /// A fact about reading *this* Export on *this* build, so it belongs to the read
@@ -510,20 +510,20 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
             CURRENT_VERSION,
         ));
     }
-    // The floor the registry inside holds. An Export can be written by hand with
+    // The floor the Registry inside holds. An Export can be written by hand with
     // `age -a -p`, and a version below the earliest one names no shape.
     if outer.is_some_and(|claimed| claimed < u64::from(EARLIEST_VERSION)) {
         return Err(no_perch_wrote(outer));
     }
 
-    // The registry travels inside carrying its own version, and it is the half
+    // The Registry travels inside carrying its own version, and it is the half
     // that holds the enums — so it is the likelier of the two to be what this
     // build cannot read.
     let inside = claimed(versioned.registry.and_then(|registry| registry.version));
     if inside.is_some_and(|claimed| claimed > u64::from(crate::registry::CURRENT_VERSION)) {
         return Err(crate::error::written_by_a_newer_perch(
-            "The registry inside this Export",
-            "registry",
+            "The Registry inside this Export",
+            "Registry",
             inside.unwrap_or_default(),
             crate::registry::CURRENT_VERSION,
         ));
@@ -532,7 +532,7 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
 }
 
 /// The refusal for an Export claiming a version below the earliest any Perch
-/// stamped, which is the registry's own sentence said about the file around it.
+/// stamped, which is the Registry's own sentence said about the file around it.
 fn no_perch_wrote(claimed: Option<u64>) -> PerchError {
     PerchError::Malformed {
         path: "the Export".to_string(),
@@ -918,7 +918,7 @@ mod tests {
     }
 
     /// The case the two above cannot cover: every published Perch wrote an
-    /// envelope at the current version around a registry at version 1, so
+    /// envelope at the current version around a Registry at version 1, so
     /// neither guard fires and nothing is ahead of anything.
     #[test]
     fn an_export_holding_a_registry_an_older_perch_wrote_opens() {
@@ -950,7 +950,7 @@ mod tests {
     }
 
     /// The floor, on the half that has one. An Import writes what it read back
-    /// out at the current version, so a registry claiming a version no Perch
+    /// out at the current version, so a Registry claiming a version no Perch
     /// stamped would be relabeled rather than refused.
     #[test]
     fn a_registry_claiming_a_version_no_perch_wrote_is_refused_inside_an_export_too() {
@@ -991,7 +991,7 @@ mod tests {
     }
 
     /// The envelope had a ceiling and no floor, though `age -a -p` is a
-    /// documented way to write one of these by hand and the registry inside
+    /// documented way to write one of these by hand and the Registry inside
     /// holds both.
     #[test]
     fn an_export_claiming_a_version_no_perch_wrote_is_refused_like_the_registry_inside_it() {
@@ -1006,7 +1006,7 @@ mod tests {
         );
     }
 
-    /// The registry inside carries its own version, and it is the half holding
+    /// The Registry inside carries its own version, and it is the half holding
     /// the enums — so it is the likelier of the two to be unreadable here.
     #[test]
     fn a_registry_from_a_newer_perch_inside_a_readable_envelope_is_refused_too() {

@@ -37,7 +37,7 @@ fn asked_for(set: Option<&std::ffi::OsStr>) -> bool {
 }
 
 /// What every report of a Perch bug has to carry: which Perch, on what, and where
-/// to send it. Shared with [`crate::registry::save`]'s refusal to write a registry
+/// to send it. Shared with [`crate::registry::save`]'s refusal to write a Registry
 /// no later command could read — not a panic, but a bug all the same. What each
 /// adds after this sentence is its own.
 pub(crate) fn this_is_a_bug() -> String {

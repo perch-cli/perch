@@ -82,7 +82,7 @@ refusal names `age -d`, which will open it.
 
 ## It takes everything and has no target
 
-The whole registry — every Account, its Alias, its Group, whether Cycling may
+The whole Registry — every Account, its Alias, its Group, whether Cycling may
 choose it, why it is Quarantined, and what each Group carries — alongside every
 Credential and each Profile's own `.claude.json`. Restoring the Credentials
 alone would leave a new machine holding working Accounts stripped of every name
@@ -129,7 +129,7 @@ the file itself a moment later.
 
 ## An Export is refused rather than migrated
 
-An Export carries two versions: its own envelope, and the registry traveling
+An Export carries two versions: its own envelope, and the Registry traveling
 inside it. Both are read off a shape that is only the versions, before the
 document is read as an Export at all — because a newer Perch is exactly the thing
 that writes a value this build has no variant for, and reading the document first
@@ -149,14 +149,14 @@ Rotation apart, with no way to tell which Credential is live; an Alias meaning
 different Accounts on two machines; a Group in both with different members. That
 is a real feature and it is not this one. Refusing keeps an Import the exact
 inverse of a Purge, and that pair is what makes moving to a new machine true. A
-registry that is there and holds nothing — what a Purge leaves — is as empty as a
+Registry that is there and holds nothing — what a Purge leaves — is as empty as a
 machine Perch has never run on.
 
-**An Import adopts nothing.** Every other command reads the registry through
+**An Import adopts nothing.** Every other command reads the Registry through
 adoption, which takes the existing Claude Code login over the first time Perch
 runs (ADR a-login-perch-does-not-need). Doing that here would make the machine
 hold one Account on the way to refusing itself for holding one. So an Import
-reads the registry directly, and the login on the machine is left exactly where
+reads the Registry directly, and the login on the machine is left exactly where
 it is: whoever imported can Switch onto it or ignore it.
 
 **Nothing is made active, and nothing arrives having just been checked.** Being
@@ -181,7 +181,7 @@ wherever its owner put it, possibly on another machine — so requiring one is a
 check that checks nothing. Offering to write one is not: it is a keystroke, and
 it is the only artifact that makes a Purge survivable. The offer goes through the
 same code as `perch holdings export`, one function below the command, because a
-Purge holds the registry lock across the offer and could not take it a second
+Purge holds the Registry lock across the offer and could not take it a second
 time. It carries the path refusals with it, plus one of its own: a path under
 Perch's home is refused, because the Purge that offered it would take the file
 moments later.
@@ -210,7 +210,7 @@ prompts ago says nothing about the Profile the next line deletes. The first ask
 earns its place by not putting five questions to somebody who was always going to
 be refused.
 
-**A Purge walks the directory rather than the registry.** The registry is not the
+**A Purge walks the directory rather than the Registry.** The Registry is not the
 whole account of what Perch holds, and the difference is not exotic: a login
 abandoned at the browser step leaves a working Credential under `pending/`, and a
 Profile whose store would not empty is deliberately kept where it is. What makes
@@ -222,12 +222,12 @@ cannot be listed or cannot be named stops the Purge rather than reading as
 nothing to do.
 
 **Credentials first, the home last.** A Credential in the operating system's
-keychain lives outside Perch's home, so the registry naming which items are there
+keychain lives outside Perch's home, so the Registry naming which items are there
 is the only record of them, and removing the home first would strand them with
 nothing left to find them by. Taking every Credential first and the home whole
-afterwards means a Purge that failed anywhere leaves the registry standing, so
+afterwards means a Purge that failed anywhere leaves the Registry standing, so
 running it again finds what it already deleted already gone and finishes — and a
-home left behind holding no registry, which is what a Purge interrupted in its
+home left behind holding no Registry, which is what a Purge interrupted in its
 last step leaves, is taken by the next one rather than reported as nothing to do.
 
 What a Purge does not touch is the Credential in the Default Profile. That is
@@ -247,7 +247,7 @@ armor header and that its recipient is scrypt, which is the pair that makes
 `age -d` recognize the file and ask for a passphrase.
 
 The other direction holds too: `perch holdings import` restores an armored file
-that `age -p` wrote — registry, Aliases, Group configuration, Quarantine reason
+that `age -p` wrote — Registry, Aliases, Group configuration, Quarantine reason
 and a Credential into the real keychain — on a machine where nothing Perch wrote
 was involved. Both halves of the format are therefore somebody else's, which is
 the whole of what taking the crate bought.

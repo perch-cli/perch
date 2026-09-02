@@ -601,7 +601,7 @@ fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
     );
 }
 
-/// A registry holding a **Landing** answers "who is active" with the Account
+/// A Registry holding a **Landing** answers "who is active" with the Account
 /// being *left*, and the live Credential during one may be either's — so one
 /// refresh token would go into the file under two addresses.
 #[test]
@@ -729,7 +729,7 @@ fn a_terminal_that_goes_away_reporting_still_says_the_export_was_written() {
 
 /// FNV-1a over the envelope's own field names, as `tests/migrating.rs` digests
 /// the name-rule table. The names alone: what each field *holds* is the
-/// registry's question and is answered by the registry's own version.
+/// Registry's question and is answered by the Registry's own version.
 fn what_the_envelope_holds() -> u64 {
     let envelope = export::Export {
         version: export::CURRENT_VERSION,

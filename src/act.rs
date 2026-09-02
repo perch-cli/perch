@@ -1,7 +1,7 @@
 //! The Act of a Round: read the candidates, choose, and Switch.
 //!
 //! What a round *decides* is [`crate::round`]'s, which reaches no further than
-//! the registry; what it *does* about the one decision that moves an Account is
+//! the Registry; what it *does* about the one decision that moves an Account is
 //! this module's — the lowest one reaching `live`, `observe`, `cycle` and
 //! `switch` at once (ADR code-lives-where-it-reaches). The ordering is the
 //! contract, and it is owned here rather than by a caller: liveness before the
@@ -303,7 +303,7 @@ mod tests {
         }
     }
 
-    /// Drives [`run`] with the watch taken and the registry held, as a round would.
+    /// Drives [`run`] with the watch taken and the Registry held, as a round would.
     fn run_the_act(host: &FakeHost, registry: &mut Registry) -> Result<Outcome> {
         run_the_act_probed(host, registry, probe::Installed::unknown("2.1.221"))
     }
@@ -347,7 +347,7 @@ mod tests {
         );
     }
 
-    /// The one Account the registry says is active, asserted after every path that
+    /// The one Account the Registry says is active, asserted after every path that
     /// must not have moved anybody.
     fn still_on(registry: &Registry, email: &str) -> bool {
         *registry.active() == crate::registry::Active::Settled(email.to_string())

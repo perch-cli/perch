@@ -34,8 +34,8 @@ neither half can shadow the other — and a word already addressing something, l
 `ungrouped` or `global`, is in it too and so may be neither. What a Name may be
 is what somebody can type at a shell prompt on a second machine months later:
 identifier characters in any alphabet, which is a rule rather than an alphabet.
-Recorded per registry version, because a rule that joined later is one the
-registry written before it did not have, and a migration that forgets that is a
+Recorded per Registry version, because a rule that joined later is one the
+Registry written before it did not have, and a migration that forgets that is a
 machine with no working command.
 _Avoid_: identifier, key, string, label
 
@@ -60,17 +60,27 @@ _Avoid_: delete, drop, unregister
 
 **Holdings**:
 Everything Perch holds on this machine: every Profile, every Credential Perch
-holds, the registry naming them and what each Group carries. The counterpart to
+holds, the Registry naming them and what each Group carries. The counterpart to
 an Installation, which is what a Channel left. What an Export writes, an Import
 puts back and a Purge gives up, and the reason none of the three takes a Target.
 Where each piece sits is derived rather than recorded — from `$PERCH_HOME`, and
-under it from the address the registry already keys on — so nothing has to agree
+under it from the address the Registry already keys on — so nothing has to agree
 with a second statement of it.
 _Avoid_: state, data, footprint, registry
 
+**Registry**:
+The one file naming what Perch holds — every Account with its Alias, its Group,
+whether Cycling may choose it, and each Scope's Settings — at `registry.json`
+under `$PERCH_HOME`, and versioned, because what it names exists nowhere else
+and starting over means logging in to every Account. An older Perch's Registry
+is brought forward on the first run that finds it; a newer one's is refused,
+naming the Perch that wrote it. One of the Holdings rather than a name for them
+all: a Credential lives in its Profile's Credential Store, never here.
+_Avoid_: database, config, state, index
+
 **Purge**:
 Giving the machine back the Holdings: every Profile, every Credential Perch
-holds, and Perch's own registry, gone in one act. What Perch holds rather than
+holds, and Perch's own Registry, gone in one act. What Perch holds rather than
 what a Channel left — the binary stays, and taking that back belongs to the
 Installation it came from. Takes no Target, because it is never about one
 Account — that is a Remove — and offers to write an Export first, which is the
@@ -78,7 +88,7 @@ only thing that makes it survivable.
 _Avoid_: uninstall, reset, wipe, remove
 
 **Export**:
-The Holdings, written to one file: the whole registry — every Account, its
+The Holdings, written to one file: the whole Registry — every Account, its
 Alias, its Group, whether Cycling may choose it, why it is Quarantined where it
 is, and what each Group carries — alongside every Credential and each Profile's
 own `.claude.json`. Takes no Target, because a selective one is a partial
@@ -271,7 +281,7 @@ what is live and what Perch records as active could disagree is a window Perch
 has said out loud it is in. A Perch that finds one knows the live Credential is
 one of two Accounts' — the one being left, or the one being switched to — which
 is what it can settle a Landing from. Never read for its outcome before it is
-recorded: the next Switch Captures into whichever Profile the registry names
+recorded: the next Switch Captures into whichever Profile the Registry names
 (ADR a-switch-is-written-down-first). Only whether it *moved* is answerable
 earlier, because a Switch that happened paces the Watcher whether or not it
 finished.
@@ -410,7 +420,7 @@ _Avoid_: lock, pid file, session file, heartbeat, sentinel
 **Setting**:
 One named rule governing how Perch behaves rather than what it holds — which
 Account a Cycle prefers, whether the Watcher may act, at what Utilization. A
-Setting reaches no further than the registry, which is what separates it from
+Setting reaches no further than the Registry, which is what separates it from
 everything else Perch can be told to do.
 _Avoid_: option, preference, flag, toggle, parameter
 
@@ -537,7 +547,7 @@ Claude Code, what the Holdings hold, which of Perch's assumptions still hold, an
 the Trail's recent lines. Judges only where Perch already has grounds to — every
 finding traces to a refusal Perch would actually make, and carries the exit code
 it would refuse with — so a Probe never asserts a rule that exists nowhere else.
-Takes no Target, reaches no network, and touches nothing: it brings no registry
+Takes no Target, reaches no network, and touches nothing: it brings no Registry
 forward and adds no line to the Trail: what repairs the machine it is describing
 destroys what it was asked to describe. A Triage captures one twice — as it
 stands, and redacted — because the two readings go to different readers.
@@ -548,7 +558,7 @@ What this Perch was asked and what it decided, two lines per invocation, kept on
 this machine alone. Evidence rather than one of the Holdings: losing it costs
 nothing a person cannot have again by running the commands again, so it carries
 no version, is never migrated, and travels in no Export
-(ADR a-trail-is-evidence). Holds no Credential. Written raw, since the registry
+(ADR a-trail-is-evidence). Holds no Credential. Written raw, since the Registry
 beside it already holds the same names in plaintext, and rendered redacted, since
 what a Probe is for is being pasted somewhere else.
 _Avoid_: log, history, audit log, journal

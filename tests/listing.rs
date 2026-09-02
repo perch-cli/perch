@@ -513,7 +513,7 @@ fn a_listing_that_refreshes_waits_for_the_other_perch_because_it_writes() {
     ] {
         let refused = result.expect_err("a writer waits on a writer");
         assert!(
-            refused.to_string().contains("the Perch registry lock"),
+            refused.to_string().contains("the Perch Registry lock"),
             "{what}: {refused}"
         );
     }
@@ -1302,7 +1302,7 @@ fn narrowing_a_listing_on_an_empty_machine_does_not_change_the_diagnosis() {
 /// The Switch-in-flight line is said whether or not the `*` is in this listing,
 /// because a Landing is a fact about the machine rather than about the rows. A
 /// Scope holding nobody is still on that machine, and `--json` carries `landing`
-/// at every breadth — so leaving it out here made two renderings of one registry
+/// at every breadth — so leaving it out here made two renderings of one Registry
 /// disagree.
 #[test]
 fn a_narrowed_scope_holding_no_accounts_still_says_a_switch_was_in_flight() {
@@ -1329,7 +1329,7 @@ fn a_narrowed_scope_holding_no_accounts_still_says_a_switch_was_in_flight() {
 }
 
 /// The three values a surface draws that nobody chose: a Quota Window's name is
-/// Anthropic's, a plan is Claude Code's, and an organization reaches the registry
+/// Anthropic's, a plan is Claude Code's, and an organization reaches the Registry
 /// through an Import as well as through the file `probe` guards
 /// (ADR nothing-drawn-is-obeyed).
 #[test]

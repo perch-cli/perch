@@ -5,7 +5,7 @@
 //! (ADR a-login-perch-does-not-need). Which Account it turned out to be is read
 //! back from the login rather than asked for.
 //!
-//! Nothing reaches the registry until the login has produced an Account Perch
+//! Nothing reaches the Registry until the login has produced an Account Perch
 //! can name.
 
 use std::io::Write;
@@ -40,7 +40,7 @@ pub struct AddArgs {
 }
 
 pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
-    // Read rather than held: holding the registry lock across a browser round
+    // Read rather than held: holding the Registry lock across a browser round
     // trip would block every other Perch for as long as the login takes.
     let registry = adopt::ensure_adopted(host)?;
 
@@ -63,7 +63,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     let group = resolve_group(host, out, &registry, &args, &pending.identity)?;
     drop(registry);
 
-    // Decided against the registry as it is *now*: the copy above was read
+    // Decided against the Registry as it is *now*: the copy above was read
     // before a login that may have taken minutes, and writing it back would
     // revert whatever ran meanwhile (ADR a-switch-is-written-down-first).
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;

@@ -1,7 +1,7 @@
 //! `perch holdings import <path>` — a whole machine, put back
 //! (ADR the-holdings-go-out-sealed).
 //!
-//! The exact inverse of `perch holdings export`: the registry and every
+//! The exact inverse of `perch holdings export`: the Registry and every
 //! Credential, so a new laptop arrives with the setup the old one had rather
 //! than a pile of nameless logins.
 //!
@@ -44,7 +44,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
             let (export, renamed) = export::unseal(&sealed, &passphrase)?;
             // Before anything is written, so a person who stops here has been
             // told what the Export would arrive as. `bring_forward` says the
-            // same about this machine's own registry.
+            // same about this machine's own Registry.
             if let Some(said) = crate::migration::what_was_renamed_said(&renamed) {
                 host.note(&said);
             }
@@ -61,12 +61,12 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     })?;
 
     // The Import is complete by this line: every Credential is placed and the
-    // registry is written. What is left is saying so, and raised bare, a terminal
+    // Registry is written. What is left is saying so, and raised bare, a terminal
     // that has gone away makes a machine that *is* restored exit non-zero.
     report(out, path, &export).map_err(|error| {
         error.with_note(
             "The Import itself finished: every Credential the Export held is \
-             restored and Perch's registry is written. Only the report of it \
+             restored and Perch's Registry is written. Only the report of it \
              could not be, so there is nothing to run again. `perch list` says \
              what arrived.",
         )
@@ -117,7 +117,7 @@ fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<Stri
 
 /// What arrived.
 ///
-/// Nothing arrives active on any Import and an Import carries the whole registry
+/// Nothing arrives active on any Import and an Import carries the whole Registry
 /// on every one, so neither is said here: the guide establishes both. The
 /// Accounts the file held no Credential for are what this can report.
 fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {

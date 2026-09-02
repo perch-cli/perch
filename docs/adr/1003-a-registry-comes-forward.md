@@ -1,18 +1,18 @@
-# A registry comes forward
+# A Registry comes forward
 
-**A registry claiming a version below this build's is brought into the shape it
+**A Registry claiming a version below this build's is brought into the shape it
 reads — in memory on every read, and written back once by the run that finds it.
 The steps chain from whichever version a document claims, and each is arithmetic
 over the document rather than a conversation with the machine.**
 
-ADR the-holdings-outlive-a-perch decided which answer the registry gets: it
-migrates, because a refused registry is not survivable. This is that step, and
+ADR the-holdings-outlive-a-perch decided which answer the Registry gets: it
+migrates, because a refused Registry is not survivable. This is that step, and
 the four things carrying it out had to settle.
 
 ## What version 1 actually is
 
 `CURRENT_VERSION` went 1 to 2 when the Settings moved onto Scopes, and the bump
-never shipped. Every registry v0.1.0, v0.1.1 and v0.2.0 wrote claims version 1,
+never shipped. Every Registry v0.1.0, v0.1.1 and v0.2.0 wrote claims version 1,
 and the guard in `load` fires only *above* the current version — so those files
 fell through to `deny_unknown_fields` and came back as serde's words about an
 unknown field, on a file Perch itself wrote three releases ago.
@@ -54,7 +54,7 @@ Version 3 took Unicode's whole `Default_Ignorable_Code_Point` set for
 allow-list of identifier characters (ADR a-target-has-to-be-typeable).
 
 That is still a version. The number tracks what this build can *read*, and a
-registry holding a name the rules now refuse is one `load` turns down — which is
+Registry holding a name the rules now refuse is one `load` turns down — which is
 every command, `perch group rename` among them. A rule with nothing to carry the
 names already written down is the failure this document exists to prevent,
 reached from the other direction.
@@ -71,7 +71,7 @@ build of that version ever wrote is a hand edit, named at `load` and left. The
 bound is owed for version 1 as much as for the two after it: almost nothing was
 refused, and *almost* is where a hand-edited `a@b` sits.
 
-Both ways a registry arrives say what was renamed. `bring_forward` says it about
+Both ways a Registry arrives say what was renamed. `bring_forward` says it about
 this machine's own file, after the write; an Import says it about the Export's,
 before one. `unseal` hands the renames back beside the document rather than
 carrying them on it, `coming_forward` being a `Deserialize` with nowhere to put
@@ -87,7 +87,7 @@ Both stamp `"version": 1`.
 
 That is the mistake this document is about, already shipped: the shape moved and
 the number did not. It is why the step reads the union of the two rather than one
-of them, and why the suite holds a registry per released version rather than a
+of them, and why the suite holds a Registry per released version rather than a
 test per field that moved — a per-field test over either document passes while
 the other stays unreadable.
 
@@ -108,14 +108,14 @@ asked for.
 ## Where it runs, and why not in one place
 
 `load` brings the document forward in memory. It cannot write it back: the
-registry lock is taken *before* the read on every path that writes
+Registry lock is taken *before* the read on every path that writes
 (ADR one-door-to-the-registry), so a `load` that took the lock itself would wait
 on the command that called it and give up after five seconds.
 
 So `main` brings it forward ahead of the command — take the lock, load, save,
 release, which is shape 1's sequence without shape 1's door, because the door
-adopts an existing login where there is no registry and a migration has nothing
-to adopt. Its outcome is deliberately not the command's: an older registry is
+adopts an existing login where there is no Registry and a migration has nothing
+to adopt. Its outcome is deliberately not the command's: an older Registry is
 read correctly either way, so a lock somebody else is holding costs the
 write-back and nothing else, and the next run takes it.
 
@@ -147,8 +147,8 @@ not do is guess: the version says which shape the rest of the file is in, and
 reading a document whose shape is unstated is the half-parse this whole document
 exists to prevent.
 
-The floor is held by both readers of a registry, not only by the file on disk. An
-Import writes what it read back out under the current version, so a registry
+The floor is held by both readers of a Registry, not only by the file on disk. An
+Import writes what it read back out under the current version, so a Registry
 inside an Export claiming a version no Perch stamped would be relabeled rather
 than refused — the same corruption by a longer route.
 
@@ -165,15 +165,15 @@ past it: dropping the field would lose which Account the machine is on and say
 nothing, which is the failure mode the version exists to prevent, reached from
 inside the thing that exists to prevent it.
 
-## The Export's registry comes forward; the Export does not
+## The Export's Registry comes forward; the Export does not
 
 An Export written by any published Perch carries envelope version 1 — still the
-current one — around a registry claiming 1. Both guards fire only above the
+current one — around a Registry claiming 1. Both guards fire only above the
 current version, so neither trips, and the envelope's derive walks into the same
 seven mismatches. The refusal ADR the-holdings-outlive-a-perch gives an Export
 has no number to name here: nothing is ahead of anything.
 
-The registry inside is the same registry, so it takes the same step, on the same
+The Registry inside is the same Registry, so it takes the same step, on the same
 grounds — it holds Groups, Aliases and Settings that exist nowhere else, and the
 Export it arrived in is how somebody moves a machine. The *envelope* keeps its
 refusal for a version above this build's, unchanged.
@@ -181,7 +181,7 @@ refusal for a version above this build's, unchanged.
 It runs on the `registry` field alone, as that field's own `deserialize_with`,
 rather than over the unsealed document. Reading the whole document as a `Value`
 first would put every Credential in the Export into a `String` that nothing
-wipes; the registry half holds no secret.
+wipes; the Registry half holds no secret.
 
 ## What was not chosen
 
@@ -204,7 +204,7 @@ skip a serialize. It would also skip `validate`, the version stamp and the
 one-step replacement, which are the three things making a half-finished
 migration impossible.
 
-**Refusing a version 1 registry with instructions to install v0.2.0 and export.**
+**Refusing a version 1 Registry with instructions to install v0.2.0 and export.**
 It is survivable, unlike a bare refusal, and it asks somebody to find a release
 by hand to keep the Groups they typed. The refusal costs more than the step does.
 
@@ -219,7 +219,7 @@ where nothing is wrong at all.
 
 ## The glossary
 
-No new term. **Holdings**, **registry** and **Settings** already say all of this,
-and "the registry comes forward" is a sentence about them rather than a coinage.
+No new term. **Holdings**, **Registry** and **Settings** already say all of this,
+and "the Registry comes forward" is a sentence about them rather than a coinage.
 The word `CLAUDE.md` uses for the mechanism is *migration*, and this document is
 the one it points at.

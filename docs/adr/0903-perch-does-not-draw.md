@@ -119,7 +119,7 @@ Every command reads its arguments, does its work and exits — a property worth 
 once rather than rediscovering, and the premise `perch run` and `perch watcher run`
 both rest on when they hand the terminal to something else.
 
-Perch's own writers of the registry are the commands, and each of them holds the lock
+Perch's own writers of the Registry are the commands, and each of them holds the lock
 for exactly as long as it needs it (ADR one-door-to-the-registry). There is no
 surface holding it across a person's attention span.
 

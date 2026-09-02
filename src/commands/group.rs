@@ -249,7 +249,7 @@ fn groups_perch_holds(registry: &Registry) -> String {
 }
 
 /// Every Group with what it holds and what governs it, so the rules Cycling
-/// will follow are readable without opening the registry.
+/// will follow are readable without opening the Registry.
 fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
     if registry.groups.is_empty() {
         say::line(
@@ -259,7 +259,7 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         )?;
     }
 
-    // Borrowed rather than collected: nothing here mutates the registry, so the
+    // Borrowed rather than collected: nothing here mutates the Registry, so the
     // only clone left is the one `Scope::Group` genuinely needs.
     for name in registry.groups.keys() {
         say::line(out, name)?;
@@ -290,7 +290,7 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         // offers `on`/`off`, which is not a value the Setting takes.
         write_line(out, "Cycling", &config::cycling_among_ungrouped(registry))?;
         // Shown for the same reason a Group's is: the rules Cycling will follow
-        // should be readable without opening the registry.
+        // should be readable without opening the Registry.
         describe_configuration(out, registry, &Scope::Ungrouped)?;
     }
 

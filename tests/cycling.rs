@@ -356,7 +356,7 @@ fn being_already_on_the_best_account_rewrites_no_credentials() {
     let error = result.expect_err("there is nothing to do");
     assert_eq!(error.exit_code(), EXIT_NOTHING_TO_DO);
     assert!(error.to_string().contains(EMAIL), "{error}");
-    // Perch's own registry lock is taken by every command; what must not be
+    // Perch's own Registry lock is taken by every command; what must not be
     // taken is one of Claude Code's, because taking those is the Switch.
     assert!(
         !host.effects().iter().any(|effect| matches!(

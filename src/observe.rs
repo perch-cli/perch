@@ -40,7 +40,7 @@ pub enum Spending<'a> {
     ItsOwn { still_ours: StillOurs<'a> },
     /// A command somebody typed. Where a Watcher is running, the active
     /// Account's figure is already being kept at the Watcher's interval, and a
-    /// second reader spends what the Watcher decides with. It holds the registry
+    /// second reader spends what the Watcher decides with. It holds the Registry
     /// lock and nothing more, so there is nothing to lose part way.
     BesideTheWatcher,
 }
@@ -108,7 +108,7 @@ pub struct Attempt {
     pub email: String,
     /// The Account as the user names it, for the notes below.
     ///
-    /// Carried rather than derived, because an `Attempt` has no registry and the
+    /// Carried rather than derived, because an `Attempt` has no Registry and the
     /// surfaces that render one show no Accounts: a Watcher's decision line is the only
     /// sentence about that Account on the screen.
     pub named: String,
@@ -300,7 +300,7 @@ pub fn refresh(
     for email in emails {
         // A round trip to Anthropic each, so the hold is renewed between them and again
         // inside the turn: one Account's turn is up to six requests bounded at thirty
-        // seconds, twice the ninety the registry hold goes stale in.
+        // seconds, twice the ninety the Registry hold goes stale in.
         perch.renew();
         // And whatever else the caller holds. Kept here beside the ask every request
         // makes for itself: an Account already Quarantined is answered before the
@@ -576,7 +576,7 @@ struct Asked {
 /// Which store holds the Credential to ask with: the Default Profile for the active
 /// Account, and its own Profile for every other.
 ///
-/// A *settled* registry rather than [`Registry::is_active`], which answers a Landing
+/// A *settled* Registry rather than [`Registry::is_active`], which answers a Landing
 /// with the Account being **left** — off which figures land under the wrong address.
 fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     let its_own_profile = account.profile_dir(host)?;
@@ -1054,7 +1054,7 @@ mod tests {
     /// The Watcher holds the watch across the whole of a burst — one read per
     /// candidate, each bounded only at thirty seconds — while the watch goes stale
     /// in twenty-two and a half minutes. So the hold it hands over is renewed on
-    /// the same beat as the registry's, per Account rather than either side.
+    /// the same beat as the Registry's, per Account rather than either side.
     #[test]
     fn whatever_the_caller_holds_is_renewed_once_per_account() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");

@@ -1,6 +1,6 @@
-# One door to the registry
+# One door to the Registry
 
-**Perch holds the registry lock in three shapes, and which shape a command uses is
+**Perch holds the Registry lock in three shapes, and which shape a command uses is
 forced by whether it waits and whether it holds anything worth guarding when it
 does.**
 
@@ -13,11 +13,11 @@ between, so there is nothing to guard against. `enable`, `alias`, `group`, `conf
 
 **2 — A wait with nothing yet to write.** Defer the lock past it. The wait is a
 browser round trip and it happens before the command holds anything worth guarding,
-so the exclusive lock is taken *afterwards*, against a registry read fresh. `add`
+so the exclusive lock is taken *afterwards*, against a Registry read fresh. `add`
 reads shared, logs in, then takes the exclusive lock; `relogin` does the same.
 
 **3 — A wait about what is already held.** Hold the lock across it and guard it with
-`still_ours`. The wait is a question put to a person *about* the registry the command
+`still_ours`. The wait is a question put to a person *about* the Registry the command
 is already holding, so deferring is not available to it. `remove`, `purge`, `import`,
 `export`.
 
@@ -54,7 +54,7 @@ Eight sites go through it. The other thirteen each either move a Credential, sav
 than once in a run, or attach a note narrating which half of an irreversible act
 completed — and for those the save's *position* is the load-bearing part.
 `remove` writes which Account is active in the middle of the destruction rather than
-with the rest of the registry at the end, precisely so a failure between the two cannot
+with the rest of the Registry at the end, precisely so a failure between the two cannot
 strand it.
 
 ## `add` is the proof that the boundary is somewhere real
@@ -70,7 +70,7 @@ compensating action over a Credential already on disk. Admitting it means puttin
 
 **One ceremony for the destructive commands.** `remove`, `purge` and `relogin` look
 alike — each prints frightening sentences, each checks something twice, each waits with
-the registry in hand — and a single higher-order `destructively(host, out, did, guard,
+the Registry in hand — and a single higher-order `destructively(host, out, did, guard,
 question, body)` is the obvious generalization. They do not share a sequence.
 
 | | `remove` | `purge` | `relogin` |
@@ -78,9 +78,9 @@ question, body)` is the obvious generalization. They do not share a sequence.
 | lock | adopts exclusively | locks and loads raw; adoption deliberately refused | adopts, then a second exclusive lock after the browser |
 | Target | one | **none**, by definition | one |
 | Landing | resolved | none | resolved, with a deliberate `Conflict` exemption |
-| liveness | one Account | the whole registry | one Account |
+| liveness | one Account | the whole Registry | one Account |
 | `still_ours` | yes | yes | never |
-| ends with | a save | deleting the registry | a save, then making the Credential live |
+| ends with | a save | deleting the Registry | a save, then making the Credential live |
 
 Three things follow. The **cohorts do not match the proposal**: `still_ours` has four
 callers — `remove`, `purge`, `import`, `export` — so `relogin` is in the candidate and
@@ -108,7 +108,7 @@ the table above is the answer to it.
 **Reversibility as the axis.** It is the obvious way to describe the cohort — every one
 of the eight is undoable — and it is the wrong axis, here and everywhere in Perch. What
 separates the eight is not that they can be undone but that they touch nothing outside
-the registry, which is a statement about **reach** rather than about consequence, and is
+the Registry, which is a statement about **reach** rather than about consequence, and is
 the one a signature can hold.
 
 **A test that walks the command modules.** Nothing stops a future command taking the
@@ -121,9 +121,9 @@ shape is then the thing to argue with, not the door.
 
 ## The glossary
 
-No new terms, and the absence is the finding. "The registry" is already the project's
+No new terms, and the absence is the finding. "The Registry" is already the project's
 word for the written-down part of what Perch holds — **Holdings** is "every Profile,
-every Credential Perch holds, the registry naming them and what each Group carries", so
+every Credential Perch holds, the Registry naming them and what each Group carries", so
 that entry's `_Avoid_` note forbids only using the word as a synonym for the whole. The
 rule was sayable in the domain's own vocabulary before it was written down, which is why
 `only_the_registry` is named in it rather than in a coinage.
@@ -135,7 +135,7 @@ here and at `only_the_registry`, and nowhere else.
 
 ## Consequences
 
-A command that changes only the registry is three lines shorter and cannot be written to
+A command that changes only the Registry is three lines shorter and cannot be written to
 touch a Credential. One that needs to touch one cannot use the door, which is the
 refusal working rather than the door being too narrow.
 

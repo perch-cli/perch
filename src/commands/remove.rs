@@ -275,7 +275,7 @@ fn what_it_would_leave(
 
 /// Makes the successor's Credential the live one before the Account being given
 /// up is destroyed, and records it as active the moment it becomes so — here
-/// rather than with the rest of the registry at the end, because everything
+/// rather than with the rest of the Registry at the end, because everything
 /// between is destructive and can fail. Written whether the landing finished or
 /// not: a Credential that reached the Default Profile is live either way.
 #[allow(
@@ -387,7 +387,7 @@ fn delete_the_credential_and_its_profile(
         let forgotten = kept_in.forget(host).map_err(|error| {
             let so_far = match anything_was_there {
                 // Said as the state it is rather than as a Quarantine, which
-                // this is not: a Quarantine is a thing the registry *records*,
+                // this is not: a Quarantine is a thing the Registry *records*,
                 // and nothing here records one.
                 true => format!(
                     "{}'s Credential has already been taken out of its other \

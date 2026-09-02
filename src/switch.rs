@@ -3,7 +3,7 @@
 //! A Capture of the outgoing Credential into its own Profile, a write of the
 //! incoming one to the Default Profile, and a patch of the Identity to match —
 //! in that order, under Claude Code's locks, with a [`Landing`] written to the
-//! registry between the first step and the second
+//! Registry between the first step and the second
 //! (ADR a-switch-is-written-down-first). Shared State is not touched: that is
 //! the Run path. [`switch_to`] is the way in and the only one: `perch switch`
 //! and the Watcher differ by a [`Reason`], a Remove's successor and a Repair
@@ -64,7 +64,7 @@ pub enum Captured {
 /// Why a Switch is being made, and so what else the save recording it carries.
 ///
 /// A Watcher is a process a supervisor may restart, so what paces the next round
-/// reaches the registry in the *same* save as the Switch it paces
+/// reaches the Registry in the *same* save as the Switch it paces
 /// (ADR a-watcher-knob-is-arithmetic).
 #[derive(Debug)]
 pub enum Reason {
@@ -156,7 +156,7 @@ pub fn switch_to(
     record_the_switch(host, perch, registry, landing, reason)
 }
 
-/// The half of a Switch that reaches the registry, with everything that has to
+/// The half of a Switch that reaches the Registry, with everything that has to
 /// reach it in the same save.
 ///
 /// Split out so the ordering can be asserted against a Landing that moved and
@@ -185,7 +185,7 @@ fn record_the_switch(
     }
 }
 
-/// A Switch under way in this process, and the registry record of it.
+/// A Switch under way in this process, and the Registry record of it.
 ///
 /// Written after the Capture and before the Credential moves, so a Perch that
 /// arrives on the gap knows which two Accounts the live Credential could belong
@@ -197,10 +197,10 @@ struct Landing {
     incoming: String,
     /// The Account it was leaving, for the same reason and for one more: where
     /// nothing moved, this is who is active, and saying so is what takes the
-    /// Landing back off the registry.
+    /// Landing back off the Registry.
     leaving: Option<String>,
     incoming_is_live: bool,
-    /// Whether the Landing reached the registry. False for every way a Switch
+    /// Whether the Landing reached the Registry. False for every way a Switch
     /// can fail before the Credential was ever going to move, which is every
     /// way that has nothing to take back.
     wrote_it_down: bool,
@@ -262,7 +262,7 @@ impl Landing {
     }
 }
 
-/// Takes a Landing back off the registry, saying who is active instead. Best
+/// Takes a Landing back off the Registry, saying who is active instead. Best
 /// effort, and the one write in a Switch that is: one left behind is settled by
 /// the next Switch off the two Credentials it names. What it buys is a `perch
 /// status` that announces no Switch in flight beside a failure saying nothing
@@ -413,7 +413,7 @@ fn perform(
 
 /// Writes down that the Credential is about to move, before it moves.
 ///
-/// The in-memory registry is put back where a save fails, so a caller that goes
+/// The in-memory Registry is put back where a save fails, so a caller that goes
 /// on to write it — `record`, saving a Quarantine — cannot put a Landing on disk
 /// that this call established could not be written.
 fn write_it_down(
@@ -476,8 +476,8 @@ pub enum Resolved<E> {
     Stopped(E),
 }
 
-/// Settles a registry that holds a Landing, so what follows runs against a
-/// registry that tells the truth. A step of its own, ahead of everything else a
+/// Settles a Registry that holds a Landing, so what follows runs against a
+/// Registry that tells the truth. A step of its own, ahead of everything else a
 /// Switch path does, and cheap where there is nothing to settle: one enum arm
 /// and no I/O, which is every command on every ordinary machine. `still_ours`
 /// is a Watcher's; every other caller's is [`crate::commands::a_settled_landing`].
@@ -785,7 +785,7 @@ fn capture(
 
     // Over the whole of Unicode, as every other comparison of two addresses is.
     // `.claude.json` is Claude Code's file and nothing makes it agree with the
-    // registry about the case of a letter outside ASCII.
+    // Registry about the case of a letter outside ASCII.
     if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.installed)
         && !name::same_name(&identity.email, outgoing.email())
     {
@@ -1453,7 +1453,7 @@ mod tests {
         }
     }
 
-    /// Asserted off the file rather than off the registry in hand, because "one
+    /// Asserted off the file rather than off the Registry in hand, because "one
     /// save carries both" is a claim about what reached disk.
     #[test]
     fn a_check_that_moved_and_then_failed_still_records_the_check() {

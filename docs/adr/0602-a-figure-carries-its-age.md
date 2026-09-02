@@ -103,7 +103,7 @@ rather than branching on the exit status; a person reads the age beside each
 figure, which is the same information said the way people read it.
 
 Errors that stop the command before any figure could be shown — no active
-Account, a registry Perch cannot read — are unaffected, and fail with the codes
+Account, a Registry Perch cannot read — are unaffected, and fail with the codes
 they already have. The rule is about the fetch, not about the command.
 
 **The Watcher is the exception** (ADR a-watcher-knob-is-arithmetic). It shows

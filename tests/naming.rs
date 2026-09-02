@@ -369,7 +369,7 @@ fn a_name_that_differs_only_in_case_is_the_same_name() {
 
 #[test]
 fn an_alias_command_on_a_registry_with_no_aliases_finds_nothing() {
-    // Holding the Account it names: a registry naming one it does not hold is a
+    // Holding the Account it names: a Registry naming one it does not hold is a
     // state `validate` refuses rather than a machine anybody has.
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
@@ -389,7 +389,7 @@ fn an_alias_command_on_a_registry_with_no_aliases_finds_nothing() {
     );
 }
 
-/// Resolving a Target honors the rule the registry enforces, or `perch group add
+/// Resolving a Target honors the rule the Registry enforces, or `perch group add
 /// Work` produces a Group that `perch group remove work` drops and
 /// `perch switch work` says does not exist.
 #[test]

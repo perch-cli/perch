@@ -9,9 +9,9 @@ for.
 Two of the seven are checkable as a class rather than as a list, and those two
 are here. The other five are types, and a type needs no suite.
 
-## The registry, over the name space
+## The Registry, over the name space
 
-> **Every version 1 registry a published Perch could have written comes forward
+> **Every version 1 Registry a published Perch could have written comes forward
 > into one this build reads.**
 
 `every_name_a_published_perch_accepted_comes_forward_into_one_that_loads`
@@ -66,10 +66,10 @@ spelling outright. A crate must not cost a seam
 (ADR a-crate-must-not-cost-a-seam), and this one would cost a build-time
 dependency for shrinking that nothing needs.
 
-**Generating registries structurally as well as by name.** Two Groups differing
+**Generating Registries structurally as well as by name.** Two Groups differing
 only in case, a Group that is also an Alias, a `checks` key naming nothing — the
 generator could reach all three, and every one of them is a state v0.1.0's own
-`validate` refused on load. A registry no published Perch could read is a hand
+`validate` refused on load. A Registry no published Perch could read is a hand
 edit, and refusing it with a sentence is this build's deliberate answer. The
 generator therefore spells its two names apart, and that exclusion is the one
 place this suite trusts a reader.

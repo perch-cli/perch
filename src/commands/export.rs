@@ -26,7 +26,7 @@ use crate::wait;
 
 pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Before the passphrase, because the refusals are ones somebody should meet
-    // before typing one twice — and before the registry is read, since reading it
+    // before typing one twice — and before the Registry is read, since reading it
     // adopts the login on a fresh machine (ADR a-login-perch-does-not-need).
     ask::needs_a_terminal(host, "perch holdings export")?;
     let mut destination = Destination::for_an_export(host, path)?;
@@ -57,10 +57,10 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     }
 }
 
-/// Everything an Export is, given a registry somebody else has read and a
+/// Everything an Export is, given a Registry somebody else has read and a
 /// [`Destination`] already proven fit: passphrase, gather, seal, file, report.
 ///
-/// Shared with `perch holdings purge`, which holds the registry lock across the
+/// Shared with `perch holdings purge`, which holds the Registry lock across the
 /// offer it makes — so it cannot go through [`run`] and wait out its own hold.
 pub fn write_the_export(
     host: &dyn Host,

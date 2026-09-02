@@ -74,7 +74,7 @@ because they are what a first pull request is most often sent back over, and
 each links to where the case is made rather than restating it.
 
 **The Holdings survive an upgrade.** The command line moves freely, marked
-`[**breaking**]` in `CHANGELOG.md`. A Profile, a Credential, the registry naming
+`[**breaking**]` in `CHANGELOG.md`. A Profile, a Credential, the Registry naming
 them and an Export carrying all three do not: when their shape changes, the
 `version` changes with it, and the change lands as a migration or as a refusal
 naming the version that wrote the file (ADR the-holdings-outlive-a-perch).

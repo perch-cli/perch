@@ -1,7 +1,7 @@
 //! `perch probe` — everything Perch can see of this machine, in one paste
 //! (ADR a-trail-is-evidence).
 //!
-//! Gathers rather than acts: no network, no registry brought forward, no Trail
+//! Gathers rather than acts: no network, no Registry brought forward, no Trail
 //! line of its own. Every failure on the way is a finding rather than a refusal,
 //! since a Probe that refuses stops where the machine is worst.
 //!
@@ -162,7 +162,7 @@ struct Seen {
     claude_at: Option<PathBuf>,
     home: Option<PathBuf>,
     registry: Option<Registry>,
-    /// The version the file on disk states. Not the loaded registry's, which
+    /// The version the file on disk states. Not the loaded Registry's, which
     /// `registry::load` has already carried forward in memory — reporting that
     /// would say every machine is current and undo the point of the exemption.
     on_disk: Option<u64>,
@@ -173,8 +173,8 @@ struct Seen {
     findings: Vec<Finding>,
 }
 
-/// The placeholders this gathering redacts to. A registry that would not load
-/// numbers nothing, which is a Probe of a machine with no registry rather than a
+/// The placeholders this gathering redacts to. A Registry that would not load
+/// numbers nothing, which is a Probe of a machine with no Registry rather than a
 /// failure: the home directory is still hidden.
 fn redaction_over(host: &dyn Host, seen: &Seen) -> Redaction {
     Redaction::of(
@@ -264,7 +264,7 @@ fn gather(host: &dyn Host) -> Seen {
             findings.push(Finding::noticed(
                 finding::REGISTRY_BEHIND,
                 format!(
-                    "The registry on disk is version {} and this Perch writes \
+                    "The Registry on disk is version {} and this Perch writes \
                      version {}. No command has brought it forward yet, which the \
                      next one that reads it will do.",
                     on_disk.unwrap_or_default(),
@@ -287,7 +287,7 @@ fn gather(host: &dyn Host) -> Seen {
                 ),
             });
         }
-        // Every command writes both, so a registry newer than the Trail's last
+        // Every command writes both, so a Registry newer than the Trail's last
         // line says the silent write failed. By a minute, the two times coming
         // from the filesystem's clock and from Perch's.
         let wrote = holdings::registry_path(host)
@@ -299,7 +299,7 @@ fn gather(host: &dyn Host) -> Seen {
             findings.push(Finding::noticed(
                 finding::TRAIL_NOT_KEPT,
                 format!(
-                    "The registry was written at {} and the Trail's last line is \
+                    "The Registry was written at {} and the Trail's last line is \
                      from {}, so a command ran and wrote nothing down. Perch's \
                      home is most likely not writable.",
                     wrote.format("%Y-%m-%d %H:%M:%SZ"),
@@ -468,14 +468,14 @@ fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
         "Home",
         match (&seen.home, &seen.registry_said) {
             (Some(home), Some(_)) => {
-                format!("{}, and the registry would not load", hidden.path(home))
+                format!("{}, and the Registry would not load", hidden.path(home))
             }
             (Some(home), None) => format!(
                 "{}, {}",
                 hidden.path(home),
                 match seen.on_disk {
-                    Some(stated) => format!("registry version {stated}"),
-                    None => "no registry yet".to_string(),
+                    Some(stated) => format!("Registry version {stated}"),
+                    None => "no Registry yet".to_string(),
                 }
             ),
             (None, _) => "could not be found".to_string(),
@@ -590,7 +590,7 @@ fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
 }
 
 /// The same answers as keys, with `null` where the machine gave none — which is
-/// what tells "the registry would not load" from "no Accounts".
+/// what tells "the Registry would not load" from "no Accounts".
 fn document(seen: &Seen, hidden: &Redaction) -> serde_json::Value {
     serde_json::json!({
         "perch": {

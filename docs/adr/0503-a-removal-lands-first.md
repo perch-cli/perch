@@ -45,12 +45,12 @@ directory that will not exist. It still writes down that the Credential is about
 to move, because that is a rule about both doors rather than about Capturing
 (ADR a-switch-is-written-down-first).
 
-The order is landing, then deleting the Credential, then writing the registry.
+The order is landing, then deleting the Credential, then writing the Registry.
 Each step is only taken once the one that could still be undone has succeeded: a
 landing that fails has cost nothing, and a store that will not give up its
 Credential stops the removal while the Account can still be named and the command
-run again. The registry is written last, so the one thing that cannot be retried
-— an Account dropped from the registry with a Credential still on disk and no
+run again. The Registry is written last, so the one thing that cannot be retried
+— an Account dropped from the Registry with a Credential still on disk and no
 name left to reach it by — cannot happen.
 
 Two Profiles are refused rather than written: the Account's own, and — where

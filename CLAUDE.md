@@ -9,7 +9,7 @@ reads them and that entry is the only warning there will be. Output prose is
 read by a person who reads it again on the next run, so it moves under
 `### Changed`.
 
-The Holdings do not. A Profile, a Credential, the registry naming them and an
+The Holdings do not. A Profile, a Credential, the Registry naming them and an
 Export carrying all three are what a changelog entry cannot give back, so a
 change to any of their shapes lands as a migration or as a
 refusal-with-instructions — never as a file this Perch reads wrong. A Credential
@@ -17,12 +17,12 @@ Store is derived from its Profile's path, so moving `profiles/` is not a rename.
 
 Which of the two is decided by what the refusal costs. An Export is a backup and
 the Perch that wrote it can still open it, so an Export this build does not
-understand is refused, naming the version that wrote it. A registry holds Groups,
+understand is refused, naming the version that wrote it. A Registry holds Groups,
 Aliases and Settings that exist nowhere else, and starting over means logging in
-to every Account — so a registry migrates forward from every version Perch has
+to every Account — so a Registry migrates forward from every version Perch has
 written.
 
-Both turn on one number: when the shape of the registry or of an Export moves,
+Both turn on one number: when the shape of the Registry or of an Export moves,
 its `version` moves with it. A shape that changes under a version that does not
 is the one failure neither the migration nor the refusal can catch.
 

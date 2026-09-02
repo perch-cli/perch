@@ -208,7 +208,7 @@ an object — `reason` and `said` — for one that does not, so a script asking
 whether it is set reads the same answer it always did and now gets the reason
 with it. `said` is that same reason as a sentence, one per `reason` rather than
 a second fact: what broke underneath is in the line Perch prints and is not
-something the registry records.
+something the Registry records.
 
 Each document answers its own command's question, so the two shapes differ:
 `perch status --json` answers about one Account under `active`, and the listing

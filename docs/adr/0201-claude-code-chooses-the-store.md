@@ -134,10 +134,10 @@ Perch broken while the thing it wraps works. Windows has no mode and relies on
 the profile ACL, so a `$PERCH_HOME` on a shared or removable drive gets that
 drive's permissions and Perch will not notice.
 
-Because a Credential Store is derived rather than recorded, the registry names
+Because a Credential Store is derived rather than recorded, the Registry names
 neither the keychain service nor the keychain account, and by the same argument
 not the Profile's directory either — that is `perch_home/profiles/slug(email)`.
-`Profile` collapses into values the registry already keys on, and two statements
+`Profile` collapses into values the Registry already keys on, and two statements
 of one fact cannot disagree. The directory is therefore the only thing that can
 still name a Profile's Credential Store, so anything discarding a Profile takes
 the Credential first and the directory last: a keychain locked mid-`perch add`
@@ -156,7 +156,7 @@ every store is derived from rather than trusted to whatever wrote the address.
 What deriving costs is that a change to Claude Code's derivation would send
 Perch looking in an empty namespace instead of at a remembered one; the answer
 to drift is to refuse loudly rather than to guess, and `short_hash` is pinned by
-test so the derivation cannot move by accident. The shape of the registry itself
+test so the derivation cannot move by accident. The shape of the Registry itself
 is ADR the-holdings-outlive-a-perch's to move.
 
 Switching writes a Credential a running Claude Code may hold, so it cooperates

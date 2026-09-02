@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--help` texts now gloss Quarantine, Trail and Captured where each first
   appears, so a reader who has not met the word is told what it names
 
+- the Registry is a defined term now, with an entry in `CONTEXT.md`'s
+  dictionary, and everything Perch says writes it capitalized like the rest of
+  its vocabulary. The file keeps its name — `registry.json` — and no `--json`
+  key and nothing in an Export moves
+
 ## [0.3.5](https://github.com/perch-cli/perch/compare/v0.3.4...v0.3.5) - 2026-08-31
 
 ### Fixed

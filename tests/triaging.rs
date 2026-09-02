@@ -375,8 +375,8 @@ fn only_the_newest_three_runs_are_kept() {
 }
 
 /// A Triage adopts nothing and saves nothing. On a machine Perch holds nothing
-/// on, any other command would leave a registry behind, and the evidence is the
-/// whole of what this one writes — no registry, and no line in the Trail.
+/// on, any other command would leave a Registry behind, and the evidence is the
+/// whole of what this one writes — no Registry, and no line in the Trail.
 #[test]
 fn a_triage_adopts_nothing_and_writes_only_its_own_evidence() {
     let host = at_a_fixed_moment(logged_in_machine());

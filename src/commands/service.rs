@@ -602,13 +602,13 @@ fn recorded_log(host: &dyn Host, unit: Option<&str>, installed: bool) -> Result<
     Ok(unit.and_then(|text| manager.log_in(text)))
 }
 
-/// Whether any Scope has told the Watcher it may act, or `None` where the registry
+/// Whether any Scope has told the Watcher it may act, or `None` where the Registry
 /// would not load.
 ///
-/// Asked of the whole registry rather than of the active Account, because a Service
+/// Asked of the whole Registry rather than of the active Account, because a Service
 /// outlives whichever Account happens to be active when it is installed.
 fn any_scope_may_act(host: &dyn Host) -> Option<bool> {
-    // Whatever is wrong with a registry that will not load is bigger news than this
+    // Whatever is wrong with a Registry that will not load is bigger news than this
     // answer, and the command that needs it will say so.
     let Ok(Some(registry)) = registry::load(host) else {
         return None;
@@ -680,7 +680,7 @@ fn gone_or_refused(host: &dyn Host, step: &Driven, args: &[&str]) -> Result<()> 
 
 /// Refuses to install a Service for somebody who is not the person it would watch.
 ///
-/// Installed under `sudo` it would be a root process watching root's registry, which is
+/// Installed under `sudo` it would be a root process watching root's Registry, which is
 /// empty, while the person who typed it wondered why nothing ever Switched.
 fn refuse_as_root(host: &dyn Host) -> Result<()> {
     if host.user_id() != Some(0) {
@@ -689,7 +689,7 @@ fn refuse_as_root(host: &dyn Host) -> Result<()> {
     Err(PerchError::Invalid(
         "A Service belongs to one person, and this is running as root.\n\
          Every Profile Perch holds is under a home directory, so a Service \
-         installed this way would watch root's registry rather than yours. Run \
+         installed this way would watch root's Registry rather than yours. Run \
          `perch watcher install` as yourself, without `sudo`."
             .to_string(),
     ))

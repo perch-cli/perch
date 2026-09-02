@@ -54,9 +54,9 @@ Account reporting a Fable window is told so where the ranking is said — the
 Listing — and ranks on Headroom alone meanwhile, because tiers keyed on a
 window nobody reports order nothing, and a Setting that silently stops meaning
 anything is the failure a changelog cannot warn about. The rename itself lands
-the way every registry shape does — a new
+the way every Registry shape does — a new
 Setting and a migration forward (ADR a-registry-comes-forward) — and adding
-`prefer-fable` moves the registry's shape too, so it moves the version with it.
+`prefer-fable` moves the Registry's shape too, so it moves the version with it.
 
 An Account whose cache holds no Fable window ranks in the first tier the way an
 unobserved figure always ranks: below every Account with known Fable room,

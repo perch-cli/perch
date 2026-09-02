@@ -45,7 +45,7 @@ pub struct Placed {
     store: Store,
     /// Whether the Profile's directory was already on the machine: a
     /// `perch add` that died at the browser step, or a Purge that could not
-    /// empty a store, leaves a directory the registry never named.
+    /// empty a store, leaves a directory the Registry never named.
     was_already_there: bool,
     /// Whether this placement wrote a Credential into that store. A Quarantined
     /// Account travels with none, and forgetting a store this never wrote to

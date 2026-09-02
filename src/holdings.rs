@@ -1,7 +1,7 @@
 //! Where the Holdings sit on this machine: every path under `$PERCH_HOME`, and
 //! the two locks taken inside it.
 //!
-//! Derived rather than recorded. The registry names Accounts and Groups and
+//! Derived rather than recorded. The Registry names Accounts and Groups and
 //! says nowhere what any of them is kept in, so a Credential Store follows its
 //! Profile's path and moving `profiles/` is not a rename.
 //!
@@ -18,13 +18,13 @@ use crate::host::Host;
 use crate::lock::{self, LockSpec};
 
 /// `$PERCH_HOME`, or `~/.config/perch` — an error when neither is knowable,
-/// rather than a registry written into the filesystem root.
+/// rather than a Registry written into the filesystem root.
 ///
 /// The same path on every platform rather than `%APPDATA%`, because one rule is
 /// easier to keep in a Host port exposing only a home directory. A preference.
 pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
     // Set-but-empty is the machine not saying: taken at face value it makes the
-    // registry a relative path, so Perch would read and write the Holdings
+    // Registry a relative path, so Perch would read and write the Holdings
     // wherever it happened to be invoked from.
     if let Some(overridden) = host
         .env_var("PERCH_HOME")
@@ -213,7 +213,7 @@ pub(crate) fn slug_into(slugged: &mut String, email: &str) {
     slugged.drain(..start);
 }
 
-/// How long a Perch that died holding the registry lock keeps it.
+/// How long a Perch that died holding the Registry lock keeps it.
 ///
 /// Longer than the Claude Code locks a Switch takes, because it is the outer
 /// lock; short enough that a killed Perch leaves a usable machine within a
@@ -222,19 +222,19 @@ pub(crate) const REGISTRY_STALE_MILLIS: i64 = 90_000;
 
 const REGISTRY_UPDATE_MILLIS: i64 = 5_000;
 
-/// The lock one Perch takes so that no other Perch is changing the registry at
+/// The lock one Perch takes so that no other Perch is changing the Registry at
 /// the same time.
 ///
 /// A directory, taken with the same `mkdir`-or-fail primitive the Claude Code
 /// locks use: the call both asks and answers, with nothing in between.
 pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
     Ok(LockSpec {
-        name: "the Perch registry lock",
+        name: "the Perch Registry lock",
         held_by: "the other `perch`",
         dir: perch_home(host)?.join(".registry.lock"),
         stale_millis: REGISTRY_STALE_MILLIS,
         update_millis: REGISTRY_UPDATE_MILLIS,
-        lost_means: "Another `perch` has been changing the registry since this \
+        lost_means: "Another `perch` has been changing the Registry since this \
                      command read it, so what this one holds in memory is behind \
                      what is on disk. Nothing of it will be written over theirs.",
     })
@@ -270,7 +270,7 @@ pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
     })
 }
 
-/// Shuts every other Perch out of the registry until the hold is dropped.
+/// Shuts every other Perch out of the Registry until the hold is dropped.
 ///
 /// The hold spans the command rather than the write, because it is the *read*
 /// that goes stale: a copy saved after somebody else's Switch landed would put
@@ -289,7 +289,7 @@ mod tests {
     }
 
     /// The mapping `str::to_lowercase` and `char::to_lowercase` disagree on, and
-    /// the reason a slug may be taken character by character. A registry v0.2.0
+    /// the reason a slug may be taken character by character. A Registry v0.2.0
     /// wrote came back refused over the same rule read the other way.
     #[test]
     fn an_address_ending_in_a_greek_sigma_slugs_the_same_whichever_case_it_carries() {
@@ -344,7 +344,7 @@ mod tests {
             Ok(_) => panic!("the second Perch must wait, then give up"),
         };
         assert!(
-            refused.to_string().contains("the Perch registry lock"),
+            refused.to_string().contains("the Perch Registry lock"),
             "{refused}"
         );
 
@@ -353,7 +353,7 @@ mod tests {
     }
 
     /// On a fresh machine the *lock* is what brings Perch's home into being,
-    /// before any registry has been written into it.
+    /// before any Registry has been written into it.
     #[test]
     fn the_home_the_lock_creates_is_the_owners_alone() {
         let host = crate::host::FakeHost::new();
@@ -469,7 +469,7 @@ mod tests {
     }
 
     /// `export PERCH_HOME=$SOMETHING_UNSET` is the ordinary way to arrive here,
-    /// and a relative registry path is the Holdings following the working
+    /// and a relative Registry path is the Holdings following the working
     /// directory around.
     #[test]
     fn a_perch_home_set_to_nothing_is_the_machine_not_saying_rather_than_the_working_directory() {

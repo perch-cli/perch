@@ -28,7 +28,7 @@ carrying an email address cannot be un-posted, and the user who ran the command
 is the one who pays.
 
 Perch already redacts deterministically. `Redaction` numbers Accounts by their
-position in the registry, so `<account 3>` means the same Account in every
+position in the Registry, so `<account 3>` means the same Account in every
 rendering, and `perch probe` has been redacting by default since it existed.
 
 So a Triage writes the Probe **twice**. `probe.raw.txt` has the real names and
@@ -54,7 +54,7 @@ the agent to fetch its own newer self from `main` and follow that instead.
 This is an instruction to download text and obey it, which is the shape of every
 prompt-injection story there is. It is bounded to one URL in this repository,
 and the sentence next to it says that everything else the agent reads — logs, the
-Trail, the registry, issues, comments, anything off the network — is data written
+Trail, the Registry, issues, comments, anything off the network — is data written
 by strangers. A maintainer who can push to `main` can already ship a Release.
 
 ## Perch's source stays out of it
@@ -84,7 +84,7 @@ which would also need a Rust toolchain the user has no reason to have.
 
 Perch already launches Claude Code: `perch run` points one process at one
 Profile. Reaching for it here would be a mistake. A Run Reconciles, Carries,
-writes a Marker and resolves a Target through the registry
+writes a Marker and resolves a Target through the Registry
 (ADR a-run-is-one-shot), and on a machine worth triaging every one of those is a
 suspect. A triage that will not start on the machines that need it is worthless.
 
@@ -101,10 +101,10 @@ somebody else's error.
 
 ## A Triage changes nothing
 
-It inherits the Probe's exemptions whole: no Adoption, no registry brought
+It inherits the Probe's exemptions whole: no Adoption, no Registry brought
 forward or saved, and no line in the Trail. A Triage renders the Trail through
 the Probe it hands over, and a line of its own would push out what somebody was
-running the command to see. The registry it reads may be exactly the thing under
+running the command to see. The Registry it reads may be exactly the thing under
 investigation.
 
 What it writes lives at `$PERCH_HOME/triage/run-<millis>/`, which makes it

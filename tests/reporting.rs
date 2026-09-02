@@ -404,7 +404,7 @@ fn status_with_no_active_account_names_the_remedy_that_applies() {
 }
 
 /// `perch status` is advertised for a shell prompt, where two of them drawing at
-/// once is ordinary rather than a race: taking the registry lock to read would
+/// once is ordinary rather than a race: taking the Registry lock to read would
 /// have one wait out the other and then fail. Nothing is written without
 /// `--refresh`, so nothing needs shutting out.
 #[test]
@@ -430,7 +430,7 @@ fn status_that_refreshes_waits_for_the_other_perch_because_it_writes() {
 
     let refused = result.expect_err("a writer waits on a writer");
     assert!(
-        refused.to_string().contains("the Perch registry lock"),
+        refused.to_string().contains("the Perch Registry lock"),
         "{refused}"
     );
 }

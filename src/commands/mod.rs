@@ -31,7 +31,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::say;
 
-/// Refuses to go on if the registry lock went stale while a question was waiting
+/// Refuses to go on if the Registry lock went stale while a question was waiting
 /// for an answer — shape 3's guard, and the counterpart to [`only_the_registry`]
 /// (ADR one-door-to-the-registry). Asked before the first irreversible thing
 /// rather than at the save, because finding out at the save is finding out after
@@ -44,14 +44,14 @@ pub fn still_ours(perch: &mut crate::lock::Held<'_>, did: &str) -> Result<()> {
     // `Busy` rather than `Other`: the sentence below is "run this again", which
     // is what `EXIT_HELD` promises and what `EXIT_GENERAL` denies.
     Err(PerchError::Busy(format!(
-        "Another `perch` changed the registry while that question was waiting \
+        "Another `perch` changed the Registry while that question was waiting \
          for an answer, so this one is working from a copy that is out of \
          date.\n\
          Nothing was {did}. Run this again."
     )))
 }
 
-/// The whole of a command that changes the registry and reaches nothing else,
+/// The whole of a command that changes the Registry and reaches nothing else,
 /// under Perch's own lock. Shape 1's door, and the counterpart to
 /// [`still_ours`]. **`change` is handed no [`Host`], and that is the point**: a
 /// command coming through here cannot reach a Credential Store, write a Profile
@@ -74,11 +74,11 @@ pub fn only_the_registry(
     Ok(())
 }
 
-/// The registry as a listing sees it, opened for what it was asked to do.
+/// The Registry as a listing sees it, opened for what it was asked to do.
 ///
-/// Whether the registry is held for writing is `--refresh`'s business, so the
+/// Whether the Registry is held for writing is `--refresh`'s business, so the
 /// hold lives in here and no caller sees it: a command opens a `Viewing`, asks
-/// it for figures, and reads the registry through it.
+/// it for figures, and reads the Registry through it.
 pub struct Viewing<'a> {
     host: &'a dyn Host,
     perch: Option<crate::lock::Held<'a>>,
@@ -119,11 +119,11 @@ impl<'a> Viewing<'a> {
     }
 }
 
-/// The same read, for a command that holds the registry whatever it was asked.
+/// The same read, for a command that holds the Registry whatever it was asked.
 ///
 /// A Cycle takes the exclusive hold before it decides anything, so it has no
 /// hold in question and no reason to open a [`Viewing`]. Nothing else is held
-/// across the read: every caller takes the registry lock and nothing more.
+/// across the read: every caller takes the Registry lock and nothing more.
 pub fn read_now(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
@@ -143,10 +143,10 @@ pub fn read_now(
     )
 }
 
-/// Brings the registry on this machine forward, once, ahead of the command.
+/// Brings the Registry on this machine forward, once, ahead of the command.
 ///
 /// Shape 1's sequence without shape 1's door, which adopts a login where there
-/// is no registry and a migration has nothing to adopt. Here rather than inside
+/// is no Registry and a migration has nothing to adopt. Here rather than inside
 /// `load`, which cannot take a lock it is already being called under.
 pub fn bring_the_registry_forward(host: &dyn Host) -> Result<()> {
     let path = crate::holdings::registry_path(host)?;

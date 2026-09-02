@@ -40,7 +40,7 @@ pub struct ReloginArgs {
 }
 
 pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()> {
-    // Read rather than held: the lock is taken below, against a registry read
+    // Read rather than held: the lock is taken below, against a Registry read
     // fresh once the login has come back.
     let registry = adopt::ensure_adopted(host)?;
 
@@ -80,7 +80,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
                 Ok(produced)
             },
             |_| {
-                // The registry read before the login is however many commands out
+                // The Registry read before the login is however many commands out
                 // of date, so it is dropped for the one on disk now.
                 let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
@@ -274,7 +274,7 @@ fn not_made_live(account: &Account, error: PerchError) -> PerchError {
 ///
 /// Repairing the Account you are on is the dangerous half: the broken Credential
 /// is still live and `active` still names it, so the next Switch would Capture it
-/// over the fresh one. The defense is a registry write, which is what failed.
+/// over the fresh one. The defense is a Registry write, which is what failed.
 fn unrecorded(
     account: &Account,
     landing_in_the_default_profile: bool,

@@ -89,7 +89,7 @@ fn identity_file(host: &FakeHost) -> String {
 
 /// The effects a Switch is judged on, in the order they reached the Host, said
 /// the way the design talks about them. Everything else Perch touches — its own
-/// registry, the directories it makes sure exist — is left out, so what the
+/// Registry, the directories it makes sure exist — is left out, so what the
 /// test asserts is the sequence a concurrently-running Claude Code would see.
 fn trace(host: &FakeHost) -> Vec<String> {
     let live = DEFAULT_SERVICE.to_string();
@@ -1036,7 +1036,7 @@ fn switching_to_the_account_that_is_already_active_changes_nothing() {
         error.to_string().contains("already the active Account"),
         "{error}"
     );
-    // Perch's own registry lock is taken by every command; what must not be
+    // Perch's own Registry lock is taken by every command; what must not be
     // taken is one of Claude Code's, because taking those is the Switch.
     assert!(
         !host.effects().iter().any(|effect| matches!(

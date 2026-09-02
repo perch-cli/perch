@@ -62,7 +62,7 @@ pub fn accounts(count: usize) -> String {
     counted(count, "Account")
 }
 
-/// The same for the two nouns a Purge counts where the registry named no Account.
+/// The same for the two nouns a Purge counts where the Registry named no Account.
 pub fn profiles(count: usize) -> String {
     counted(count, "Profile")
 }

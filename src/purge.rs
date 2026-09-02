@@ -30,12 +30,12 @@ pub struct Purged {
     /// is why the caller says it rather than this deciding.
     pub credentials: usize,
     /// Profiles emptied and deleted that no Account named. Counted rather than
-    /// reported as nothing, because on a registry that will not parse this is
+    /// reported as nothing, because on a Registry that will not parse this is
     /// *every* Profile on the machine, and a Purge is what nothing undoes.
     pub unnamed: Unnamed,
 }
 
-/// The Profiles under Perch's home that the registry does not name, and how many
+/// The Profiles under Perch's home that the Registry does not name, and how many
 /// of them had a Credential to delete.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Unnamed {
@@ -74,7 +74,7 @@ pub fn refuse_while_anything_is_running(
         .collect();
 
     // Named generically, because there is nothing to name them by: a login in
-    // progress has no Account yet, and a Profile the registry does not hold has
+    // progress has no Account yet, and a Profile the Registry does not hold has
     // no address Perch can put to the user.
     places.extend(
         what_the_registry_does_not_name(host, registry)?
@@ -131,7 +131,7 @@ fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
 /// Deletes every Credential Perch holds, and then everything Perch keeps.
 ///
 /// A store that will not give its Credential up stops the Purge. Nothing is
-/// undone — the registry is still there, so running it again finishes it — and
+/// undone — the Registry is still there, so running it again finishes it — and
 /// the home goes last and whole, lock artifact and all.
 pub fn erase(
     host: &dyn Host,
@@ -163,7 +163,7 @@ pub fn erase(
     perch.renew();
     if !perch.still_held() {
         return Err(PerchError::Other(format!(
-            "Another `perch` changed the registry while this Purge was working. \
+            "Another `perch` changed the Registry while this Purge was working. \
              Every Credential Perch held is deleted; {} was left where it is, \
              rather than taken with whatever the other `perch` put in it.\n\
              Run `perch holdings purge` again and it will finish.",
@@ -189,10 +189,10 @@ pub fn erase(
 }
 
 /// Empties the Credential Store of every directory under Perch's home that has
-/// one, whether or not the registry names it: a Store is derived from its
+/// one, whether or not the Registry names it: a Store is derived from its
 /// directory, so a home taken whole destroys the only name reaching a keychain
 /// item outside it. Counted apart from the Accounts — nobody believes in these —
-/// and never as nothing, because a registry that will not parse names none of them.
+/// and never as nothing, because a Registry that will not parse names none of them.
 fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<Unnamed> {
     let mut counted = Unnamed::default();
     for dir in what_the_registry_does_not_name(host, registry)? {
@@ -201,7 +201,7 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) 
         // deleted, and passing over it reports a machine given back.
         let store = probe::store_for_profile(host, &dir).map_err(|error| {
             error.with_note(&format!(
-                "Perch's registry is untouched and every Credential already \
+                "Perch's Registry is untouched and every Credential already \
                  deleted is already gone. {} is still there, and until Perch \
                  can say which Credential Store it belongs to there is no way \
                  to tell whether one is being left behind.",
@@ -216,10 +216,10 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) 
     Ok(counted)
 }
 
-/// How many Profiles are under Perch's home, whatever the registry says of them.
+/// How many Profiles are under Perch's home, whatever the Registry says of them.
 ///
-/// For the one question the registry cannot answer: what a Purge is about to take
-/// on a machine whose registry will not parse. `Err` where the home cannot be
+/// For the one question the Registry cannot answer: what a Purge is about to take
+/// on a machine whose Registry will not parse. `Err` where the home cannot be
 /// listed, which is a refusal the Purge itself raises a moment later.
 pub fn profiles_held(host: &dyn Host) -> Result<usize> {
     Ok(everything_perch_holds(host)?.len())
@@ -252,7 +252,7 @@ fn empty_the_stores(host: &dyn Host, store: &probe::Store) -> Result<bool> {
     for kept_in in credentials::stores_for(host, store) {
         let forgotten = kept_in.forget(host).map_err(|error| {
             error.with_note(&format!(
-                "Perch's registry is untouched and every Credential already \
+                "Perch's Registry is untouched and every Credential already \
                  deleted is already gone, so `perch holdings purge` can be run \
                  again once {} can be written to, and it will finish.",
                 kept_in.describe(),
@@ -267,7 +267,7 @@ fn empty_the_stores(host: &dyn Host, store: &probe::Store) -> Result<bool> {
 /// either of them held one.
 fn forget_the_credential(host: &dyn Host, account: &Account) -> Result<bool> {
     // An address no Profile could be named after has no Profile and no Store to
-    // empty. One reaches the registry only by hand, and a Purge is taking it out
+    // empty. One reaches the Registry only by hand, and a Purge is taking it out
     // by hand, automated — so it must not be the command such an Account stops.
     let Ok(dir) = account.profile_dir(host) else {
         return Ok(false);
@@ -419,7 +419,7 @@ mod tests {
     }
 
     /// An address no Profile could be named after has no Credential Store to
-    /// empty, and the registry recording it is exactly what a Purge takes away.
+    /// empty, and the Registry recording it is exactly what a Purge takes away.
     #[test]
     fn an_address_no_profile_could_be_named_after_does_not_stop_a_purge() {
         let host = FakeHost::new();

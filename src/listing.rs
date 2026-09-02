@@ -127,7 +127,7 @@ pub fn scope_json(scope: &config::Scope) -> serde_json::Value {
 }
 
 /// Every Scope, the active Account's first, because it is where you are and the
-/// one a bare `perch switch` looks in. These partition the registry, and what
+/// one a bare `perch switch` looks in. These partition the Registry, and what
 /// keeps them partitioning it is `load` declaring any Group an Account claims:
 /// one claiming a Group nothing declared would be in no Listing at all.
 pub fn scopes(registry: &Registry) -> Vec<config::Scope> {
@@ -223,7 +223,7 @@ mod tests {
         );
     }
 
-    /// A registry holding four Accounts across two Groups and none, active on
+    /// A Registry holding four Accounts across two Groups and none, active on
     /// the ungrouped one.
     fn holdings() -> Registry {
         let mut registry = Registry::default();

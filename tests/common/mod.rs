@@ -379,14 +379,14 @@ pub fn credential_of(host: &FakeHost, email: &str) -> Option<String> {
         .map(|held| held.credential.to_string())
 }
 
-/// The registry as it would be read back by the next command Perch runs.
+/// The Registry as it would be read back by the next command Perch runs.
 pub fn registry_of(host: &FakeHost) -> perch::registry::Registry {
     perch::registry::load(host)
         .unwrap()
         .expect("a registry is written")
 }
 
-/// Writes the registry the way a command does, which means under the lock a
+/// Writes the Registry the way a command does, which means under the lock a
 /// command holds. Taken and given back here, so a fixture arranging a state is
 /// one line rather than three.
 pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
@@ -399,7 +399,7 @@ pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
 
 /// What a Perch killed mid-Switch leaves on the registry: a Landing naming the
 /// Account it was leaving and the one it was switching to
-/// (ADR a-switch-is-written-down-first). The registry half only — what the
+/// (ADR a-switch-is-written-down-first). The Registry half only — what the
 /// machine holds is what a Landing is settled against, so each test arranges
 /// that half itself.
 pub fn a_switch_died_mid_flight(host: &FakeHost, leaving: Option<&str>, arriving: &str) {
@@ -835,7 +835,7 @@ pub fn run_remove_with(host: &FakeHost, args: RemoveArgs) -> (perch::Result<()>,
     })
 }
 
-/// Why an Account is Quarantined, as the registry records it.
+/// Why an Account is Quarantined, as the Registry records it.
 pub fn quarantine_of(host: &FakeHost, email: &str) -> Option<Quarantine> {
     registry_of(host)
         .account(email)
