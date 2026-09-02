@@ -51,6 +51,8 @@ that exists to be written to.
 ## What CI checks
 
 Run these before you push and the pull request goes green on the first try.
+`typos` is the one tool of them rustup does not bring:
+`cargo install typos-cli`.
 
 ```sh
 cargo fmt --all -- --check
@@ -72,7 +74,7 @@ because they are what a first pull request is most often sent back over, and
 each links to where the case is made rather than restating it.
 
 **The Holdings survive an upgrade.** The command line moves freely, marked
-`[**breaking**]` in `CHANGELOG.md`. A Profile, a Credential, the registry naming
+`[**breaking**]` in `CHANGELOG.md`. A Profile, a Credential, the Registry naming
 them and an Export carrying all three do not: when their shape changes, the
 `version` changes with it, and the change lands as a migration or as a refusal
 naming the version that wrote the file (ADR the-holdings-outlive-a-perch).

@@ -141,9 +141,9 @@ staying current, which is more than this buys.
 upgraded into a bad one with no route back but re-running the installer by hand.
 
 It is not silent, though, because a Perch older than the one that last wrote the
-registry refuses to read it (ADR the-holdings-outlive-a-perch). So going back far
+Registry refuses to read it (ADR the-holdings-outlive-a-perch). So going back far
 enough leaves a working machine with a binary that will not read its own
-registry. The confirmation names that consequence rather than asking a bare "are
+Registry. The confirmation names that consequence rather than asking a bare "are
 you sure", which is a question nobody has ever answered with information.
 
 Homebrew is the one Channel a Release cannot be named to at all: it installs

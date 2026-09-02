@@ -1,4 +1,4 @@
-//! A registry document from an older Perch, in the shape this build reads
+//! A Registry document from an older Perch, in the shape this build reads
 //! (ADR a-registry-comes-forward).
 //!
 //! On the document rather than on typed values: the shapes this reads —
@@ -7,7 +7,7 @@
 //! nothing writes any more. What arrives is JSON and what leaves is JSON, so the
 //! step is arithmetic and needs no machine to test.
 //!
-//! The registry migrates and an Export refuses (ADR the-holdings-outlive-a-perch).
+//! The Registry migrates and an Export refuses (ADR the-holdings-outlive-a-perch).
 
 use serde_json::{Map, Value};
 
@@ -36,7 +36,7 @@ pub fn says_no_version(text: &str) -> bool {
 /// Whether a document claims a version below the oldest any Perch stamped, or
 /// none at all.
 ///
-/// The floor both readers of a registry hold. Neither number names a shape, and
+/// The floor both readers of a Registry hold. Neither number names a shape, and
 /// reading one as the current shape is the half-parse a version exists to stop.
 pub fn below_the_earliest(text: &str) -> bool {
     says_no_version(text)
@@ -44,21 +44,21 @@ pub fn below_the_earliest(text: &str) -> bool {
             .is_some_and(|claimed| claimed < u64::from(EARLIEST_VERSION))
 }
 
-/// The registry document this build reads, or `None` where it already is one.
+/// The Registry document this build reads, or `None` where it already is one.
 ///
 /// Nothing rather than an error over nonsense: what to make of that belongs to
 /// the caller, which knows what file it is holding. Idempotent, because it is
 /// reached twice — in memory on a read, and again on the run that writes it back.
 pub fn forward(document: &str) -> Result<Option<String>> {
     // The version off a shape that is only the version, before the whole tree is
-    // built: every command reaches this against a registry already current, and
+    // built: every command reaches this against a Registry already current, and
     // a `Value` of every cached Utilization is a costly way to say "nothing".
     forward_from(document, crate::error::claimed_version(document))
 }
 
 /// The same where the caller has already read the version off the document.
 ///
-/// Both readers of a registry have: `load` reads it to refuse a newer Perch, and
+/// Both readers of a Registry have: `load` reads it to refuse a newer Perch, and
 /// `behind` to say which version it is bringing forward. Reading it again here
 /// is a second scan of the whole file to learn what the caller was holding.
 pub fn forward_from(document: &str, claimed: Option<u64>) -> Result<Option<String>> {
@@ -81,7 +81,7 @@ pub fn forward_from(document: &str, claimed: Option<u64>) -> Result<Option<Strin
 
     serde_json::to_string(&Value::Object(moved))
         .map(Some)
-        .map_err(|err| PerchError::Other(format!("could not write the registry forward: {err}")))
+        .map_err(|err| PerchError::Other(format!("could not write the Registry forward: {err}")))
 }
 
 /// The version 1 shape as version 2 held it: an `active` that is an object, the
@@ -155,7 +155,7 @@ fn from_version_one(held: &Map<String, Value>) -> Result<Map<String, Value>> {
         // no-return could never fire (ADR a-watcher-knob-is-arithmetic).
         kept.remove("switched_off");
         // `ungrouped` is a legitimate key here and is not a Group, so a v1
-        // registry that declared a Group by that name must not have the
+        // Registry that declared a Group by that name must not have the
         // Ungrouped Scope's Cooldown re-keyed onto the renamed Group.
         let under = match crate::name::means_ungrouped(&group) {
             // The constant rather than the spelling found: `record_switch` only
@@ -261,7 +261,7 @@ pub struct Renamed {
     pub is_now: String,
 }
 
-/// What [`forward`] has to rename to bring a version 1 registry inside this
+/// What [`forward`] has to rename to bring a version 1 Registry inside this
 /// build's name rules.
 ///
 /// Renamed rather than refused: `validate` is reached from `load`, so that
@@ -409,14 +409,14 @@ fn claimed_groups(held: &Map<String, Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// What a registry that has just come forward says for itself.
+/// What a Registry that has just come forward says for itself.
 ///
 /// Here rather than beside the sequence that writes it: what a step could not
 /// carry and what it renamed are facts about the step, and the step is this
 /// module's.
 pub(crate) fn brought_forward_note(was: u64, renamed: &[Renamed]) -> String {
     format!(
-        "This machine's registry was written by an older Perch (version {was}), \
+        "This machine's Registry was written by an older Perch (version {was}), \
          and has been brought forward to version {}.{} No older Perch reads the \
          file now.{}",
         crate::registry::CURRENT_VERSION,
@@ -446,7 +446,7 @@ fn what_was_renamed(renamed: &[Renamed]) -> String {
     what_was_renamed_said(renamed).map_or_else(String::new, |said| format!("\n\n{said}"))
 }
 
-/// The same as a sentence of its own, for the other way a registry comes
+/// The same as a sentence of its own, for the other way a Registry comes
 /// forward: an Import, which says it before it writes rather than after.
 pub fn what_was_renamed_said(renamed: &[Renamed]) -> Option<String> {
     if renamed.is_empty() {
@@ -457,7 +457,7 @@ pub fn what_was_renamed_said(renamed: &[Renamed]) -> Option<String> {
         .map(
             |entry| match crate::host::unshowable_character_in(&entry.was) {
                 // A name refused for a character that draws as nothing draws
-                // as one the registry may also hold: quoting `dev\u{FE00}` puts
+                // as one the Registry may also hold: quoting `dev\u{FE00}` puts
                 // a second `dev` beside the one the step did not touch.
                 Some(said) => format!(
                     "{} carrying {said} is now `{}`",
@@ -563,7 +563,7 @@ fn ungrouped(
     Value::Object(ungrouped)
 }
 
-/// The Account the registry was left on, as `Active` spells it.
+/// The Account the Registry was left on, as `Active` spells it.
 fn settled(email: &str) -> Value {
     let mut active = Map::new();
     active.insert("settled".to_string(), Value::from(email));
@@ -577,7 +577,7 @@ fn settled(email: &str) -> Value {
 /// so it is the one thing this step refuses rather than carries.
 fn shape_belies_the_version(field: &str) -> PerchError {
     PerchError::Other(format!(
-        "This registry says it is version {EARLIEST_VERSION}, and its `{field}` \
+        "This Registry says it is version {EARLIEST_VERSION}, and its `{field}` \
          is in a later shape. Perch will not guess which of the two the rest of \
          the file is in."
     ))
@@ -590,14 +590,14 @@ fn shape_belies_the_version(field: &str) -> PerchError {
 /// migration nor a later refusal can catch.
 fn no_object_here(field: &str) -> PerchError {
     PerchError::Other(format!(
-        "This registry says it is version {EARLIEST_VERSION}, and its `{field}` \
-         is not the shape a version {EARLIEST_VERSION} registry wrote. Perch \
+        "This Registry says it is version {EARLIEST_VERSION}, and its `{field}` \
+         is not the shape a version {EARLIEST_VERSION} Registry wrote. Perch \
          will not read past it, because what it holds would be dropped rather \
          than refused."
     ))
 }
 
-/// Whatever object was there, and an empty one otherwise. A v1 registry left out
+/// Whatever object was there, and an empty one otherwise. A v1 Registry left out
 /// every key it had nothing to say about, so absent and empty are one case here
 /// — and anything that is no object at all is the case [`no_object_here`] is for.
 fn object(field: &str, value: Option<&Value>) -> Result<Map<String, Value>> {
@@ -618,10 +618,10 @@ fn own(value: Value) -> Map<String, Value> {
 mod tests {
     use super::*;
 
-    /// A registry v0.2.0 wrote, serialized by v0.2.0's own serde impls.
+    /// A Registry v0.2.0 wrote, serialized by v0.2.0's own serde impls.
     const V0_2_0: &str = include_str!("../tests/fixtures/registry-v0.2.0.json");
 
-    /// A registry v0.1.1 wrote. The same `"version": 1` and a different shape:
+    /// A Registry v0.1.1 wrote. The same `"version": 1` and a different shape:
     /// whole `GroupConfig` values under `groups`, no `ungrouped`, and a `global`
     /// holding nothing but the one flag.
     const V0_1_1: &str = include_str!("../tests/fixtures/registry-v0.1.1.json");
@@ -868,7 +868,7 @@ mod tests {
     }
 
     /// v0.2.0 told two names apart by `to_lowercase`, and this build folds both
-    /// spellings of a Greek sigma together — so a registry it wrote can hold two
+    /// spellings of a Greek sigma together — so a Registry it wrote can hold two
     /// Groups this build reads as one name. The rename pass gives them two, and
     /// carrying the second one to the first one's new name would file both
     /// Groups' Accounts under one and lose the other Group's Settings outright.
@@ -1142,7 +1142,7 @@ mod tests {
         }
     }
 
-    /// Both halves of the floor, which the registry and an Export's registry
+    /// Both halves of the floor, which the Registry and an Export's Registry
     /// share.
     #[test]
     fn a_version_below_the_earliest_and_none_at_all_are_one_answer() {

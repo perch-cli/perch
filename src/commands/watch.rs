@@ -5,7 +5,7 @@
 //! service manager, or one round for a scheduler — and the difference between them is
 //! [`Watcher`] and nothing else.
 //!
-//! Nothing a round takes is held across the wait — not the registry lock, not Claude
+//! Nothing a round takes is held across the wait — not the Registry lock, not Claude
 //! Code's locks — which is what makes a stop safe. The exception is the watcher lock,
 //! held for the whole process and renewed as it goes.
 
@@ -52,7 +52,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     };
     let mut watching_alone = Watch::taken(host, watching_alone);
 
-    // Nothing carried in: the cooldown comes off the registry inside the round, and a
+    // Nothing carried in: the cooldown comes off the Registry inside the round, and a
     // back-off would pace a loop this process does not have.
     let verdict = match one_round(
         host,
@@ -61,7 +61,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         &mut watching_alone,
     ) {
         Ok(verdict) => verdict,
-        // Another `perch` holding the registry is ordinary, so it is a held round
+        // Another `perch` holding the Registry is ordinary, so it is a held round
         // rather than a raise, which would reach a cron mailbox by way of standard
         // error.
         Err(PerchError::Busy(why)) => {
@@ -95,7 +95,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
 
     // The two things carried from one round to the next, both in memory and nowhere
     // else: what the loop is waiting out and what it has already said belong to the
-    // loop. What paces a Switch does not — it is read off the registry each round.
+    // loop. What paces a Switch does not — it is read off the Registry each round.
     let mut backoff = Backoff::none();
     let mut voice = Voice::quiet();
 
@@ -121,7 +121,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
                 round.waiting_for()
             }
             // The machine is not arranged for watching, which the loop holds on.
-            // Nothing is charged to the back-off: this round asked the registry rather
+            // Nothing is charged to the back-off: this round asked the Registry rather
             // than Anthropic.
             Ok(Verdict::NotArranged(why)) => {
                 held_before_a_round(out, &mut voice, &why.to_string(), host.now())?
@@ -130,7 +130,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             // asked it already, and the answer to a sticky question does not change.
             Ok(Verdict::Lost(lost)) => return voice.left(out, lost),
             // Held like any other round that could not read. Ending the watcher over a
-            // contended registry would let a `perch status --refresh` stop it silently.
+            // contended Registry would let a `perch status --refresh` stop it silently.
             Err(PerchError::Busy(why)) => held_before_a_round(out, &mut voice, &why, host.now())?,
             Err(other) => return Err(other),
         };
@@ -178,7 +178,7 @@ fn take_the_watch<'a>(
 
 /// A hold that happened before there was a [`Round`] to hold, and so one with no
 /// Account to name; a round's own hold is [`Voice::round`]'s. At the ordinary
-/// interval, because nothing here spent a request: a contended registry, a lock
+/// interval, because nothing here spent a request: a contended Registry, a lock
 /// inside its window and a machine nothing arranged are each an answer.
 fn held_before_a_round(
     out: &mut dyn Write,
@@ -233,7 +233,7 @@ fn opening(host: &dyn Host) -> Result<String> {
 
 /// One round: read, decide, and act if acting is what was decided.
 ///
-/// The registry lock is taken here and given back when this returns rather than held
+/// The Registry lock is taken here and given back when this returns rather than held
 /// for the life of the loop, which would shut every other `perch` out of the machine
 /// for as long as the loop ran.
 fn one_round<'h>(
@@ -304,7 +304,7 @@ fn one_round<'h>(
     }
 
     // The Account the Refresh just wrote to, taken out before the closure below needs
-    // the registry back: what a figure is read off is this, and `watching.account` is
+    // the Registry back: what a figure is read off is this, and `watching.account` is
     // the copy from before the read.
     let account = registry
         .account(&email)

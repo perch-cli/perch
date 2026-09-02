@@ -13,9 +13,9 @@ use crate::profile;
 use crate::registry::{self, Account, Registry};
 use crate::say;
 
-/// Loads the registry, adopting the existing login the first time Perch runs.
+/// Loads the Registry, adopting the existing login the first time Perch runs.
 ///
-/// For the commands that only *read* the registry, and for the two that spend a
+/// For the commands that only *read* the Registry, and for the two that spend a
 /// browser login before they change anything. A command that is going to write
 /// wants [`ensure_adopted_exclusively`].
 pub fn ensure_adopted(host: &dyn Host) -> Result<Registry> {
@@ -25,12 +25,12 @@ pub fn ensure_adopted(host: &dyn Host) -> Result<Registry> {
     }
     // The adoption itself writes, so it is done with the other Perches shut out
     // — two of them adopting at once would each build the first Profile and one
-    // would overwrite the other's registry wholesale.
+    // would overwrite the other's Registry wholesale.
     let mut perch = holdings::lock(host)?;
     load_or_adopt(host, &mut perch)
 }
 
-/// The registry, with every other Perch shut out of it until the returned hold
+/// The Registry, with every other Perch shut out of it until the returned hold
 /// is dropped.
 ///
 /// The hold comes back rather than staying inside because the span that has to
@@ -42,7 +42,7 @@ pub fn ensure_adopted_exclusively(host: &dyn Host) -> Result<(crate::lock::Held<
     Ok((held, registry))
 }
 
-/// The registry, adopting the existing login if there is none. The lock is the
+/// The Registry, adopting the existing login if there is none. The lock is the
 /// caller's to have taken — this is the half of adoption that writes.
 fn load_or_adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<Registry> {
     match registry::load(host)? {
@@ -85,7 +85,7 @@ fn store_as_first_profile(
     )?;
 
     // Undone if it fails, because a Profile nothing records is worse than none:
-    // it holds a copy of the live Credential that no registry names and that
+    // it holds a copy of the live Credential that no Registry names and that
     // `reap_abandoned` never walks, since that only walks `pending/`.
     let made = (|| {
         let mut registry = Registry::default();

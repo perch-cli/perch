@@ -111,7 +111,7 @@ enum Command {
     /// Everything Perch holds on this machine: write it out, put it back, or
     /// give it up.
     ///
-    /// Every Profile, every Credential Perch holds, the registry naming them
+    /// Every Profile, every Credential Perch holds, the Registry naming them
     /// and what each Group carries — the counterpart to an Installation, which
     /// is what a Channel left. None of the three takes a Target, because none
     /// of them is about one Account.
@@ -137,13 +137,15 @@ enum Command {
     /// what this is for is being pasted somewhere else.
     ///
     /// Reads and judges, and repairs nothing. It reaches no network, brings no
-    /// registry forward and adds no line to the Trail, so running it never
-    /// changes the machine it is describing. Exits `0` whatever it finds.
+    /// Registry forward and adds no line to the Trail — the log of what Perch
+    /// was asked and what it decided — so running it never changes the machine
+    /// it is describing. Exits `0` whatever it finds.
     Probe(ProbeArgs),
 
     /// Log an Account in again, in place.
     ///
-    /// The way back from a Quarantine: the Account keeps its Alias, its Group,
+    /// The way back from a Quarantine, the state of an Account whose
+    /// Credential stopped working: the Account keeps its Alias, its Group,
     /// whether Cycling may choose it and its place in the listing, and only its
     /// Credential is replaced. The Account you are working in is untouched,
     /// unless it is the one being repaired — then its fresh Credential becomes
@@ -183,8 +185,9 @@ enum Command {
     /// without. A candidate that would lose even if its quota had refilled
     /// entirely is not worth a round trip, and is not read.
     ///
-    /// The Credential you are leaving is Captured back into its own Profile
-    /// first, so a Rotation that happened while it was active is not lost. Your
+    /// The Credential you are leaving is Captured — copied back into its own
+    /// Profile — first, so a refresh token Anthropic replaced while it was
+    /// active is not lost. Your
     /// memory, settings, plugins and project history are untouched.
     Switch(SwitchArgs),
 
@@ -197,7 +200,7 @@ enum Command {
     /// The agent asks what went wrong, investigates this machine, and drafts the
     /// issue — it posts nothing without showing you the whole thing first.
     ///
-    /// Perch itself only gathers. It brings no registry forward, writes no line
+    /// Perch itself only gathers. It brings no Registry forward, writes no line
     /// to its own log, and changes nothing about the machine you are asking it
     /// to describe. Two copies of the evidence are written: one with the real
     /// names and paths for the agent to work from, and one with placeholders,
@@ -223,7 +226,7 @@ enum Command {
     /// likely — is refused rather than written over, and `--channel` says which
     /// Channel it really is when the path does not.
     ///
-    /// Nothing Perch holds is touched: no registry, no Credential, no Profile.
+    /// Nothing Perch holds is touched: no Registry, no Credential, no Profile.
     Upgrade(UpgradeArgs),
 
     /// Say which Perch is installed, and whether a newer Release exists.
@@ -237,7 +240,7 @@ enum Command {
     /// the Channel this Installation came from, waits as long as the answer
     /// takes, and answers a script through `--json`.
     ///
-    /// Nothing Perch holds is read or written: no registry, no Credential, no
+    /// Nothing Perch holds is read or written: no Registry, no Credential, no
     /// Profile.
     Version,
 
@@ -257,6 +260,20 @@ enum Command {
         #[command(subcommand)]
         action: WatcherCommand,
     },
+}
+
+/// The flag clap once generated, caught before the parser so the refusal can
+/// name the command that answers it. The parser would only say the word is one
+/// it has never heard of.
+fn refuse_the_version_flag(typed: &[String]) -> perch::Result<()> {
+    if matches!(typed.first().map(String::as_str), Some("--version" | "-V")) {
+        return Err(perch::error::PerchError::NotUnderstood(
+            "That is a command here: `perch version` says which Perch is \
+             installed, and whether a newer Release exists."
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Nought for having worked, and otherwise whatever the failure earned.
@@ -290,7 +307,7 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
 }
 
 /// Everything `main` has to know about one command before running it, stated
-/// by the arm that builds it: what runs, whether the registry comes forward
+/// by the arm that builds it: what runs, whether the Registry comes forward
 /// first, and whether the run is written down. One place per command, so a new
 /// command cannot get one of the three right and another silently wrong.
 struct Orders {
@@ -303,7 +320,7 @@ struct Orders {
 type Run = dyn FnOnce(&dyn perch::host::Host, &mut dyn Write) -> perch::Result<i32>;
 
 impl Orders {
-    /// The ordinary command: the registry is brought forward first, and the run
+    /// The ordinary command: the Registry is brought forward first, and the run
     /// is written into the Trail.
     fn of(
         run: impl FnOnce(&dyn perch::host::Host, &mut dyn Write) -> perch::Result<i32> + 'static,
@@ -316,7 +333,7 @@ impl Orders {
     }
 
     /// Run when the machine is already misbehaving, and promised at `--help`
-    /// to touch nothing Perch holds — so the registry is not brought forward.
+    /// to touch nothing Perch holds — so the Registry is not brought forward.
     /// A version carried forward past a Probe, or past the Triage handing one
     /// over, is a finding it destroyed.
     fn touching_nothing_perch_holds(mut self) -> Orders {
@@ -413,6 +430,9 @@ fn main() {
     if let Err(refusal) = run::refuse_a_flag_without_the_separator(&typed) {
         std::process::exit(ended_as(Err(refusal), &mut out));
     }
+    if let Err(refusal) = refuse_the_version_flag(&typed) {
+        std::process::exit(ended_as(Err(refusal), &mut out));
+    }
 
     let host = RealHost::new();
 
@@ -421,7 +441,7 @@ fn main() {
     let orders = cli.command.orders();
 
     // Not the command's outcome, deliberately (ADR a-registry-comes-forward): an
-    // older registry is read correctly either way, so a lock somebody else holds
+    // older Registry is read correctly either way, so a lock somebody else holds
     // costs the write-back alone and the next run takes it.
     if orders.migrates {
         let _ = perch::commands::bring_the_registry_forward(&host);
@@ -655,11 +675,16 @@ mod tests {
                 "`{}` should not parse",
                 typed.join(" ")
             );
+
+            let said = refuse_the_version_flag(&[typed[1].to_string()])
+                .expect_err("the flag is caught before the parser")
+                .to_string();
+            assert!(said.contains("perch version"), "{said}");
         }
     }
 
     /// Both promise at `--help` to touch nothing Perch holds, and a migration is
-    /// a read of the registry and a write of it under the lock.
+    /// a read of the Registry and a write of it under the lock.
     #[test]
     fn the_two_commands_for_a_misbehaving_machine_skip_the_migration() {
         assert!(!Command::Version.orders().migrates);

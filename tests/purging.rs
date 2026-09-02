@@ -48,7 +48,7 @@ fn perch_home_as_written(host: &FakeHost) -> String {
         .to_string()
 }
 
-/// The registry as it is on disk, or nothing at all — which is what a machine
+/// The Registry as it is on disk, or nothing at all — which is what a machine
 /// given back looks like.
 fn registry_on(host: &FakeHost) -> Option<Registry> {
     perch::registry::load(host).expect("whatever is there is readable")
@@ -252,7 +252,7 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
     );
 }
 
-/// A Purge holds the registry lock across its offer, so its Export cannot go
+/// A Purge holds the Registry lock across its offer, so its Export cannot go
 /// through `perch holdings export` — and the settlement that command makes
 /// before it reads a Credential Store is the one step that has to come with it.
 /// Without it, every Credential is gathered out of its own Profile, where the
@@ -686,7 +686,7 @@ fn a_client_running_against_a_profile_stops_the_purge() {
     );
 }
 
-/// The registry is not the whole account of what Perch holds: a login in
+/// The Registry is not the whole account of what Perch holds: a login in
 /// progress lives under `pending/` and is in no `registry.accounts`, and it is
 /// still a directory this command deletes.
 #[test]
@@ -886,7 +886,7 @@ fn a_terminal_that_goes_away_after_the_export_lands_does_not_lose_the_file() {
     );
 }
 
-/// The Credentials go first and the registry naming them goes last, so what is
+/// The Credentials go first and the Registry naming them goes last, so what is
 /// already deleted is found already gone rather than lost track of.
 #[test]
 fn a_purge_that_stopped_part_way_finishes_when_it_is_run_again() {
@@ -925,7 +925,7 @@ fn a_purge_that_stopped_part_way_finishes_when_it_is_run_again() {
     }
 }
 
-/// A home left behind with no registry in it is what an interrupted Purge
+/// A home left behind with no Registry in it is what an interrupted Purge
 /// leaves, rather than a machine with nothing to do.
 #[test]
 fn a_home_left_behind_with_no_registry_is_taken_by_the_next_purge() {
@@ -937,7 +937,7 @@ fn a_home_left_behind_with_no_registry_is_taken_by_the_next_purge() {
     outcome.expect("the word was typed");
 
     assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
-    // The Profiles, because with no registry there are no Accounts to name — and
+    // The Profiles, because with no Registry there are no Accounts to name — and
     // three working keychain items were deleted, so "no Accounts" understates it.
     assert!(
         printed.contains("3 Profiles Perch could not name") && !printed.contains("Purged 0"),
@@ -1045,8 +1045,8 @@ fn a_hold_lost_after_the_credentials_were_deleted_does_not_say_nothing_happened(
 }
 
 /// The questions a Purge asks are the one wait in Perch with no bound on them,
-/// and the registry lock is held across them — so a hold this Perch has lost is
-/// a registry somebody else has been changing since it was read.
+/// and the Registry lock is held across them — so a hold this Perch has lost is
+/// a Registry somebody else has been changing since it was read.
 #[test]
 fn an_answer_that_arrives_after_another_perch_took_the_lock_purges_nothing() {
     let host = a_machine_to_give_back()
@@ -1121,7 +1121,7 @@ fn a_purge_takes_the_credential_an_abandoned_login_left_as_well() {
 }
 
 /// What a Purge that stopped in its last step leaves for the next one: a home
-/// holding a registry and nothing else. Holding no Accounts is a real state here
+/// holding a Registry and nothing else. Holding no Accounts is a real state here
 /// rather than a machine Perch never ran on, so it is said as what happened.
 #[test]
 fn a_home_holding_a_registry_and_nothing_else_is_taken_and_said_as_that() {
@@ -1143,10 +1143,10 @@ fn a_home_holding_a_registry_and_nothing_else_is_taken_and_said_as_that() {
     assert!(!printed.contains("Profile"), "{printed}");
 }
 
-/// The prompt read "its registry says nothing this Perch can read" off the
-/// Accounts being empty, which a registry that parsed perfectly can also be. A
+/// The prompt read "its Registry says nothing this Perch can read" off the
+/// Accounts being empty, which a Registry that parsed perfectly can also be. A
 /// login that died at the browser step is exactly that machine, and telling the
-/// person their registry is corrupt is a false thing to be agreeing to in the
+/// person their Registry is corrupt is a false thing to be agreeing to in the
 /// one command nothing undoes.
 #[test]
 fn a_readable_registry_naming_nobody_is_not_said_to_be_unreadable() {
@@ -1191,7 +1191,7 @@ fn a_stray_file_under_the_profiles_is_not_counted_as_one() {
     );
 }
 
-/// The same from the other side: a `perch add` whose registry write failed
+/// The same from the other side: a `perch add` whose Registry write failed
 /// leaves a Profile holding a live Credential no Account names.
 #[test]
 fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
@@ -1287,7 +1287,7 @@ fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_b
     let failed = stopped.expect_err("a Credential that will not go is not a Purge that worked");
     let said = failed.to_string();
     assert!(
-        said.contains("Perch's registry is untouched"),
+        said.contains("Perch's Registry is untouched"),
         "so running it again is a whole Purge rather than a partial one: {said}"
     );
     assert!(
@@ -1404,7 +1404,7 @@ fn a_directory_perch_cannot_list_stops_the_purge_rather_than_reading_as_empty() 
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
 }
 
-/// A registry a hand-edit or a half-written save left unparsable is the one
+/// A Registry a hand-edit or a half-written save left unparsable is the one
 /// state with no way off the machine: `perch holdings import` refuses it too,
 /// and on macOS a Credential Store is named after the Profile a `rm -rf` would
 /// take away, so deleting the home by hand orphans every keychain item.
@@ -1427,7 +1427,7 @@ fn a_registry_that_will_not_parse_does_not_stop_the_purge_that_does_not_read_one
             "and no Credential is left in a store nothing can name any more"
         );
     }
-    // What it took, both before the question and after it. The registry names
+    // What it took, both before the question and after it. The Registry names
     // nothing, so the Profiles are the only count there is — and "no Accounts"
     // is what three working logins must not be agreed to as.
     assert!(

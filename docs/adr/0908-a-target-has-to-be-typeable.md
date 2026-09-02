@@ -49,7 +49,7 @@ is where the rule comes from rather than something to reopen per script.
 ## What XID does not answer
 
 `dev\u{FE00}` and `dev\u{3164}` are both well-formed identifiers, and both draw
-as `dev`. That is the collision registry version 3 exists for
+as `dev`. That is the collision Registry version 3 exists for
 (ADR nothing-drawn-is-obeyed), so `unshowable_character_in` is asked ahead of the
 allow-list: the allow-list would let both through, and it is the terminal rather
 than Unicode that decides this one.
@@ -73,7 +73,7 @@ that draw alike are two names one person chose for their own machine, and
 `perch list` shows both rows. Reopening this needs a case where somebody else
 chooses the name, and nobody else does.
 
-## The registry moves for it
+## The Registry moves for it
 
 A name rule that refuses what this build itself wrote down is a refusal at
 `load`, which is every command including `perch remove`
@@ -97,14 +97,14 @@ Version 1's bound is written out for the first time here, and it narrows. It
 returned `true` for every name, which was survivable only because `acceptable`
 answered `None` for the names version 1 itself refused. The repair no longer
 does: it strips an `@` and a space rather than giving up on them. So a version 1
-registry hand-edited to name a Group `a@b` or `one two` is named at `load` now
+Registry hand-edited to name a Group `a@b` or `one two` is named at `load` now
 where it was silently renamed before, which is what every other version already
 did with a hand edit.
 
 Version 3 shipped in no release, and the number still moves. Both name rules
 land in one version of Perch, so anyone coming from v0.2.0 goes from 1 to 4 and
 meets version 3 only as a step. Amending 3 in place instead would put two rule
-sets under one number, and a registry written by a build off `main` would be
+sets under one number, and a Registry written by a build off `main` would be
 read under the rules of the other one. That is the failure a version exists to
 catch, and it is the one neither the migration nor the refusal can.
 
@@ -134,7 +134,7 @@ of the rule this document replaces, found the same way the last four were.
 - `offerable_name` offers less. An organization whose name carries a `.` or a `,`
   now produces no offer at all rather than a Group name spelled with one, and
   `perch add` asks the question with no default in front of it.
-- A machine whose registry holds a now-refused name comes forward with it
+- A machine whose Registry holds a now-refused name comes forward with it
   renamed and a note saying which, and every command works.
 - `unicode-ident` is a dependency (ADR a-crate-must-not-cost-a-seam). It sits on
   neither seam, is already compiled on every build through `clap_derive`, and

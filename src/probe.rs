@@ -139,7 +139,7 @@ pub const DEFAULT_SERVICE: &str = "Claude Code-credentials";
 
 /// The non-secret description of an Account, as Claude Code records it: what
 /// Claude Code displays to say who you are. Perch stores it verbatim, so the
-/// registry and the probe describe an Account with one type rather than two.
+/// Registry and the probe describe an Account with one type rather than two.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Identity {

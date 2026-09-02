@@ -766,7 +766,7 @@ pub struct Standing {
     pub binary: Option<PathBuf>,
     pub binary_is_there: Option<bool>,
     pub log: Option<PathBuf>,
-    /// Whether any Scope has told the Watcher it may act, or `None` where the registry
+    /// Whether any Scope has told the Watcher it may act, or `None` where the Registry
     /// would not load. A Service granted nothing holds rather than deciding anything,
     /// however healthy every other answer here looks.
     pub any_scope_may_act: Option<bool>,
@@ -813,7 +813,7 @@ impl Standing {
             .to_string(),
         );
 
-        // Said only where the answer is known to be no: a registry that would not load
+        // Said only where the answer is known to be no: a Registry that would not load
         // is bigger news than this line, and the command that needs it will say so.
         if self.any_scope_may_act == Some(false) {
             said.push(HOLDS_FOR_A_GRANT.to_string());
@@ -913,7 +913,7 @@ mod tests {
         );
     }
 
-    /// A registry that will not load is bigger news than this line, so neither
+    /// A Registry that will not load is bigger news than this line, so neither
     /// renderer claims an answer it does not have.
     #[test]
     fn a_registry_that_would_not_load_is_answered_as_unknown_rather_than_as_yes() {

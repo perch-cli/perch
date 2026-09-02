@@ -109,6 +109,6 @@ routing on figures whose age is printed beside them, which is what a cached
 figure is for.
 
 **No version moves.** A window's name is a value in a `String` a Refresh replaces
-whole, so nothing about the registry's shape changes and the codenames a cache
+whole, so nothing about the Registry's shape changes and the codenames a cache
 holds today die at the next read (ADR the-holdings-outlive-a-perch). `--json`
 gains `group` on each window, which is additive.

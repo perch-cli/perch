@@ -132,8 +132,8 @@ it is refused as a Group name and as an Alias, and somebody typing
 such Scope.
 
 The reservation is not there because the guard is cheap. A Group name is a
-Holding: it is written into the registry, every Setting it carries hangs off it,
-and nothing outside the registry can reconstruct it
+Holding: it is written into the Registry, every Setting it carries hangs off it,
+and nothing outside the Registry can reconstruct it
 (ADR the-holdings-outlive-a-perch). Letting the name be taken means a Group that
 answers to `global`, quietly absorbing every later `perch config set global …`
 while every other Scope stays as it was — a Setting that appeared to take. The
@@ -153,13 +153,13 @@ A Group name therefore cannot hold a space. `set` reads `<scope> <key> <value>`
 by counting words, so a Group called `my work` is one no `set` could address. It
 is refused at the one moment somebody can still choose another name.
 
-The registry holds a map of `Settings` per Group and one record for the Accounts
+The Registry holds a map of `Settings` per Group and one record for the Accounts
 in no Group, which carries their declaration beside their Settings. A Cycle and a
 Setting name the Scope with one type, because the hazard that would keep them
 apart — a layer within reach of the ranking — cannot occur where there is no
 layer.
 
-The registry's `version` moves when that shape moves
+The Registry's `version` moves when that shape moves
 (ADR the-holdings-outlive-a-perch). A shape that changes under a version that
 does not is the one failure a migration cannot catch.
 

@@ -6,7 +6,7 @@ sidebar:
 
 Two commands for the same moment. `perch probe` gathers everything Perch can see
 of this machine, and `perch triage` hands that to Claude Code and lets it do the
-investigating and the writing. Neither changes anything: no registry brought
+investigating and the writing. Neither changes anything: no Registry brought
 forward, no line added to the Trail, nothing repaired behind your back.
 
 ## What Perch can see of this machine
@@ -22,9 +22,9 @@ Findings
   <account 3> is Quarantined, so Cycling will not choose it and a Switch to it
   refuses. `perch relogin <account 3>` is the way back. (exit 19)
 
-Perch         0.2.0 (linux x86_64), installed by npm
+Perch         0.3.5 (linux x86_64), installed by npm
 Claude Code   2.1.221, at <home>/.local/share/claude/bin/claude
-Home          <home>/.config/perch, registry version 5
+Home          <home>/.config/perch, Registry version 6
 Active        <account 1>
 Holdings      4 Accounts in 2 Groups, 1 Quarantined, 0 Disabled
 Watcher       installed, running, may act somewhere
@@ -40,11 +40,11 @@ with.
 
 Email addresses, Alias and Group names and your home directory come out as
 placeholders, because the point of this is pasting it somewhere else. The
-numbers are the Account's place in the registry, so `<account 3>` is the same
+numbers are the Account's place in the Registry, so `<account 3>` is the same
 Account every time you run it — two reports a week apart are comparable.
 `--raw` prints the names as they are, and is worth checking before you paste.
 
-It reads and judges and repairs nothing. No network, no registry brought
+It reads and judges and repairs nothing. No network, no Registry brought
 forward, no line added to the Trail, and it exits `0` whatever it finds.
 
 Every command writes two lines to the **Trail** as it goes, one when it starts
@@ -57,7 +57,7 @@ its own when it Switches. The Trail is not one of the Holdings — it is never
 exported, and a Purge takes it with everything else.
 
 `perch probe` names the Watcher's own log and does not read it. On macOS and
-Windows that is `watch.log` beside the registry; on Linux systemd keeps it, and
+Windows that is `watch.log` beside the Registry; on Linux systemd keeps it, and
 what the Probe prints is the `journalctl` line to run.
 
 ## Letting an agent do it
@@ -85,7 +85,7 @@ does not reach a public issue because a model was careless. `--raw` writes the
 real names to both, and is for whoever is working on the command itself.
 
 Some things are off limits and the agent is told so: it never reads a Credential,
-never edits the registry by hand, never patches Perch's source, and never runs
+never edits the Registry by hand, never patches Perch's source, and never runs
 `perch holdings purge` or `perch holdings import` as a fix. Anything that touches
 the Holdings at all comes after an offer to write an Export first.
 

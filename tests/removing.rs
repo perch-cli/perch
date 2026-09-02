@@ -36,7 +36,7 @@ fn holds(host: &FakeHost, email: &str) -> bool {
     registry_of(host).account(email).is_some()
 }
 
-/// A Remove deletes the Credential and saves the registry before it reports, so
+/// A Remove deletes the Credential and saves the Registry before it reports, so
 /// a stdout that will not take the report is a change that landed under a
 /// non-zero exit — and unnoted it sends a script back to give up an Account it
 /// has already given up, which the second time is exit 12.
@@ -272,7 +272,7 @@ fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happe
          the job: {printed}"
     );
     // The other half of saying it plainly: whatever the sentence claims, the
-    // registry has to agree with it. It records no Quarantine here, so the
+    // Registry has to agree with it. It records no Quarantine here, so the
     // sentence must not name one.
     assert!(
         !said.contains("Quarantined"),
@@ -727,7 +727,7 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
     );
     // The refusal has to land before the landing: making the successor live
     // replaces the Credential a running client is holding, and the `active` that
-    // records it is in a registry this command may no longer write.
+    // records it is in a Registry this command may no longer write.
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(CREDENTIAL),

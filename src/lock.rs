@@ -33,7 +33,7 @@ pub struct LockSpec {
     /// What it costs to have lost this one, said to the user when a renewal
     /// finds it gone. A takeover means something different for each lock — a
     /// Switch under Claude Code's locks carries on, where a command that has
-    /// lost Perch's own registry lock stops — and the sentence that explains it
+    /// lost Perch's own Registry lock stops — and the sentence that explains it
     /// belongs beside the lock rather than in the code that renews them all.
     pub lost_means: &'static str,
 }
@@ -248,8 +248,8 @@ impl Drop for Held<'_> {
 }
 
 /// Two holds that have to move together: a Switch runs under Claude Code's locks
-/// *and* Perch's registry lock, and both go stale on their own clocks — ten
-/// seconds for the config file, ninety for the registry — so every slow step has
+/// *and* Perch's Registry lock, and both go stale on their own clocks — ten
+/// seconds for the config file, ninety for the Registry — so every slow step has
 /// to renew both. It holds no state of its own; what it buys is that "the slow
 /// steps" can be grepped for rather than kept by reading a comment.
 pub struct Holds<'a, 'one, 'other> {
@@ -278,7 +278,7 @@ impl<'a, 'one, 'other> Holds<'a, 'one, 'other> {
     }
 
     /// The same, for the one step that has to *use* a hold rather than only be
-    /// protected by it: writing the registry down mid-Switch
+    /// protected by it: writing the Registry down mid-Switch
     /// (ADR a-switch-is-written-down-first), which is a save and so takes the
     /// hold it is renewed with. Named for the write rather than for the hold, so
     /// nothing reaches for it to borrow a lock for something else.
@@ -312,7 +312,7 @@ pub fn under<T, E: From<PerchError>>(
 /// Takes every lock in `locks`, in the order given, and hands back the hold,
 /// which gives them all back when it is dropped. [`under`] is the shape to reach
 /// for; this one is for a hold that has to last as long as a whole command
-/// rather than a closure — Perch's registry lock spans a load, whatever the
+/// rather than a closure — Perch's Registry lock spans a load, whatever the
 /// command does, and the save.
 pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
     let mut held = Held {

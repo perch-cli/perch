@@ -126,7 +126,7 @@ fn seed(at: &Path) -> String {
 /// Why Claude Code was not launched, or `None` where it will be.
 ///
 /// Two questions, because a broken Credential shows up two ways: as a Probe that
-/// could not read one, and as the registry's own record that the Account it
+/// could not read one, and as the Registry's own record that the Account it
 /// belongs to is Quarantined.
 fn withholding(host: &dyn Host, gathered: &Gathered) -> Option<String> {
     let unusable = |said: &str| {
@@ -144,7 +144,7 @@ fn withholding(host: &dyn Host, gathered: &Gathered) -> Option<String> {
         return Some(unusable(&found.said));
     }
 
-    // Read and let go. A Triage brings no registry forward and saves none: the
+    // Read and let go. A Triage brings no Registry forward and saves none: the
     // migration is one of the things it may have been run to look at.
     let registry = registry::load(host).ok().flatten()?;
     let Active::Settled(email) = registry.active() else {

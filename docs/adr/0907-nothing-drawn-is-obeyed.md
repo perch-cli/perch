@@ -23,12 +23,12 @@ Three more reached `perch list` and `perch status` with nothing asked at all:
 | --- | --- |
 | a Quota Window's name | the usage endpoint, by way of `anthropic::windows_in` |
 | an Account's plan | `subscriptionType`, out of a Credential file |
-| an organization name | the registry, which `read_identity` does not guard |
+| an organization name | the Registry, which `read_identity` does not guard |
 
 The third is the one that says the shape rather than the oversight. The rule
 *was* enforced on that value — at the boundary where Claude Code's `.claude.json`
-is read, and nowhere on the registry path, so an Import or a hand edit walks past
-it. `registry::validate` is public *because* an Import writes a registry without
+is read, and nowhere on the Registry path, so an Import or a hand edit walks past
+it. `registry::validate` is public *because* an Import writes a Registry without
 reading one and what it accepts must not differ; a guard on one of the two routes
 in is a guard on neither.
 
@@ -43,7 +43,7 @@ refused in `probe::read_identity`; neither is refused in `registry::validate`.
 
 The rule the address broke is the one stated two sections down about the other
 three: a refusal in `validate` is met at `load`, and `load` is every command.
-A registry v0.2.0 wrote holding `wo\u{1b}rk@example.com` — an address that build
+A Registry v0.2.0 wrote holding `wo\u{1b}rk@example.com` — an address that build
 accepted, its whole rule being one alphanumeric and an `@` — answers every
 command with a refusal naming the file to edit, and `perch remove`, which is the
 only way such an Account could ever go, is one of them. `migration::forward`
@@ -129,7 +129,7 @@ that `perch group add \u{2764}\u{FE0F}` is now refused, naming the character;
 
 Refusing a name this build itself accepted and wrote down is a rule joining
 `validate_name` with nothing to carry what is already on disk, which is the
-refusal `load` makes every command. The registry moves to version 3 for it, and
+refusal `load` makes every command. The Registry moves to version 3 for it, and
 the step renames — but only what version 2 accepted. A name no Perch of that
 version ever wrote is a hand edit, and is still named at `load` and left.
 
@@ -200,11 +200,11 @@ glyph rather than slots in a syllable block, and go with them.
 
 The strip moving is not a name rule moving. Nothing on disk is keyed on what a
 terminal draws, `validate_name` and `probe::read_identity` still ask the whole
-set, and no registry version moves.
+set, and no Registry version moves.
 
 ## What is rejected
 
-**A checked `Deserialize`, so nothing unshowable enters the registry.** It is a
+**A checked `Deserialize`, so nothing unshowable enters the Registry.** It is a
 refusal at `load` wearing another hat, and lands on the values with no author.
 
 **Three more `control_character_in` blocks in `registry::validate`.** The fourth
@@ -252,7 +252,7 @@ code in one file rather than a rule about which sink a caller reached for.
   the address on the whole set, because an address is a Target, and the
   organization on `Cc` alone, because it is drawn and never typed.
   `registry::validate` refuses neither.
-- The unshowable set moving is a name rule moving, so it moves the registry
+- The unshowable set moving is a name rule moving, so it moves the Registry
   version with it and owes a step. `migration::forward` chains from whichever
   version a document claims, and every step lands on the rename pass.
 

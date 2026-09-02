@@ -24,7 +24,7 @@ presence is not the question: read as "already asked for", it withholds the sugg
 exactly the person who has no backtrace to send.
 
 The same sentence about what a bug is and where to send it is shared with
-`registry::save`'s refusal to write a registry no later command could read — not a panic,
+`registry::save`'s refusal to write a Registry no later command could read — not a panic,
 but a bug all the same, and one the person in front of it can do nothing about.
 
 ## Held is a promise about the machine
@@ -41,7 +41,7 @@ machine is exactly as it was.
 So **`Busy` is a promise about the machine rather than a description of the failure**, and
 the two come apart in one place: a hold lost *after* something has been written. Another
 `perch` waited the artifact out and took it over while this one was working, so this one
-holds a registry behind the one on disk, and `registry::save` refuses — correctly, because
+holds a Registry behind the one on disk, and `registry::save` refuses — correctly, because
 writing it back would revert whatever the other command did. Read as a lock problem that is
 the most retryable failure there is. Read as a promise it is false, because by then the
 Credential has moved.
@@ -58,10 +58,10 @@ is what would make it carry on.
 Being exact about the cost matters, because the tempting argument overstates it. A
 continued loop would **not** destroy a Credential: a Capture reads the Identity beside the
 live Credential before it files anything, and a Credential whose Identity names somebody
-other than the Account the registry calls outgoing is declined rather than written into the
+other than the Account the Registry calls outgoing is declined rather than written into the
 wrong Profile — a guard put there for this exact state
 (ADR a-switch-is-written-down-first). What a continued loop costs is smaller and still not
-acceptable: every round after it reads and ranks the wrong Account, because the registry
+acceptable: every round after it reads and ranks the wrong Account, because the Registry
 names one Account and the machine is acting as another, and it does so unattended and
 indefinitely.
 
@@ -117,7 +117,7 @@ looking past the half of it that says what is actually wrong.
 
 **A document written by a newer Perch is refused in one sentence, naming what it was, how far
 ahead it is, and that upgrading is the way through.** The two formats Perch versions owe the
-reader the same three things, so it is said once for both. A registry migrates forward and an
+reader the same three things, so it is said once for both. A Registry migrates forward and an
 Export is refused, and which of the two a format gets turns on what the refusal costs
 (ADR the-holdings-outlive-a-perch); this is the wording the refusal uses. The version question
 is asked on its own, ahead of parsing, because a newer Perch is exactly what writes a value

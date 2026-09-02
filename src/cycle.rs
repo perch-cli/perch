@@ -528,7 +528,7 @@ impl Basis {
 /// The Account a Cycle picked, with what it will say about having picked it.
 #[derive(Debug)]
 pub struct Choice {
-    /// Owned, so the caller can go on to write the registry it came from.
+    /// Owned, so the caller can go on to write the Registry it came from.
     pub account: Account,
     /// What this Account won on, for the landing line that names where it
     /// landed.
@@ -2181,7 +2181,7 @@ pub(crate) mod tests {
     /// `Registry::upsert` matches with `same_name` and stores the *incoming*
     /// spelling, so an Identity Claude Code re-writes under another
     /// capitalization leaves `active` naming the entry the old way — the state
-    /// this fixture puts the registry in.
+    /// this fixture puts the Registry in.
     #[test]
     fn the_listing_agrees_with_the_cycle_however_the_active_address_is_capitalized() {
         let registry = preferring(

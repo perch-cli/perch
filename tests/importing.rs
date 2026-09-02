@@ -49,8 +49,8 @@ fn a_new_machine_holding(sealed: &str) -> FakeHost {
         .with_secrets(&[PASSPHRASE])
 }
 
-/// The registry as it is on disk, or nothing at all — which is what "no
-/// half-populated registry" is asserted against.
+/// The Registry as it is on disk, or nothing at all — which is what "no
+/// half-populated Registry" is asserted against.
 fn registry_on(host: &FakeHost) -> Option<Registry> {
     perch::registry::load(host).expect("whatever is there is readable")
 }
@@ -519,7 +519,7 @@ fn an_import_that_fails_part_way_takes_back_what_it_had_already_placed() {
     }
 }
 
-/// It is the *registry* an Import needs empty, and a Profile directory nothing
+/// It is the *Registry* an Import needs empty, and a Profile directory nothing
 /// names outlives every command that would have named it — so on macOS deleting
 /// one takes the only name reaching a live Credential beside it.
 #[test]
@@ -530,7 +530,7 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
         .with_file(AT, &sealed)
         .with_secrets(&[PASSPHRASE]);
     // A Profile from a `perch add` that never finished: a directory holding a
-    // Credential and a registry that never named it. The first of the three, so
+    // Credential and a Registry that never named it. The first of the three, so
     // the Import has written into it by the time the second one fails.
     let orphan = store_of(&host, EMAIL);
     let host = host.with_file(&orphan.credentials_file, CREDENTIAL);
@@ -668,7 +668,7 @@ fn a_rollback_leaves_a_credential_this_import_never_wrote() {
         .with_file(AT, &sealed)
         .with_secrets(&[PASSPHRASE])
         .with_a_path_refusing(REGISTRY_PATH, Refusing::Write, "No space left on device");
-    // A directory the registry never named, holding somebody's live Credential —
+    // A directory the Registry never named, holding somebody's live Credential —
     // the leftover a `perch add` that died at the browser step leaves.
     let landing = store_of(&host, THIRD_EMAIL);
     let host = host.with_file(&landing.credentials_file, THIRD_CREDENTIAL);
@@ -688,8 +688,8 @@ fn a_rollback_leaves_a_credential_this_import_never_wrote() {
     );
 }
 
-/// Every Credential is already in a store by the time the registry is written,
-/// so a registry that will not go down leaves Profiles no command could name.
+/// Every Credential is already in a store by the time the Registry is written,
+/// so a Registry that will not go down leaves Profiles no command could name.
 #[test]
 fn a_registry_that_cannot_be_written_takes_every_profile_back_out_with_it() {
     let sealed = an_export_of_a_whole_machine();
@@ -819,7 +819,7 @@ fn nothing_the_export_holds_reaches_standard_output() {
         );
     }
     // One line, asserted whole: how many, and from where. That nothing arrives
-    // active and that an Import carries the whole registry are true of every
+    // active and that an Import carries the whole Registry are true of every
     // Import, so the guide establishes them rather than this line.
     assert_eq!(
         printed.trim_end().lines().last(),
@@ -851,7 +851,7 @@ fn what_an_export_wrote_is_what_an_import_reads_back() {
 
 /// The identity file is the half of a Profile that cannot be reconstructed
 /// *faithfully*: Claude Code's `oauthAccount` block carries fields beyond the
-/// registry's four, and a Run Carries from it (ADR everything-but-the-account).
+/// Registry's four, and a Run Carries from it (ADR everything-but-the-account).
 #[test]
 fn an_imported_profile_holds_the_identity_file_its_account_had() {
     let from = machine_with_two_accounts();
@@ -875,7 +875,7 @@ fn an_imported_profile_holds_the_identity_file_its_account_had() {
     }
 }
 
-/// The Identity the registry records is enough to compose the block Claude Code
+/// The Identity the Registry records is enough to compose the block Claude Code
 /// would have written.
 #[test]
 fn an_account_whose_export_carried_no_identity_file_still_gets_one() {
@@ -910,7 +910,7 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
     let sealed = an_export_of_a_whole_machine();
     let host = a_new_machine_holding(&sealed);
     // What a Purge that could not finish leaves: a Profile directory with a
-    // client in it and no registry naming it.
+    // client in it and no Registry naming it.
     let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
     a_client_running_against(&host, &profile, 4242);
 
@@ -936,7 +936,7 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
 }
 
 /// `load` normalizes before it validates, "so `load` and `save` judge one
-/// shape". An Import writes a registry without reading one, so it has to judge
+/// shape". An Import writes a Registry without reading one, so it has to judge
 /// that same shape — and it validated what arrived instead, over two fields it
 /// clears on the way in. A file every command on the machine would go on to read
 /// was refused, and the refusal named a Check the Import was never going to keep.
@@ -945,7 +945,7 @@ fn an_export_is_judged_by_the_shape_that_will_be_written_rather_than_the_one_tha
     let (mut export, _) =
         perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE).expect("it opens");
     // A Check against a Group nothing declares, which is what a hand-edited
-    // registry — or one whose Group was removed beside it — carries.
+    // Registry — or one whose Group was removed beside it — carries.
     export
         .registry
         .record_switch("nobody-declared-this", Utc::now());
@@ -965,8 +965,8 @@ fn an_export_is_judged_by_the_shape_that_will_be_written_rather_than_the_one_tha
 
 /// An Import says what the step forward renamed, before it writes.
 ///
-/// `bring_forward` says the same about this machine's own registry, and an Export
-/// is the other way a registry arrives — the rename pass runs on both, so a
+/// `bring_forward` says the same about this machine's own Registry, and an Export
+/// is the other way a Registry arrives — the rename pass runs on both, so a
 /// person who restores a backup is not left to find the new name in a listing.
 #[test]
 fn an_import_says_what_bringing_the_registry_forward_renamed() {
@@ -1019,7 +1019,7 @@ fn an_import_whose_sessions_directory_will_not_be_read_writes_nothing_and_says_s
     let sealed = an_export_of_a_whole_machine();
     let host = a_new_machine_holding(&sealed);
     // What a Purge that could not finish leaves: a Profile directory with no
-    // registry naming it, and a `sessions` inside it nobody can read.
+    // Registry naming it, and a `sessions` inside it nobody can read.
     let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
     let sessions = perch::probe::sessions_dir(&profile);
     host.create_dir_all(&sessions).expect("it is left behind");

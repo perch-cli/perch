@@ -65,7 +65,7 @@ impl Setting {
     /// What [`carried_by`](Self::carried_by) answering false comes to.
     ///
     /// Once, because it is refused twice: `parse` turns the word down and
-    /// `write` turns it down again at the registry boundary, and one sentence
+    /// `write` turns it down again at the Registry boundary, and one sentence
     /// spelled at two sites is how the two come to name different remedies.
     fn only_the_ungrouped_scope_carries_it() -> PerchError {
         PerchError::Invalid(format!(
@@ -133,7 +133,7 @@ impl Setting {
 
     /// Applied to a copy and checked over the whole Scope before anything
     /// lands, so a refused `set` leaves every Setting as it found it. Checked
-    /// there rather than only here, because the registry is the boundary every
+    /// there rather than only here, because the Registry is the boundary every
     /// Config crosses and this one is only a command line.
     pub fn write(self, registry: &mut Registry, scope: &Scope, value: &str) -> Result<()> {
         // Asked again here, for the reason `settings_mut` is asked about below:
@@ -380,7 +380,7 @@ pub fn one_of_the_strategies() -> String {
 
 /// A percentage, refused with the numbers that would have been accepted.
 ///
-/// The range is the registry's to state (`a_percentage`), so a number too large
+/// The range is the Registry's to state (`a_percentage`), so a number too large
 /// for the field and one the field holds but the policy will not are refused in
 /// one sentence: to the script that mistyped, `300` and `101` are one mistake.
 fn percentage(key: &str, value: &str) -> Result<u8> {
@@ -403,7 +403,7 @@ fn margin(key: &str, value: &str) -> Result<u8> {
 }
 
 /// A value refused for the value it is, said to somebody who just typed it —
-/// which is why it is not the registry's `out_of_range`, whose reader is
+/// which is why it is not the Registry's `out_of_range`, whose reader is
 /// somebody looking at a file and needs to be told which Scope it is in.
 fn not_a_value(key: &str, value: &str, accepted: &str) -> PerchError {
     PerchError::Invalid(format!(
@@ -493,7 +493,7 @@ pub const MIN_MARGIN_PERCENT: u8 = 1;
 pub const MAX_PERCENTAGE: u8 = 100;
 
 /// What a percentage accepts, said once so a mistyped `perch config set` and a
-/// hand-edited registry are refused in the same words. Built from the bound, so
+/// hand-edited Registry are refused in the same words. Built from the bound, so
 /// the sentence and the number cannot disagree.
 pub fn a_percentage() -> String {
     format!("a whole number between 0 and {MAX_PERCENTAGE}")
@@ -611,7 +611,7 @@ impl Scope {
     /// The Scope a word names, or which way it fails to — the one derivation of
     /// the decision, so no command comes to lack an arm of it. A word for every
     /// Scope is answered before the Group lookup, because fallen through it
-    /// earns "Declare it with `perch group add global`", which the registry
+    /// earns "Declare it with `perch group add global`", which the Registry
     /// then refuses.
     pub fn named(registry: &Registry, word: &str) -> std::result::Result<Scope, NotAScope> {
         if name::means_the_ungrouped_scope(word) {
@@ -738,7 +738,7 @@ mod tests {
         percentage(setting.as_str(), &most.to_string()).expect("the top of the range");
         percentage(setting.as_str(), &past_it.to_string()).expect_err("and one past it");
 
-        // And what a registry somebody edited by hand is refused for.
+        // And what a Registry somebody edited by hand is refused for.
         let scope = work();
         Settings {
             watcher_threshold_percent: most,
@@ -787,7 +787,7 @@ mod tests {
             .write(&mut registry, &work(), "true")
             .unwrap();
 
-        // Refused by the range the registry enforces, after the value parsed.
+        // Refused by the range the Registry enforces, after the value parsed.
         Setting::WatcherThresholdPercent
             .write(&mut registry, &work(), "101")
             .expect_err("a Utilization threshold is a percentage");

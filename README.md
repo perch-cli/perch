@@ -15,6 +15,9 @@ Perch is for one person moving between logins they already hold — their own
 accounts, on their own machine. It creates no accounts and authenticates nobody;
 it only chooses between logins you have already made yourself.
 
+Capitalized words — Account, Group, Cycle and the rest — are Perch's defined
+terms, and [`CONTEXT.md`](CONTEXT.md) is the dictionary that defines them.
+
 ```
 $ perch switch
 Switched to overflow@example.com, the most room in Group `work`.
@@ -24,10 +27,10 @@ Utilization   5-hour    12%  (as of 4m ago)
 
 ## Install
 
-Perch is pre-1.0. Every release is real and works, but the command line may
-still change between them, and the changelog marks every change that breaks
-something. macOS, Linux and Windows. Claude Code has to be installed
-already, for Perch to have anything to switch between.
+Perch is pre-1.0: the command line may still change between releases, and the
+changelog marks every change that breaks something. It runs on macOS, Linux and
+Windows. Claude Code has to be installed already, for Perch to have anything to
+switch between.
 
 ```sh
 brew tap perch-cli/perch && brew install perch      # Homebrew, on macOS or Linux

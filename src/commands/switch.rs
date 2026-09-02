@@ -80,7 +80,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 
     already_there(host, &installed, &registry, &settled, &incoming)?;
 
-    // Everything the Switch owes the registry is written by `switch_to`, which
+    // Everything the Switch owes the Registry is written by `switch_to`, which
     // is the only way to reach what the Switch found. `Reason::Asked` is all
     // this caller differs by: somebody typed it, so nothing paces anything.
     let Switched { captured, .. } = switch::switch_to(

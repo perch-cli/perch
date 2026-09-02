@@ -24,7 +24,7 @@ use crate::utilization;
 /// work and a Disabled Account is never chosen, so counting either would count
 /// quota nothing can spend. Both are still said, as what is out of the running.
 pub struct Reserve<'a> {
-    /// The Accounts a Cycle may land on, in the order the registry holds them.
+    /// The Accounts a Cycle may land on, in the order the Registry holds them.
     /// Deliberately not the Cycle's ranking — `best` reads the separately sorted
     /// `with_headroom` and the rest are counts — because claiming an order
     /// nothing establishes invites the next caller to rely on it.
@@ -67,7 +67,7 @@ impl<'a> Reserve<'a> {
                 Headroom::Unobserved => unobserved += 1,
             }
         }
-        // Best first, stable, so a tie keeps the registry's order. Deliberately
+        // Best first, stable, so a tie keeps the Registry's order. Deliberately
         // not a claim about where a Cycle would land: under `soonest-reset` the
         // Account with the most room is not the one a Cycle prefers.
         with_headroom.sort_by(|(_, ours), (_, theirs)| theirs.total_cmp(ours));
@@ -104,7 +104,7 @@ impl<'a> Reserve<'a> {
                 ),
             ),
             // No age: being Disabled or Quarantined is a fact about the
-            // registry rather than an observation. The parenthetical is never
+            // Registry rather than an observation. The parenthetical is never
             // empty — an empty Scope is the listing's own sentence, said first.
             None if self.candidates.is_empty() => format!(
                 "Reserve: none — no Account here may be Cycled to ({})",

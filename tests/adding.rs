@@ -47,7 +47,7 @@ fn assert_the_active_account_survived(host: &FakeHost) {
     );
 }
 
-/// An Add records the Account and saves the registry before it reports, so a
+/// An Add records the Account and saves the Registry before it reports, so a
 /// stdout that will not take the report is a login that landed under a non-zero
 /// exit — and unnoted it sends somebody back through a browser login for an
 /// Account Perch already holds.
@@ -562,7 +562,7 @@ fn one_invocation_cannot_plant_the_collision_it_would_later_refuse() {
 fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
     // A new Profile is filled in two steps: the Credential goes to the
     // keychain, then the Identity to a file. A failure between them would
-    // otherwise leave a stored Credential that no registry entry names.
+    // otherwise leave a stored Credential that no Registry entry names.
     let host = logged_in_machine();
     run_status(&host, false).0.unwrap();
     let services_before = host.keychain_services();
@@ -619,7 +619,7 @@ fn a_profile_whose_credential_would_not_go_down_is_not_left_behind() {
     assert_the_active_account_survived(&host);
 }
 
-/// The same one step later: the Profile is complete and the registry will not
+/// The same one step later: the Profile is complete and the Registry will not
 /// take it. A Profile nothing records holds a live refresh token that
 /// `reap_abandoned` never walks, since that only walks `pending/`.
 #[test]
@@ -665,8 +665,8 @@ fn adding_an_account_makes_no_network_call() {
     assert!(host.http_calls().is_empty());
 }
 
-/// The interleaving Perch's registry lock exists for: `perch add` reads the
-/// registry, spends minutes in a browser, and another terminal Switches while it
+/// The interleaving Perch's Registry lock exists for: `perch add` reads the
+/// Registry, spends minutes in a browser, and another terminal Switches while it
 /// waits (ADR a-switch-is-written-down-first).
 #[test]
 fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {

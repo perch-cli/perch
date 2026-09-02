@@ -1,7 +1,7 @@
 //! `perch holdings purge` — giving the machine back
 //! (ADR the-holdings-go-out-sealed).
 //!
-//! Every Profile, every Credential Perch holds, and Perch's own registry, gone
+//! Every Profile, every Credential Perch holds, and Perch's own Registry, gone
 //! in one act. The exact inverse of an Import, and the command that makes moving
 //! to another machine an act somebody can finish rather than start.
 //!
@@ -64,7 +64,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     let installed = Installed::for_a_report(host);
 
     let mut holding = (perch, registry);
-    // The hold first, the other way round from `perch remove`: a registry this
+    // The hold first, the other way round from `perch remove`: a Registry this
     // Perch may no longer write is one it may no longer act on either.
     let mut standing = wait::Standing::of()
         .and(|(perch, _): &mut (crate::lock::Held<'_>, Registry)| still_ours(perch, "purged"))
@@ -180,15 +180,15 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
     ))
 }
 
-/// What the registry names, where it can be read at all.
+/// What the Registry names, where it can be read at all.
 ///
 /// The one caller for which `load`'s refusal is the wrong answer: `erase` walks
-/// the directories rather than the registry, and refusing is the only way off a
-/// machine whose registry is corrupt (ADR the-holdings-outlive-a-perch).
+/// the directories rather than the Registry, and refusing is the only way off a
+/// machine whose Registry is corrupt (ADR the-holdings-outlive-a-perch).
 fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> (Registry, bool) {
     // Read directly rather than through adoption, for the reason an Import reads
     // it directly: adoption would make an Account on the way to destroying every
-    // Account. A home holding no registry is what an interrupted Purge leaves.
+    // Account. A home holding no Registry is what an interrupted Purge leaves.
     match registry::load(host) {
         Ok(held) => (held.unwrap_or_default(), true),
         Err(unreadable) => {
@@ -229,7 +229,7 @@ fn what_will_go(
 
     let accounts: Vec<&str> = registry.accounts.iter().map(Account::email).collect();
     if accounts.is_empty() {
-        // The Profiles rather than the Accounts, because a registry naming none of
+        // The Profiles rather than the Accounts, because a Registry naming none of
         // them is the state where that count is the only one there is — and an
         // unparsable one must not be agreed to as an empty machine.
         return match profiles {
@@ -244,12 +244,12 @@ fn what_will_go(
                  {NOTHING_UNDOES_IT}{and_the_service}",
                 say::profiles(profiles),
                 home.display(),
-                // Only where the registry is the reason: one that parsed and
+                // Only where the Registry is the reason: one that parsed and
                 // names nobody is the ordinary leftover of a login that died at
                 // the browser step, and is not a corrupt file to be agreed to.
                 match readable {
                     true => "",
-                    false => ", its registry saying nothing this Perch can read",
+                    false => ", its Registry saying nothing this Perch can read",
                 },
                 home.display(),
             ),
@@ -399,9 +399,9 @@ fn report(
                  to take, and it is gone.",
                 home.display(),
             ),
-            // The Profiles, because the registry named no Account and they are
+            // The Profiles, because the Registry named no Account and they are
             // the only count there is. Never "no Accounts": a machine whose
-            // registry would not parse still held every one of these.
+            // Registry would not parse still held every one of these.
             (0, profiles) => format!(
                 "Purged {} Perch could not name, {} among them, and {} is gone.",
                 say::profiles(profiles),

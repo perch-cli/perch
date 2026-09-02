@@ -1385,7 +1385,7 @@ impl FakeHost {
 /// function for the three things the fake stands in for by keeping a prefix — a
 /// store that corrupts, a disk that fills partway, a keychain that takes only so
 /// much — and a boundary, because `String::truncate` panics on an index that is
-/// not one and what is being cut is registry JSON and `.claude.json`.
+/// not one and what is being cut is Registry JSON and `.claude.json`.
 fn a_prefix_of(text: &str, bytes: usize) -> String {
     text.char_indices()
         .take_while(|(at, _)| *at < bytes)

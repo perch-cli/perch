@@ -5,7 +5,7 @@
 //! what is asserted here is *which program was run* — and, for the two Channels
 //! Perch does not run anything for, that nothing was.
 //!
-//! Nothing here arranges a registry, and one test asserts that on purpose.
+//! Nothing here arranges a Registry, and one test asserts that on purpose.
 
 mod common;
 
@@ -792,7 +792,7 @@ fn an_older_release_is_named_as_one_and_says_what_it_costs() {
     outcome.expect("they agreed");
     assert!(said.contains("older"), "{said}");
     assert!(
-        said.contains("registry"),
+        said.contains("Registry"),
         "the consequence is named rather than a bare `are you sure`: {said}"
     );
     assert_eq!(ran(&host).len(), 1);

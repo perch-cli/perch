@@ -2,7 +2,7 @@
 //! and which Account is active.
 //!
 //! Versioned, and the version moves when the shape does
-//! (ADR the-holdings-outlive-a-perch): a registry claiming more than this build
+//! (ADR the-holdings-outlive-a-perch): a Registry claiming more than this build
 //! understands is refused rather than silently misread.
 
 use std::collections::BTreeMap;
@@ -21,7 +21,7 @@ use crate::probe::Identity;
 
 /// The version this build writes.
 ///
-/// A registry claiming a higher one is refused rather than silently misread, and
+/// A Registry claiming a higher one is refused rather than silently misread, and
 /// the guard is only worth having if this moves whenever the shape does.
 pub const CURRENT_VERSION: u32 = 6;
 
@@ -101,7 +101,7 @@ impl Quarantine {
         }
     }
 
-    /// The reason as a script reads it, which is the spelling the registry
+    /// The reason as a script reads it, which is the spelling the Registry
     /// records.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -157,7 +157,7 @@ impl Quarantine {
     /// The same as a script reads it. Absent reads as false wherever a script
     /// asks whether it is set, so one already branching on the fact carries why.
     ///
-    /// `said` rather than `detail`: the registry records a `Quarantine` and not
+    /// `said` rather than `detail`: the Registry records a `Quarantine` and not
     /// the failure behind one, so there is no "how" here to carry.
     pub fn document(quarantine: Option<Quarantine>) -> serde_json::Value {
         match quarantine {
@@ -213,7 +213,7 @@ pub struct Account {
     pub disabled: bool,
     /// Why this Account's Credential can no longer be used, when it cannot.
     ///
-    /// Left out of the file entirely rather than written as a null: the registry
+    /// Left out of the file entirely rather than written as a null: the Registry
     /// is something a person may open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quarantine: Option<Quarantine>,
@@ -238,7 +238,7 @@ pub struct Checked {
 /// Which Account is active — and, while a Switch is under way, that Perch cannot
 /// yet say (ADR a-switch-is-written-down-first).
 ///
-/// One field with three states rather than two, so a registry naming both a
+/// One field with three states rather than two, so a Registry naming both a
 /// settled active Account and a different in-flight one cannot be written.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -287,7 +287,7 @@ impl Active {
     }
 
     /// Whether this address is named here in any role, case-folded like every
-    /// other way the registry is asked about a name.
+    /// other way the Registry is asked about a name.
     pub fn names(&self, email: &str) -> bool {
         match self {
             Active::Nobody => false,
@@ -345,13 +345,13 @@ impl Active {
     }
 
     /// Absent from the file rather than written as a word, which is what the
-    /// registry of a machine that has never Switched has always looked like.
+    /// Registry of a machine that has never Switched has always looked like.
     fn is_nobody(&self) -> bool {
         matches!(self, Active::Nobody)
     }
 }
 
-/// No Landing is in flight, so the registry a reader is about to ask tells the
+/// No Landing is in flight, so the Registry a reader is about to ask tells the
 /// truth about who is active. A witness (ADR an-ordering-is-a-type), and the
 /// negative of a Landing, so nothing is promoted. Two things earn it:
 /// [`Registry::settle`] records what a walk settled a Landing on, and
@@ -359,7 +359,7 @@ impl Active {
 pub struct Settled(());
 
 /// The witness for a reader that has a Landing to *check* rather than one to
-/// settle: a `perch watcher run` says what it is about to watch off a registry it
+/// settle: a `perch watcher run` says what it is about to watch off a Registry it
 /// has not locked, and a Landing in flight is the state where it has nothing to
 /// say yet, because [`Active::whose`] answers with the Account being *left*.
 /// `None` is the whole of what it can answer about a Landing.
@@ -399,7 +399,7 @@ pub struct Registry {
     /// The last unasked Switch in each Scope. Written by `perch watcher run` and
     /// `perch watcher check`, and absent from the file until one of them
     /// Switches. Spelled `checks` because a Watcher that only ran scheduled
-    /// wrote it first, and a key is registry shape: renaming it is a migration
+    /// wrote it first, and a key is Registry shape: renaming it is a migration
     /// rather than a rename.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub checks: BTreeMap<String, Checked>,
@@ -426,7 +426,7 @@ impl Account {
 
     /// The Profile this Account's Credential lives in.
     ///
-    /// Derived from the email address the registry already keys on rather than
+    /// Derived from the email address the Registry already keys on rather than
     /// recorded beside it (ADR claude-code-chooses-the-store): two statements of
     /// one fact can disagree.
     pub fn profile_dir(&self, host: &dyn Host) -> Result<PathBuf> {
@@ -532,9 +532,9 @@ impl Registry {
         Settled(())
     }
 
-    /// Whether this address is the one the registry records as active.
+    /// Whether this address is the one the Registry records as active.
     ///
-    /// Case-folded, like every other way the registry is asked about a name:
+    /// Case-folded, like every other way the Registry is asked about a name:
     /// `upsert` stores the incoming spelling, so an Identity re-read with
     /// different capitalization would leave an exact `==` answering wrongly.
     pub fn is_active(&self, _settled: &Settled, email: &str) -> bool {
@@ -740,7 +740,7 @@ impl Registry {
 
     /// Renames a Group, keeping everything it carries.
     ///
-    /// `held` is the name as this registry holds it. Three things move with it:
+    /// `held` is the name as this Registry holds it. Three things move with it:
     /// the Settings, the Accounts that claim it, and what the last scheduled
     /// Check left — dropping that would let the watcher Switch again at once.
     pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
@@ -828,7 +828,7 @@ impl Registry {
 
     /// The same, where the Account has to be there.
     ///
-    /// The state cannot happen — [`validate`] refuses every registry that could
+    /// The state cannot happen — [`validate`] refuses every Registry that could
     /// produce it, on the way in and, since `save` validates too, on the way out
     /// — so a refusal naming what could not be found beats a panic.
     pub fn held(&self, email: &str) -> Result<&Account> {
@@ -896,7 +896,7 @@ impl Registry {
             instead_of: previous.as_deref(),
         })?;
 
-        // The address as the registry *holds* it, not as it was typed: the
+        // The address as the Registry *holds* it, not as it was typed: the
         // lookup above folds case, and storing the typed spelling would point
         // the Alias at a string no `accounts` entry has.
         let held = self
@@ -1031,7 +1031,7 @@ pub fn sharing_a_profile_with<'a>(
     })
 }
 
-/// Reads the registry, or `None` when Perch has never run here.
+/// Reads the Registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     let path = &holdings::registry_path(host)?;
     let contents = match host.read_file(path) {
@@ -1091,7 +1091,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     Ok(Some(registry))
 }
 
-/// The refusal for a registry claiming a version no Perch has stamped, or none
+/// The refusal for a Registry claiming a version no Perch has stamped, or none
 /// (ADR a-registry-comes-forward).
 ///
 /// Neither names a shape, and a document whose shape is unstated half-parses
@@ -1121,7 +1121,7 @@ fn no_perch_wrote(path: &Path, claimed: Option<u64>) -> PerchError {
 
 /// Where to put right something only a hand edit could have put wrong.
 ///
-/// Kept apart from [`validate`]'s rule because [`save`] is holding a registry
+/// Kept apart from [`validate`]'s rule because [`save`] is holding a Registry
 /// nobody hand-edited, and telling somebody to edit a value that is not in the
 /// file yet is the one sentence that would make it worse.
 pub fn the_file_to_edit(path: &Path) -> String {
@@ -1146,11 +1146,11 @@ fn no_such_account(email: &str) -> PerchError {
     ))
 }
 
-/// Everything a registry has to be true of before any command acts on it.
+/// Everything a Registry has to be true of before any command acts on it.
 ///
 /// Checked on the way in rather than where each value is read, because the thing
 /// that reads them is a loop nobody is watching. Public because an Import writes
-/// a registry without reading one, and what it accepts must not differ.
+/// a Registry without reading one, and what it accepts must not differ.
 pub fn validate(registry: &Registry) -> Result<()> {
     // Every Scope, and every Scope is all of them: with no layer above, one
     // walk over the Scopes is the whole of the check.
@@ -1159,7 +1159,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
     }
 
     // The Group *names* an Account claims, the declared Groups, and the Aliases
-    // with them: a hand-edited registry is exactly where a name nothing would
+    // with them: a hand-edited Registry is exactly where a name nothing would
     // have accepted comes from, in any of the three.
     let claimed = registry
         .accounts
@@ -1314,14 +1314,14 @@ pub fn validate(registry: &Registry) -> Result<()> {
 }
 
 /// Refuses one of `active`'s pointers into the Accounts naming somebody Perch
-/// does not hold. `said` is what the registry claims about that address, so
+/// does not hold. `said` is what the Registry claims about that address, so
 /// each of the three pointers a Landing can carry says which one it was.
 fn refuse_a_dangling_pointer(registry: &Registry, email: &str, said: &str) -> Result<()> {
     if registry.account(email).is_some() {
         return Ok(());
     }
     Err(PerchError::Invalid(format!(
-        "The registry {said}, which is not an Account Perch holds."
+        "The Registry {said}, which is not an Account Perch holds."
     )))
 }
 
@@ -1356,7 +1356,7 @@ fn first_collision<'a>(names: impl Iterator<Item = &'a str>) -> Option<(&'a str,
     None
 }
 
-/// Refuses a name in the registry that nothing would have accepted.
+/// Refuses a name in the Registry that nothing would have accepted.
 ///
 /// Named rather than repaired: a value only a hand edit can produce is one only a
 /// hand edit can take out. The cross-half collision is asked from the Group side
@@ -1394,7 +1394,7 @@ fn refuse_a_name_nothing_would_have_accepted(
     }
 }
 
-/// A registry from outside this Perch, made readable: every claimed Group
+/// A Registry from outside this Perch, made readable: every claimed Group
 /// declared, every `checks` key under its declared spelling, then validated. The
 /// pair and never one — `validate` asks `declared_group` about the `checks` key,
 /// so validating before normalizing refuses a shape the normalizer repairs. The
@@ -1468,9 +1468,9 @@ fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Regis
     registry
 }
 
-/// Writes the registry, under the hold the caller took to read it.
+/// Writes the Registry, under the hold the caller took to read it.
 ///
-/// The hold is a parameter because a registry is only ever written by the Perch
+/// The hold is a parameter because a Registry is only ever written by the Perch
 /// that read it, and is where [`validate`] is asked on the way out, so what this
 /// writes and what [`load`] accepts cannot differ.
 pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry) -> Result<()> {
@@ -1480,8 +1480,8 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
         // (ADR a-refusal-is-a-promise): `Busy` promises nothing was changed, and
         // this save is reached as often after a Credential moved as before.
         return Err(PerchError::Other(
-            "Another `perch` took the registry lock over while this command was \
-             working, and has changed the registry since this one read it. \
+            "Another `perch` took the Registry lock over while this command was \
+             working, and has changed the Registry since this one read it. \
              Nothing was written, because writing would have undone whatever it \
              did. Run this command again."
                 .to_string(),
@@ -1508,12 +1508,12 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
     // place: a second full copy of the Holdings is a copy a Watcher pays for
     // every round.
     let mut body = serde_json::to_string_pretty(&*registry)
-        .map_err(|err| PerchError::Other(format!("could not serialize the registry: {err}")))?;
+        .map_err(|err| PerchError::Other(format!("could not serialize the Registry: {err}")))?;
     body.push('\n');
     write(host, &path, &body)
 }
 
-/// Replaces the registry in one step, or not at all, and for its owner alone.
+/// Replaces the Registry in one step, or not at all, and for its owner alone.
 ///
 /// One step because every command reads this file first, and a crash mid-write
 /// would leave it half written for good. Its owner alone because it holds no
@@ -1916,7 +1916,7 @@ mod tests {
         }
     }
 
-    /// The registry here is built by hand because nothing reachable produces it:
+    /// The Registry here is built by hand because nothing reachable produces it:
     /// a Group cannot be declared under a name an Alias already holds. It is what
     /// a third way of making a name would walk into.
     #[test]
@@ -2087,7 +2087,7 @@ mod tests {
     /// `checked` and `validate` fold the key and the two mutators remove it
     /// exactly, so a `checks` key that outlives its Group leaves `validate`
     /// refusing what `save` has just built — under a sentence saying the fault
-    /// is Perch's, on a registry no command can then read.
+    /// is Perch's, on a Registry no command can then read.
     #[test]
     fn a_check_keyed_in_another_case_than_its_group_is_brought_to_one_on_the_way_in() {
         let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
@@ -2112,7 +2112,7 @@ mod tests {
     }
 
     /// The order is the whole of the contract: `validate` asks `declared_group`
-    /// about the `checks` key, so a registry judged before it is normalized is
+    /// about the `checks` key, so a Registry judged before it is normalized is
     /// refused over the very Group the normalizer is about to declare.
     #[test]
     fn a_registry_is_normalized_before_it_is_validated_and_never_after() {

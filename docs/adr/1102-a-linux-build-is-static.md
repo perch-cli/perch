@@ -25,7 +25,7 @@ is no libsecret to link against — the one thing that would have made a static
 binary genuinely worse.
 
 And musl's allocator, which is the reason performance-sensitive programs avoid
-it, is arithmetic Perch never does: it reads a registry, writes a credential,
+it, is arithmetic Perch never does: it reads a Registry, writes a credential,
 and prints a table.
 
 ## The consequence worth writing down

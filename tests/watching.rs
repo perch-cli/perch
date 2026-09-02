@@ -38,7 +38,7 @@ const SPENT: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spent","ref
 /// active Account holds its session.
 const DEFAULT_CONFIG_DIR: &str = "/Users/someone/.claude";
 
-/// Perch's own lock over its registry — the one artifact a loop could leave behind if
+/// Perch's own lock over its Registry — the one artifact a loop could leave behind if
 /// it held anything across a wait.
 const REGISTRY_LOCK: &str = "/Users/someone/.config/perch/.registry.lock";
 
@@ -1204,7 +1204,7 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
     assert!(
         written
             .iter()
-            // The registry, and the copy beside it its atomic write goes through on the
+            // The Registry, and the copy beside it its atomic write goes through on the
             // way.
             .all(|path| path
                 .to_string_lossy()
@@ -1521,7 +1521,7 @@ fn another_perch_holding_the_registry_holds_the_round_rather_than_ending_the_wat
         .find(|line| line.contains("held"))
         .unwrap_or_else(|| panic!("the round is held and said so: {printed}"));
     assert!(
-        held.contains("registry") || held.contains("lock"),
+        held.contains("Registry") || held.contains("lock"),
         "and says what was holding it: {held}"
     );
     assert!(
@@ -1942,7 +1942,7 @@ fn a_check_held_settling_a_landing_says_so_on_standard_output() {
 
 /// The same again, inside the round rather than between two. A `SIGKILL` here
 /// runs no `Drop`, so both locks are left on disk: every other `perch` waits out
-/// the registry's window, and the next login's Service waits out the watch's.
+/// the Registry's window, and the next login's Service waits out the watch's.
 #[test]
 fn a_watcher_asked_to_stop_reads_nothing_and_pays_nothing() {
     // A third Account, so there is a second candidate for the burst to reach —

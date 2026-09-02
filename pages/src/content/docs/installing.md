@@ -4,9 +4,8 @@ sidebar:
   order: 1
 ---
 
-Perch is pre-1.0. Every release is real and works, but the command line may
-still change between them, and the changelog marks every change that breaks
-something. macOS, Linux and Windows, on both Arm and Intel except Windows,
+Perch is pre-1.0: the command line may still change between releases, and the
+changelog marks every change that breaks something. macOS, Linux and Windows, on both Arm and Intel except Windows,
 which is x64 only. Claude Code has to be installed for Perch to have anything
 to switch between.
 
@@ -57,12 +56,13 @@ older version instead of a newer one.
 ## By hand
 
 From [the releases page](https://github.com/perch-cli/perch/releases). Every
-release carries one archive per platform, a `SHA256SUMS`, and signed build
-provenance. The checksums say which bytes; the provenance says which workflow,
+release carries one archive per platform and a `SHA256SUMS`; the signed build
+provenance is an attestation GitHub holds rather than a file among the assets.
+The checksums say which bytes; the provenance says which workflow,
 in which repository, at which commit produced them, which is the stronger claim:
 
 ```sh
-gh attestation verify perch-v0.1.0-aarch64-apple-darwin.tar.gz --repo perch-cli/perch
+gh attestation verify perch-v<version>-<target>.tar.gz --repo perch-cli/perch
 ```
 
 Both installers check the checksum, and check the provenance too when `gh` is
@@ -85,10 +85,10 @@ It works out which of the channels above installed this Perch and hands the work
 back to that one — `brew upgrade perch` on Homebrew, `npm update -g perch-cli`
 on npm — because those binaries belong to Homebrew and npm, and a Perch that
 wrote over one would be reverted at the next `brew upgrade` or thrown away at
-the next `npm install`. It prints the command before running it. Only a binary
-the installer script put in `~/.local/bin` does Perch replace itself, by
-re-running that same installer, which is what it did before this command
-existed.
+the next `npm install`. It prints the command before running it. Perch replaces itself only where the
+installer script put it — `~/.local/bin`, `%LOCALAPPDATA%\Perch\bin` on
+Windows, or `$PERCH_INSTALL_DIR` if you set one — by re-running that same
+installer, which is what it did before this command existed.
 
 A binary you unpacked from the releases page by hand belongs to no channel, and
 Perch will not write over a file it did not put there. Re-run the installer to
@@ -112,7 +112,7 @@ perch upgrade --release v0.2.0
 ```
 
 Going backwards is allowed and is confirmed first, because a Perch older than
-the one that last wrote your registry will refuse to read it — `--yes` says you
+the one that last wrote your Registry will refuse to read it — `--yes` says you
 have accounted for that. Homebrew installs whatever its formula names and cannot
 be pointed at an older release, so `--release` is refused there rather than
 quietly ignored; the installer script takes `PERCH_VERSION` if you need to hold
@@ -160,6 +160,17 @@ Builds and runs on macOS, Linux and Windows, with the same command surface
 everywhere. The toolchain is pinned in `rust-toolchain.toml` — Rust 1.97.1,
 edition 2024 — so rustup will fetch the right one on first build.
 
+```sh
+# builds a release binary and puts it on ~/.cargo/bin, which is on your PATH
+# if rustup set it up
+cargo install --path .
+
+# the same binary, left at target/release/perch for you to put somewhere
+cargo build --release
+```
+
+The tests, if you want to run them first:
+
 ```
 # touches nothing you own: every suite but `your_machine.rs`, which is held
 # back by a feature rather than by a list somebody has to maintain
@@ -179,3 +190,10 @@ Code's item. Set `PERCH_SKIP_KEYCHAIN=1` to skip those where the keychain
 cannot be unlocked — they are macOS-only, because only macOS compiles them in.
 The rest of the suite needs no opt-out: it touches only temporary directories
 of its own.
+
+## Once it is installed
+
+Run `perch status`. The first command you run adopts the Claude Code login
+already on the machine as your first Account, and
+[Accounts](accounts.md#adopting-the-login-you-already-have) picks up from
+there.

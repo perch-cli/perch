@@ -13,7 +13,7 @@ machine as it was before Perch.
 ## Backing up everything
 
 `perch holdings export <path>` writes everything Perch holds to one encrypted
-file: the whole registry — every Account, its Alias, its Group, whether Cycling
+file: the whole Registry — every Account, its Alias, its Group, whether Cycling
 may choose it, why it is Quarantined where it is, and what each Group carries —
 alongside every Credential. A dead machine, a mistaken `perch remove` or a new
 laptop then costs you a file rather than a login for every subscription.
@@ -32,8 +32,9 @@ the prompt says while you are still choosing one, and why the report does not
 say it again.
 
 **It takes everything and has no target.** There is no per-Account and no
-per-Group form, because a selective export is a partial restore — which is the
-failure the file exists to prevent, wearing a feature's clothes.
+per-Group form, because a selective export can only ever restore part of your
+Holdings — and a partial restore is exactly the loss this file exists to
+prevent, however deliberately it was asked for.
 
 **The passphrase is required rather than offered**, prompted, confirmed, and
 never shown as you type it. It cannot be passed as an argument and there is no
@@ -71,7 +72,7 @@ permissions you did not choose.
 
 ## Moving to another machine
 
-`perch holdings import <path>` is the exact inverse: it puts the whole registry
+`perch holdings import <path>` is the exact inverse: it puts the whole Registry
 and every Credential back, so a new laptop arrives with the setup the old one
 had rather than a pile of nameless logins.
 
@@ -117,8 +118,8 @@ terminal it is refused for the same reason `perch holdings export` is, and there
 is no flag.
 
 An import that fails part way leaves nothing behind: every Profile it made comes
-back out, so there is no half-populated registry and no orphaned Profile, and the
-file can simply be imported again. A registry inside the file written by a newer
+back out, so there is no half-populated Registry and no orphaned Profile, and the
+file can simply be imported again. A Registry inside the file written by a newer
 Perch is refused rather than half-read. An Account the export carried no
 Credential for is still restored, Quarantine reason and all, and the command says
 which — `perch relogin` is what ends that.
@@ -126,7 +127,7 @@ which — `perch relogin` is what ends that.
 ## Giving the machine back
 
 `perch holdings purge` is the other half of that pair: every Profile, every
-Credential Perch holds and Perch's own registry, gone in one act, so the machine
+Credential Perch holds and Perch's own Registry, gone in one act, so the machine
 is the one you had before you installed it. It is what makes room for an import,
 and what you run on the laptop you are handing on.
 
@@ -188,9 +189,9 @@ whatever is holding them. That is checked before the questions and again after
 them, because a client started while you were typing was not running when the
 first check ran.
 
-The Credentials go first and the registry naming them goes last, which is what
+The Credentials go first and the Registry naming them goes last, which is what
 makes a purge that stopped part way finishable: a keychain item lives outside
 `~/.config/perch`, so the record of which items there are is the last thing to
 go. A purge that failed anywhere — a store that would not give its Credential up,
-a directory that would not go — leaves the registry standing, and running it
+a directory that would not go — leaves the Registry standing, and running it
 again finds what it already deleted already gone and carries on.

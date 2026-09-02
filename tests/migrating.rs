@@ -1,4 +1,4 @@
-//! Behavior: a registry an older Perch wrote, on this build
+//! Behavior: a Registry an older Perch wrote, on this build
 //! (ADR a-registry-comes-forward).
 //!
 //! The fixtures are what those releases actually wrote, serialized by each tag's
@@ -22,12 +22,12 @@ use perch::host::prelude::*;
 use perch::name;
 use perch::registry::{self, CURRENT_VERSION};
 
-/// A registry v0.2.0 wrote: `active` a bare address, `groups` a map of partial
+/// A Registry v0.2.0 wrote: `active` a bare address, `groups` a map of partial
 /// Overrides, an `ungrouped` beside a `global`, and one Account kept out of
 /// Cycling.
 const V0_2_0: &str = include_str!("fixtures/registry-v0.2.0.json");
 
-/// A registry v0.1.1 wrote, under the same version number: `groups` a map of
+/// A Registry v0.1.1 wrote, under the same version number: `groups` a map of
 /// whole GroupConfigs, no `ungrouped` at all, and a `global` holding one flag.
 const V0_1_1: &str = include_str!("fixtures/registry-v0.1.1.json");
 
@@ -372,7 +372,7 @@ fn a_registry_that_is_not_json_is_still_malformed() {
     assert!(refused.to_string().contains("could not read"), "{refused}");
 }
 
-/// Every command reads the registry, so bringing it forward is not one command's
+/// Every command reads the Registry, so bringing it forward is not one command's
 /// business — but it is the *commands* that must all work, and a listing is the
 /// cheapest proof that one does end to end.
 #[test]
@@ -508,7 +508,7 @@ fn an_ungrouped_cooldown_comes_forward_under_the_spelling_a_check_writes() {
     );
     assert!(written["checks"].get("ungrouped").is_some(), "{written}");
     // And the next Check really does record against it rather than building a
-    // registry `save` refuses.
+    // Registry `save` refuses.
     let registry = registry::load(&host)
         .expect("the migrated registry loads")
         .expect("and there is one there");
@@ -619,7 +619,7 @@ fn two_v1_cooldowns_landing_on_one_key_keep_the_later_switch() {
     );
 }
 
-// ————— every version 1 registry, and not only the two on disk —————
+// ————— every version 1 Registry, and not only the two on disk —————
 
 /// The name rules the published version 1 builds shipped, at their loosest:
 /// v0.1.0's four checks, its own `to_lowercase` fold and all.
@@ -699,7 +699,7 @@ fn every_name_a_published_perch_accepted() -> Vec<String> {
     names
 }
 
-/// One version 1 registry, with `group` in all three places a Group name is
+/// One version 1 Registry, with `group` in all three places a Group name is
 /// written down — declared, claimed and keyed on by a Check — and `alias` in the
 /// one place an Alias is.
 fn a_v1_registry_naming(group: &str, alias: &str) -> String {
@@ -754,7 +754,7 @@ fn the_corpus_holds_names_this_build_refuses() {
     );
 }
 
-/// Every version 1 registry a published Perch could have written comes forward
+/// Every version 1 Registry a published Perch could have written comes forward
 /// into one this build reads (ADR a-class-not-its-instances).
 ///
 /// Over the name space rather than the instances: a rule joining `validate_name`
@@ -764,7 +764,7 @@ fn every_name_a_published_perch_accepted_comes_forward_into_one_that_loads() {
     for name in every_name_a_published_perch_accepted() {
         // The counterparts are spelled outside the corpus, so no case pairs a
         // name with itself: a Group and an Alias of one name is the collision
-        // every published `validate` refused, and so is no v1 registry.
+        // every published `validate` refused, and so is no v1 Registry.
         for (group, alias) in [(name.as_str(), "the-alias"), ("the-group", name.as_str())] {
             let host = machine_holding(&a_v1_registry_naming(group, alias));
 
@@ -794,7 +794,7 @@ fn every_name_a_published_perch_accepted_comes_forward_into_one_that_loads() {
 ///
 /// All three compared with `to_lowercase`, and all three refused a pair it
 /// called one — in either half of the namespace and across the two. So a pair
-/// this refuses is in no registry a published Perch wrote.
+/// this refuses is in no Registry a published Perch wrote.
 fn a_published_perch_held_them_as_two(one: &str, other: &str) -> bool {
     one.to_lowercase() != other.to_lowercase()
 }
@@ -803,7 +803,7 @@ fn a_published_perch_held_them_as_two(one: &str, other: &str) -> bool {
 /// build folds into one.
 ///
 /// The corpus walks names one at a time and a fold is about a pair: `ΟΔΟΣ`
-/// beside `οδος` is a registry v0.2.0 wrote and this build reads as one Group.
+/// beside `οδος` is a Registry v0.2.0 wrote and this build reads as one Group.
 fn every_pair_this_build_folds_together() -> Vec<(String, String)> {
     let names = every_name_a_published_perch_accepted();
     let mut pairs = Vec::new();
@@ -820,8 +820,8 @@ fn every_pair_this_build_folds_together() -> Vec<(String, String)> {
 /// Every pair of a name this build refuses and the spelling the rename pass
 /// gives it.
 ///
-/// What the pass may rename onto is what nothing else in the registry answers
-/// to, and a registry holding one name is one where every spelling is free.
+/// What the pass may rename onto is what nothing else in the Registry answers
+/// to, and a Registry holding one name is one where every spelling is free.
 fn every_pair_of_a_rename_and_where_it_lands() -> Vec<(String, String)> {
     every_name_a_published_perch_accepted()
         .into_iter()
@@ -837,7 +837,7 @@ fn every_pair_of_a_rename_and_where_it_lands() -> Vec<(String, String)> {
 
 /// Every pair of names the rename pass would put in one place.
 ///
-/// Two refused names wanting one spelling is the case a registry holding a
+/// Two refused names wanting one spelling is the case a Registry holding a
 /// single refused name cannot pose. Four per landing: the fifth asks what the
 /// fourth asked, and the corpus offers up to forty-four.
 fn every_pair_wanting_one_landing() -> Vec<(String, String)> {
@@ -848,7 +848,7 @@ fn every_pair_wanting_one_landing() -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     for mut names in wanting.into_values() {
         // The corpus spells `-` both as a word and out of the alphabet, and one
-        // JSON object holds one key: two of a spelling is no registry.
+        // JSON object holds one key: two of a spelling is no Registry.
         names.sort();
         names.dedup();
         let names = &names[..names.len().min(4)];
@@ -861,7 +861,7 @@ fn every_pair_wanting_one_landing() -> Vec<(String, String)> {
     pairs
 }
 
-/// One version 1 registry naming two Groups and two Aliases, each Group with
+/// One version 1 Registry naming two Groups and two Aliases, each Group with
 /// Settings, an Account and a Check of its own.
 ///
 /// Two of everything, because what a rename loses is not a name: it is one
@@ -913,7 +913,7 @@ fn a_v1_registry_naming_two(groups: (&str, &str), aliases: (&str, &str)) -> Stri
 /// The two names still two, each carrying what it carried.
 ///
 /// `load` answering is not the claim. A rename that folds one Group into the
-/// other comes forward into a registry every command reads happily, short one
+/// other comes forward into a Registry every command reads happily, short one
 /// Group, one set of Settings and one Account's place.
 fn they_come_forward_as_two(groups: (&str, &str), aliases: (&str, &str)) {
     let host = machine_holding(&a_v1_registry_naming_two(groups, aliases));
@@ -996,11 +996,11 @@ fn they_come_forward_as_two(groups: (&str, &str), aliases: (&str, &str)) {
     );
 }
 
-/// Every pair of names one version 1 registry could hold comes forward as two
+/// Every pair of names one version 1 Registry could hold comes forward as two
 /// names, each still carrying what it carried.
 ///
 /// Over the pair space rather than the name space: the guard above puts one
-/// corpus name in a registry at a time, and a fold decides about two.
+/// corpus name in a Registry at a time, and a fold decides about two.
 #[test]
 fn every_pair_a_published_perch_held_as_two_comes_forward_as_two() {
     let mut pairs = every_pair_this_build_folds_together();
@@ -1046,7 +1046,7 @@ fn every_name_a_version_2_perch_accepted() -> Vec<String> {
     names
 }
 
-/// One version 2 registry, with `group` in all three places a Group name is
+/// One version 2 Registry, with `group` in all three places a Group name is
 /// written down and `alias` in the one place an Alias is. The shape version 3
 /// reads: only the name rules moved between them.
 fn a_v2_registry_naming(group: &str, alias: &str) -> String {
@@ -1100,7 +1100,7 @@ fn the_version_2_corpus_holds_names_this_build_refuses() {
     );
 }
 
-/// Every version 2 registry a published Perch could have written comes forward
+/// Every version 2 Registry a published Perch could have written comes forward
 /// into one this build reads.
 ///
 /// The version 1 guard's twin, on the version whose rules moved under it: a rule
@@ -1149,7 +1149,7 @@ fn a_name_no_version_2_perch_accepted_is_named_rather_than_renamed() {
 /// The note names the character rather than the name it is in.
 ///
 /// A name refused for a character that draws as nothing reaches a terminal as
-/// one the registry may also hold, so quoting it would say a Group `dev` became
+/// one the Registry may also hold, so quoting it would say a Group `dev` became
 /// `dev-1` beside an untouched Group of exactly that name.
 #[test]
 fn the_note_for_a_rename_names_the_character_that_caused_it() {
@@ -1177,9 +1177,9 @@ fn the_note_for_a_rename_names_the_character_that_caused_it() {
     );
 }
 
-// ————— every version 3 registry, and not only the ones on disk —————
+// ————— every version 3 Registry, and not only the ones on disk —————
 
-/// One version 3 registry. Version 3 changed no shape, so it is the version 2
+/// One version 3 Registry. Version 3 changed no shape, so it is the version 2
 /// document under the later number.
 fn a_v3_registry_naming(group: &str, alias: &str) -> String {
     let mut held: serde_json::Value =
@@ -1234,7 +1234,7 @@ fn the_version_3_corpus_holds_names_this_build_refuses() {
     );
 }
 
-/// Every version 3 registry a Perch could have written comes forward into one
+/// Every version 3 Registry a Perch could have written comes forward into one
 /// this build reads.
 ///
 /// The third of these. `validate_name` went from a deny-list to an allow-list,
@@ -1369,7 +1369,7 @@ fn a_registry_holding_a_name_this_build_refuses_still_has_a_perch_remove() {
     );
 }
 
-// ————— a name rule and the registry version move together —————
+// ————— a name rule and the Registry version move together —————
 
 /// What this build's name rules answer over a fixed corpus, as one number.
 ///
@@ -1405,7 +1405,7 @@ fn what_the_table_holds() -> u64 {
     digest
 }
 
-/// A name rule that moves takes the registry version with it. Two numbers,
+/// A name rule that moves takes the Registry version with it. Two numbers,
 /// neither covering the other: the table sees a row gain, lose or reorder a
 /// rule for any character; the corpus sees a rule's own body change, bounded to
 /// the spellings it holds. A row arriving or leaving is `registry.rs`'s `const`

@@ -839,7 +839,7 @@ fn setting_one_waits_for_the_other_perch_because_it_writes() {
 
     let refused = result.expect_err("a writer waits on a writer");
     assert!(
-        refused.to_string().contains("the Perch registry lock"),
+        refused.to_string().contains("the Perch Registry lock"),
         "{refused}"
     );
 }

@@ -83,7 +83,7 @@ impl Scratch {
     /// The ordinary machine these tests drive: one Account, active and a Cycle
     /// candidate, and one Group declared holding nothing. Written rather than
     /// adopted, because adoption is what asks the machine what Claude Code is
-    /// installed — and a registry already there is what stops every command
+    /// installed — and a Registry already there is what stops every command
     /// below asking.
     fn holding_an_account(by: &str) -> Scratch {
         let machine = Scratch::untouched(by);
@@ -116,7 +116,7 @@ impl Scratch {
         machine
     }
 
-    /// A machine whose registry an older Perch wrote: the document v0.2.0's own
+    /// A machine whose Registry an older Perch wrote: the document v0.2.0's own
     /// serde produced, so what the binary meets is a shape a release actually
     /// wrote rather than this tree's memory of one.
     fn holding_what_v0_2_0_wrote(by: &str) -> Scratch {
@@ -176,8 +176,9 @@ fn the_version_question_is_answered_by_the_process_in_one_line() {
 }
 
 /// The flag is gone rather than kept beside the command: two spellings of one
-/// capability are two, and neither is ever retired. clap offers no tip towards
-/// the command, its suggestions running from an unknown flag to other flags.
+/// capability are two, and neither is ever retired. The refusal names
+/// `perch version` itself, because clap's would run from an unknown flag to
+/// other flags and never towards the command that answers the question.
 #[test]
 fn the_flag_the_command_replaced_is_no_longer_a_second_spelling_of_it() {
     let machine = Scratch::holding_an_account("version-flag");
@@ -187,11 +188,7 @@ fn the_flag_the_command_replaced_is_no_longer_a_second_spelling_of_it() {
 
         assert_ne!(ran.code, EXIT_OK, "{asked:?}");
         assert!(ran.out.is_empty(), "{asked:?} said nothing: {}", ran.out);
-        assert!(
-            ran.err.contains("unexpected argument"),
-            "{asked:?}: {}",
-            ran.err
-        );
+        assert!(ran.err.contains("perch version"), "{asked:?}: {}", ran.err);
     }
 }
 
@@ -727,7 +724,7 @@ fn row_for<'a>(listing: &'a str, email: &str) -> &'a str {
 }
 
 /// End to end, through the process: the wound this repairs was that every
-/// registry any published Perch wrote came back as serde's words about an
+/// Registry any published Perch wrote came back as serde's words about an
 /// unknown field. A listing is the cheapest command that proves one is read, and
 /// the file left behind is the proof the step is paid once
 /// (ADR a-registry-comes-forward).

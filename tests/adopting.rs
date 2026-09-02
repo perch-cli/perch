@@ -298,9 +298,9 @@ fn a_login_whose_address_names_no_directory_is_refused_rather_than_adopted() {
     );
 }
 
-/// A first run on a machine whose registry cannot be written — a full disk, a
+/// A first run on a machine whose Registry cannot be written — a full disk, a
 /// directory somebody made read-only. Adoption writes a Credential before it
-/// writes the registry that names it, and on macOS that copy is a keychain item
+/// writes the Registry that names it, and on macOS that copy is a keychain item
 /// outside Perch's home entirely.
 #[test]
 fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {

@@ -290,7 +290,7 @@ It is the same policy as the loop, run once — the same threshold, cooldown and
 margin, and the same refusal to act on a figure it did not just read. **The
 cooldown survives between invocations**, because each Check is a fresh
 process and the sequence of them is the watcher: when one check Switched is
-recorded against the Group in the registry for the next one to be paced by. That
+recorded against the Group in the Registry for the next one to be paced by. That
 stamp is the one thing about the watcher that is written down, and it is why a
 check every minute still Switches no more often than the cooldown allows. The
 loop keeps the same fact in memory instead — two loops would be two people
@@ -306,7 +306,7 @@ check saying what it decided:
 | 15 | nothing to do now — under the threshold, inside the cooldown, a client was holding the Profile, or the Account it went to turned out to be Quarantined |
 | 17 | a Switch was wanted and every candidate was exhausted |
 | 18 | the Account it is on is in no Group, so nothing carries permission |
-| 20 | held: the figures were stale and the Refresh that would have replaced them failed |
+| 20 | held: a lock somebody else has — a Watcher was already running — or the figures were stale and the Refresh that would have replaced them failed. Nothing is wrong and nothing was changed — ask again shortly |
 
 Three more are the machine not being arranged for a check at all, and a cron
 wrapper meets the first of them before anything else:

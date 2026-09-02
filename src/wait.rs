@@ -60,7 +60,7 @@ pub enum Asked<T> {
 }
 
 /// The question, then the re-establish, then the witness. `holding` is
-/// whatever both halves must reach — the registry hold, usually. A question
+/// whatever both halves must reach — the Registry hold, usually. A question
 /// that fails is never followed by the re-asks, because nothing downstream of
 /// it will run.
 pub fn across<S, T, R>(

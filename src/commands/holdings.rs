@@ -21,7 +21,7 @@ use crate::host::Host;
 pub enum HoldingsCommand {
     /// Write everything Perch holds to one encrypted file.
     ///
-    /// The registry and every Credential, in the `age` format, so a dead
+    /// The Registry and every Credential, in the `age` format, so a dead
     /// machine or a new laptop does not cost a login for every subscription.
     /// There is no per-Account form: a selective export is a partial restore.
     ///
@@ -37,7 +37,7 @@ pub enum HoldingsCommand {
 
     /// Put a whole machine back from a file `perch holdings export` wrote.
     ///
-    /// The exact inverse of an export: the registry and every Credential, so a
+    /// The exact inverse of an export: the Registry and every Credential, so a
     /// new machine arrives with the setup the old one had rather than a pile of
     /// nameless logins. Credentials land wherever this machine's Claude Code
     /// keeps one, whatever store the file was written from.
@@ -54,7 +54,7 @@ pub enum HoldingsCommand {
 
     /// Give the machine back the state it had before Perch.
     ///
-    /// Every Profile, every Credential Perch holds and its own registry, gone
+    /// Every Profile, every Credential Perch holds and its own Registry, gone
     /// in one act — the exact inverse of an import, and what makes room for
     /// one. It takes no target: giving up one Account is `perch remove`.
     ///

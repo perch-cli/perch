@@ -1,6 +1,6 @@
 //! The namespace an Alias and a Group name share, and what may be typed as one.
 //!
-//! Below the registry that stores them rather than beside it: a name rule names
+//! Below the Registry that stores them rather than beside it: a name rule names
 //! nothing above `host`, and the migration reads the same rules this build
 //! enforces (ADR code-lives-where-it-reaches).
 
@@ -69,7 +69,7 @@ impl NameKind {
     }
 
     /// The singular with its article, for a refusal that names one of them
-    /// rather than stating the rule: "the registry holds an Alias `…`".
+    /// rather than stating the rule: "the Registry holds an Alias `…`".
     pub fn article(self) -> &'static str {
         match self {
             NameKind::Alias => "an Alias",
@@ -280,7 +280,7 @@ impl Rule {
 }
 
 /// How a version tells two names apart. History as well as a rule: what folds
-/// together decides which names one registry holds as two.
+/// together decides which names one Registry holds as two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fold {
     /// `str::to_lowercase`, which applies Greek's final-sigma rule and so holds
@@ -368,7 +368,7 @@ const UNSHOWABLE_V3: &[(char, char)] = &[
     ('\u{E0000}', '\u{E0FFF}'),
 ];
 
-/// One row per registry version, in order, so the count is the newest version.
+/// One row per Registry version, in order, so the count is the newest version.
 /// Each below the last is stated at the loosest of the builds that stamped that
 /// version, a rule joining part way through one being a rule that version did
 /// not have for all its life.
@@ -492,7 +492,7 @@ impl Rules {
     }
 
     /// Whether a Perch of this version would have accepted the name — the
-    /// question the rename pass asks of a registry it is bringing forward.
+    /// question the rename pass asks of a Registry it is bringing forward.
     pub fn accepts(&self, name: &str) -> bool {
         !self
             .rules

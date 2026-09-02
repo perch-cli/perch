@@ -945,7 +945,7 @@ fn a_token_renewed_on_the_way_in_is_not_renewed_again_when_anthropic_refuses_it(
 fn a_refresh_mid_landing_reads_the_account_named_rather_than_whatever_is_live() {
     let host = machine_with_two_accounts();
     // What a Switch leaves when it dies after the Credential moved and before the
-    // Identity was patched: the arriving Account's Credential is live, and the registry
+    // Identity was patched: the arriving Account's Credential is live, and the Registry
     // still answers "who is active" with the one being left.
     a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_FRESH);

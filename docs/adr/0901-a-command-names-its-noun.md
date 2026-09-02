@@ -92,7 +92,7 @@ Installation is what a Channel *left*; Holdings are what Perch *holds*; a Purge
 takes the second without touching the first.
 
 `Registry` understates the thing by exactly the part that matters, since an Export
-writes the registry "alongside every Credential". `State` is the kind of word the
+writes the Registry "alongside every Credential". `State` is the kind of word the
 glossary's *Avoid* lines exist to catch. `Backup` is refused by `CONTEXT.md`
 itself, which rules that "a backup is what one is *for*; the thing itself is an
 Export".
@@ -194,7 +194,7 @@ on a fresh Account says it was already so and exits 0; neither verb ever reaches
 `EXIT_NOTHING_TO_DO`, because a script that runs twice has not done anything
 wrong.
 
-Three spellings follow. `Account.disabled` is present-only in the registry, the
+Three spellings follow. `Account.disabled` is present-only in the Registry, the
 shape `quarantine` has and for the reason `quarantine` gives — a healthy Account
 reads more clearly for saying nothing about its health. The listing's State cell
 empties to the placeholder the Alias column already uses, so `disabled`,
@@ -309,6 +309,6 @@ exits with what it decided rather than with "it worked". `perch run` and
 `perch upgrade` also exit with something other than Perch's own code, for reasons
 their own commands hold.
 
-A command that reaches nothing but the registry goes through the one door
+A command that reaches nothing but the Registry goes through the one door
 (ADR one-door-to-the-registry), which is a statement about reach rather than about
 placement and does not follow from anything here.

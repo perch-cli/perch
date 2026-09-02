@@ -385,7 +385,7 @@ pub const COOLDOWN_MINUTES: u32 = 15;
 ///
 /// One difference, and it is here rather than scattered through the round: who
 /// decides when the next reading is. The cooldown is not the other half of it —
-/// both read it off the registry, because a loop is a process a Service restarts.
+/// both read it off the Registry, because a loop is a process a Service restarts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Watcher {
     /// `perch watcher run`: rounds separated by a wait this process takes.
@@ -574,7 +574,7 @@ impl Cooled<'_> {
 /// The one thing carried from one round to the next: when the watcher last Switched.
 ///
 /// Where it is carried is the loop's and the check's one difference — in memory, or off
-/// the registry ([`Recently::recorded`]) for a fresh process every time.
+/// the Registry ([`Recently::recorded`]) for a fresh process every time.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Recently {
     switched: Option<DateTime<Utc>>,
@@ -654,7 +654,7 @@ fn still_to_wait(left: Duration) -> String {
 /// A candidate as this round read it, ready to be judged against the margin.
 ///
 /// The name travels beside the address because the sentence explaining why an Account
-/// was passed over is read by the person who named it, and only the registry knows what
+/// was passed over is read by the person who named it, and only the Registry knows what
 /// they called it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Considered {
@@ -973,7 +973,7 @@ fn explaining(said: &str) -> String {
 }
 
 /// A hold that happened before there was a [`Round`] to hold, because another `perch`
-/// was holding the registry — said in the same shape as every other line, with the
+/// was holding the Registry — said in the same shape as every other line, with the
 /// figure it does not have said as unread. `retrying_in` is the promise the line may
 /// make, which is all a caller with no Round has to say: a loop's wait, or nothing
 /// for a check.
@@ -1380,7 +1380,7 @@ mod tests {
             );
         }
         assert!(
-            !held_line("Another `perch` holds the registry.", None, now()).contains("threshold"),
+            !held_line("Another `perch` holds the Registry.", None, now()).contains("threshold"),
             "including the hold that happened before there was a round to hold"
         );
     }

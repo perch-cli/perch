@@ -54,7 +54,7 @@ fn a_probe_says_which_perch_which_claude_code_and_what_it_holds() {
     assert!(said.contains(env!("CARGO_PKG_VERSION")), "{said}");
     assert!(said.contains(CLAUDE_VERSION), "{said}");
     assert!(said.contains("2 Accounts"), "{said}");
-    assert!(said.contains("registry version"), "{said}");
+    assert!(said.contains("Registry version"), "{said}");
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn every_account_comes_out_as_its_place_in_the_registry() {
     );
 }
 
-/// The numbering is the registry's order rather than the order names are met,
+/// The numbering is the Registry's order rather than the order names are met,
 /// which is what makes two Probes a week apart comparable.
 #[test]
 fn the_same_account_is_the_same_number_wherever_it_appears() {
@@ -163,7 +163,7 @@ fn a_registry_that_will_not_load_is_a_finding_rather_than_a_refusal() {
     );
 
     assert_eq!(code, EXIT_OK, "a Probe answers, whatever it found");
-    assert!(said.contains("registry would not load"), "{said}");
+    assert!(said.contains("Registry would not load"), "{said}");
 }
 
 #[test]
@@ -514,7 +514,7 @@ fn the_probe_names_the_watchers_own_log_and_does_not_read_it() {
 }
 
 /// The one reading that catches the write Perch makes in silence: every command
-/// writes the Trail, so a registry newer than its last line means one could not.
+/// writes the Trail, so a Registry newer than its last line means one could not.
 #[test]
 fn a_registry_written_after_the_trails_last_line_says_the_trail_is_not_kept() {
     let host = machine_with_two_accounts();
@@ -528,7 +528,7 @@ fn a_registry_written_after_the_trails_last_line_says_the_trail_is_not_kept() {
         ),
     );
     let host = host.with_now(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap());
-    // Touched last, so the registry is the newer of the two.
+    // Touched last, so the Registry is the newer of the two.
     host.set_file(
         REGISTRY_PATH,
         &host
@@ -607,7 +607,7 @@ fn a_start_a_reboot_left_behind_falls_out_of_the_window_with_everything_else() {
     assert!(!said.contains("never finished"), "{said}");
 }
 
-/// `registry::load` carries an old registry forward in memory, so the loaded
+/// `registry::load` carries an old Registry forward in memory, so the loaded
 /// value says every machine is current. What the file states is the finding.
 #[test]
 fn a_registry_no_command_has_carried_forward_is_said_at_the_version_it_states() {
@@ -619,7 +619,7 @@ fn a_registry_no_command_has_carried_forward_is_said_at_the_version_it_states() 
     let said = probed(&host);
     let document = probed_json(&host);
 
-    assert!(said.contains("registry version 4"), "{said}");
+    assert!(said.contains("Registry version 4"), "{said}");
     assert!(said.contains("No command has brought it forward"), "{said}");
     assert_eq!(document["home"]["registry_version"], 4, "{document:#}");
 }
@@ -771,13 +771,13 @@ fn a_machine_that_will_not_say_who_is_logged_in_asks_nothing_of_the_store() {
     );
 }
 
-/// Told apart from a registry that would not load, which is the distinction the
+/// Told apart from a Registry that would not load, which is the distinction the
 /// Home row exists to make.
 #[test]
 fn a_machine_holding_nothing_yet_says_there_is_no_registry_rather_than_a_broken_one() {
     let said = probed(&machine_with_claude_code());
 
-    assert!(said.contains("no registry yet"), "{said}");
+    assert!(said.contains("no Registry yet"), "{said}");
     assert!(!said.contains("would not load"), "{said}");
 }
 
@@ -825,7 +825,7 @@ fn a_unit_naming_a_binary_that_is_gone_says_which_half_is_missing() {
     assert!(said.contains("the binary its unit names is gone"), "{said}");
 }
 
-/// A registry that will not load takes the Watcher's grant with it: what a Scope
+/// A Registry that will not load takes the Watcher's grant with it: what a Scope
 /// says lives in the file that would not open.
 #[test]
 fn a_registry_that_will_not_load_leaves_what_the_watcher_may_act_on_unknown() {

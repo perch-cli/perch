@@ -43,7 +43,7 @@ impl Place {
     }
 
     /// An Account's own Profile. Fails where the address has no character a
-    /// directory can be named after, which is a question about the registry
+    /// directory can be named after, which is a question about the Registry
     /// rather than about liveness and so reaches the caller as itself.
     pub fn of_the_profile(host: &dyn Host, account: &Account) -> Result<Place> {
         Ok(Place::new(
@@ -543,7 +543,7 @@ mod tests {
 
     /// Not a Live Profile and not a refusal: nothing about that Profile was ever
     /// established, because there is nowhere to ask about. It reaches the caller
-    /// as the registry question it is rather than as a liveness answer.
+    /// as the Registry question it is rather than as a liveness answer.
     #[test]
     fn an_address_no_profile_can_be_named_after_has_nowhere_to_ask_about() {
         let host = FakeHost::new();

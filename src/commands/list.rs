@@ -83,7 +83,7 @@ impl Scope {
     }
 
     /// The same Accounts, as the emails a Refresh is asked for. Here rather
-    /// than at the caller because a second walk of the registry would be a
+    /// than at the caller because a second walk of the Registry would be a
     /// second answer to a question this type already answers.
     fn emails(&self, registry: &Registry) -> Vec<String> {
         self.accounts(registry)

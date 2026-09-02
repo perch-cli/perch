@@ -4,7 +4,7 @@
 //! One process is pointed at one Profile by setting `CLAUDE_CONFIG_DIR` for it
 //! and nothing else, so a Run shares none of a Switch's machinery. Several Runs
 //! coexist, which is why nothing here holds anything for as long as the client
-//! lives — the registry least of all. It is the one path where a Profile is a
+//! lives — the Registry least of all. It is the one path where a Profile is a
 //! live configuration directory, so the one path that Reconciles and the one
 //! that makes a Profile Live. Perch's own remarks go to standard error, because
 //! what the client says on stdout is the whole of what a Run says on stdout.
@@ -41,7 +41,7 @@ pub struct RunArgs {
 /// said would break every script that branches on it.
 pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // Read and let go, never held. A Run lasts as long as somebody's session,
-    // and a registry lock held across that would shut every other Perch out —
+    // and a Registry lock held across that would shut every other Perch out —
     // including the second Run this command exists to make possible.
     let registry = adopt::ensure_adopted(host)?;
 
@@ -71,7 +71,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
 
     // The one file Reconcile cannot link, because it holds the Account as well
     // as the person (ADR everything-but-the-account). It asks whether a Landing
-    // is in flight rather than settling one, since a Run holds no registry lock.
+    // is in flight rather than settling one, since a Run holds no Registry lock.
     let settled = registry::nothing_in_flight(&registry);
 
     carry::carry(
@@ -256,7 +256,7 @@ fn launching(
     let active = settled.and_then(|settled| Some((settled, registry.active().whose()?)));
     match active {
         // Both Accounts named the way every other command names one, through
-        // `is_active` — the one place the registry answers a question about an
+        // `is_active` — the one place the Registry answers a question about an
         // address, so an Alias `upsert` has respelled is not named twice.
         Some((settled, active)) if !registry.is_active(settled, email) => format!(
             "Running {said} as {named}, in this terminal alone. {} stays the \

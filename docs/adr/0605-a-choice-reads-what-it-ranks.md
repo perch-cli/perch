@@ -8,7 +8,7 @@ figure to deciding on one.
 That extension was wrong, and the sentence it produced says why:
 
 ```
-mads@example.com is already the best Account in Group `default`, with 100%
+overflow@example.com is already the best Account in Group `default`, with 100%
 headroom, which is true of every one of its Quota Windows — 5-hour is its
 fullest, as of 1m ago.
 ```

@@ -57,7 +57,7 @@ reading rather than a proof.
 
 A witness is only as honest as the ask that mints one, so there are exactly two
 minters. The second is `switch::nothing_in_flight`, for the opening line, which
-holds no registry lock and so has a Landing to *check* rather than one to
+holds no Registry lock and so has a Landing to *check* rather than one to
 settle; it can only answer `None` where one is in flight, which is why it cannot
 weaken what `Settled` means. Any third has to be argued for here.
 
@@ -117,7 +117,7 @@ Three places is a fact about the two.
   crossing, through `Crossed::fullest` either way, so the figure on the line and
   the figure the decision was taken on cannot come to differ.
 - `perch watcher run` says nothing about which Account it is watching until the
-  first round has settled the Landing. A registry read before that may hold a
+  first round has settled the Landing. A Registry read before that may hold a
   Landing, and during one `Active::whose` answers with the Account being *left*
   — the last thing Perch established rather than the thing that is true.
   Covered by a test, because an unasserted claim about what a command prints is

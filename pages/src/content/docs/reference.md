@@ -72,16 +72,19 @@ rather than on the code.
 `perch watcher status` is the same shape of question and exits 0 whether or not
 a Service is installed — branch on `--json`'s `installed`, `running` and
 `watching`, which are three different facts. `perch watcher uninstall` exits 15
-when there was nothing to take back, and a Check or a Watcher that finds another
-Watcher holding the lock exits 20.
+when there was nothing to take back. A Check that finds another Watcher holding
+the lock exits 20; a Watcher that meets a held lock at startup says who holds it
+and waits instead, and one whose lock is taken over mid-run stops, says so, and
+exits 0 — being replaced is not a failure.
 
 ## Where things are
 
 - `~/.config/perch/registry.json` — Perch's own state, versioned.
 - `~/.config/perch/.watch.lock` — held for as long as a Watcher runs, which is
   what makes it the only one on the machine. Given back however the process
-  ends; a second Watcher says who holds it and waits rather than deciding
-  alongside them.
+  ends; a second Watcher starting up says who holds it and waits rather than
+  deciding alongside them, and a Watcher whose lock is taken over mid-run stops
+  and says so.
 - `~/.config/perch/trail.log`, and `~/.config/perch/trail.log.1` once the first
   has grown past a megabyte and been moved aside. What each command was asked
   and what it decided, which `perch probe` reads back. Never written where Perch

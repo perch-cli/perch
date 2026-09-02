@@ -156,7 +156,7 @@ fn render_json(
 }
 
 /// The document for either way Perch can be on no Account: a Landing that left
-/// nobody behind, and a registry settled on nobody. One function, so the two
+/// nobody behind, and a Registry settled on nobody. One function, so the two
 /// cannot differ in shape — and every key the ordinary one has, with what it
 /// cannot answer left `null`, where a missing key is a script's `jq` failing
 /// for what reads like a different reason.

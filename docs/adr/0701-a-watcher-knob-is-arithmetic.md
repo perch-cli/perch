@@ -158,7 +158,7 @@ It is asked before the candidates are read rather than after, because a round
 that may not act has no business spending an allowance on figures it cannot use.
 
 **Every unasked Switch is written down, and both arrangements read it.** What
-Switched, and when, is written against the Scope in the registry in the same
+Switched, and when, is written against the Scope in the Registry in the same
 save as the Switch it paces — and the round ahead reads it back under the lock,
 so the Cooldown a round is held by is the one that was on record when it
 decided. Per Scope rather than per machine, because a Switch within one Group
@@ -182,10 +182,10 @@ now waits out what is left of a Cooldown, which is the cost of the Watcher not
 being able to ask who restarted it — and the cheaper of the two mistakes, since
 the other one is a machine that Switches on a crash loop.
 
-The Cooldown being on disk does not make it the machine's. A registry is per
+The Cooldown being on disk does not make it the machine's. A Registry is per
 Perch home and the watch is held by a lock over that home, so there is exactly
 one Watcher writing one record: two people watching pace themselves separately
-because they are not sharing a registry to begin with.
+because they are not sharing a Registry to begin with.
 
 **There is no no-return.** Nothing is Switched during a Cooldown, so nothing can
 be Switched back either, and a rule barring the Account just left could never

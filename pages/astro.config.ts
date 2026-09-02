@@ -42,6 +42,15 @@ export default defineConfig({
       // the default left implicit is what shows a tab a broken image.
       favicon: "/favicon.svg",
       customCss: ["./src/styles/perch.css"],
+      // Starlight declares a large-image card by default, and this site carries
+      // no og:image — that pairing renders an oversized empty slot on every
+      // shared link. `summary` is the card the head can honestly fill.
+      head: [
+        {
+          tag: "meta",
+          attrs: { name: "twitter:card", content: "summary" },
+        },
+      ],
       // Both exist for the client-side router: one to put `<ClientRouter />` in
       // the head, one to keep the search dialog across a swap.
       components: {

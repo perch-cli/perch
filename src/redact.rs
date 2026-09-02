@@ -13,7 +13,7 @@ use crate::registry::Registry;
 /// What an Account, a Group or a home directory is called in a rendering that
 /// leaves this machine.
 ///
-/// Numbered by the Account's place in the registry rather than by the order
+/// Numbered by the Account's place in the Registry rather than by the order
 /// names are met, so `<account 3>` is the same Account in every rendering.
 pub struct Redaction {
     /// Longest first, so a replacement never lands inside one already made:
@@ -45,7 +45,7 @@ enum Kind {
 }
 
 /// What a name that reached the output without a placeholder becomes: an
-/// Account the registry no longer holds, most often a `remove` earlier in the
+/// Account the Registry no longer holds, most often a `remove` earlier in the
 /// Trail. It cannot be numbered, because nothing on the machine still says
 /// which Account it was.
 const NOT_HELD: &str = "<an account no longer held>";
@@ -172,7 +172,7 @@ fn replace_whole(haystack: &str, needle: &str, with: &str) -> String {
 /// Whatever still looks like an email address once the known names are gone.
 ///
 /// The safety net rather than the rule: an Account removed last week is in the
-/// Trail and in no registry, so nothing above can name it. A run of the
+/// Trail and in no Registry, so nothing above can name it. A run of the
 /// characters an address is written with, holding an `@` with a `.` after it.
 fn anything_else_that_is_an_address(text: &str) -> String {
     let addressy = |c: char| c.is_alphanumeric() || matches!(c, '.' | '_' | '%' | '+' | '-' | '@');
@@ -344,7 +344,7 @@ mod tests {
         assert_eq!(hidden.word("spare"), "<account 1> (alias)");
     }
 
-    /// A registry an older Perch wrote can name a Group nothing: matched
+    /// A Registry an older Perch wrote can name a Group nothing: matched
     /// literally it stands between every pair of characters in the sentence.
     #[test]
     fn a_name_with_nothing_in_it_matches_nothing() {

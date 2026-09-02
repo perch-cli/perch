@@ -23,7 +23,7 @@ way of arranging something that was already permitted.
 The obvious implementation is a timer running `perch watcher check` every two
 and a half minutes. It needs no new code: the Check exists, its exit codes were
 designed for a scheduler, and its Cooldown already survives between invocations
-in the registry.
+in the Registry.
 
 It is the wrong one, and the reason is the Back-off. A Back-off is memory the
 loop keeps — it doubles when a Refresh cannot be read and the first Refresh that
@@ -31,7 +31,7 @@ works drops the whole of it (ADR a-watcher-knob-is-arithmetic). A Check has no
 memory to keep it in, so a sequence of Checks has no Back-off at all: a
 fixed-interval timer asks a refusing endpoint twenty-four times an hour, for
 ever. Persisting it would work and would be wrong twice over — it would put
-Anthropic's allowance in the registry beside the Group's Settings as if it were
+Anthropic's allowance in the Registry beside the Group's Settings as if it were
 one of them, and it would give the loop a file to write when the whole of the
 Cooldown's reasoning is that a loop's pacing belongs to the loop.
 
@@ -53,10 +53,10 @@ A LaunchAgent on macOS, a `systemd --user` unit on Linux, a Scheduled Task that
 runs on logon on Windows. Never a LaunchDaemon, never a system unit, and
 `install` refuses when it is run as root.
 
-Every Profile Perch holds is under one person's home directory, and the registry
+Every Profile Perch holds is under one person's home directory, and the Registry
 that says which Account is active is that person's. A Watcher started before
 anybody logs in has no home to read and nothing to decide about; installed under
-`sudo` it would watch root's registry, which is empty, while the person who
+`sudo` it would watch root's Registry, which is empty, while the person who
 typed it wondered why nothing ever Switched. On macOS it would also have no
 keychain, because there is no unlocked one before login
 (ADR claude-code-chooses-the-store) — but the home directory argument is every
@@ -113,7 +113,7 @@ you have not granted permission yet is a Service you have to remember to start
 again after you do, and one whose permission was withdrawn on Tuesday is
 watching again the moment it is granted on Wednesday.
 
-A permission hold reads the registry rather than the network, so it costs
+A permission hold reads the Registry rather than the network, so it costs
 nothing and needs no Back-off. It is still re-read every round rather than only
 at the first, and it re-checks on the ordinary interval rather than a faster one
 of its own: granting permission and waiting up to two and a half minutes is not
@@ -141,7 +141,7 @@ again.
 ## A Service that cannot start gives up rather than restarting for ever
 
 Everything a Watcher can hold on, it holds on, so a Service that will not
-*start* is a machine somebody has to look at: a registry that will not parse, a
+*start* is a machine somebody has to look at: a Registry that will not parse, a
 Claude Code that cannot be probed, a home directory that has gone. Restarting
 into that for ever is a loop nobody ever sees, because the only place it is
 visible is a log nobody is reading.
@@ -257,7 +257,7 @@ an Identity patch under Claude Code's locks.
 Windows gets a Scheduled Task rather than a Windows Service. A true service
 would mean the service control manager, a service entry point and a session-zero
 process with no user profile; a logon task runs in the user's own context, which
-is where the registry and the Profiles are. It is registered non-interactively so
+is where the Registry and the Profiles are. It is registered non-interactively so
 that no console window appears at every login.
 
 No exit code is new. A blocked Check is `20`, an `uninstall` with nothing to

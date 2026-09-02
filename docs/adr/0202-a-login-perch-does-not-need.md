@@ -72,6 +72,6 @@ the result differs — `perch add` refuses an Account Perch already holds, and
 `perch relogin` refuses every Account but the one named — so the refusal is the
 caller's rather than the login's.
 
-The registry lock is never held across a login. That is minutes of somebody
+The Registry lock is never held across a login. That is minutes of somebody
 else's time, and the commands that spend it take the lock afterwards, against a
-registry read fresh.
+Registry read fresh.

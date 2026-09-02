@@ -94,8 +94,9 @@ every one of them, and a Cycle spends nothing.
 
 An Account that could not be read — a spent hourly allowance, an endpoint that
 is not answering — keeps whatever figure it had, is ranked on it, and is named
-on its own line. A Switch you asked for is one you get; the age beside the
-figure is still the promise, said in a sentence instead of a column.
+on its own line. A Switch you asked for is one you get; the line says how old
+the figure it was ranked on is, so what the choice rested on is still in front
+of you.
 `perch switch --no-refresh` skips all of it and Cycles on the cache, for when
 you are offline or in a hurry. Nothing is read when you name an Account,
 because naming one decides nothing.

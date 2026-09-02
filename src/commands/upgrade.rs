@@ -6,7 +6,7 @@
 //! shortcut: Perch hands the work back to the Channel that left this
 //! Installation, and replaces the binary only for the one that leaves nobody.
 //!
-//! It writes no registry, no lock and no Credential — only, on the installer
+//! It writes no Registry, no lock and no Credential — only, on the installer
 //! Channel, a script under Perch's home, which on a fresh machine makes it.
 
 use std::io::Write;
@@ -237,7 +237,7 @@ fn check(
 /// Whether there is agreement to install a Release older than the one running.
 ///
 /// Named as a downgrade and told what it costs rather than asked "are you sure":
-/// a Perch refuses a registry a newer one wrote, so going back far enough leaves
+/// a Perch refuses a Registry a newer one wrote, so going back far enough leaves
 /// a binary that cannot read its own state.
 fn agree_to_going_back(
     host: &dyn Host,
@@ -253,7 +253,7 @@ fn agree_to_going_back(
         return Err(PerchError::Invalid(format!(
             "{wanted} is older than the {installed} that is installed, and \
              there is no terminal to agree to that on.\n\
-             A Perch older than the one that last wrote your registry refuses \
+             A Perch older than the one that last wrote your Registry refuses \
              to read it. `--yes` says you have accounted for that."
         )));
     }
@@ -262,7 +262,7 @@ fn agree_to_going_back(
         out,
         &format!(
             "{wanted} is older than the {installed} that is installed.\n\
-             Perch refuses a registry written by a newer Perch, so if {installed} \
+             Perch refuses a Registry written by a newer Perch, so if {installed} \
              has written yours, {wanted} will not read it. `perch upgrade` back \
              to {installed} is the repair."
         ),

@@ -205,6 +205,7 @@ request, which proves the *next* release's site builds. To run it yourself:
 ```sh
 cd pages
 corepack enable pnpm      # once per machine; pnpm's version comes from package.json
+                          # Node 25+ stopped bundling corepack: `npm i -g corepack` first
 pnpm install --frozen-lockfile
 pnpm check                # types, oxlint, oxfmt
 pnpm dev                  # or `pnpm build` for what the deploy uploads

@@ -42,7 +42,7 @@ fn is_disabled(host: &FakeHost, email: &str) -> bool {
         .disabled
 }
 
-/// A repair records the fresh Credential and saves the registry before it
+/// A repair records the fresh Credential and saves the Registry before it
 /// reports, so a stdout that will not take the report is a repair that stands
 /// under a non-zero exit — and unnoted it sends somebody back through a browser
 /// login for an Account that is already working again.
@@ -698,7 +698,7 @@ fn repairing_the_account_you_are_on_is_refused_while_a_client_holds_the_default_
 
 /// One step earlier than the test below, and the more dangerous of the two: the
 /// repair happened and could not be *recorded*. Clearing `active` is what would
-/// defend against that state, and clearing `active` is a registry write — so the
+/// defend against that state, and clearing `active` is a Registry write — so the
 /// only defense left is saying what not to do.
 #[test]
 fn a_repair_that_could_not_be_recorded_says_the_login_worked_and_not_to_switch() {
@@ -729,7 +729,7 @@ fn a_repair_that_could_not_be_recorded_says_the_login_worked_and_not_to_switch()
     );
 }
 
-/// The write that records a landing as landed is the third registry write of a
+/// The write that records a landing as landed is the third Registry write of a
 /// repair, and it is the one `make_live` makes for its callers — `perch relogin`
 /// makes none of its own. A `perch switch` that cannot make it says so, and so
 /// does a `perch remove`; this was the one door of the three that did not.
@@ -742,7 +742,7 @@ fn a_repair_whose_landing_could_not_be_recorded_says_so_rather_than_claiming_it_
     quarantine(&host, EMAIL);
 
     // Two writes land — the repair, and the Landing written down before the
-    // Credential moves — and the third does not. A registry lock taken over
+    // Credential moves — and the third does not. A Registry lock taken over
     // mid-command reaches the same refusal.
     let host = host.with_a_file_unwritable_after(REGISTRY_PATH, 2, "read-only file system");
 
@@ -917,7 +917,7 @@ fn an_account_removed_while_its_login_was_open_says_the_login_still_worked() {
     let host = broken_second_account().with_login(|host, dir| {
         // Somebody in another terminal gives the Account up while the browser is
         // still open. Through `forget`, which is what `perch remove` calls:
-        // dropping the entry by hand leaves a registry `load` refuses.
+        // dropping the entry by hand leaves a Registry `load` refuses.
         let mut registry = registry_of(host);
         registry.forget(SECOND_EMAIL);
         save_registry(host, &registry);

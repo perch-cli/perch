@@ -4,13 +4,13 @@ Perch is at v0.2.0 with three published releases, a Homebrew tap and an
 installer pasted from a URL with no version in it. There are people on the other
 end of it, and the premise the tree was written on is that there are none:
 breaking changes free and preferred, no migration code, no format upgraders, no
-fallback for a registry an older Perch wrote.
+fallback for a Registry an older Perch wrote.
 
 What that premise costs is already on disk rather than hypothetical.
 `registry.rs` bumped `CURRENT_VERSION` from 1 to 2 when the Settings moved onto
-Scopes, and that bump is unreleased. Every registry any published Perch has
+Scopes, and that bump is unreleased. Every Registry any published Perch has
 written claims version 1 and carries the shape that went with it. The version
-guard in `load` fires only above `CURRENT_VERSION`, so a version 1 registry is
+guard in `load` fires only above `CURRENT_VERSION`, so a version 1 Registry is
 not diagnosed — it falls through to `deny_unknown_fields` and comes back as
 serde's words about an unknown field, on a file Perch itself wrote three releases
 ago. It would ship in the release that announces Perch.
@@ -25,9 +25,9 @@ seconds, and the person is whole. So the CLI surface moves freely: commands,
 flags, output prose, exit codes and the shape of `--json`, each marked
 `[**breaking**]` in `CHANGELOG.md`, which is what `feat!:` already produces.
 
-A registry whose shape moved is a file that person cannot convert. The entry
+A Registry whose shape moved is a file that person cannot convert. The entry
 tells them what happened and leaves them with it. So the Holdings — a Profile, a
-Credential, the registry naming them, an Export carrying all three off the
+Credential, the Registry naming them, an Export carrying all three off the
 machine — change shape only behind a migration or a refusal-with-instructions.
 
 Two of the free ones are named in the rule rather than left to the list, because
@@ -41,7 +41,7 @@ a format change. A Credential Store is derived from its Profile's path, so movin
 *contents* are Claude Code's shape rather than Perch's, and are not Perch's to
 break or to keep.
 
-## An Export refuses and a registry migrates
+## An Export refuses and a Registry migrates
 
 Which of the two answers applies is not a preference. It follows from what the
 refusal costs the person it lands on.
@@ -53,10 +53,10 @@ already the shape `export.rs` argues for its own two version fields, and the
 reason an Export is meant to outlive the machine it was written on
 (ADR the-holdings-go-out-sealed).
 
-A registry holds Groups, Aliases and Settings that were typed by hand and exist
+A Registry holds Groups, Aliases and Settings that were typed by hand and exist
 nowhere else. Refusing one leaves starting over as the only route, and starting
 over means logging in to every Account again. Nothing reconstructs it. So the
-registry migrates forward from every version Perch has written.
+Registry migrates forward from every version Perch has written.
 
 That generalizes rather than enumerating: refusal is the default, and a migration
 is the exception a single artifact earns by being irreplaceable. Today exactly
@@ -69,7 +69,7 @@ refusal that cannot tell an unreadable file from a newer one says the wrong thin
 about it; a migration that cannot tell which shape it is holding cannot pick a
 step.
 
-So a change to the shape of the registry or of an Export moves its `version`. A
+So a change to the shape of the Registry or of an Export moves its `version`. A
 shape that changes under a version that does not is the one failure neither
 mechanism catches: the file parses, or half-parses, and what comes back is wrong
 rather than refused. That is the corruption both of these exist to prevent, and
@@ -87,7 +87,7 @@ That is a decision for the release that claims it.
 
 **Freezing the formats until 1.0.** It buys the same safety by forbidding the
 change instead of handling it, and the price is paid by the design rather than by
-the release: a registry that cannot change shape is a registry that accumulates
+the release: a Registry that cannot change shape is a Registry that accumulates
 fields it does not want. The bump from 1 to 2 was right; only its landing was
 wrong.
 
@@ -96,13 +96,13 @@ written perhaps twice a year, kept forever, tested against shapes nobody holds.
 The Perch that wrote the file still opens it, so the symmetry buys nothing the
 person did not already have.
 
-**Refusing the registry too.** Cheapest to write, and symmetric with the Export.
-It fails on the one thing the symmetry hides: a refused registry is not
+**Refusing the Registry too.** Cheapest to write, and symmetric with the Export.
+It fails on the one thing the symmetry hides: a refused Registry is not
 survivable. There is no earlier Perch still installed to fall back to, and what
 is being refused is the only copy of what a person told Perch about their own
 Accounts.
 
 **Leaving the whole stance in this document, with nothing in `CLAUDE.md`.** An
-agent about to change the registry's shape reads `CLAUDE.md` and may not glob
+agent about to change the Registry's shape reads `CLAUDE.md` and may not glob
 `docs/adr/`. The rule goes where it is always read; the case goes where a case
 belongs.

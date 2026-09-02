@@ -179,7 +179,7 @@ pub enum PerchError {
 /// The refusal a build raises rather than half-reading something a newer Perch
 /// wrote. Said once because both formats owe the reader the same three things:
 /// what it was, how far ahead it is, and that upgrading is the way through. A
-/// registry merely *older* migrates forward instead, and which of the two a
+/// Registry merely *older* migrates forward instead, and which of the two a
 /// format gets turns on what a refusal costs (ADR the-holdings-outlive-a-perch).
 pub fn written_by_a_newer_perch(what: &str, of: &str, version: u64, understood: u32) -> PerchError {
     PerchError::Other(format!(
@@ -484,13 +484,13 @@ mod tests {
     #[test]
     fn a_note_on_a_structured_failure_keeps_what_it_said_about_the_file() {
         let noted = PerchError::file_write("/tmp/registry.json", "read-only")
-            .with_note("Perch's registry is untouched.");
+            .with_note("Perch's Registry is untouched.");
 
         assert_eq!(noted.exit_code(), EXIT_GENERAL);
         let said = noted.to_string();
         assert!(said.contains("/tmp/registry.json"), "{said}");
         assert!(said.contains("read-only"), "{said}");
-        assert!(said.contains("Perch's registry is untouched."), "{said}");
+        assert!(said.contains("Perch's Registry is untouched."), "{said}");
     }
 
     #[test]
@@ -575,11 +575,11 @@ mod tests {
 
     #[test]
     fn a_file_written_by_a_newer_perch_says_how_far_ahead_it_is_and_what_to_do() {
-        let refused = written_by_a_newer_perch("The registry", "registry", 4, 2);
+        let refused = written_by_a_newer_perch("The Registry", "Registry", 4, 2);
 
         assert_eq!(refused.exit_code(), EXIT_GENERAL);
         let said = refused.to_string();
-        assert!(said.contains("The registry"), "{said}");
+        assert!(said.contains("The Registry"), "{said}");
         assert!(said.contains("version 4"), "{said}");
         assert!(said.contains("understands 2"), "{said}");
         assert!(said.contains("Upgrade Perch."), "{said}");

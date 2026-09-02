@@ -3,7 +3,7 @@
 //!
 //! Two halves, the same way [`crate::export`] has two. **Reading** an Export is
 //! arithmetic — given one, say whether this build understands it and what
-//! registry it restores to. **Placing** is the effect: every Credential into the
+//! Registry it restores to. **Placing** is the effect: every Credential into the
 //! Credential Store this machine's Claude Code would use, so an Export written
 //! on macOS lands in files on Linux (ADR claude-code-chooses-the-store).
 //!
@@ -26,7 +26,7 @@ use crate::say;
 /// Refuses to import onto a machine still holding anything, and names the one
 /// command that makes room.
 ///
-/// The whole registry rather than its Accounts: `Registry::forget` leaves a
+/// The whole Registry rather than its Accounts: `Registry::forget` leaves a
 /// Group declared, so the last Remove leaves Settings held nowhere else.
 pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()> {
     let Some(registry) = held else {
@@ -61,7 +61,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
     )))
 }
 
-/// The registry an Export restores to, or a refusal to guess at one.
+/// The Registry an Export restores to, or a refusal to guess at one.
 ///
 /// Nothing arrives active and nothing arrives having just been checked: being
 /// active is a claim about *this* machine's Default Profile, and
@@ -94,7 +94,7 @@ const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
 
 /// Puts every Credential the Export holds into the Profile of the Account it
 /// belongs to, wherever this machine keeps one, then runs `save` — the caller's
-/// registry write — and takes everything back out where that refuses, so an
+/// Registry write — and takes everything back out where that refuses, so an
 /// Import that does not finish cannot leave a Credential behind. Through
 /// [`profile::place`], for the read-back guard and the ledger of the taking-back.
 pub fn place(
@@ -104,7 +104,7 @@ pub fn place(
     _fresh: &crate::wait::Fresh,
     save: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    // Keyed rather than asked of the registry per key: two names are one name
+    // Keyed rather than asked of the Registry per key: two names are one name
     // exactly where `name::folded` agrees, which is what `account` scans for.
     let listed: std::collections::HashSet<String> = export
         .registry
@@ -161,7 +161,7 @@ pub fn place(
     // refusal — met half way through, it means undoing work never started.
 
     // Said here rather than left to `profile_dir_for`, whose refusal names a
-    // registry an Import requires to be empty — so it points at a file the
+    // Registry an Import requires to be empty — so it points at a file the
     // Account it is about is never in.
     for account in &export.registry.accounts {
         if holdings::slug(account.email()).is_empty() {
@@ -209,7 +209,7 @@ pub fn place(
             continue;
         }
         // Verbatim where the Export carries one, because Claude Code's
-        // `oauthAccount` block holds fields the registry does not record and a
+        // `oauthAccount` block holds fields the Registry does not record and a
         // Switch prefers it (ADR everything-but-the-account).
 
         // `Zeroizing` because `Export::drop` wipes `identity_files` and this
@@ -333,7 +333,7 @@ mod tests {
         assert!(said.contains("1 Account and 1 Group"), "{said}");
     }
 
-    /// Where the restored registry would be written. It is the file a refusal
+    /// Where the restored Registry would be written. It is the file a refusal
     /// tells somebody to edit, so it is named rather than derived here.
     const REGISTRY: &str = "/Users/someone/.config/perch/registry.json";
 
@@ -462,7 +462,7 @@ mod tests {
             || {
                 saved += 1;
                 // The Credential is already in its store when the save runs, so the
-                // registry never records an Account whose Credential is not there.
+                // Registry never records an Account whose Credential is not there.
                 assert!(
                     crate::credentials::read(&host, &store)
                         .expect("the store answers")
@@ -547,7 +547,7 @@ mod tests {
         );
     }
 
-    /// The same check the registry gets off disk. A value that means nothing
+    /// The same check the Registry gets off disk. A value that means nothing
     /// would otherwise sit in the file until the watcher next went round.
     #[test]
     fn group_configuration_that_could_not_mean_anything_is_refused_on_the_way_in() {
@@ -571,7 +571,7 @@ mod tests {
     /// And the rest of that check, which an Import used to skip. Anything this
     /// accepts and `registry::load` refuses is a machine with no working
     /// command left on it — `perch holdings purge`, the one that would make
-    /// room to try again, reads the registry too. So an Export is held to
+    /// room to try again, reads the Registry too. So an Export is held to
     /// exactly what a load is.
     #[test]
     fn a_registry_no_later_command_could_read_is_refused_rather_than_restored() {
@@ -696,7 +696,7 @@ mod tests {
 
         let said = refused.to_string();
         assert!(said.contains('@'), "{said}");
-        // An Import needs an empty registry, so the one `profile_dir_for` would
+        // An Import needs an empty Registry, so the one `profile_dir_for` would
         // send somebody to edit is the one file the Account is not in.
         assert!(
             said.contains("Export"),

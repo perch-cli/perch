@@ -24,7 +24,7 @@ A Switch writes to three places: the outgoing Account's Credential Store, the
 Default Profile's Credential Store, and `.claude.json`. On macOS the second is a
 keychain and the third is a file, and nothing makes a keychain write and a file
 write atomic together. Recording which Account is active writes a fourth place,
-the registry. **There is no arrangement of these that commits as one.** Every
+the Registry. **There is no arrangement of these that commits as one.** Every
 alternative that begins "write X first" only moves which pair can disagree.
 
 The second constraint is sharper, and it closes off the escape the first
@@ -40,14 +40,14 @@ whether Perch can at least know that.
 
 The path that survives every check the Capture makes for itself is a crash
 mid-Switch followed by a Switch to a **third** Account. `.claude.json` names the
-outgoing Account, the registry names the outgoing Account, the two agree — and
+outgoing Account, the Registry names the outgoing Account, the two agree — and
 both are wrong. That evidence is indistinguishable from an ordinary Capture of a
 Rotation, which is the case the three steps exist to serve, so no rule reading
 only that evidence can separate them: the Capture would write the *incoming*
 Account's Credential into the *outgoing* Account's Profile, over the copy the
 Switch's own first step had just correctly saved there.
 
-It does not need a crash. The registry hold goes stale in ninety seconds, a
+It does not need a crash. The Registry hold goes stale in ninety seconds, a
 keychain that stops to ask the user for permission runs that out, and Perch is
 then left detecting the disagreement, narrating it, and having nowhere to write
 it down.
@@ -56,14 +56,14 @@ it down.
 
 **`registry.active` is one field with three states** — no Account, a settled
 Account, or a Landing naming the Account being left and the Account being
-switched to. One field rather than two, so a registry naming both a settled
+switched to. One field rather than two, so a Registry naming both a settled
 active Account and a different in-flight one cannot be written at all. The
-registry carries one dangling-pointer check for `active`; a second field would
+Registry carries one dangling-pointer check for `active`; a second field would
 need a second, held by nothing but care.
 
 **It is written after the Capture and before the Credential write.** The Capture
 is safe to crash inside — it writes the live Credential into the Profile of the
-Account the registry already names, which is where that Credential belongs, and
+Account the Registry already names, which is where that Credential belongs, and
 re-running repeats it harmlessly. A Landing written earlier would be one written
 for every Switch that then refuses at step one, and one every refusal path has
 to remember to clear.
@@ -73,17 +73,17 @@ slow keychain during the Capture, the **Landing write** is the first thing that
 meets it — so it fails with nothing moved, before step two rather than after it,
 and the worst non-crash path becomes an ordinary refusal.
 
-**In the registry, not a sidecar.** A sidecar could be written outside the perch
+**In the Registry, not a sidecar.** A sidecar could be written outside the perch
 lock, which is the only argument for one, and that argument is self-defeating:
 it puts two writers on one fact. A sidecar written *under* the lock is the
-registry with an extra file that can go missing. A Landing exists to describe a
-disagreement between the registry and the machine, and the two halves of one
+Registry with an extra file that can go missing. A Landing exists to describe a
+disagreement between the Registry and the machine, and the two halves of one
 fact should not be readable apart.
 
 ## Resolution is its own step, and the Capture answers a different question
 
-A Switch path that loads a registry holding a Landing **resolves it first**, and
-then runs against a registry that tells the truth. Resolution reads the live
+A Switch path that loads a Registry holding a Landing **resolves it first**, and
+then runs against a Registry that tells the truth. Resolution reads the live
 Credential and asks, in order:
 
 - equal to the incoming Account's stored copy → the incoming Account is active;
@@ -102,7 +102,7 @@ rest.
 **The Capture gains no branch from any of this.** It answers *is there a
 Rotation to save*; resolution answers *who is active*. Those are different
 questions, and a Capture's declines about ownership are what it looks like when
-one function is made to answer both. Against a settled registry the Capture is
+one function is made to answer both. Against a settled Registry the Capture is
 the function it was written to be, and the Landing pays for itself by making the
 *next* special case unnecessary rather than by adding one.
 

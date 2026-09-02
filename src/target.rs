@@ -5,7 +5,7 @@
 //! command it is typed at. The order is Alias, then Account email, then Group.
 //!
 //! That order can never break a tie: an Alias and a Group name cannot collide
-//! because the registry refuses the second, and neither may look like an email
+//! because the Registry refuses the second, and neither may look like an email
 //! address. It is fixed anyway, because a resolution rule that depends on no
 //! collisions existing stops being true the day a migration lets one through.
 
@@ -83,7 +83,7 @@ pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarge
 }
 
 /// Matched however it was capitalized, because that is the rule the names were
-/// made under: the registry refuses an Alias or a Group differing from a held
+/// made under: the Registry refuses an Alias or a Group differing from a held
 /// name only in case, so there is never more than one candidate to find. An
 /// exact lookup here would make resolving a Target stricter than setting one.
 fn matched(registry: &Registry, target: &str) -> Option<Target> {

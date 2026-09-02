@@ -53,7 +53,7 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
     // takes the write lock waits out whatever holds it and then fails with
     // "another `perch` holds it".
     match command {
-        // The half that writes changes the registry and reaches nothing else,
+        // The half that writes changes the Registry and reaches nothing else,
         // which is the whole of what `only_the_registry` is for
         // (ADR one-door-to-the-registry).
         ConfigCommand::Set { words } => {

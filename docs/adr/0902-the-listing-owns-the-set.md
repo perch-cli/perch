@@ -197,7 +197,7 @@ sentence Perch says.
 
 `perch list` is the whole of looking and `perch switch` the whole of choosing.
 Every Account Perch holds appears in exactly one Section, because the Scopes
-partition the registry — every declared Group, then the Accounts in none — and what
+partition the Registry — every declared Group, then the Accounts in none — and what
 holds that partition up is `load` declaring any Group an Account claims. An Account
 that fell between them would simply not be printed, with nothing anywhere to say
 so.

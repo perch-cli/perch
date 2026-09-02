@@ -44,7 +44,7 @@ is written by somebody who did not read it.
 | a buffer holding a secret never frees a copy of one | `secret::Secret`, whose growth wipes what it grew out of, and which `host::write_double_quoted` and `write_escaped` take instead of a `String` |
 | a Watcher acts only while it holds the watch and has not been asked to stop | `anthropic::send`, the only path from that module to the network, whose ask is a required parameter, and `switch::asking_first`, the only path to a keychain read on the walk that settles a Landing; the port's `Network::http` is a `disallowed_methods` entry in `clippy.toml` naming the three senders that reach it, and `commands::watch::Watch::goes_on` is what a Watcher answers both asks with |
 | a step forward lands on the shape this build reads | `migration::CARRIED_TO`, a literal with `const _: () = assert!` against `registry::CURRENT_VERSION` |
-| a name rule and the registry version move together | `name::ROWS`, one row per registry version holding the rules that version enforced, with `const _: () = assert!` in `registry.rs` that the count is `CURRENT_VERSION`; a rule is a `name::Rule` variant, so one joining the build is one every `match` over the enum reports |
+| a name rule and the Registry version move together | `name::ROWS`, one row per Registry version holding the rules that version enforced, with `const _: () = assert!` in `registry.rs` that the count is `CURRENT_VERSION`; a rule is a `name::Rule` variant, so one joining the build is one every `match` over the enum reports |
 
 Four of the five are types, and the first is a lint beside its type because
 there is no type for "a path somebody resolved" that `std` will not also hand out
@@ -199,6 +199,6 @@ with nothing to ask about.
 - A name rule joining `name::validate` without `CURRENT_VERSION` moving does not
   build, and neither does the reverse: the row count is the version. What the
   rule *means* is still a reader's, and the corpus digest is what asks about it.
-- A registry version below the current one is a `name::Rules` row rather than a
+- A Registry version below the current one is a `name::Rules` row rather than a
   predicate, and the row names nothing this build can change. What a published
   Perch accepted therefore stops moving when this build's rules do.
