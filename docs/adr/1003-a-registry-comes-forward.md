@@ -125,7 +125,7 @@ is idempotent and asserted to be.
 ## It says so, once
 
 The migration prints one line, on the run that writes: which version was on disk
-and which is there now. The stance in `CLAUDE.md` is that a Holding never lands
+and which is there now. The stance in `AGENTS.md` is that a Holding never lands
 as a file this Perch reads wrong; it does not say quiet. A file somebody did not
 ask to have rewritten was rewritten, and that is worth a sentence.
 
@@ -221,5 +221,5 @@ where nothing is wrong at all.
 
 No new term. **Holdings**, **Registry** and **Settings** already say all of this,
 and "the Registry comes forward" is a sentence about them rather than a coinage.
-The word `CLAUDE.md` uses for the mechanism is *migration*, and this document is
+The word `AGENTS.md` uses for the mechanism is *migration*, and this document is
 the one it points at.

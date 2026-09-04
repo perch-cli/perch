@@ -1,6 +1,6 @@
 # Comments: the worked examples and the reasoning
 
-The rule is in `CLAUDE.md` under **A comment earns its place**. This file holds
+The rule is in `AGENTS.md` under **A comment earns its place**. This file holds
 the examples and the case for each clause. The rule binds without reading this;
 read it when a call is close.
 

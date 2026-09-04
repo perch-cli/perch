@@ -77,7 +77,7 @@ the only way to reach it is to forget the number.
 
 ## What 1.0 leaves open
 
-This says nothing about 1.0 and neither does `CLAUDE.md`. The Holdings rule is
+This says nothing about 1.0 and neither does `AGENTS.md`. The Holdings rule is
 already what it would be at any version — irreplaceable is not a property that
 changes on a release — so what a 1.0 would have to decide is the other half: how
 freely the CLI surface may still move once a version number promises it will not.
@@ -102,7 +102,7 @@ survivable. There is no earlier Perch still installed to fall back to, and what
 is being refused is the only copy of what a person told Perch about their own
 Accounts.
 
-**Leaving the whole stance in this document, with nothing in `CLAUDE.md`.** An
-agent about to change the Registry's shape reads `CLAUDE.md` and may not glob
+**Leaving the whole stance in this document, with nothing in `AGENTS.md`.** An
+agent about to change the Registry's shape reads `AGENTS.md` and may not glob
 `docs/adr/`. The rule goes where it is always read; the case goes where a case
 belongs.
