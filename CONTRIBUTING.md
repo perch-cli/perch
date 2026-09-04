@@ -69,7 +69,7 @@ run on macOS, Linux and Windows.
 
 ## Four rules that decide a review
 
-`CLAUDE.md` states these in full and is the copy that binds. They are named here
+`AGENTS.md` states these in full and is the copy that binds. They are named here
 because they are what a first pull request is most often sent back over, and
 each links to where the case is made rather than restating it.
 

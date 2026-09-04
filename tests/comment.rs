@@ -1,6 +1,6 @@
 //! The two clauses of the comment standard a script can hold.
 //!
-//! `CLAUDE.md` states four. What a comment may say, and whether it says it in
+//! `AGENTS.md` states four. What a comment may say, and whether it says it in
 //! the present tense, are judgments no text comparison reaches; the per-tier
 //! caps and one citation per decision per file are text comparisons, and
 //! eleven rewriting passes drifted on exactly those two — a two-paragraph
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use tree::{read, relative};
 
-/// What a block of each role may spend, from `CLAUDE.md`'s table. Read by role
+/// What a block of each role may spend, from `AGENTS.md`'s table. Read by role
 /// rather than by marker, because a file with no `///` still has a header, a
 /// block above a declaration, and a note at a site.
 const CAPS: [(&str, usize); 3] = [("header", 10), ("declaration", 5), ("site", 3)];

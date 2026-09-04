@@ -175,7 +175,7 @@ or a colon in the dash's old position is the same clause wearing a different mar
 is what gave the dash away rather than the dash itself.
 
 **Gated, and this is the one place a mechanical check is right.** `tests/comment.rs`
-already gates comment shape, and CLAUDE.md already says that passing it is not passing
+already gates comment shape, and AGENTS.md already says that passing it is not passing
 the standard; this sits beside it under the same caveat. It is not the line-count cap
 rejected below: a character's presence is a fact about the text rather than a proxy for
 whether a sentence earned its place, so the check can be wrong about a labeled row and

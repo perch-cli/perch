@@ -29,7 +29,7 @@ subprocess.
 
 ## Why it is not a Holding
 
-The test is the one `CLAUDE.md` states: the Holdings are what a changelog entry
+The test is the one `AGENTS.md` states: the Holdings are what a changelog entry
 cannot give back. A Profile, a Credential, the Registry naming them and an Export
 carrying all three are gone for good when a build reads one wrong. A lost Trail
 costs a person nothing they cannot have again by running the commands again.

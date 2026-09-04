@@ -7,7 +7,7 @@
 //! nothing reads it until somebody goes looking. So it is asserted here, on
 //! every pull request.
 //!
-//! The form is `CLAUDE.md`'s; the reasoning is `docs/agents/comments.md`'s.
+//! The form is `AGENTS.md`'s; the reasoning is `docs/agents/comments.md`'s.
 
 mod tree;
 
