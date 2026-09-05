@@ -15,7 +15,9 @@ Codex exposes enough information to investigate Utilization display and account 
 
 **Documented qualification:** Eligible Chat and Work activity can draw from shared workspace credits under credit-based organizational agreements. User limits, workspace overage controls, and the remaining credit allocation differ. Consuming committed credits does not itself create an additional invoice charge. [Work usage and cost](https://learn.chatgpt.com/docs/enterprise/chatgpt-work-usage-and-cost)
 
-**Answer to the user's question:** The subscription can grant access to both products while usage follows different buckets. It would be wrong to label every Codex reading “ChatGPT utilization,” or to promise that every ChatGPT activity is independent of Codex. Current documentation explicitly couples Work and Codex. The examined pages do not establish the ordinary personal-chat limit boundary for every plan/model, so that narrower point remains unconfirmed.
+**Answer to the user's question:** Yes: normal daily ChatGPT chat and Codex have separate usage allowances, even though the same ChatGPT subscription grants access to both. OpenAI explicitly separates Chat usage and credit rules from Work and Codex, including the listed Pro-model Chat allowances. Work is a different experience and shares Codex usage. [Chat model usage limits](https://help.openai.com/en/articles/20001354-gpt-56-and-gpt-6-pro-in-chatgpt)
+
+The Codex plan article also excludes regular chat from its per-chat credit rule and distinguishes ChatGPT upload, image, and voice limits from Codex. Managed workspace credit arrangements still require the qualification above; a shared billing pool is not evidence that ordinary chat consumes a Codex quota window. [Using Codex with your ChatGPT plan](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan)
 
 ## Documented integration surface
 
