@@ -191,8 +191,8 @@ reading away, so the license is the GNU General Public License, version 3 or
 any later version: use it, sell it, change it, and whoever receives the changed
 one receives its source too. The text is in [`LICENSE`](LICENSE).
 
-One additional term, under section 7 of that license, stated in full in
-[`ADDITIONAL-TERMS`](ADDITIONAL-TERMS) and shipped in every archive:
+One additional term, under sections 7(c) and 7(e) of that license, stated in
+full in [`ADDITIONAL-TERMS`](ADDITIONAL-TERMS) and shipped in every archive:
 
 > The names "Perch" and "perch-cli", and any logo of the Perch project, may
 > not be used to identify a modified version of Perch, or a work based on
@@ -200,8 +200,7 @@ One additional term, under section 7 of that license, stated in full in
 > version must be marked as modified, in a way that a person running it can
 > see, so that it is not mistaken for the version the Perch project published.
 
-The cost is that a permissive project cannot lift a module out of Perch. The
-keychain module is the piece most worth lifting, and under this license it
+The cost is that a permissive project cannot lift a module out of Perch; it
 goes only to a project that makes the same promise.
 
 ### Contribution

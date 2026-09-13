@@ -2,8 +2,8 @@ Additional terms under section 7 of the GNU General Public License, version 3
 
 Perch is licensed under the GNU General Public License, version 3 or (at your
 option) any later version. The text of that license is in the file LICENSE.
-Under section 7(e) of that license, the following additional term applies to
-every copy of Perch and to every work based on it:
+Under sections 7(c) and 7(e) of that license, the following additional term
+applies to every copy of Perch and to every work based on it:
 
   The names "Perch" and "perch-cli", and any logo of the Perch project, may
   not be used to identify a modified version of Perch, or a work based on
@@ -12,7 +12,8 @@ every copy of Perch and to every work based on it:
   see, so that it is not mistaken for the version the Perch project
   published.
 
-This term declines to grant rights in the Perch name. It removes no permission
+This term declines to grant rights in the Perch name, and requires a changed
+version to say so. It removes no permission
 the license grants: you may use, study, change and pass on Perch, and sell
 copies of it, on the terms of the license. What you pass on must carry its
 source, this notice, and a name that does not say it came from here when it
