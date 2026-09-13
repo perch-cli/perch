@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+
+- Perch is licensed under the GNU General Public License, version 3 or any
+  later version, where it was `MIT OR Apache-2.0`. Whoever receives a changed
+  Perch receives its source too, and one additional term reserves the Perch
+  name for the version this project published. Every archive now carries
+  `LICENSE` and `ADDITIONAL-TERMS` in place of `LICENSE-MIT` and
+  `LICENSE-APACHE`; the binary, the commands and the JSON are unchanged
+  ([#438](https://github.com/perch-cli/perch/issues/438))
 
 ## [0.3.8](https://github.com/perch-cli/perch/compare/v0.3.7...v0.3.8) - 2026-09-02
 ### Fixed

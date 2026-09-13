@@ -6,7 +6,7 @@
 [![npm](https://img.shields.io/npm/v/perch-cli?label=npm)](https://www.npmjs.com/package/perch-cli)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](pages/src/content/docs/installing.md)
 [![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fperch-cli%2Fperch%2Fmain%2Frust-toolchain.toml&query=%24.toolchain.channel&label=rust&prefix=v)](rust-toolchain.toml)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](#license)
 
 Run Claude Code as whichever Claude account you want, without going through the
 login flow again.
@@ -184,23 +184,27 @@ decisions.
 
 ## License
 
-Two of them, at your option, which is the Rust ecosystem's convention and not an
-accident. MIT is the shorter and better-known of the pair but says nothing at all
-about patents; Apache-2.0 grants them expressly, and cannot be combined with
-GPLv2. Offering both leaves that choice where it belongs, with whoever is
-downstream.
+Perch holds your Credentials and decides, on your behalf, which Account gets
+spent. What makes that tolerable is that anyone running it can read what it
+does. A changed Perch shipped closed asks for the same trust and takes the
+reading away, so the license is the GNU General Public License, version 3 or
+any later version: use it, sell it, change it, and whoever receives the changed
+one receives its source too. The text is in [`LICENSE`](LICENSE).
 
-Licensed under either of
+One additional term, under sections 7(c) and 7(e) of that license, stated in
+full in [`ADDITIONAL-TERMS`](ADDITIONAL-TERMS) and shipped in every archive:
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
-  <http://www.apache.org/licenses/LICENSE-2.0>)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or
-  <http://opensource.org/licenses/MIT>)
+> The names "Perch" and "perch-cli", and any logo of the Perch project, may
+> not be used to identify a modified version of Perch, or a work based on
+> Perch, without the written permission of the Perch maintainers. A modified
+> version must be marked as modified, in a way that a person running it can
+> see, so that it is not mistaken for the version the Perch project published.
 
-at your option.
+The cost is that a permissive project cannot lift a module out of Perch; it
+goes only to a project that makes the same promise.
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
+A contribution you send is licensed under the same terms, and sending it is
+the statement that you may license it so. [`CONTRIBUTING.md`](CONTRIBUTING.md)
+says the rest.

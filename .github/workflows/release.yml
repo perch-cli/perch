@@ -133,18 +133,19 @@ jobs:
       - name: Build
         run: cargo build --locked --release --target ${{ matrix.target }}
 
-      # Flat archives — the binary and both licenses, no wrapping directory —
-      # because everything that reads them extracts into a directory of its own.
-      # `.zip` on Windows, where tar in the shell is not a given.
+      # Flat archives — the binary, the license and its additional terms, no
+      # wrapping directory — because everything that reads them extracts into a
+      # directory of its own. `.zip` on Windows, where tar in the shell is not
+      # a given.
       - name: Archive
         if: runner.os != 'Windows'
         run: |
           staging="perch-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p dist "$staging"
-          cp "target/${{ matrix.target }}/release/perch" LICENSE-MIT LICENSE-APACHE "$staging/"
+          cp "target/${{ matrix.target }}/release/perch" LICENSE ADDITIONAL-TERMS "$staging/"
           # Short flags and named members: GNU tar on the Linux runners and
           # bsdtar on the macOS ones agree on these and not on much else.
-          tar -czf "dist/$staging.tar.gz" -C "$staging" perch LICENSE-MIT LICENSE-APACHE
+          tar -czf "dist/$staging.tar.gz" -C "$staging" perch LICENSE ADDITIONAL-TERMS
           ls -l dist
 
       - name: Archive (Windows)
@@ -153,7 +154,7 @@ jobs:
         run: |
           $staging = "perch-$env:GITHUB_REF_NAME-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path dist, $staging | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/perch.exe", LICENSE-MIT, LICENSE-APACHE $staging
+          Copy-Item "target/${{ matrix.target }}/release/perch.exe", LICENSE, ADDITIONAL-TERMS $staging
           Compress-Archive -Path "$staging/*" -DestinationPath "dist/$staging.zip"
           Get-ChildItem dist
 

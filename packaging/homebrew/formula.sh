@@ -44,7 +44,7 @@ class Perch < Formula
   desc "Run Claude Code as whichever Claude account you want, without logging in again"
   homepage "https://github.com/perch-cli/perch"
   version "${version}"
-  license any_of: ["MIT", "Apache-2.0"]
+  license "GPL-3.0-or-later"
 
   on_macos do
     on_arm do

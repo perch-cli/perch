@@ -487,10 +487,11 @@ and no sentence holds room for both.
 _Avoid_: platform, arch, triple, variant
 
 **Artifact**:
-One file belonging to a Release: an archive holding a binary and both licenses,
-or the checksums, or the signed provenance for either. What an Artifact claims
-about itself is checkable — the checksums say which bytes, and the provenance
-says which workflow, in which repository, at which commit, produced them.
+One file belonging to a Release: an archive holding a binary, the license and
+its additional terms, or the checksums, or the signed provenance for either.
+What an Artifact claims about itself is checkable — the checksums say which
+bytes, and the provenance says which workflow, in which repository, at which
+commit, produced them.
 _Avoid_: asset, file, package, download
 
 **Channel**:
