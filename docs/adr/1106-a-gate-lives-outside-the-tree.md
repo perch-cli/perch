@@ -123,10 +123,13 @@ guards tag creation is that write access is held by one person.
 
 ## What is deliberately absent
 
-No CLA and no Developer Certificate of Origin check. Apache-2.0 § 5 already
-places a submitted contribution under the license, `CONTRIBUTING.md` says so,
-and a sign-off check spends its enforcement on first-time contributors failing a
-push for a reason they have to go and read about.
+No CLA and no Developer Certificate of Origin check. GPLv3 has no clause that
+places a submitted contribution under the license on its own, so
+`CONTRIBUTING.md` states the terms a contribution arrives under and a pull
+request is the act of accepting them (ADR what-you-change-stays-open). That is
+the whole mechanism. A sign-off check spends its enforcement on first-time
+contributors failing a push for a reason they have to go and read about, and
+adds no term the statement does not already carry.
 
 No scanning for non-provider patterns and no validity checks on found secrets.
 Both are wanted and neither is available: they need GitHub Secret Protection,

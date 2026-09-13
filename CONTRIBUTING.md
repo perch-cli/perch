@@ -144,4 +144,7 @@ fix impossible to read, and impossible to revert on its own.
 
 ## License
 
-Contributions are dual-licensed under MIT and Apache-2.0, the same as Perch.
+A contribution is licensed under the same terms as Perch: GPL-3.0-or-later,
+with the additional term in `ADDITIONAL-TERMS`. Sending a pull request is the
+statement that you hold the right to license it so and do. There is no CLA to
+sign and no sign-off to add; this paragraph is the agreement.
