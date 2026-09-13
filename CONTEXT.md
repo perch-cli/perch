@@ -528,6 +528,22 @@ backwards when asked, which is still an Upgrade — the direction is the user's
 and the route is not.
 _Avoid_: update, self-update, bump, install
 
+**Guide**:
+The pages https://perch-cli.github.io/perch/ renders from
+`pages/src/content/docs/`, read by somebody with Perch installed and a
+terminal open. Every sentence says what to type, what they will see, what to
+do next, or what Perch will not do; why Perch does it is the ADRs' to say
+(ADR the-guide-says-what-to-type). Distinct from the README, which npm and an
+offline clone read, and from the Splash.
+_Avoid_: docs, documentation, manual, wiki
+
+**Splash**:
+The site's front page, and the one page of it that faces a reader deciding
+whether to install. It may say what Perch is for; a Guide page may not. Its
+card grid is the Guide's index, so the two cannot disagree about which pages
+exist.
+_Avoid_: landing page, home page, index
+
 ## Proving it works
 
 **Behavior**:
