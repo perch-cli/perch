@@ -243,9 +243,9 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
         "and the Purge happened: {printed}"
     );
     assert!(
-        printed.contains(AT),
-        "and the report names the file, which is now the only thing that names \
-         the Holdings — every other way out of this command says so: {printed}"
+        !printed.contains(AT),
+        "and the report names no path: the person typed it a moment ago, and a \
+         success line carries none (ADR perch-says-what-it-did): {printed}"
     );
 }
 

@@ -22,7 +22,7 @@ use crate::name::UNGROUPED;
 use crate::registry::Registry;
 use crate::say;
 
-/// What was asked of `perch config`, as the words that were typed — carried
+/// What was asked of `perch config`, as the words that were typed. Carried
 /// rather than resolved, because telling somebody which form they seem to have
 /// meant is part of what this command does, and a parser that had thrown the
 /// words away could not.

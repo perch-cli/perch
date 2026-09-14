@@ -17,7 +17,7 @@ $ perch holdings export ~/perch-backup.age
 Choose a passphrase. Nothing opens the Export without it.
 Passphrase:
 Again:
-Exported 3 Accounts to /Users/you/perch-backup.age.
+Exported 3 Accounts.
 ```
 
 Keep the passphrase somewhere that is not beside the file. Without it the
@@ -40,7 +40,7 @@ directory that does not exist is refused rather than created.
 ```
 $ perch holdings import ~/perch-backup.age
 Passphrase:
-Imported 3 Accounts from /Users/you/perch-backup.age.
+Imported 3 Accounts.
 
 $ perch list
   Account               Alias     Group  State                  Headroom        Utilization
@@ -89,7 +89,7 @@ Where to write it: /Users/you/perch-backup.age
 Choose a passphrase. Nothing opens the Export without it.
 Passphrase:
 Again:
-Exported 3 Accounts to /Users/you/perch-backup.age.
+Exported 3 Accounts.
 Type `purge` to give the machine back: purge
 Purged 3 Accounts.
 ```

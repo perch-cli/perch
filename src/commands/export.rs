@@ -102,7 +102,7 @@ pub fn write_the_export(
     drop(standing);
     destination.write(host, &sealed, &fresh)?;
 
-    report(out, destination.path(), &export)
+    report(out, &export)
 }
 
 /// The path an Export lands at, proven fit before anything is spent on it.
@@ -239,16 +239,9 @@ fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<S
 /// What an Export carries is what an Export is, and the prompt above says where
 /// the passphrase is kept — so neither is said again where every run would say
 /// it (ADR perch-says-what-it-did). The Accounts without a Credential are.
-fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
+fn report(out: &mut dyn Write, export: &Export) -> Result<()> {
     let accounts = export.accounts();
-    say::line(
-        out,
-        &format!(
-            "Exported {} to {}.",
-            say::accounts(accounts),
-            path.display(),
-        ),
-    )?;
+    say::line(out, &format!("Exported {}.", say::accounts(accounts),))?;
 
     let bare = export.without_a_credential();
     if !bare.is_empty() {

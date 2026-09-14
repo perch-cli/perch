@@ -362,6 +362,7 @@ pub fn refuse_while_anything_is_running(
     account: &crate::registry::Account,
     also_the_default_profile: Option<&'static str>,
     installed: &crate::probe::Installed,
+    consequence: &Consequence,
 ) -> Result<()> {
     let mut places = vec![Place::of_the_profile(host, account)?];
     if let Some(why) = also_the_default_profile {
@@ -373,7 +374,7 @@ pub fn refuse_while_anything_is_running(
         ));
     }
 
-    ask(host, &places).idle_or(installed, &NOTHING_WAS_CHANGED)?;
+    ask(host, &places).idle_or(installed, consequence)?;
     Ok(())
 }
 

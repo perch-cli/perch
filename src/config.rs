@@ -295,19 +295,11 @@ pub fn vocabulary(scope: &Scope) -> Vec<&'static str> {
 fn gated(registry: &Registry, scope: &Scope) -> String {
     match scope {
         Scope::Ungrouped if !registry.ungrouped.interchangeable => format!(
-            " It does not act there yet: `{}` is false, and that is a separate \
-             declaration that those Accounts are interchangeable at all. \
-             `perch config set {UNGROUPED} {} true` makes it.",
-            Setting::Interchangeable.as_str(),
+            " It does not act there until `perch config set {UNGROUPED} {} true` \
+             is set too.",
             Setting::Interchangeable.as_str(),
         ),
-        Scope::Ungrouped => format!(
-            " Those Accounts have also been declared interchangeable, which is \
-             the other half of it: the watcher acts here only where `{}` is on \
-             too.",
-            Setting::Interchangeable.as_str(),
-        ),
-        Scope::Group(_) => String::new(),
+        Scope::Ungrouped | Scope::Group(_) => String::new(),
     }
 }
 

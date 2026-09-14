@@ -28,6 +28,10 @@ leaving. Switching to the Account already active does nothing. A Switch that
 fails part way says which Account is active now, and running it again finishes
 the job.
 
+A login made outside Perch, sitting in the live store when you Switch, is
+replaced, and a `Note:` line under the verdict says whose it was. `perch add`
+logs it in again as an Account.
+
 ## Cycling
 
 ```

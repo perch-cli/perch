@@ -270,7 +270,8 @@ fn report(
         say::line(
             out,
             &format!(
-                "Note: {live}'s login was made outside Perch and replaced. `perch add` keeps it."
+                "Note: {live}'s login, made outside Perch, was replaced. `perch add` logs \
+                 it in again."
             ),
         )?;
     }

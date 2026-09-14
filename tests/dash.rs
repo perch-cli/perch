@@ -38,34 +38,43 @@ fn what_perch_says(text: &str) -> String {
         Some(at) => &text[..at],
         None => text,
     };
+    let as_said = |doc: &str| format!("\"{}\"", doc.trim_start()[3..].replace('"', "'"));
     let mut depth = 0usize;
     let mut clap_item = false;
-    text.lines()
-        .map(|line| {
-            let trimmed = line.trim_start();
-            if !clap_item && trimmed.starts_with("#[derive(") && derives_clap(trimmed) {
-                clap_item = true;
+    let mut kept: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if !clap_item && trimmed.starts_with("#[derive(") && derives_clap(trimmed) {
+            clap_item = true;
+            // The `///` run directly above is the item's own, which clap renders
+            // as its `about`: made into what it says, now that this is known.
+            let lines: Vec<&str> = text.lines().collect();
+            let mut above = kept.len();
+            while above > 0 && lines[above - 1].trim_start().starts_with("///") {
+                above -= 1;
+                kept[above] = as_said(lines[above]);
             }
-            if trimmed.starts_with("//") {
-                return match clap_item && trimmed.starts_with("///") {
-                    true => format!("\"{}\"", trimmed[3..].replace('"', "'")),
-                    false => String::new(),
-                };
+        }
+        if trimmed.starts_with("//") {
+            kept.push(match clap_item && trimmed.starts_with("///") {
+                true => as_said(trimmed),
+                false => String::new(),
+            });
+            continue;
+        }
+        if clap_item {
+            depth += line.matches('{').count();
+            let closed = line.matches('}').count();
+            if closed >= depth && depth > 0 {
+                depth = 0;
+                clap_item = false;
+            } else {
+                depth -= closed;
             }
-            if clap_item {
-                depth += line.matches('{').count();
-                let closed = line.matches('}').count();
-                if closed >= depth && depth > 0 {
-                    depth = 0;
-                    clap_item = false;
-                } else {
-                    depth -= closed;
-                }
-            }
-            line.to_string()
-        })
-        .collect::<Vec<String>>()
-        .join("\n")
+        }
+        kept.push(line.to_string());
+    }
+    kept.join("\n")
 }
 
 fn derives_clap(attribute: &str) -> bool {
@@ -191,7 +200,13 @@ pub struct Plain {
         .into_iter()
         .map(|(_, said)| said)
         .collect();
-    assert_eq!(said, vec![" One line — and its reasoning.".to_string()]);
+    assert_eq!(
+        said,
+        vec![
+            " A module — with a dash.".to_string(),
+            " One line — and its reasoning.".to_string()
+        ]
+    );
 }
 
 /// Named so a failure above can be read: what the scan takes a literal to be.

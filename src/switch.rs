@@ -939,8 +939,8 @@ fn identity_block_for(host: &dyn Host, incoming: &Account, kept_in: &Store) -> R
     Ok(held.unwrap_or_else(|| incoming.identity.oauth_account_block()))
 }
 
-/// Kept on every step short of the live write, where a half-done Switch is what
-/// the reader cannot see (ADR a-refusal-is-a-promise).
+/// Kept on every step through the live write, which fails whole: a half-done
+/// Switch is what the reader cannot see (ADR a-refusal-is-a-promise).
 const NOTHING_SWITCHED: &str = "Nothing was switched.";
 
 fn live_but_unnamed(outgoing: Option<&Account>, incoming: &Account) -> String {

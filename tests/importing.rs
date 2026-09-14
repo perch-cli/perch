@@ -818,7 +818,7 @@ fn nothing_the_export_holds_reaches_standard_output() {
     // Import, so the guide establishes them rather than this line.
     assert_eq!(
         printed.trim_end().lines().last(),
-        Some(format!("Imported 3 Accounts from {AT}.").as_str()),
+        Some("Imported 3 Accounts."),
         "{printed}"
     );
 }

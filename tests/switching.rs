@@ -308,7 +308,7 @@ fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
     );
     assert!(
         printed.contains(&format!(
-            "Note: {THIRD_EMAIL}'s login was made outside Perch and replaced. `perch add` keeps it."
+            "Note: {THIRD_EMAIL}'s login, made outside Perch, was replaced. `perch add` logs it in again."
         )),
         "and the Switch says whose the live Credential was: {printed}"
     );

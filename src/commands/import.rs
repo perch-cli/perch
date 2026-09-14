@@ -63,7 +63,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // The Import is complete by this line: every Credential is placed and the
     // Registry is written. What is left is saying so, and raised bare, a terminal
     // that has gone away makes a machine that *is* restored exit non-zero.
-    report(out, path, &export).map_err(|error| {
+    report(out, &export).map_err(|error| {
         error.with_note("The Import finished. Only the report could not be printed.")
     })
 }
@@ -110,16 +110,9 @@ fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<Stri
 /// Nothing arrives active on any Import and an Import carries the whole Registry
 /// on every one, so neither is said here: the guide establishes both. The
 /// Accounts the file held no Credential for are what this can report.
-fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
+fn report(out: &mut dyn Write, export: &Export) -> Result<()> {
     let accounts = export.accounts();
-    say::line(
-        out,
-        &format!(
-            "Imported {} from {}.",
-            say::accounts(accounts),
-            path.display(),
-        ),
-    )?;
+    say::line(out, &format!("Imported {}.", say::accounts(accounts),))?;
 
     // The repair, which is nothing where nothing came back bare, so it is the
     // condition rather than a second thing asked after one. The mirror of this in

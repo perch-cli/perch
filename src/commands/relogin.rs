@@ -61,6 +61,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         &account,
         landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
         &installed,
+        &live::NOTHING_WAS_CHANGED,
     )?;
 
     // Not `still_ours`, alone among the waits: no hold is taken before the
@@ -109,6 +110,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
                     &account,
                     landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
                     &installed,
+                    &live::NOTHING_WAS_CHANGED,
                 )?;
                 Ok((perch, registry, landing_in_the_default_profile))
             },

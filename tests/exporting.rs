@@ -269,7 +269,7 @@ fn nothing_the_export_holds_reaches_standard_output() {
     // the passphrase is kept, so neither is said again after the write.
     assert_eq!(
         printed.trim_end().lines().last(),
-        Some(format!("Exported 3 Accounts to {AT}.").as_str()),
+        Some("Exported 3 Accounts."),
         "{printed}"
     );
 }

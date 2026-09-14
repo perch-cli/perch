@@ -38,6 +38,13 @@ const WHY_THE_DEFAULT_PROFILE: &str = "the Default Profile, which is where the A
 
 /// Whether the Default Profile joins the Profiles this removal writes into: it
 /// does where an Account is landed on in place of the one being given up.
+/// Owed on both asks, because the second comes after the person agreed to a
+/// deletion and cannot see whether it began (ADR a-refusal-is-a-promise).
+const NOTHING_WAS_REMOVED: live::Consequence = live::Consequence {
+    nothing_happened: Some("Nothing was removed."),
+    quit_it: live::NOTHING_WAS_CHANGED.quit_it,
+};
+
 fn why_the_default_profile(consequence: &Consequence) -> Option<&'static str> {
     consequence
         .successor
@@ -102,6 +109,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
                 &account,
                 why_the_default_profile(&consequence),
                 &installed,
+                &NOTHING_WAS_REMOVED,
             )
         })
         .and(|perch| still_ours(perch, "removed"));
