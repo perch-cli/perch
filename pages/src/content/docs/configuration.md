@@ -4,11 +4,34 @@ sidebar:
   order: 8
 ---
 
-`perch config` changes the rules Perch chooses Accounts by, and asks nothing:
-every capability Perch has is reachable from a script, because it has to be
-complete over SSH and in CI.
+`perch config` changes the rules Perch chooses Accounts by. Every Setting is
+said about a Scope: a Group by name, or `ungrouped` for the Accounts in no
+Group. There is nothing above a Scope, and an Account carries no Settings.
 
 ## The Settings
+
+```
+$ perch config set --help
+Set one Setting on one Scope, and say what it now means.
+
+A Scope is a Group by name, or `ungrouped` for the Accounts in no Group.
+
+The Settings, and the values each takes:
+  interchangeable            `true` or `false`
+  strategy                   `most-headroom` or `soonest-reset`
+  prefer-fable               `true` or `false`
+  watcher-may-act            `true` or `false`
+  watcher-threshold-percent  a whole number between 0 and 100
+  watcher-margin-percent     a whole number between 1 and 100
+
+Every Scope carries all of them but `interchangeable`, which the Accounts in no Group alone carry: the declaration that they may be Cycled among at all.
+
+The Strategies:
+  most-headroom — prefers the Account with the most room left
+  soonest-reset — prefers the Account whose quota is about to be thrown away, so it is spent rather than wasted
+
+`perch config get` reads every Setting back.
+```
 
 | Key | Said about | Values | Default |
 | --- | ---------- | ------ | ------- |
@@ -19,36 +42,71 @@ complete over SSH and in CI.
 | `watcher-margin-percent` | any Scope | 1–100 | `10` |
 | `interchangeable` | `ungrouped` only | `true`, `false` | `false` |
 
-`perch config set --help` names the same list and the same values, so the table
-here is somewhere to read more rather than the only place they are written down.
+## Setting one
 
-## A Setting is said about the Scope it governs
+```
+$ perch config set work watcher-may-act true
+`watcher-may-act` on Group `work` is now true.
+`perch watcher run` may Switch within Group `work` on your behalf when the Account you are on reaches its threshold. Only while a Watcher is running: `perch watcher run`, a Service `perch watcher install` set up, or a `perch watcher check` on a schedule. Nothing here starts one.
+```
 
-A **Scope** — each Group, and the Accounts in no Group taken together — holds
-its own full Settings, and there is nothing above it. A Setting nobody has said
-anything about is the compiled-in default rather than somebody else's value, and
-an Account carries nothing at all: every Setting there is describes how Perch
-chooses *between* Accounts, and a rule for choosing has nothing to say to a set
-of one.
-
-So every `set` names its subject: `perch config set <scope> <key> <value>`. One
-that names no Scope is refused, because a rule with no subject is a rule about
-nothing — and there is no word for "everywhere" to reach for instead.
+`perch config set <scope> <key> <value>` sets one Setting and says what it now
+means. It reaches the Scope it names and no other: a Group declared tomorrow
+starts at the defaults. There is no `unset`. Set a value to what it should be.
 
 ```
 $ perch config set work watcher-threshold-percent 70
 `watcher-threshold-percent` on Group `work` is now 70.
-`perch watcher run` Switches within Group `work` once that much of the fullest Quota Window of the Account you are on has been used. [...]
+`perch watcher run` Switches within Group `work` once that much of the fullest Quota Window of the Account you are on has been used. Only while a Watcher is running: `perch watcher run`, a Service `perch watcher install` set up, or a `perch watcher check` on a schedule. Nothing here starts one.
 
-$ perch config set watcher-threshold-percent 70
-`perch config set watcher-threshold-percent 70` names no Scope, and every Setting is said about the Scope it governs — there is nothing above them for a value to be set at. `perch config set <scope> watcher-threshold-percent 70` sets one. `ungrouped` addresses the Accounts in no Group. Groups Perch holds: personal, work.   # exit 14
+$ perch config set work watcher-margin-percent 20
+`watcher-margin-percent` on Group `work` is now 20.
+`perch watcher run` will only move within Group `work` to an Account at 50% or under. A round with nowhere that empty to go says so and moves nothing. Only while a Watcher is running: `perch watcher run`, a Service `perch watcher install` set up, or a `perch watcher check` on a schedule. Nothing here starts one.
+```
 
+The margin is in points under the threshold. A margin wider than the threshold
+is allowed, and means the watcher moves only onto an Account with nothing used.
+
+```
+$ perch config set work strategy soonest-reset
+`strategy` on Group `work` is now soonest-reset.
+A Cycle within Group `work` prefers the Account whose fullest Quota Window resets soonest, so perishable quota is spent rather than wasted. Headroom is still measured by the worst window, so an exhausted Account is still never chosen however soon it comes back.
+
+$ perch config set work prefer-fable true
+`prefer-fable` on Group `work` is now true.
+A Cycle within Group `work` now puts the Accounts that can serve Fable first, ranked by the room in their Fable weekly window, and falls through to the rest — ranked without that window — only when Fable is spent everywhere.
+```
+
+Where a cached figure carries no reset time, `soonest-reset` ranks it below
+one that does, and a Cycle with no reset times to compare says it fell back to
+room. With `prefer-fable` on and no Account reporting a Fable window, the
+listing says so and ranks on Headroom alone. Perch supplies Fable capacity
+only. Which model a session uses stays with the session.
+
+## Letting the ungrouped Accounts Cycle
+
+```
+$ perch config set ungrouped interchangeable true
+`interchangeable` on the Ungrouped Scope is now true.
+A bare `perch switch` from an Account in no Group now Cycles among the other ungrouped Accounts. That declares every ungrouped Account interchangeable at once, present and future, including the next one `perch add` creates.
+
+$ perch config set ungrouped watcher-may-act true
+`watcher-may-act` on the Ungrouped Scope is now true.
+`perch watcher run` may Switch among the Accounts in no Group on your behalf when the Account you are on reaches its threshold. Those Accounts have also been declared interchangeable, which is the other half of it: the watcher acts here only where `interchangeable` is on too. Only while a Watcher is running: `perch watcher run`, a Service `perch watcher install` set up, or a `perch watcher check` on a schedule. Nothing here starts one.
+```
+
+The Accounts in no Group need both. A Group needs only `watcher-may-act`, and
+does not carry `interchangeable`.
+
+## Reading it back
+
+```
 $ perch config get
 ungrouped:
 interchangeable            true
 strategy                   most-headroom
 prefer-fable               false
-watcher-may-act            false
+watcher-may-act            true
 watcher-threshold-percent  80
 watcher-margin-percent     10
 
@@ -61,140 +119,18 @@ watcher-margin-percent     10
 
 work:
 strategy                   soonest-reset
-prefer-fable               false
-watcher-may-act            false
+prefer-fable               true
+watcher-may-act            true
 watcher-threshold-percent  70
-watcher-margin-percent     10
+watcher-margin-percent     20
 
 $ perch config get work strategy
 soonest-reset
 ```
 
-**Reading is not writing.** A bare `perch config get` prints every Scope's
-Config in full, and `perch config get <scope>` prints one Scope's: a read has no
-subject to be wrong about, and a write does. A Scope's name and a row under it
-are the `perch config set` that would restore the line, so reading the Config
-and writing it back are the same vocabulary — and naming both words prints the
-value alone, which is what `$(perch config get work strategy)` wants.
+`perch config get <scope>` prints one Scope's page without its heading. A
+Scope and a key print the value alone, for `$(perch config get work strategy)`.
+Each row under a Scope's name is the `perch config set` that would restore it.
 
-There is no `perch config unset`. With nothing above a Scope there is nothing to
-clear — a value is simply set to what it should be. (`perch alias <target>
---unset` is untouched: freeing a name is a different act.)
-
-## Scopes
-
-A Scope is a Group by name, or `ungrouped` for the Accounts in no Group — which
-are a Scope so that there is somewhere to say how they are Cycled, and never a
-Group: a Group is a declaration somebody made, and this is the absence of one.
-No Group can be called `ungrouped`, or the Scope would answer to the name first.
-
-`global` is refused as a Group name and as an Alias too, for a different reason:
-it is the word people reach for when they mean *everywhere*, and there is no
-everywhere. The refusal is where you find that out, which is a better place to
-learn it than from a Setting that appeared to take.
-
-`interchangeable` is carried by `ungrouped` alone and is absent from a Group's
-page. It is the declaration that those Accounts may be Cycled among at all, and
-a Group **is** that declaration — printing the line against a Group and then
-refusing to set it would break the rule the whole command rests on.
-
-The watcher therefore needs **two independent yeses** among the Accounts in no
-Group: `interchangeable`, saying they are a set worth moving between, and
-`watcher-may-act`, letting something move between them unasked. A Group needs
-only the second. Neither implies the other, which is why they are two things
-rather than one said twice.
-
-## Strategy
-
-The **strategy** is which Account a Cycle prefers when more than one would
-serve. `most-headroom` takes the one with the most room left; `soonest-reset`
-takes the one whose fullest Quota Window comes back soonest, so quota that was
-about to be thrown away is spent rather than wasted. How headroom is *measured*
-is always the worst window, so a strategy reorders the Accounts that have room
-and can never promote an exhausted one. [`prefer-fable`](#spending-fable-first)
-adds a tier on top of that measurement, and a strategy then orders within a
-tier.
-
-A strategy says which figure to prefer, not which figures to invent. Cached
-figures do not always carry a reset time, and `soonest-reset` ranks an Account
-whose figure does not above nothing at all: an Account that says when it comes
-back is preferred to one that does not, and where none of them says, the Cycle
-falls back to the room it can see and says that is what it did.
-
-## Spending Fable first
-
-`prefer-fable` makes a Scope spend Fable before anything else. Off — the
-default — nothing changes. On, the ranking becomes two tiers: the Accounts that
-can serve a Fable request right now come first, ordered by how much of their
-weekly Fable window is left, so Fable drains evenly across the Scope before
-anything else is touched. Everything else follows, ordered by its fullest
-window that is not Fable's — so when Fable is spent everywhere, the watcher
-still moves you once onto the best of what remains and then holds. `perch list`
-shows the same order the watcher acts on.
-
-The preference keys on the window Anthropic reports for Fable. If it is on and
-no observed Account reports that window — after a model rename, say — the
-listing says so, and Accounts rank on headroom alone rather than the Setting
-silently behaving as if it were off.
-
-Perch supplies Fable *capacity* only: which model a session actually uses stays
-with the session.
-
-## The watcher's three
-
-The **watcher's** three fields govern [`perch watcher`](watching.md) and nothing
-else. `watcher-may-act` says whether it may Switch within that Scope at all, and
-is off by default because a Scope only ever changes underneath you because you
-said it could. It is said about the Scope it grants and reaches no other, so a
-Group declared afterwards is a Group nobody has said anything about — and there
-is no one command that withdraws the watcher everywhere, which is the price of
-consent that cannot arrive by inheritance. `watcher-threshold-percent` is how
-much of the fullest Quota Window of the Account you are on has to be used before
-it moves you. Neither of them starts a Watcher: they take effect while one is
-running — the loop in a terminal, a Service, or a scheduled Check — and not
-otherwise.
-
-Taking `watcher-may-act` back does not stop a Watcher that is already running.
-It **holds** it: it reads nothing and moves nothing, says what is missing, and
-starts deciding again the moment the grant comes back. The grant is about
-whether it may *act*, and a held Watcher is not acting.
-
-`watcher-margin-percent` is the second half of the same question, and a
-different one: how *empty* a candidate has to be before moving to it is worth
-doing, in points under the threshold. At the default 10 and a threshold of 80,
-nothing above 70% is moved to. Two knobs rather than one because the ceiling is
-the threshold less the margin, so a single knob moves both: raising the
-threshold to 90 to reach a ceiling of 80 also delays when you are moved off,
-which is the opposite of what a conservative destination rule wants.
-
-`0` is refused. An Account is left at or over the threshold and a candidate is
-set aside above the ceiling, so at a margin of nothing an Account at exactly 80%
-would be both full enough to leave and clear enough to arrive at. A margin wider
-than the threshold is fine, and is a Scope that will only move onto an Account
-with nothing used at all — a coherent thing to ask for, reached from either
-side.
-
-**The two numbers beside them are arithmetic, so they are fixed rather than
-offered:**
-
-- How often it **reads** — two and a half minutes, derived from Anthropic's
-  allowance of ~28-30 reads an hour rather than from anyone's taste. A Group
-  configured to read every ten seconds would be a Group configured to spend that
-  allowance and be refused.
-- The **cooldown** — 15 minutes — which is the least it leaves between two
-  Switches. A five-hour window moves slowly enough that fifteen minutes never
-  misses a real crossing, which is arithmetic about the window rather than a
-  taste.
-
-## Reading it back
-
-`perch config get` lays each Scope's Settings out as a page: the keys in one
-column and the values in another. A bare `perch config get` names each Scope
-above its page, because the words did not; `perch config get <scope>` prints the
-page alone. Naming a Scope and a key prints the value alone, with no field to
-cut out of it.
-
-An unknown key or a value that means nothing is refused with exit code 14 and
-the ones that do mean something, so a script that mistyped a Setting does not
-go on believing it took — and so is a `set` with no Scope in it, which is the
-same mistake made about the subject rather than the value.
+A `set` that names no Scope, an unknown key or a value out of range is refused
+and names what would have worked.

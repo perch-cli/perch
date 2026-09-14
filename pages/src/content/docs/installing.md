@@ -193,7 +193,16 @@ of its own.
 
 ## Once it is installed
 
-Run `perch status`. The first command you run adopts the Claude Code login
-already on the machine as your first Account, and
+```
+$ perch status
+Adopted the Claude Code login as your first Profile, now active: you@example.com (Acme, pro). Claude Code 2.1.221.
+Account       you@example.com
+Organization  Acme
+Plan          pro
+Utilization   never observed
+```
+
+The first command you run adopts the Claude Code login already on the machine
+as your first Account.
 [Accounts](accounts.md#adopting-the-login-you-already-have) picks up from
 there.
