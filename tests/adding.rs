@@ -178,7 +178,7 @@ fn the_account_you_were_using_stays_active_and_untouched() {
     // for, and nothing reassuring about the Account being left alone.
     assert!(
         printed.contains("Logging in to a new Profile."),
-        "the user should be told the session they are in survived:\n{printed}"
+        "what the login is for, and nothing more:\n{printed}"
     );
     assert!(
         !host

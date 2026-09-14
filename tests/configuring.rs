@@ -734,7 +734,7 @@ fn a_get_of_a_key_alone_says_a_setting_is_read_about_a_scope() {
     assert!(said.contains("is a Setting, not a Scope"), "{said}");
     assert!(
         said.contains("perch config set <scope> strategy"),
-        "and the form that reads it is named: {said}"
+        "and the form that sets it is named: {said}"
     );
 }
 

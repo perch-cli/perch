@@ -46,7 +46,7 @@ pub struct Unnamed {
 /// What a Purge that will not run leaves behind: everything, a Purge being all
 /// or nothing.
 const NOTHING_WAS_PURGED: live::Consequence = live::Consequence {
-    nothing_happened: "Nothing was purged.",
+    nothing_happened: Some("Nothing was purged."),
     quit_it: "Quit it and run this again.",
 };
 

@@ -49,7 +49,7 @@ $ perch list
   spare@example.com     -         none   disabled, quarantined  never observed  never observed
 
 spare@example.com: Anthropic would not renew its Credential.
-`perch relogin spare@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+`perch relogin spare@example.com` repairs it.
 ```
 
 Nothing arrives active. Claude Code goes on as whatever it is logged in as

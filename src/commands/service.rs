@@ -332,7 +332,7 @@ fn describe(host: &dyn Host) -> Result<(Unit, ResolvedClaude)> {
         environment: carried
             .into_iter()
             .chain(match &claude {
-                ResolvedClaude::Carried { at, .. } => Some((
+                ResolvedClaude::Carried { at } => Some((
                     probe::CLAUDE_BIN_VAR.to_string(),
                     at.to_string_lossy().into_owned(),
                 )),
@@ -432,10 +432,9 @@ fn rehearsed(
     }
 }
 
-/// Which Claude Code the unit carries, or that it carries none and the
-/// Service will hold.
-/// Said only where the person has to act: a carried `claude` is the ordinary
-/// case, and one passed over changes nothing they will do.
+/// The note an install owes about Claude Code, where it owes one: a carried
+/// `claude` is the ordinary case, and one passed over changes nothing the
+/// person will do.
 fn said_about_claude(claude: &ResolvedClaude) -> Option<String> {
     match claude {
         ResolvedClaude::Carried { .. } => None,

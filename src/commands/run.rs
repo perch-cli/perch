@@ -229,8 +229,7 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> 
     )
 }
 
-/// What is about to happen. Nothing about who stays active elsewhere: that is
-/// what a Run is, and the guide's to say (ADR perch-says-what-it-did).
+/// What is about to happen.
 fn launching(registry: &Registry, email: &str, said: &str) -> String {
     format!(
         "Running {said} as {}, in this terminal alone.",

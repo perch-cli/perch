@@ -90,7 +90,7 @@ Enabling does not repair a Quarantined Account:
 
 ```
 $ perch enable spare
-spare@example.com (as `spare`) was already enabled. It is Quarantined, though: Anthropic would not renew its Credential. Nothing switches to it, Cycling or you. `perch relogin spare@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+spare@example.com (as `spare`) was already enabled. It is Quarantined: Anthropic would not renew its Credential. `perch relogin spare@example.com` repairs it.
 ```
 
 ## When an Account breaks
@@ -100,7 +100,7 @@ $ perch status
 Account       you@example.com
 Organization  Acme
 Plan          pro
-Quarantine    Anthropic would not renew its Credential. `perch relogin you@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+Quarantine    Anthropic would not renew its Credential. `perch relogin you@example.com` repairs it.
 Utilization   never observed
 ```
 

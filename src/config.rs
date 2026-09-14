@@ -336,28 +336,6 @@ fn strategy(value: &str) -> Result<Strategy> {
         })
 }
 
-/// Each Strategy and what it prefers, a line apiece. The one list, because the
-/// refusal and `set`'s help both offer it and two would drift.
-pub fn the_strategies() -> Vec<String> {
-    Strategy::ALL
-        .map(|strategy| format!("{} — {}", strategy.as_str(), gloss(strategy)))
-        .to_vec()
-}
-
-/// What each Strategy prefers, in a clause. Built by matching every Strategy
-/// rather than written out once as prose, so a Strategy added to the enum
-/// cannot ship with a refusal that fails to mention it — the match stops
-/// compiling instead.
-fn gloss(strategy: Strategy) -> &'static str {
-    match strategy {
-        Strategy::MostHeadroom => "prefers the Account with the most room left",
-        Strategy::SoonestReset => {
-            "prefers the Account whose quota is about to be thrown away, so it \
-             is spent rather than wasted"
-        }
-    }
-}
-
 fn yes_or_no(key: &str, value: &str) -> Result<bool> {
     match value.to_ascii_lowercase().as_str() {
         "true" => Ok(true),

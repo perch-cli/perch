@@ -36,7 +36,7 @@ $ perch list
 
 * is the active Account.
 overflow@example.com (as `overflow`): Anthropic would not renew its Credential.
-`perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+`perch relogin overflow@example.com` repairs it.
 ```
 
 **State** is `disabled`, `quarantined`, both, or empty. **Headroom** is what is
@@ -66,7 +66,7 @@ Group `work`
 Reserve: 1 of 1 Account has Headroom, the best 58% left (as of 4m ago)
 1 Quarantined, so nothing Cycles to it.
 overflow@example.com (as `overflow`): Anthropic would not renew its Credential.
-`perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+`perch relogin overflow@example.com` repairs it.
 ```
 
 `perch list <group>` is where a Cycle could take you. The **Reserve** is how

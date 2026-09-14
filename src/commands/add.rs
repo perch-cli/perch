@@ -259,8 +259,7 @@ fn resolve_group(
     }
 }
 
-/// What the login is for. That the active Account is left alone is what every
-/// Add does, and the guide's to say (ADR perch-says-what-it-did).
+/// What the login is for.
 fn announcement() -> String {
     "Logging in to a new Profile.".to_string()
 }

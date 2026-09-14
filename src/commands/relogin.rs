@@ -313,8 +313,7 @@ fn will_land_in_the_default_profile(registry: &Registry, account: &Account) -> b
     registry.active().names(account.email())
 }
 
-/// What the login is for. Whether the fresh Credential goes live is what a
-/// repair of the active Account does, and the guide's to say.
+/// What the login is for.
 fn announcement(account: &Account) -> String {
     format!("Logging in again to repair {}.", account.email())
 }

@@ -59,8 +59,8 @@ to learn that.
 > under the verdict, opening `Note:`, that names the command.
 
 The one Capture outcome that survives is the login made outside Perch that a Switch is
-about to replace: *Note: alice@x's login was replaced outside Perch. `perch add` keeps
-it.* The person may want that login, and nothing else on the screen tells them it exists.
+about to replace: *Note: alice@x's login was made outside Perch and replaced. `perch add`
+keeps it.* The person may want that login, and nothing else on the screen tells them it exists.
 
 **No path on a success line.** *Installed the Watcher. Its decisions go to
 /Users/you/Library/Logs/perch/watcher.log* tells the person where a file is on the one
