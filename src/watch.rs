@@ -416,13 +416,7 @@ impl Voice {
         match lost {
             // A stop nobody asked for, so a refusal says why. The lock is not
             // given back — it is somebody else's now.
-            Lost::HandedOver => say::line(
-                out,
-                "Stopped: another Watcher has taken the watch over, so this one \
-                 is no longer the only one deciding. Its lock is left where it \
-                 is, no file of its own was written, and the Account you are on \
-                 is the one it last Switched to.",
-            ),
+            Lost::HandedOver => say::line(out, "Stopped: another Watcher took the watch over."),
             Lost::Stopped => self.stopped(out),
         }
     }

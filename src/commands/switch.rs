@@ -26,15 +26,10 @@ use crate::utilization;
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct SwitchArgs {
-    /// The Account to switch to — its Alias or its email address — or a
-    /// Group to Cycle within.
+    /// An Alias or email address, or a Group to Cycle within
     pub target: Option<String>,
 
-    /// Cycle on the cached figures, without reading any first.
-    ///
-    /// A Cycle otherwise reads the Accounts it cannot rank without, which
-    /// costs a round trip each. Nothing is read for a named Account
-    /// either way, because naming one decides nothing.
+    /// Cycle on the cached figures
     #[arg(long)]
     pub no_refresh: bool,
 }
@@ -67,15 +62,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         incoming,
         chosen,
         unread,
-    } = decide(
-        host,
-        &mut perch,
-        &mut registry,
-        &settled,
-        &args,
-        &installed,
-        out,
-    )?;
+    } = decide(host, &mut perch, &mut registry, &settled, &args, &installed)?;
     let outgoing = registry.active_account(&settled).cloned();
 
     already_there(host, &installed, &registry, &settled, &incoming)?;
@@ -116,12 +103,10 @@ fn decide(
     settled: &Settled,
     args: &SwitchArgs,
     installed: &Installed,
-    out: &mut dyn Write,
 ) -> Result<Decision> {
     let scope = match args.target.as_deref() {
         Some(target) => {
             let found = target::resolve(registry, target)?;
-            say::line(out, &found.matched())?;
             match found {
                 Target::Group { name } => Scope::Group(name),
                 Target::Alias { email, .. } | Target::Account { email } => {
@@ -259,66 +244,6 @@ fn report(
     captured: &Captured,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    match captured {
-        // Said by nothing, because it happens before every Switch without
-        // exception — the ordinary case announcing that it was ordinary. The
-        // reassurance is the guide's to give once.
-        Captured::Copied { .. } => {}
-        // The one case where a Capture was declined rather than found
-        // unnecessary, so it says what was live and what was spared.
-        Captured::NotTheirs { outgoing, live } => say::line(
-            out,
-            &format!(
-                "The live Credential names {live}, not {outgoing}, so it was not \
-                 Captured and {outgoing}'s own Credential is untouched. To keep \
-                 a login made outside Perch, `perch add` it before switching."
-            ),
-        )?,
-        // The one case where switching back to that Account needs a login
-        // rather than just working.
-        Captured::NothingLive => say::line(
-            out,
-            "There was no live Credential to Capture: Claude Code was logged out.",
-        )?,
-        // The live store held something that was not a Credential. Said rather
-        // than swallowed, and not refused either: bytes nothing can read are not
-        // a Rotation, and this Switch puts a usable Credential back in front.
-        Captured::Unreadable { outgoing, why } => say::line(
-            out,
-            &format!(
-                "The live Credential could not be read, so it was not Captured \
-                 and {outgoing}'s own Credential is untouched: {why}"
-            ),
-        )?,
-        // Also worth saying: whatever was live belonged to no Account Perch
-        // holds, so it was replaced rather than kept anywhere.
-        Captured::NoOutgoing => say::line(
-            out,
-            "Perch held no active Account, so there was nothing to Capture.",
-        )?,
-        // A `perch run` against the Account being left Rotated its own Profile's
-        // copy, so the live one is the older. Said, because it is the one case
-        // where the Account keeps a Credential the live store never held.
-        Captured::Superseded { outgoing } => say::line(
-            out,
-            &format!(
-                "{outgoing}'s Profile already held a newer Credential than the \
-                 live one, so it was kept rather than Captured over."
-            ),
-        )?,
-        // The repair for a Switch that stopped before it named the Account it
-        // had landed on. Nothing was Captured because nothing had moved on.
-        Captured::NothingToSave => say::line(
-            out,
-            &format!(
-                "{}'s Credential was already the live one, so there was nothing \
-                 to Capture. This finished a Switch that had stopped before \
-                 naming it.",
-                incoming.email(),
-            ),
-        )?,
-    }
-
     // An Account the Cycle wanted to read and could not, ranked on whatever was
     // cached — the one thing that can make this Switch land somewhere worse than
     // it left. Silence is every figure it ranked on current or proven harmless.
@@ -337,6 +262,19 @@ fn report(
             None => format!("Switched to {named}."),
         },
     )?;
+
+    // The one Capture outcome with something to do about it: a login made
+    // outside Perch that this Switch replaced, which nothing else on the screen
+    // says existed. Every other outcome is silent.
+    if let Captured::NotTheirs { live, .. } = captured {
+        say::line(
+            out,
+            &format!(
+                "Note: {live}'s login, made outside Perch, was replaced. `perch add` logs \
+                 it in again."
+            ),
+        )?;
+    }
 
     // As of the cache and never from the network
     // (ADR a-figure-carries-its-age): the figures are shown with their age, so a

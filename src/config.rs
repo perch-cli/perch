@@ -69,9 +69,8 @@ impl Setting {
     /// spelled at two sites is how the two come to name different remedies.
     fn only_the_ungrouped_scope_carries_it() -> PerchError {
         PerchError::Invalid(format!(
-            "`{}` is the declaration that the Accounts in no Group are \
-             interchangeable at all, and only they carry it. `perch config set \
-             {UNGROUPED} {} <value>` says it.",
+            "`{}` is a Setting of `{UNGROUPED}` alone. `perch config set \
+             {UNGROUPED} {} <value>` sets it.",
             Setting::Interchangeable.as_str(),
             Setting::Interchangeable.as_str(),
         ))
@@ -167,7 +166,7 @@ impl Setting {
                 unreachable!("the Ungrouped Scope is always there to write to")
             };
             return Err(PerchError::NotFound(format!(
-                "no Group is called `{name}`, so there is nothing to set on it."
+                "No Group is called `{name}`."
             )));
         };
         *held = settings;
@@ -296,19 +295,11 @@ pub fn vocabulary(scope: &Scope) -> Vec<&'static str> {
 fn gated(registry: &Registry, scope: &Scope) -> String {
     match scope {
         Scope::Ungrouped if !registry.ungrouped.interchangeable => format!(
-            " It does not act there yet: `{}` is false, and that is a separate \
-             declaration that those Accounts are interchangeable at all. \
-             `perch config set {UNGROUPED} {} true` makes it.",
-            Setting::Interchangeable.as_str(),
+            " It does not act there until `perch config set {UNGROUPED} {} true` \
+             is set too.",
             Setting::Interchangeable.as_str(),
         ),
-        Scope::Ungrouped => format!(
-            " Those Accounts have also been declared interchangeable, which is \
-             the other half of it: the watcher acts here only where `{}` is on \
-             too.",
-            Setting::Interchangeable.as_str(),
-        ),
-        Scope::Group(_) => String::new(),
+        Scope::Ungrouped | Scope::Group(_) => String::new(),
     }
 }
 
@@ -327,33 +318,14 @@ fn strategy(value: &str) -> Result<Strategy> {
         .find(|candidate| value.eq_ignore_ascii_case(candidate.as_str()))
         .ok_or_else(|| {
             PerchError::Invalid(format!(
-                "`{value}` is not a Strategy Perch implements. The ones it \
-                 implements are:\n  {}",
-                the_strategies().join("\n  "),
+                "`{value}` is not a Strategy. They are {}.",
+                Strategy::ALL
+                    .iter()
+                    .map(|strategy| format!("`{}`", strategy.as_str()))
+                    .collect::<Vec<String>>()
+                    .join(" and "),
             ))
         })
-}
-
-/// Each Strategy and what it prefers, a line apiece. The one list, because the
-/// refusal and `set`'s help both offer it and two would drift.
-pub fn the_strategies() -> Vec<String> {
-    Strategy::ALL
-        .map(|strategy| format!("{} — {}", strategy.as_str(), gloss(strategy)))
-        .to_vec()
-}
-
-/// What each Strategy prefers, in a clause. Built by matching every Strategy
-/// rather than written out once as prose, so a Strategy added to the enum
-/// cannot ship with a refusal that fails to mention it — the match stops
-/// compiling instead.
-fn gloss(strategy: Strategy) -> &'static str {
-    match strategy {
-        Strategy::MostHeadroom => "prefers the Account with the most room left",
-        Strategy::SoonestReset => {
-            "prefers the Account whose quota is about to be thrown away, so it \
-             is spent rather than wasted"
-        }
-    }
 }
 
 fn yes_or_no(key: &str, value: &str) -> Result<bool> {

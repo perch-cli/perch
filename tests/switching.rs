@@ -192,7 +192,7 @@ fn switching_by_email_makes_that_account_the_one_every_client_reads() {
 }
 
 #[test]
-fn switching_by_alias_says_which_account_the_name_reached() {
+fn switching_by_alias_lands_on_the_account_the_name_reaches() {
     let host = machine_with_two_accounts();
     set_alias(&host, "overflow", SECOND_EMAIL).0.unwrap();
 
@@ -200,7 +200,7 @@ fn switching_by_alias_says_which_account_the_name_reached() {
 
     result.expect("the Switch runs");
     assert!(
-        printed.contains(&format!("`overflow` is an Alias for {SECOND_EMAIL}.")),
+        printed.contains(&format!("Switched to {SECOND_EMAIL} (as `overflow`).")),
         "{printed}"
     );
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
@@ -282,8 +282,9 @@ fn a_capture_does_not_write_the_live_credential_over_a_newer_one_the_profile_hol
         "the Capture is declined: the live copy's refresh token is the retired one"
     );
     assert!(
-        printed.contains("newer Credential"),
-        "and the declined Capture is said rather than swallowed: {printed}"
+        !printed.contains("Captur"),
+        "and a declined Capture that needs nothing done is not said (ADR \
+         perch-says-what-it-did): {printed}"
     );
 }
 
@@ -306,7 +307,9 @@ fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
         "{EMAIL}'s own Credential is untouched, not overwritten with {THIRD_EMAIL}'s"
     );
     assert!(
-        printed.contains(THIRD_EMAIL) && printed.contains("not Captured"),
+        printed.contains(&format!(
+            "Note: {THIRD_EMAIL}'s login, made outside Perch, was replaced. `perch add` logs it in again."
+        )),
         "and the Switch says whose the live Credential was: {printed}"
     );
 }
@@ -579,7 +582,6 @@ fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
     assert!(error.to_string().contains("77"), "{error}");
     assert!(error.to_string().contains(EMAIL), "{error}");
-    assert!(error.to_string().contains("Nothing was changed"), "{error}");
     assert_eq!(
         live_credential(&host).as_deref(),
         Some(CREDENTIAL),
@@ -608,8 +610,8 @@ fn a_live_credential_perch_cannot_read_is_repaired_by_switching_rather_than_refu
          bytes nothing understands are not a Rotation to keep: {printed}"
     );
     assert!(
-        printed.contains("could not be read"),
-        "the declined Capture is said rather than swallowed: {printed}"
+        !printed.contains("Captur"),
+        "and a declined Capture that needs nothing done is not said: {printed}"
     );
 }
 
@@ -643,7 +645,7 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
 
     let error = result.expect_err("a Credential that cannot be read cannot be Captured");
     assert!(
-        error.to_string().contains("could not be Captured"),
+        error.to_string().contains("was not Captured"),
         "it says which step stopped: {error}"
     );
     assert!(
@@ -1333,7 +1335,7 @@ fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
 }
 
 #[test]
-fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture() {
+fn switching_with_no_active_account_recorded_says_nothing_about_the_capture() {
     let host = machine_with_two_accounts();
     let mut registry = registry_of(&host);
     registry.settle(None);
@@ -1342,10 +1344,7 @@ fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture()
     let (result, printed) = run_switch(&host, SECOND_EMAIL);
 
     result.expect("an Account Perch holds is still somewhere to land");
-    assert!(
-        printed.contains("Perch held no active Account, so there was nothing to Capture."),
-        "{printed}"
-    );
+    assert!(!printed.contains("Captur"), "{printed}");
     assert_eq!(
         live_credential(&host).as_deref(),
         Some(SECOND_CREDENTIAL),
@@ -1355,7 +1354,7 @@ fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture()
 }
 
 #[test]
-fn switching_from_a_logged_out_claude_code_says_there_was_nothing_live_to_capture() {
+fn switching_from_a_logged_out_claude_code_says_nothing_about_the_capture() {
     let host = machine_with_two_accounts();
     host.keychain_delete(DEFAULT_SERVICE, LOGIN_NAME)
         .expect("the login is given up");
@@ -1363,10 +1362,7 @@ fn switching_from_a_logged_out_claude_code_says_there_was_nothing_live_to_captur
     let (result, printed) = run_switch(&host, SECOND_EMAIL);
 
     result.expect("a logged-out machine is still one that can be switched");
-    assert!(
-        printed.contains("There was no live Credential to Capture: Claude Code was logged out."),
-        "{printed}"
-    );
+    assert!(!printed.contains("Captur"), "{printed}");
     assert_eq!(
         live_credential(&host).as_deref(),
         Some(SECOND_CREDENTIAL),
@@ -1388,8 +1384,8 @@ fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
         .expect_err("the Landing could not be written")
         .to_string();
     assert!(
-        said.contains("has written down that it is about to"),
-        "it says why nothing moved: {said}"
+        said.contains("Nothing was switched."),
+        "it says nothing moved: {said}"
     );
     assert_eq!(
         live_credential(&host).as_deref(),
@@ -1457,10 +1453,6 @@ fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
         said.contains("Nothing was switched."),
         "the first write failing means nothing happened: {said}"
     );
-    assert!(
-        said.contains(EMAIL) && said.contains("still the active Account"),
-        "it names who is still active: {said}"
-    );
 
     // And the machine agrees with the note in the one place that decides it.
     assert_eq!(
@@ -1484,14 +1476,7 @@ fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_la
     let said = result
         .expect_err("the live store could not be written")
         .to_string();
-    assert!(
-        said.contains(&format!("{SECOND_EMAIL} was not made active")),
-        "{said}"
-    );
-    assert!(
-        !said.contains("Captured") && !said.contains("Profile is unchanged"),
-        "with nothing active there is no Profile to say anything about: {said}"
-    );
+    assert!(said.contains("Nothing was switched."), "{said}");
     assert_eq!(
         host.file(CREDENTIALS_PATH).as_deref(),
         Some(CREDENTIAL),
@@ -1500,7 +1485,7 @@ fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_la
 }
 
 #[test]
-fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
+fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_switched() {
     let host = two_accounts_off_macos().with_a_path_refusing(
         CREDENTIALS_PATH,
         Refusing::Write,
@@ -1513,14 +1498,11 @@ fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
         .expect_err("the live store could not be written")
         .to_string();
     assert!(
-        said.contains("was Captured into its own Profile first")
-            && said.contains("nothing has been lost"),
-        "{said}"
+        said.contains("Nothing was switched."),
+        "it says the Switch did not happen, and nothing about the Capture, which \
+         needs nothing done (ADR perch-says-what-it-did): {said}"
     );
-    assert!(
-        said.contains(&format!("{SECOND_EMAIL} was not made active")),
-        "and it says the Switch did not happen: {said}"
-    );
+    assert!(!said.contains("Captured"), "{said}");
     assert_eq!(
         registry_of(&host).active().whose(),
         Some(EMAIL),
@@ -1529,7 +1511,7 @@ fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
 }
 
 #[test]
-fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged() {
+fn a_live_write_that_fails_with_nothing_captured_says_nothing_was_switched() {
     let host = two_accounts_off_macos();
     host.remove_file(std::path::Path::new(CREDENTIALS_PATH))
         .expect("the login is given up");
@@ -1540,14 +1522,8 @@ fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged()
     let said = result
         .expect_err("the live store could not be written")
         .to_string();
-    assert!(
-        said.contains(&format!("{EMAIL}'s Profile is unchanged.")),
-        "{said}"
-    );
-    assert!(
-        !said.contains("Captured"),
-        "nothing was Captured, so nothing may claim it was: {said}"
-    );
+    assert!(said.contains("Nothing was switched."), "{said}");
+    assert!(!said.contains("Captured"), "{said}");
 }
 
 #[test]
@@ -2019,7 +1995,7 @@ fn a_landing_that_left_nobody_behind_is_refused_without_naming_one() {
     let error = result.expect_err("nothing on the machine says whose that Credential is");
     let said = error.to_string();
     assert_eq!(error.exit_code(), EXIT_CONFLICT, "{said}");
-    assert!(said.contains("on no Account before it"), "{said}");
+    assert!(said.contains("none Perch holds"), "{said}");
     assert!(
         said.contains(&format!("perch relogin {SECOND_EMAIL}")),
         "and names the one way through: {said}"

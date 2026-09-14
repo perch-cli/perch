@@ -219,8 +219,7 @@ impl Rule {
         PerchError::Invalid(match self {
             Rule::Empty => format!("{} cannot be empty.", kind.names()),
             Rule::Unshowable(set) => format!(
-                "{} are drawn as they are held, and this one carries {}: two names \
-                 nothing on screen tells apart would be one row in every listing.",
+                "{} do not carry {}.",
                 kind.names(),
                 name.chars()
                     .find(|c| crate::host::within(set, *c))
@@ -232,7 +231,7 @@ impl Rule {
             ),
             Rule::NotAnIdentifier => format!(
                 "`{name}` carries {}, and {} are made of letters, digits, `_` \
-                 and `-`, in every alphabet, so `café` and `日本` are names.",
+                 and `-`.",
                 said(name.chars().find(|c| !a_name_may_carry(*c))),
                 kind.names()
             ),
@@ -242,23 +241,12 @@ impl Rule {
                 kind.names()
             ),
             Rule::Whitespace => format!(
-                "`{name}` carries {}, and {} carry no whitespace: a Target is one \
-                 word at a shell prompt.",
+                "`{name}` carries {}, and {} carry no whitespace.",
                 said(name.chars().find(|c| c.is_whitespace())),
                 kind.names()
             ),
-            Rule::LikeAnAddress => format!(
-                "`{name}` carries `@`, and {} do not. A Target is an Alias, an \
-                 email address or a Group name, and no `@` is what tells the \
-                 address from the other two.",
-                kind.names()
-            ),
-            Rule::LeadingDash => format!(
-                "`{name}` opens with `-`, and {} do not: a Target `perch run` \
-                 could never be given, its program going after the `--` that \
-                 would rescue one anywhere else.",
-                kind.names()
-            ),
+            Rule::LikeAnAddress => format!("`{name}` carries `@`, and {} do not.", kind.names()),
+            Rule::LeadingDash => format!("`{name}` opens with `-`, and {} do not.", kind.names()),
             // One sentence for both spellings, because they were reserved as
             // two: a Group called `ungrouped` or `none` is one no
             // `perch config set` could reach, and an Alias is the same collision.
@@ -271,8 +259,7 @@ impl Rule {
             // name would take every later `perch config set global …` quietly.
             Rule::MeansEveryScope(_) => format!(
                 "`{name}` is how people say every Scope at once, so it cannot also \
-                 be {}. There is no such Scope: every Setting is said about the one \
-                 it governs, and `perch config set <scope> <key> <value>` says it.",
+                 be {}.",
                 kind.article()
             ),
         })

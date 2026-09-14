@@ -183,8 +183,8 @@ pub enum PerchError {
 /// format gets turns on what a refusal costs (ADR the-holdings-outlive-a-perch).
 pub fn written_by_a_newer_perch(what: &str, of: &str, version: u64, understood: u32) -> PerchError {
     PerchError::Other(format!(
-        "{what} was written by a newer Perch ({of} version {version}, this build \
-         understands {understood}). Upgrade Perch."
+        "{what} is {of} version {version}, and this Perch reads {understood}. \
+         Upgrade Perch."
     ))
 }
 
@@ -581,7 +581,7 @@ mod tests {
         let said = refused.to_string();
         assert!(said.contains("The Registry"), "{said}");
         assert!(said.contains("version 4"), "{said}");
-        assert!(said.contains("understands 2"), "{said}");
+        assert!(said.contains("reads 2"), "{said}");
         assert!(said.contains("Upgrade Perch."), "{said}");
     }
 }

@@ -48,9 +48,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
         // fails a command whose file is there — and a re-run is refused for the
         // path being taken, which reads as somebody else's file.
         (Err(error), Some(at)) => Err(error.with_note(&format!(
-            "The Export at {} was written and holds a working Credential for \
-             every Account. Only saying so failed, so there is nothing to run \
-             again. Keep it somewhere you would keep those, or delete it.",
+            "The Export at {} was written. Only the report could not be printed.",
             at.display(),
         ))),
         (written, _) => written,
@@ -104,7 +102,7 @@ pub fn write_the_export(
     drop(standing);
     destination.write(host, &sealed, &fresh)?;
 
-    report(out, destination.path(), &export)
+    report(out, &export)
 }
 
 /// The path an Export lands at, proven fit before anything is spent on it.
@@ -167,9 +165,8 @@ fn refuse_a_path_perchs_home_would_take(host: &dyn Host, path: &Path) -> Result<
         return Ok(());
     }
     Err(PerchError::Invalid(format!(
-        "{} is inside {}, which `perch holdings purge` deletes whole, so an \
-         Export written there goes with the Holdings it is the only copy of.\n\
-         Name a path somewhere Perch does not own.",
+        "{} is inside {}, which `perch holdings purge` deletes.\n\
+         Name a path outside it.",
         path.display(),
         home.display(),
     )))
@@ -185,8 +182,8 @@ fn refuse_an_occupied_path(host: &dyn Host, path: &Path) -> Result<()> {
         return Ok(());
     }
     Err(PerchError::Conflict(format!(
-        "{} is already there, and an Export is never written over anything.\n\
-         Name a path that is free, or move what is at that one first.",
+        "{} is already there, and Perch will not write over it.\n\
+         Name a path that is free.",
         path.display(),
     )))
 }
@@ -206,11 +203,9 @@ fn refuse_a_directory_that_is_not_there(host: &dyn Host, path: &Path) -> Result<
         return Ok(());
     }
     Err(PerchError::NotFound(format!(
-        "{} is not a directory that exists, so there is nowhere to write {}.\n\
-         Perch will not make it: a directory it created for a path you typed \
-         would be one you did not ask for, at permissions you did not choose.",
+        "{} is not there, and Perch will not make it.\n\
+         Name a path in a directory that exists.",
         dir.display(),
-        path.display(),
     )))
 }
 
@@ -222,25 +217,18 @@ fn refuse_a_directory_that_is_not_there(host: &dyn Host, path: &Path) -> Result<
 fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
     say::line(
         out,
-        "This file holds a working Credential for every Account Perch has. It is \
-         encrypted with a passphrase you choose, and there is no way into it \
-         without one.",
+        "Choose a passphrase. Nothing opens the Export without it.",
     )?;
 
     let Some(typed) = ask::a_passphrase(host, out, "Passphrase: ")? else {
         return Err(PerchError::Invalid(
-            "No passphrase was typed, and an Export cannot be written without \
-             one. Nothing was written."
-                .to_string(),
+            "No passphrase was typed, and an Export needs one.".to_string(),
         ));
     };
 
     if ask::a_secret(host, out, "Again: ")?.unwrap_or_default() != typed {
         return Err(PerchError::Invalid(
-            "Those two do not match. Nothing was written, because a passphrase \
-             mistyped here is a file nobody discovers is unreadable until the \
-             machine it would have restored is gone."
-                .to_string(),
+            "Those two do not match. Run `perch holdings export` again.".to_string(),
         ));
     }
     Ok(typed)
@@ -251,29 +239,21 @@ fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<S
 /// What an Export carries is what an Export is, and the prompt above says where
 /// the passphrase is kept — so neither is said again where every run would say
 /// it (ADR perch-says-what-it-did). The Accounts without a Credential are.
-fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
+fn report(out: &mut dyn Write, export: &Export) -> Result<()> {
     let accounts = export.accounts();
-    say::line(
-        out,
-        &format!(
-            "Exported {} to {}.",
-            say::accounts(accounts),
-            path.display(),
-        ),
-    )?;
+    say::line(out, &format!("Exported {}.", say::accounts(accounts),))?;
 
     let bare = export.without_a_credential();
     if !bare.is_empty() {
         say::line(
             out,
             &format!(
-                "Neither Credential Store held anything for {}, so the Export \
-                 carries the {} without a Credential. `perch relogin` is worth \
-                 doing before this file is the only copy.",
+                "Note: the Export holds no Credential for {}. `perch relogin {}` \
+                 logs it in again.",
                 bare.join(", "),
                 match bare.len() {
-                    1 => "Account",
-                    _ => "Accounts",
+                    1 => bare[0],
+                    _ => "<target>",
                 },
             ),
         )?;

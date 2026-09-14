@@ -11,7 +11,7 @@ of Cycling, repair one, give one up.
 
 ```
 $ perch status
-Adopted the Claude Code login as your first Profile, now active: you@example.com (Acme, pro). Claude Code 2.1.221.
+Adopted the Claude Code login as you@example.com (Acme, pro).
 Account       you@example.com
 Organization  Acme
 Plan          pro
@@ -27,8 +27,8 @@ declare the ungrouped Accounts interchangeable.
 
 ```
 $ perch add --group work --alias overflow
-Logging in to a new Profile. you@example.com stays active and its session is untouched.
-Quit Claude Code when the login is done to come back here.
+Logging in to a new Profile.
+Quit Claude Code when the login is done.
 
 Added overflow@example.com (Overflow Ltd, max).
 Alias:  overflow
@@ -45,8 +45,8 @@ asks you to confirm. `--alias <name>` names the Account at the same time.
 
 ```
 $ perch add --no-group
-Logging in to a new Profile. you@example.com stays active and its session is untouched.
-Quit Claude Code when the login is done to come back here.
+Logging in to a new Profile.
+Quit Claude Code when the login is done.
 
 Added spare@example.com (Spare Ltd, pro).
 Group:  none
@@ -58,11 +58,9 @@ In a script, pass one of the two flags, or the Add is refused.
 
 ```
 $ perch alias overflow@example.com overflow
-`overflow@example.com` is an Account.
 `overflow` now names overflow@example.com.
 
 $ perch alias overflow --unset
-`overflow` is an Alias for overflow@example.com.
 `overflow` no longer names overflow@example.com.
 ```
 
@@ -77,11 +75,9 @@ are the same name. `ungrouped`, `none` and `global` are refused as names.
 
 ```
 $ perch disable spare
-`spare` is an Alias for spare@example.com.
 Disabled spare@example.com (as `spare`).
 
 $ perch enable spare
-`spare` is an Alias for spare@example.com.
 Enabled spare@example.com (as `spare`).
 ```
 
@@ -94,8 +90,7 @@ Enabling does not repair a Quarantined Account:
 
 ```
 $ perch enable spare
-`spare` is an Alias for spare@example.com.
-spare@example.com (as `spare`) was already enabled. It is Quarantined, though: Anthropic would not renew its Credential. Nothing switches to it, Cycling or you. `perch relogin spare@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+spare@example.com (as `spare`) was already enabled. It is Quarantined: Anthropic would not renew its Credential. `perch relogin spare@example.com` repairs it.
 ```
 
 ## When an Account breaks
@@ -105,7 +100,7 @@ $ perch status
 Account       you@example.com
 Organization  Acme
 Plan          pro
-Quarantine    Anthropic would not renew its Credential. `perch relogin you@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+Quarantine    Anthropic would not renew its Credential. `perch relogin you@example.com` repairs it.
 Utilization   never observed
 ```
 
@@ -115,9 +110,8 @@ and `perch switch` onto it is refused.
 
 ```
 $ perch relogin overflow
-`overflow` is an Alias for overflow@example.com.
-Logging in again to repair overflow@example.com. you@example.com stays active and its session is untouched.
-Quit Claude Code when the login is done to come back here.
+Logging in again to repair overflow@example.com.
+Quit Claude Code when the login is done.
 
 Repaired overflow@example.com (as `overflow`). It is no longer Quarantined.
 ```
@@ -134,7 +128,6 @@ one. A healthy Account may be relogged in too.
 
 ```
 $ perch remove spare
-`spare` is an Alias for spare@example.com.
 Removed spare@example.com (as `spare`).
 The Alias `spare` is free to use again.
 ```
@@ -147,8 +140,7 @@ anything is deleted:
 
 ```
 $ perch remove work-main
-`work-main` is an Alias for you@example.com.
-you@example.com (as `work-main`) is the active Account. overflow@example.com (as `overflow`) will be made active first, so nothing is left running as an Account Perch has forgotten. `perch switch <target>` first if you would rather land somewhere else. The login being given up goes with it, and holding it again would mean `perch add`.
+you@example.com (as `work-main`) is the active Account. overflow@example.com (as `overflow`) will be made active first; `perch switch <target>` before this lands somewhere else. Its Credential is deleted with it.
 Remove you@example.com (as `work-main`)? [y/N]: y
 overflow@example.com (as `overflow`) is the active Account now.
 Removed you@example.com (as `work-main`).

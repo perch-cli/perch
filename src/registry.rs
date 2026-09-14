@@ -172,10 +172,7 @@ impl Quarantine {
 /// How a Quarantine is asked about and how it is put right, said the same way
 /// wherever an Account is shown as broken.
 pub fn how_to_repair(target: &str) -> String {
-    format!(
-        "`perch relogin {target}` logs it in again in place, keeping its Alias, \
-         its Group and whether Cycling may choose it."
-    )
+    format!("`perch relogin {target}` repairs it.")
 }
 
 /// The same repair, for however many Accounts are in that state — said once,
@@ -187,11 +184,7 @@ pub fn how_to_repair_them(targets: &[impl AsRef<str>]) -> Option<String> {
     match targets {
         [] => None,
         [one] => Some(how_to_repair(one.as_ref())),
-        _ => Some(
-            "`perch relogin <target>` logs one in again in place, keeping its \
-             Alias, its Group and whether Cycling may choose it."
-                .to_string(),
-        ),
+        _ => Some("`perch relogin <target>` repairs one.".to_string()),
     }
 }
 
@@ -1099,21 +1092,15 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 fn no_perch_wrote(path: &Path, claimed: Option<u64>) -> PerchError {
     // Without the path, which `Malformed` has already said.
     let what = match claimed {
-        Some(version) => format!(
-            "it says it is registry version {version}, and no Perch has written \
-             that."
-        ),
-        None => "it does not say which registry version it is, and every Perch \
-                 has written one."
-            .to_string(),
+        Some(version) => format!("it is registry version {version}, which no Perch has written."),
+        None => "it does not say which registry version it is.".to_string(),
     };
     PerchError::Malformed {
         path: path.display().to_string(),
         detail: what,
     }
     .with_note(&format!(
-        "The version says which shape the rest of the file is in, so Perch will \
-         not guess at it. This build reads versions {} through {CURRENT_VERSION}.\n{}",
+        "This Perch reads versions {} through {CURRENT_VERSION}. {}",
         crate::migration::EARLIEST_VERSION,
         the_file_to_edit(path),
     ))
@@ -1125,11 +1112,7 @@ fn no_perch_wrote(path: &Path, claimed: Option<u64>) -> PerchError {
 /// nobody hand-edited, and telling somebody to edit a value that is not in the
 /// file yet is the one sentence that would make it worse.
 pub fn the_file_to_edit(path: &Path) -> String {
-    format!(
-        "It is in {}, which every Perch command reads, including the ones that \
-         would set it. Edit the value there.",
-        path.display(),
-    )
+    format!("Edit {} by hand.", path.display())
 }
 
 /// The refusal for an Account that was named and is not there.
@@ -1138,10 +1121,7 @@ pub fn the_file_to_edit(path: &Path) -> String {
 /// something to go and fix.
 fn no_such_account(email: &str) -> PerchError {
     PerchError::Other(format!(
-        "Perch was asked for {email}, which it does not hold, by something that \
-         had already established it did.\n\
-         {}\n\
-         Nothing was changed.",
+        "Perch was asked for {email}, which it does not hold.\n{}",
         crate::report::this_is_a_bug(),
     ))
 }
@@ -1187,7 +1167,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
     for (alias, email) in &registry.aliases {
         if !held.contains(name::folded(email).as_str()) {
             return Err(PerchError::Invalid(format!(
-                "The registry gives the Alias `{alias}` to {email}, which is not \
+                "The Registry gives the Alias `{alias}` to {email}, which is not \
                  an Account Perch holds.",
             )));
         }
@@ -1196,10 +1176,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
         // both — the same undecided answer as two names differing only in case.
         if let Some(already) = named.insert(name::folded(email), alias) {
             return Err(PerchError::Invalid(format!(
-                "The registry gives {email} both the Alias `{already}` and the \
-                 Alias `{alias}`, and an Account answers to one Alias at a \
-                 time, so which of them Perch shows it under is not decided by \
-                 anything.",
+                "The Registry gives {email} two Aliases, `{already}` and `{alias}`.",
             )));
         }
     }
@@ -1236,9 +1213,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
     for account in &registry.accounts {
         if !account.email().contains('@') {
             return Err(PerchError::Invalid(format!(
-                "The registry holds an Account called `{}`, which is not an \
-                 address an Alias or a Group name could be told from, and a \
-                 Target that could be either has no single answer.",
+                "The Registry holds an Account called `{}`, which is not an \
+                 address.",
                 account.email(),
             )));
         }
@@ -1252,9 +1228,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // `perch list` renders two rows, and a Cycle counts it twice.
     if let Some((already, again)) = first_collision(registry.accounts.iter().map(Account::email)) {
         return Err(PerchError::Invalid(format!(
-            "The registry holds two Accounts spelled `{already}` and `{again}`, \
-             which are one Account, so which entry a command reads, and which \
-             one it writes, is not decided by anything."
+            "The Registry holds two Accounts spelled `{already}` and `{again}`, \
+             which are one Account."
         )));
     }
 
@@ -1266,9 +1241,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
             continue;
         }
         return Err(PerchError::Invalid(format!(
-            "The registry records a Check against `{named}`, which is neither a \
-             Group Perch holds nor the Accounts in no Group, so the Cooldown it \
-             carries paces nothing."
+            "The Registry records a Check against `{named}`, which is not a Group \
+             Perch holds."
         )));
     }
 
@@ -1277,9 +1251,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // to one pace the next Check off a record nothing is keeping.
     if let Some((already, name)) = first_collision(registry.checks.keys().map(String::as_str)) {
         return Err(PerchError::Invalid(format!(
-            "The registry records a Check against `{already}` and one against \
-             `{name}`, which are one Group, so which Cooldown paces the next one \
-             is not decided by anything."
+            "The Registry records a Check against `{already}` and one against \
+             `{name}`, which are one Group."
         )));
     }
 
@@ -1297,11 +1270,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
         {
             if !(0.0..=100.0).contains(&window.used_percent) {
                 return Err(PerchError::Invalid(format!(
-                    "The registry says {} is {}% through its {} window, and a \
-                     window is between 0 and 100 percent full, so it is not a \
-                     figure a Cycle could rank on.\n\
-                     Deleting the Account's `utilization` lets a `perch status \
-                     --refresh` read it again.",
+                    "The Registry says {} is {}% through its {} window.\n\
+                     Delete the Account's `utilization`, and `perch status \
+                     --refresh` reads it again.",
                     account.email(),
                     window.used_percent,
                     window.window,
@@ -1335,8 +1306,8 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
     match first_collision(names.map(String::as_str)) {
         None => Ok(()),
         Some((already, name)) => Err(PerchError::Invalid(format!(
-            "The registry holds {} `{already}` and `{name}`, which differ only \
-             in case, so which one a Target finds is not decided by anything.",
+            "The Registry holds {} `{already}` and `{name}`, which differ only \
+             in case.",
             kind.article(),
         ))),
     }
@@ -1387,8 +1358,8 @@ fn refuse_a_name_nothing_would_have_accepted(
     match refused {
         None => Ok(()),
         Some(why) => Err(PerchError::Invalid(format!(
-            "The registry holds {} `{name}`, which is not a name Perch would \
-             have accepted: {why}.",
+            "The Registry holds {} `{name}`, which is not a name Perch accepts: \
+             {why}.",
             kind.article(),
         ))),
     }
@@ -1480,10 +1451,8 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
         // (ADR a-refusal-is-a-promise): `Busy` promises nothing was changed, and
         // this save is reached as often after a Credential moved as before.
         return Err(PerchError::Other(
-            "Another `perch` took the Registry lock over while this command was \
-             working, and has changed the Registry since this one read it. \
-             Nothing was written, because writing would have undone whatever it \
-             did. Run this command again."
+            "Another `perch` changed the Registry while this command was working. \
+             Nothing was written. Run this command again."
                 .to_string(),
         ));
     }
@@ -1492,11 +1461,7 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
     // writing a file every later command declined to read would leave a machine
     // with no working `perch` on it, and no `perch holdings purge` either.
     validate(registry).map_err(|invalid| {
-        PerchError::Other(format!(
-            "{invalid}\n\n{}\n\
-             Nothing was written, and the registry on disk is as it was.",
-            crate::report::this_is_a_bug(),
-        ))
+        PerchError::Other(format!("{invalid}\n{}", crate::report::this_is_a_bug(),))
     })?;
 
     let path = holdings::registry_path(host)?;
@@ -3071,7 +3036,7 @@ mod tests {
         let said = refused.to_string();
         assert!(said.contains("Account called `work`"), "{said}");
         assert!(
-            said.contains("could be told from"),
+            said.contains("is not an address"),
             "it says what is wrong with it: {said}"
         );
         assert!(
@@ -3104,7 +3069,7 @@ mod tests {
         let cases = [
             (
                 r#""aliases":{"spare":"someone@example.com","work":"someone@example.com"}"#,
-                "one Alias at a time",
+                "two Aliases",
             ),
             (
                 r#""aliases":{}"#,

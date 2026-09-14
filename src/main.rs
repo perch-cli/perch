@@ -36,226 +36,84 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Add an Account by logging in inside a new Profile.
-    ///
-    /// The Account you are on stays active and its session is untouched, so
-    /// gaining an Account never costs you the one you are using.
+    /// Log a new Account in, inside its own Profile.
     Add(AddArgs),
 
-    /// Name an Account, so no command needs its email address.
-    ///
-    /// Aliases and Group names share one namespace, so a name is refused if
-    /// the other half already has it and a Target is never ambiguous.
+    /// Name an Account.
     Alias {
-        /// The Account to name: its current Alias, or its email address.
+        /// The Account: its Alias, or its email address.
         target: String,
 
-        /// The name to give, unless `--unset` is freeing the one it has.
+        /// The name to give.
         #[arg(required_unless_present = "unset", conflicts_with = "unset")]
         name: Option<String>,
 
-        /// Free the name the Account answers to, instead of giving it one.
+        /// Free the Alias the Account has.
         #[arg(long)]
         unset: bool,
     },
 
-    /// Read and change how Cycling behaves, one Scope at a time.
-    ///
-    /// Every Setting is reachable from a script, because Perch has to be
-    /// complete over SSH and in CI. A Setting is said about the Scope it
-    /// governs and there is nothing above them, so a `set` is always
-    /// `<scope> <key> <value>` — where a Scope is a Group by name, or
-    /// `ungrouped` for the Accounts in no Group.
-    ///
-    /// A bare `perch config get` reads every Scope there is; a `set` that names
-    /// none is refused, because a rule with no subject is a rule about
-    /// nothing.
-    ///
-    /// `perch config set --help` names every Setting there is and the values
-    /// each one takes.
+    /// Read and change Settings, one Scope at a time.
     Config {
         #[command(subcommand)]
         action: ConfigCommand,
     },
 
-    /// Keep an Account out of Cycling, without giving it up.
-    ///
-    /// It stays listed, keeps its Alias, its Group and its Credential, and
-    /// `perch switch <target>` still switches to it. Only Cycling stops
-    /// choosing it, and `perch enable` puts it back.
+    /// Keep an Account out of Cycling.
     Disable {
         /// The Account: its Alias, or its email address.
         target: String,
     },
 
-    /// Return an Account to the Cycling pool.
-    ///
-    /// The other half of `perch disable`, and all it takes to undo one: the
-    /// Account never lost its Profile or its Credential, so nothing has to be
-    /// logged into again.
+    /// Return an Account to Cycling.
     Enable {
         /// The Account: its Alias, or its email address.
         target: String,
     },
 
     /// Declare which Accounts are interchangeable.
-    ///
-    /// Cycling only ever moves between Accounts in one Group, so a Group is how
-    /// you say that another work subscription is an acceptable landing place
-    /// and your personal Account is not.
     Group {
         #[command(subcommand)]
         action: GroupCommand,
     },
 
-    /// Everything Perch holds on this machine: write it out, put it back, or
-    /// give it up.
-    ///
-    /// Every Profile, every Credential Perch holds, the Registry naming them
-    /// and what each Group carries — the counterpart to an Installation, which
-    /// is what a Channel left. None of the three takes a Target, because none
-    /// of them is about one Account.
+    /// Export, import or purge everything Perch holds here.
     Holdings {
         #[command(subcommand)]
         action: HoldingsCommand,
     },
 
-    /// Show every Account with its Alias, Group, state and cached Utilization.
-    ///
-    /// The one place that answers "what do I have", at every breadth: bare it
-    /// is every Account Perch holds, and a Scope narrows it to the Accounts you
-    /// could Cycle between — where you would land before you switch. Renders
-    /// from cache unless you ask it to fetch.
+    /// Show every Account, with Alias, Group, state and Utilization.
     List(ListArgs),
 
-    /// Everything Perch can see of this machine, in one paste.
-    ///
-    /// What a bug report needs and nobody should have to gather by hand: which
-    /// Perch and which Claude Code, what the Holdings hold, which of Perch's
-    /// assumptions still hold, and what has been run here lately. Names and
-    /// paths come out as placeholders unless `--raw` says otherwise, because
-    /// what this is for is being pasted somewhere else.
-    ///
-    /// Reads and judges, and repairs nothing. It reaches no network, brings no
-    /// Registry forward and adds no line to the Trail — the log of what Perch
-    /// was asked and what it decided — so running it never changes the machine
-    /// it is describing. Exits `0` whatever it finds.
+    /// Describe this machine as Perch sees it, for a bug report.
     Probe(ProbeArgs),
 
     /// Log an Account in again, in place.
-    ///
-    /// The way back from a Quarantine, the state of an Account whose
-    /// Credential stopped working: the Account keeps its Alias, its Group,
-    /// whether Cycling may choose it and its place in the listing, and only its
-    /// Credential is replaced. The Account you are working in is untouched,
-    /// unless it is the one being repaired — then its fresh Credential becomes
-    /// the live one, because a repair nothing reads is not a repair.
     Relogin(ReloginArgs),
 
-    /// Give up an Account: forget it, and delete the Credential Perch holds.
-    ///
-    /// The Account stops being listed and stops being a Cycle candidate, and
-    /// the Alias it answered to is free again. Removing the Account you are on
-    /// names the Account Perch will leave active, lands on it first, and asks
-    /// before any of it happens.
+    /// Forget an Account and delete its Credential.
     Remove(RemoveArgs),
 
-    /// Launch Claude Code as one Account, without changing which one is active.
-    ///
-    /// The Account you are on stays active — in every other terminal, in the
-    /// editor extension and in the desktop app — because a Run points one
-    /// process at one Profile and touches nothing else. Two terminals can run
-    /// two Accounts at once, and the client's exit code is Perch's.
+    /// Launch Claude Code as one Account, leaving the active one alone.
     Run(RunArgs),
 
-    /// Show the active Account and its cached Utilization.
-    ///
-    /// The Account you are on and nothing else — a set of Accounts is
-    /// `perch list`, at whatever breadth. Renders from cache unless you ask it
-    /// to fetch, so it is cheap enough for a shell prompt.
+    /// Show the active Account and its Utilization.
     Status(StatusArgs),
 
-    /// Make an Account active everywhere, with no login flow.
-    ///
-    /// With no target, Perch picks for you: it Cycles within the current
-    /// Account's Group, ranking each Account by its most constrained Quota
-    /// Window, and never asks anything.
-    ///
-    /// It reads current Utilization first, for the Accounts it cannot rank
-    /// without. A candidate that would lose even if its quota had refilled
-    /// entirely is not worth a round trip, and is not read.
-    ///
-    /// The Credential you are leaving is Captured — copied back into its own
-    /// Profile — first, so a refresh token Anthropic replaced while it was
-    /// active is not lost. Your
-    /// memory, settings, plugins and project history are untouched.
+    /// Make an Account active everywhere.
     Switch(SwitchArgs),
 
-    /// Hand what Perch can see of this machine to Claude Code, and let it help
-    /// you file an issue.
-    ///
-    /// For when something has gone wrong and typing out a bug report by hand is
-    /// the last thing you want to do. Perch gathers what `perch probe` gathers,
-    /// writes the playbook a coding agent follows, and starts Claude Code on it.
-    /// The agent asks what went wrong, investigates this machine, and drafts the
-    /// issue — it posts nothing without showing you the whole thing first.
-    ///
-    /// Perch itself only gathers. It brings no Registry forward, writes no line
-    /// to its own log, and changes nothing about the machine you are asking it
-    /// to describe. Two copies of the evidence are written: one with the real
-    /// names and paths for the agent to work from, and one with placeholders,
-    /// which is the copy meant for a public issue.
-    ///
-    /// With no Claude Code installed, or with the Account you are on broken,
-    /// nothing is launched: the files are written and Perch says where they are,
-    /// so you can paste them into whatever you do have.
+    /// Hand what Perch sees of this machine to Claude Code.
     Triage(TriageArgs),
 
-    /// Replace this Perch with a newer Release.
-    ///
-    /// Through whatever Channel installed it: a Homebrew Installation is
-    /// handed to `brew upgrade perch` and an npm one
-    /// to `npm update -g perch-cli`, because their binaries are theirs to
-    /// replace and writing over one is reverted or thrown away at the next
-    /// thing they do. Only a binary the installer script put where it puts them
-    /// — `~/.local/bin`, `%LOCALAPPDATA%\Perch\bin` on Windows, or
-    /// `$PERCH_INSTALL_DIR` — is replaced by Perch itself, using that same
-    /// installer.
-    ///
-    /// A binary anywhere else — unpacked from the Release page by hand, most
-    /// likely — is refused rather than written over, and `--channel` says which
-    /// Channel it really is when the path does not.
-    ///
-    /// Nothing Perch holds is touched: no Registry, no Credential, no Profile.
+    /// Upgrade Perch through whatever installed it.
     Upgrade(UpgradeArgs),
 
     /// Say which Perch is installed, and whether a newer Release exists.
-    ///
-    /// The line about a newer Release appears only at a terminal, is given two
-    /// seconds, and is dropped in silence on any failure, so a machine with no
-    /// network loses a line and nothing else. `PERCH_NO_UPGRADE_CHECK` switches
-    /// the check off entirely.
-    ///
-    /// `perch upgrade --check` is the same question asked on purpose: it names
-    /// the Channel this Installation came from, waits as long as the answer
-    /// takes, and answers a script through `--json`.
-    ///
-    /// Nothing Perch holds is read or written: no Registry, no Credential, no
-    /// Profile.
     Version,
 
-    /// Cycle on your behalf when the Account you are on runs low.
-    ///
-    /// Three arrangements and one behavior: `run` is a loop you can see and
-    /// kill, `install` hands that same loop to the machine's own service
-    /// manager, and `check` is one round for a scheduler to fire. One of them
-    /// at a time, and the policy is the same in all three.
-    ///
-    /// Only the active Account is read, and only within a Scope that has been
-    /// told the watcher may act on it — `perch config set <group>
-    /// watcher-may-act true` for a Group, or the same for `ungrouped` where
-    /// `interchangeable` is on as well, because being interchangeable at all is
-    /// its own yes.
+    /// Cycle for you when the active Account runs low.
     Watcher {
         #[command(subcommand)]
         action: WatcherCommand,
@@ -268,9 +126,7 @@ enum Command {
 fn refuse_the_version_flag(typed: &[String]) -> perch::Result<()> {
     if matches!(typed.first().map(String::as_str), Some("--version" | "-V")) {
         return Err(perch::error::PerchError::NotUnderstood(
-            "That is a command here: `perch version` says which Perch is \
-             installed, and whether a newer Release exists."
-                .to_string(),
+            "`perch version` says which Perch is installed.".to_string(),
         ));
     }
     Ok(())

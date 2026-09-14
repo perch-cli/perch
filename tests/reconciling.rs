@@ -235,7 +235,7 @@ fn a_link_that_cannot_be_made_refuses_and_names_the_entry_and_the_reason() {
     let said = refusal.to_string();
     assert!(said.contains("`plugins`"), "{said}");
     assert!(said.contains("Read-only file system"), "{said}");
-    assert!(said.contains("never by copying"), "{said}");
+    assert!(said.contains("carries links"), "{said}");
     assert_eq!(
         host.file(profile("plugins")),
         None,
@@ -373,7 +373,7 @@ fn something_that_is_not_a_link_in_the_way_is_refused_rather_than_deleted() {
     );
     // This is a path to move rather than a privilege to turn on, and the
     // remedy has to be the one that fits.
-    assert!(said.contains("move it aside or remove it"), "{said}");
+    assert!(said.contains("Move it aside"), "{said}");
     assert!(!said.contains("filesystem that carries no links"), "{said}");
 }
 
@@ -609,7 +609,7 @@ fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mo
          about: {said}"
     );
     assert!(
-        said.contains("the directory holding it"),
+        said.contains("Check that you own the directory"),
         "what actually refused is named: {said}"
     );
 }

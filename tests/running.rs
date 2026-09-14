@@ -342,41 +342,8 @@ fn a_group_target_is_refused_as_naming_no_one_account() {
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     let said = refusal.to_string();
     assert!(said.contains("`work` is a Group"), "{said}");
-    assert!(said.contains("name the Account itself"), "{said}");
+    assert!(said.contains("Name one Account"), "{said}");
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
-}
-
-#[test]
-fn which_kind_of_target_matched_is_said_before_the_client_takes_the_terminal() {
-    let host = machine();
-    set_alias(&host, "overflow", SECOND_EMAIL)
-        .0
-        .expect("the Alias is given");
-
-    let (_, printed) = run_run(&host, "overflow");
-    let said = host.notes().join("\n");
-    assert!(
-        said.contains(&format!("`overflow` is an Alias for {SECOND_EMAIL}.")),
-        "{said}"
-    );
-    assert!(
-        said.contains(&format!(
-            "Running Claude Code as {SECOND_EMAIL} (as `overflow`)"
-        )),
-        "{said}"
-    );
-    assert!(
-        printed.is_empty(),
-        "and none of it on the stream the client is about to write to: {printed}"
-    );
-
-    host.forget_notes();
-    let _ = run_run(&host, SECOND_EMAIL);
-    let said = host.notes().join("\n");
-    assert!(
-        said.contains(&format!("`{SECOND_EMAIL}` is an Account.")),
-        "{said}"
-    );
 }
 
 #[test]
@@ -397,19 +364,6 @@ fn a_run_says_nothing_on_the_stream_the_client_writes_to() {
     assert!(
         !host.notes().is_empty(),
         "and what Perch had to say was still said, on stderr"
-    );
-}
-
-#[test]
-fn a_run_says_which_account_stays_active_everywhere_else() {
-    let host = machine();
-
-    let _ = run_run(&host, SECOND_EMAIL);
-
-    let said = host.notes().join("\n");
-    assert!(
-        said.contains(&format!("{EMAIL} stays the active Account everywhere else")),
-        "{said}"
     );
 }
 
@@ -760,7 +714,6 @@ fn a_run_that_cannot_mark_its_profile_live_does_not_launch() {
 
     let said = refusal.to_string();
     assert!(said.contains("permission denied"), "{said}");
-    assert!(said.contains("Nothing was launched"), "{said}");
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 

@@ -416,34 +416,16 @@ fn claimed_groups(held: &Map<String, Value>) -> Vec<String> {
 /// module's.
 pub(crate) fn brought_forward_note(was: u64, renamed: &[Renamed]) -> String {
     format!(
-        "This machine's Registry was written by an older Perch (version {was}), \
-         and has been brought forward to version {}.{} No older Perch reads the \
-         file now.{}",
+        "The Registry was brought forward from version {was} to version {}.{}",
         crate::registry::CURRENT_VERSION,
-        what_the_step_could_not_carry(was),
         what_was_renamed(renamed),
     )
-}
-
-/// What a step left behind, for the note, or nothing where it left nothing.
-///
-/// The three retired Watcher Settings are the one thing any step drops, and
-/// only the version 1 step reaches them: a version 2 document has none.
-fn what_the_step_could_not_carry(was: u64) -> String {
-    if was != u64::from(EARLIEST_VERSION) {
-        return String::new();
-    }
-    " The Watcher's cooldown, margin and no-return are fixed in this build, so \
-     whatever they were set to is gone; everything else came with it."
-        .to_string()
 }
 
 /// What the step had to rename, for the note, or nothing where it renamed
 /// nothing.
 fn what_was_renamed(renamed: &[Renamed]) -> String {
-    // Two newlines because this one is appended to a note that has already said
-    // the version moved; the Import's stands alone.
-    what_was_renamed_said(renamed).map_or_else(String::new, |said| format!("\n\n{said}"))
+    what_was_renamed_said(renamed).map_or_else(String::new, |said| format!(" {said}"))
 }
 
 /// The same as a sentence of its own, for the other way a Registry comes
@@ -473,15 +455,11 @@ pub fn what_was_renamed_said(renamed: &[Renamed]) -> Option<String> {
             },
         )
         .collect();
-    Some(format!(
-        "This build refuses names it once accepted, so {}. Nothing else about \
-         {} changed.",
-        said.join(", "),
-        match renamed.len() {
-            1 => "it",
-            _ => "them",
-        },
-    ))
+    let mut said = said.join(", ");
+    if let Some(first) = said.get(..1) {
+        said.replace_range(..1, &first.to_uppercase());
+    }
+    Some(format!("{said}."))
 }
 
 /// The version on disk, where [`forward`] has a step that moves it.
@@ -578,8 +556,7 @@ fn settled(email: &str) -> Value {
 fn shape_belies_the_version(field: &str) -> PerchError {
     PerchError::Other(format!(
         "This Registry says it is version {EARLIEST_VERSION}, and its `{field}` \
-         is in a later shape. Perch will not guess which of the two the rest of \
-         the file is in."
+         is in a later shape."
     ))
 }
 
@@ -591,9 +568,7 @@ fn shape_belies_the_version(field: &str) -> PerchError {
 fn no_object_here(field: &str) -> PerchError {
     PerchError::Other(format!(
         "This Registry says it is version {EARLIEST_VERSION}, and its `{field}` \
-         is not the shape a version {EARLIEST_VERSION} Registry wrote. Perch \
-         will not read past it, because what it holds would be dropped rather \
-         than refused."
+         is not the shape version {EARLIEST_VERSION} wrote."
     ))
 }
 

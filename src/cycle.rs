@@ -98,11 +98,10 @@ pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
         Some(group) => Ok(Scope::Group(group.clone())),
         None if registry.ungrouped.interchangeable => Ok(Scope::Ungrouped),
         None => Err(PerchError::NotInterchangeable(format!(
-            "{} is in no Group, so nothing has declared which Accounts it is \
-             interchangeable with.\n\
-             Either put it in a Group with `perch group move {} <group>`, or \
-             declare that every ungrouped Account is interchangeable with \
-             `perch config set ungrouped interchangeable true`.",
+            "{} is in no Group, and the ungrouped Accounts are not declared \
+             interchangeable.\n\
+             `perch group move {} <group>` puts it in one, or `perch config set \
+             ungrouped interchangeable true` declares them.",
             registry.named_for_the_user(leaving.email()),
             leaving.email(),
         ))),
@@ -552,8 +551,7 @@ pub fn choose(
     let accounts = scope.accounts(registry);
     if accounts.is_empty() {
         return Err(PerchError::NoCandidate(format!(
-            "{} holds no Accounts, so there is nowhere to Cycle to. Nothing was \
-             changed.",
+            "{} holds no Accounts, so there is nowhere to Cycle to.",
             scope.place(),
         )));
     }
@@ -637,8 +635,7 @@ pub fn choose(
     let Some(best) = worth_going.first() else {
         let alone = here.expect("something unexhausted is here or elsewhere");
         return Err(PerchError::NothingToDo(format!(
-            "{} is the only Account in {} that is not exhausted, and nothing \
-             has been observed of it. {}",
+            "{} is the only Account in {} not exhausted, and it has no figure. {}",
             registry.named_for_the_user(alone.account.email()),
             scope.place(),
             how_to_get_figures(scope),
@@ -1432,7 +1429,7 @@ pub(crate) mod tests {
         let said = refused.to_string();
         assert!(said.contains("here@example.com"), "which Account: {said}");
         assert!(
-            said.contains("nothing has been observed of it"),
+            said.contains("it has no figure"),
             "and why staying put is not a comparison Perch made: {said}"
         );
         assert!(

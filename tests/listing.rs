@@ -927,7 +927,7 @@ fn one_quarantined_account_is_told_the_repair_for_itself() {
         "the Account, as it is named, and what happened to it:\n{printed}"
     );
     assert!(
-        printed.contains("`perch relogin overflow@example.com` logs it in again in place"),
+        printed.contains("`perch relogin overflow@example.com` repairs it"),
         "and the repair pointed at the one Account it can be about:\n{printed}"
     );
 }
@@ -1136,7 +1136,7 @@ fn an_account_perch_holds_is_said_to_be_one_rather_than_a_bad_group_name() {
     let refused = result.expect_err("an address is not a Scope");
     let said = refused.to_string();
     assert!(
-        said.contains("an Account Perch holds"),
+        said.contains("that is an Account"),
         "it says what the name is: {said}"
     );
     assert!(

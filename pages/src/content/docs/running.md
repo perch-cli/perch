@@ -11,8 +11,7 @@ one is active.
 
 ```
 $ perch run overflow
-`overflow` is an Alias for overflow@example.com.
-Running Claude Code as overflow@example.com (as `overflow`), in this terminal alone. you@example.com stays the active Account everywhere else.
+Running Claude Code as overflow@example.com (as `overflow`), in this terminal alone.
 ```
 
 Every other terminal, the editor extension and the desktop app go on as the
@@ -30,7 +29,7 @@ The client's exit code is Perch's, so `perch run` stands in a script wherever
 
 ```
 $ perch run work
-`work` is a Group. This acts on one Account, so name the Account itself: its Alias, or its email address.   # exit 14
+`work` is a Group. Name one Account: its Alias, or its email address.   # exit 14
 ```
 
 A Quarantined Account is refused rather than launched into a login prompt.
@@ -39,9 +38,8 @@ A Quarantined Account is refused rather than launched into a login prompt.
 
 ```
 $ perch switch overflow
-`overflow` is an Alias for overflow@example.com.
 A client is running against you@example.com's Profile (pid 4242).
-Nothing was changed. That Credential belongs to it until it exits. Quit it, or switch to a different Account.   # exit 16
+Quit it, or `perch switch` to another Account.   # exit 16
 ```
 
 While a Run is going, its Profile is Live, and Perch writes nothing into it.
@@ -50,7 +48,7 @@ A Switch away from the Account you are running is refused as above. A
 
 ```
 $ perch status --refresh
-you@example.com: its access token has expired and a client is running against it (pid 4242 in /Users/you/.config/perch/profiles/you-example-com), so renewing it would log that session out. The cached figure is what you see.
+you@example.com: its access token has expired and a client is running against it (pid 4242 in /Users/you/.config/perch/profiles/you-example-com), so it was not Renewed.
 Account       you@example.com
 Organization  Acme
 Plan          pro
@@ -65,12 +63,10 @@ killed rather than closed leaves nothing behind that matters.
 
 ```
 $ perch run overflow -- --resume --model opus
-`overflow` is an Alias for overflow@example.com.
-Running Claude Code as overflow@example.com (as `overflow`), in this terminal alone. you@example.com stays the active Account everywhere else.
+Running Claude Code as overflow@example.com (as `overflow`), in this terminal alone.
 
 $ perch run overflow -- npm test
-`overflow` is an Alias for overflow@example.com.
-Running `npm` as overflow@example.com (as `overflow`), in this terminal alone. you@example.com stays the active Account everywhere else.
+Running `npm` as overflow@example.com (as `overflow`), in this terminal alone.
 ```
 
 Everything after `--` reaches the program exactly as typed. A first word that

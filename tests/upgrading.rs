@@ -188,10 +188,6 @@ fn npm_on_windows_is_printed_rather_than_run_because_it_cannot_work_from_here() 
         said.contains("update -g perch-cli") && said.contains("running"),
         "it says the command and why Perch is not the one to run it: {said}"
     );
-    assert!(
-        said.contains("Nothing was upgraded"),
-        "and says plainly that the machine is as it was: {said}"
-    );
 }
 
 /// The rule its Homebrew twin states out loud: a refusal that holds whatever

@@ -372,7 +372,7 @@ fn a_machine_perch_holds_nothing_on_has_nothing_to_purge() {
 
     assert_eq!(ran.code, EXIT_NOTHING_TO_DO, "{}{}", ran.out, ran.err);
     assert!(
-        ran.err.contains("nothing to give back"),
+        ran.err.contains("nothing to purge"),
         "and says so rather than making the home it was asked about:\n{}",
         ran.err
     );
@@ -576,7 +576,7 @@ fn the_upgrade_arm_refuses_a_binary_no_channel_put_where_it_is() {
     let ran = perch(&machine, &["upgrade"]);
 
     assert_eq!(ran.code, EXIT_INVALID, "{}{}", ran.out, ran.err);
-    assert!(ran.err.contains("which names no Channel"), "{}", ran.err);
+    assert!(ran.err.contains("where no Channel put it"), "{}", ran.err);
     assert!(
         ran.err.contains("--channel"),
         "and it says how to answer that:\n{}",

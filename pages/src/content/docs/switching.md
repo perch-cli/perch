@@ -12,7 +12,6 @@ declare which Accounts are interchangeable.
 
 ```
 $ perch switch overflow
-`overflow` is an Alias for overflow@example.com.
 Switched to overflow@example.com (as `overflow`).
 Utilization   5-hour  12%  (as of 4m ago)
               7-day   40%  (as of 4m ago)
@@ -28,6 +27,10 @@ refused while a client is running against the Profile of the Account you are
 leaving. Switching to the Account already active does nothing. A Switch that
 fails part way says which Account is active now, and running it again finishes
 the job.
+
+A login made outside Perch, sitting in the live store when you Switch, is
+replaced, and a `Note:` line under the verdict says whose it was. `perch add`
+logs it in again as an Account.
 
 ## Cycling
 
@@ -76,11 +79,9 @@ $ perch group add work
 Declared the Group `work`.
 
 $ perch group move you@example.com work
-`you@example.com` is an Account.
 Moved you@example.com into `work`.
 
 $ perch group move overflow@example.com work
-`overflow@example.com` is an Account.
 Moved overflow@example.com into `work`.
 
 $ perch group list

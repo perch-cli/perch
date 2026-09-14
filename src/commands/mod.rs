@@ -44,9 +44,7 @@ pub fn still_ours(perch: &mut crate::lock::Held<'_>, did: &str) -> Result<()> {
     // `Busy` rather than `Other`: the sentence below is "run this again", which
     // is what `EXIT_HELD` promises and what `EXIT_GENERAL` denies.
     Err(PerchError::Busy(format!(
-        "Another `perch` changed the Registry while that question was waiting \
-         for an answer, so this one is working from a copy that is out of \
-         date.\n\
+        "Another `perch` changed the Registry while that question waited.\n\
          Nothing was {did}. Run this again."
     )))
 }

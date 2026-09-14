@@ -224,7 +224,7 @@ fn a_name_this_build_refuses_is_renamed_on_disk_and_the_note_says_which() {
 
     let said = host.notes().join("\n");
     assert!(
-        said.contains("a Group `global` is now `global-1`"),
+        said.contains("A Group `global` is now `global-1`"),
         "the note says what it renamed and to what: {said:?}"
     );
     assert!(
@@ -1275,7 +1275,7 @@ fn a_version_3_name_of_symbols_comes_forward_named_for_its_kind() {
 
     let said = host.notes().join("\n");
     assert!(
-        said.contains("a Group `🚀` is now `group`"),
+        said.contains("A Group `🚀` is now `group`"),
         "the note says what it renamed and to what: {said:?}"
     );
     let written: serde_json::Value =

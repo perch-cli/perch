@@ -73,10 +73,7 @@ fn run_the_login(
     // is for, the other an instruction somebody has to follow before the command
     // can finish (ADR perch-says-what-it-did).
     say::line(out, purpose)?;
-    say::line(
-        out,
-        "Quit Claude Code when the login is done to come back here.\n",
-    )?;
+    say::line(out, "Quit Claude Code when the login is done.\n")?;
 
     let status = host
         .exec_interactive(
@@ -172,15 +169,6 @@ pub fn reap_abandoned(host: &dyn Host) {
         if let Ok(store) = probe::store_for_profile(host, &dir) {
             profile::discard(host, &store);
         }
-    }
-}
-
-/// What every login says about the Account it is leaving alone, when there is
-/// one to leave alone.
-pub fn leaving_the_active_account_alone(active: Option<&str>) -> String {
-    match active {
-        Some(active) => format!(" {active} stays active and its session is untouched."),
-        None => String::new(),
     }
 }
 

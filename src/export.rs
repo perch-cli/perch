@@ -42,11 +42,9 @@ where
     // The same floor `registry::load` holds: a version no Perch stamped names no
     // shape, and an Import writes what it read back out under the current one.
     if crate::migration::below_the_earliest(&text) {
-        return Err(D::Error::custom(format!(
-            "the Registry inside says it is a version no Perch has written, so \
-             Perch will not read it as version {}",
-            crate::registry::CURRENT_VERSION,
-        )));
+        return Err(D::Error::custom(
+            "the Registry inside is a version no Perch has written",
+        ));
     }
     let forwarded = crate::migration::forward(&text).map_err(D::Error::custom)?;
     serde_json::from_str(forwarded.as_deref().unwrap_or(&text)).map_err(D::Error::custom)
@@ -159,7 +157,14 @@ pub fn gather(
     };
 
     for account in &registry.accounts {
-        if let Some(credential) = read_the_credential(host, registry, account, installed)? {
+        let credential =
+            read_the_credential(host, registry, account, installed).map_err(|error| {
+                error.with_note(&format!(
+                    "{}'s Credential could not be read, so no Export was written.",
+                    account.email()
+                ))
+            })?;
+        if let Some(credential) = credential {
             gathered
                 .credentials
                 .insert(account.email().to_string(), credential);
@@ -192,7 +197,7 @@ fn read_the_credential(
     // answer: `claude /logout` empties the live store and leaves the Account
     // active, holding a Credential Perch has perfectly well.
     if let Some(live) = the_live_store(host, registry, account, installed)?
-        && let Some(credential) = read_from(host, &live, account)?
+        && let Some(credential) = read_from(host, &live)?
     {
         return Ok(Some(credential));
     }
@@ -202,7 +207,7 @@ fn read_the_credential(
     let Ok(store) = account.store(host) else {
         return Ok(None);
     };
-    read_from(host, &store, account)
+    read_from(host, &store)
 }
 
 /// The Default Profile, where what is live in it is this Account's Credential.
@@ -235,18 +240,8 @@ fn the_live_store(
     Ok((!somebody_else).then_some(live))
 }
 
-fn read_from(
-    host: &dyn Host,
-    store: &crate::probe::Store,
-    account: &Account,
-) -> Result<Option<String>> {
-    let held = credentials::read(host, store).map_err(|error| {
-        error.with_note(&format!(
-            "Nothing was written. An Export that left {} out would be a partial \
-             restore, which is the whole of what this file exists to prevent.",
-            account.email(),
-        ))
-    })?;
+fn read_from(host: &dyn Host, store: &crate::probe::Store) -> Result<Option<String>> {
+    let held = credentials::read(host, store)?;
     // Copied out of its `Zeroizing` rather than carried in it: `Export` wipes
     // both of its maps in its own `Drop`, and the wrapper this came in wipes the
     // buffer it leaves behind.
@@ -448,28 +443,22 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
         // -r` rather than `age -p`. Told as a wrong passphrase, it invites
         // somebody to retype forever one that was never involved.
         age::DecryptError::NoMatchingKeys => PerchError::Invalid(
-            "This is an `age` file, but it was not written with a passphrase, so \
-             no passphrase will open it. An Export always is."
-                .to_string(),
+            "This file was not written with a passphrase, so it is not an Export.".to_string(),
         ),
         // The file is intact and the passphrase may well be right: nothing here
         // is worth typing again, and everything here is worth trying on a
         // machine with more to spend.
         age::DecryptError::ExcessiveWork { required, .. } => PerchError::Invalid(format!(
-            "This file was sealed with more work than Perch will spend opening \
-             one (2^{required} scrypt rounds, against a ceiling of \
-             2^{MAX_WORK_FACTOR}). Nothing is wrong with the file and the \
-             passphrase is not in question. `age -d` opens it where this will \
-             not."
+            "This file takes 2^{required} scrypt rounds to open, more than Perch \
+             spends. `age -d` opens it."
         )),
         // This *is* the Export and it did not come through intact: a header
         // whose MAC fails, or a payload that stops early. Its own answer, or a
         // damaged copy of the right file sends somebody looking for another.
         damaged @ (age::DecryptError::InvalidMac | age::DecryptError::Io(_)) => {
             PerchError::Invalid(format!(
-                "This is an `age` file and it did not come through intact \
-                 ({damaged}). The passphrase is not in question, and nothing will \
-                 open this copy. Find another one."
+                "This `age` file did not come through intact ({damaged}). Find \
+                 another copy."
             ))
         }
         other => PerchError::Invalid(format!("This is not an `age` file Perch can read: {other}")),
@@ -537,10 +526,8 @@ fn no_perch_wrote(claimed: Option<u64>) -> PerchError {
     PerchError::Malformed {
         path: "the Export".to_string(),
         detail: format!(
-            "it says it is export version {}, which is a version no Perch has \
-             written. The earliest is {}. Nothing was imported.",
+            "it is export version {}, which no Perch has written.",
             claimed.unwrap_or_default(),
-            EARLIEST_VERSION,
         ),
     }
 }
@@ -839,7 +826,7 @@ mod tests {
         assert!(
             no_passphrase
                 .to_string()
-                .contains("passphrase will open it"),
+                .contains("not written with a passphrase"),
             "{no_passphrase}"
         );
 
@@ -1093,6 +1080,5 @@ mod tests {
         let refused = gather(&host, &registry, &Installed::unknown("2.1.221"))
             .expect_err("nothing can be read");
         assert!(refused.to_string().contains("one@example.com"), "{refused}");
-        assert!(refused.to_string().contains("partial restore"), "{refused}");
     }
 }

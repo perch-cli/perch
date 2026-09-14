@@ -12,26 +12,21 @@ Group. There is nothing above a Scope, and an Account carries no Settings.
 
 ```
 $ perch config set --help
-Set one Setting on one Scope, and say what it now means.
+Set one Setting on one Scope.
 
-A Scope is a Group by name, or `ungrouped` for the Accounts in no Group.
-
-The Settings, and the values each takes:
+`<scope>` is a Group by name, or `ungrouped`. `<key>` and `<value>`:
   interchangeable            `true` or `false`
   strategy                   `most-headroom` or `soonest-reset`
   prefer-fable               `true` or `false`
   watcher-may-act            `true` or `false`
   watcher-threshold-percent  a whole number between 0 and 100
   watcher-margin-percent     a whole number between 1 and 100
-
-Every Scope carries all of them but `interchangeable`, which the Accounts in no Group alone carry: the declaration that they may be Cycled among at all.
-
-The Strategies:
-  most-headroom — prefers the Account with the most room left
-  soonest-reset — prefers the Account whose quota is about to be thrown away, so it is spent rather than wasted
-
-`perch config get` reads every Setting back.
 ```
+
+Every Scope carries all of them but `interchangeable`, which only `ungrouped`
+carries. `most-headroom` prefers the Account with the most room left.
+`soonest-reset` prefers the Account whose quota is about to be thrown away, so
+it is spent rather than wasted. `perch config get` reads every Setting back.
 
 | Key | Said about | Values | Default |
 | --- | ---------- | ------ | ------- |

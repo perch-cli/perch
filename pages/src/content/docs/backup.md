@@ -14,10 +14,10 @@ writes them to one encrypted file, `perch holdings import` puts them back, and
 
 ```
 $ perch holdings export ~/perch-backup.age
-This file holds a working Credential for every Account Perch has. It is encrypted with a passphrase you choose, and there is no way into it without one.
+Choose a passphrase. Nothing opens the Export without it.
 Passphrase:
 Again:
-Exported 3 Accounts to /Users/you/perch-backup.age.
+Exported 3 Accounts.
 ```
 
 Keep the passphrase somewhere that is not beside the file. Without it the
@@ -40,7 +40,7 @@ directory that does not exist is refused rather than created.
 ```
 $ perch holdings import ~/perch-backup.age
 Passphrase:
-Imported 3 Accounts from /Users/you/perch-backup.age.
+Imported 3 Accounts.
 
 $ perch list
   Account               Alias     Group  State                  Headroom        Utilization
@@ -49,7 +49,7 @@ $ perch list
   spare@example.com     -         none   disabled, quarantined  never observed  never observed
 
 spare@example.com: Anthropic would not renew its Credential.
-`perch relogin spare@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+`perch relogin spare@example.com` repairs it.
 ```
 
 Nothing arrives active. Claude Code goes on as whatever it is logged in as
@@ -70,8 +70,7 @@ and no merge:
 
 ```
 $ perch holdings import ~/perch-backup.age
-Perch already holds 3 Accounts and 1 Group, and an Import does not merge onto a machine that holds anything. A Group and what it carries are declarations this machine holds alone.
-Nothing was imported and the file was not opened. `perch holdings purge` makes room, and offers to write an Export first.   # exit 13
+Perch already holds 3 Accounts and 1 Group, and an Import lands only on an empty machine. `perch holdings purge` makes room.   # exit 13
 ```
 
 A wrong passphrase fails before anything is written. An Import that fails part
@@ -83,17 +82,16 @@ Export written by a newer Perch is refused, naming the version that wrote it.
 ```
 $ perch holdings purge
 Perch holds 3 Accounts: you@example.com, overflow@example.com, spare@example.com.
-A Purge deletes every one of their Profiles, every Credential Perch holds for them, and /Users/you/.config/perch itself. Nothing undoes it: only a fresh login brings an Account back, and it comes back as a new one.
+A Purge deletes their Profiles, their Credentials, and /Users/you/.config/perch itself. Nothing undoes it.
 Claude Code goes on running as whatever it is logged in as.
 Write an Export first? [Y/n]: y
 Where to write it: /Users/you/perch-backup.age
-This file holds a working Credential for every Account Perch has. It is encrypted with a passphrase you choose, and there is no way into it without one.
+Choose a passphrase. Nothing opens the Export without it.
 Passphrase:
 Again:
-Exported 3 Accounts to /Users/you/perch-backup.age.
+Exported 3 Accounts.
 Type `purge` to give the machine back: purge
-Purged 3 Accounts, and /Users/you/.config/perch is gone.
-The Export is at /Users/you/perch-backup.age, and holds a working Credential for every Account. Keep it somewhere you would keep those. `perch holdings purge` will not write over it.
+Purged 3 Accounts.
 ```
 
 A Purge takes no Target. Giving up one Account is `perch remove`. It offers an
