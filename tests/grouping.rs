@@ -324,7 +324,7 @@ fn a_read_only_question_about_an_alias_is_not_told_to_free_it() {
         .to_string();
 
     assert!(
-        refusal.contains("no Group can be called that"),
+        refusal.contains("is an Alias for"),
         "it says why the word is not a Group: {refusal}"
     );
     assert!(

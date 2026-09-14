@@ -158,7 +158,7 @@ fn a_watcher_reading_this_account_keeps_the_allowance_a_typed_refresh_would_spen
         "the allowance is 28-30 an hour and the Watcher has 24 of them: {printed}"
     );
     assert!(
-        printed.contains("Watcher is reading this Account every 2m30s"),
+        printed.contains("the Watcher read it less than 2m30s ago"),
         "and the reader is told why the figure is the cached one: {printed}"
     );
     assert!(printed.contains("42%"), "which is still shown: {printed}");
@@ -384,7 +384,6 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
         "renewing a Credential a running client holds would log it out"
     );
     assert!(printed.contains("4242"), "{printed}");
-    assert!(printed.contains("cached figure"), "{printed}");
     // And *which* directory the client is in: the active Account is asked about from
     // two, and a refusal naming neither leaves the reader to guess which to quit.
     // Derived rather than spelled, because joining uses the platform's separator.
@@ -419,7 +418,6 @@ fn a_credential_a_run_is_holding_is_never_renewed_either() {
         "renewing under a Run would log that client out mid-task"
     );
     assert!(printed.contains(&THIS_PROCESS.to_string()), "{printed}");
-    assert!(printed.contains("cached figure"), "{printed}");
 }
 
 #[test]
@@ -439,7 +437,6 @@ fn a_run_against_the_active_account_stops_its_live_credential_being_renewed() {
         host.sent_to(TOKEN_URL)
     );
     assert!(printed.contains(&THIS_PROCESS.to_string()), "{printed}");
-    assert!(printed.contains("cached figure"), "{printed}");
 }
 
 #[test]
@@ -1018,7 +1015,6 @@ fn an_account_that_shares_a_profile_with_another_is_never_renewed() {
         printed.contains(sharer),
         "the refusal names the Account it is protecting: {printed}"
     );
-    assert!(printed.contains("cached figure"), "{printed}");
 }
 
 #[test]

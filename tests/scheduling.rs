@@ -193,7 +193,6 @@ fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_declarations() 
     let said = refusal.to_string();
     assert!(said.contains("interchangeable"), "{said}");
     assert!(said.contains("watcher-may-act"), "{said}");
-    assert!(said.contains("perch group move"), "{said}");
     assert!(
         host.sent_to(USAGE_URL).is_empty(),
         "and it read nothing on the way to deciding it may do nothing"

@@ -340,10 +340,8 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
             Err(err) => {
                 let _ = host.remove_dir_all(&lock.dir);
                 return Err(PerchError::Other(format!(
-                    "{} ({}) was taken and then would not say when it was \
-                     written ({err}), which is the only thing that makes a hold \
-                     on it checkable.\n\
-                     Nothing was changed, and the lock was given back.",
+                    "{} ({}) was taken, but when it was written could not be \
+                     read ({err}), so it was given back.",
                     lock.name,
                     lock.dir.display(),
                 )));
@@ -406,9 +404,8 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
     // changed, and the two callers that run unattended have to tell this from a
     // fault.
     Err(PerchError::Busy(format!(
-        "{} ({}) is held by {} and was not given back.\n\
-         Nothing was changed. Try again in a moment; if it persists, quit it \
-         and run this again.",
+        "{} ({}) is held by {}.\n\
+         Nothing was changed. Try again in a moment.",
         lock.name,
         lock.dir.display(),
         lock.held_by,
@@ -487,8 +484,7 @@ fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
 
     Err(PerchError::Other(format!(
         "{} ({}) is not a lock directory and could not be cleared: {err}.\n\
-         Nothing was changed. A lock is a directory, and nothing will be \
-         able to take this one until whatever is at that path is removed.",
+         Remove whatever is at that path.",
         lock.name,
         lock.dir.display(),
     )))
@@ -920,7 +916,7 @@ mod tests {
         assert!(
             refusal
                 .to_string()
-                .contains("would not say when it was written"),
+                .contains("when it was written could not be read"),
             "{refusal}"
         );
         assert!(

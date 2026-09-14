@@ -82,14 +82,11 @@ fn a_purge_takes_every_profile_every_credential_and_the_registry() {
         !host.path_exists(Path::new(PERCH_HOME)),
         "and the directory Perch kept it all in is not there either"
     );
-    // One line, asserted whole (ADR perch-says-what-it-did): how many, and the
-    // directory they were kept in. That every Profile and every Credential went
-    // with them is what a Purge *is*, and was said in the question.
+    // One line, asserted whole (ADR perch-says-what-it-did): how many. That every
+    // Profile and every Credential went with them is what a Purge *is*, and was
+    // said in the question; the directory is a path, and a success names none.
     assert!(
-        printed.trim_end().ends_with(&format!(
-            "Purged 3 Accounts, and {} is gone.",
-            perch_home_as_written(&host)
-        )),
+        printed.trim_end().ends_with("Purged 3 Accounts."),
         "{printed}"
     );
 }
@@ -822,7 +819,7 @@ fn a_terminal_that_goes_away_during_the_report_does_not_lose_the_export() {
          Holdings: {said}"
     );
     assert!(
-        said.contains("Purge itself finished"),
+        said.contains("The Purge finished"),
         "and what happened is said, because there is nothing to run again: {said}"
     );
     assert!(
@@ -959,10 +956,6 @@ fn a_machine_perch_never_ran_on_has_nothing_to_give_back() {
     let refused = outcome.expect_err("there is nothing here");
     assert_eq!(refused.exit_code(), EXIT_NOTHING_TO_DO, "{refused}");
     assert!(
-        refused.to_string().contains(&perch_home_as_written(&host)),
-        "{refused}"
-    );
-    assert!(
         !host.path_exists(Path::new(PERCH_HOME)),
         "and no directory was made on the way to saying so"
     );
@@ -1035,7 +1028,7 @@ fn a_hold_lost_after_the_credentials_were_deleted_does_not_say_nothing_happened(
         "every Credential is already deleted, so that sentence is false: {said}"
     );
     assert!(
-        said.contains("Every Credential Perch held is deleted"),
+        said.contains("Every Credential is deleted"),
         "it says what did happen: {said}"
     );
     assert!(
@@ -1238,7 +1231,7 @@ fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_l
     let failed = stopped.expect_err("the home directory would not go");
     let said = failed.to_string();
     assert!(
-        said.contains("Every Credential Perch held is deleted"),
+        said.contains("Every Credential is deleted"),
         "the destructive half really did happen: {said}"
     );
     // Rendered as the Host built it rather than as the constant spells it: home
@@ -1287,13 +1280,10 @@ fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_b
     let failed = stopped.expect_err("a Credential that will not go is not a Purge that worked");
     let said = failed.to_string();
     assert!(
-        said.contains("Perch's Registry is untouched"),
+        said.contains("The Registry is untouched"),
         "so running it again is a whole Purge rather than a partial one: {said}"
     );
-    assert!(
-        said.contains("`perch holdings purge` can be run again"),
-        "{said}"
-    );
+    assert!(said.contains("Run `perch holdings purge` again"), "{said}");
     assert!(
         registry_on(&host).is_some(),
         "the registry really is still there: {printed}"
@@ -1319,9 +1309,7 @@ fn a_leftover_directory_that_names_no_store_stops_the_purge_rather_than_being_pa
 
     let refusal = result.expect_err("a Credential that cannot be named cannot be deleted");
     assert!(
-        refusal
-            .to_string()
-            .contains("already deleted is already gone"),
+        refusal.to_string().contains("The Registry is untouched"),
         "it says what a second run would finish: {refusal}"
     );
     assert!(

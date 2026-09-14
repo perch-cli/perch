@@ -248,12 +248,9 @@ fn disabling_a_quarantined_account_promises_no_switch_that_would_not_work() {
     result.expect("an Account can leave the pool whatever its Credential is doing");
     // The one thing either half says beyond what it changed: an Account nothing
     // will switch to is a refusal wearing an outcome's clothes, so it keeps its
-    // explanation and its remedy (ADR perch-says-what-it-did).
+    // reason and its remedy (ADR perch-says-what-it-did).
     assert!(
-        printed.contains(
-            "It is Quarantined, though: Anthropic would not renew its \
-             Credential. Nothing switches to it, Cycling or you."
-        ),
+        printed.contains("It is Quarantined: Anthropic would not renew its Credential."),
         "the promise disabling makes about naming an Account is exactly the one \
          Quarantine breaks, so what is said here is the breakage: {printed}"
     );
@@ -286,20 +283,6 @@ fn a_healthy_account_is_told_what_changed_and_nothing_about_what_that_means() {
         printed.trim_end().lines().last(),
         Some(format!("Enabled {SECOND_EMAIL}.").as_str()),
         "nor the other way: {printed}"
-    );
-}
-
-#[test]
-fn the_target_says_which_kind_of_name_matched_before_it_acts() {
-    let host = machine_with_two_accounts();
-    set_alias(&host, "spare", SECOND_EMAIL).0.expect("named");
-
-    let (result, printed) = disable_account(&host, "spare");
-
-    result.expect("an Alias reaches the Account it names");
-    assert!(
-        printed.contains("`spare` is an Alias for") && printed.contains(SECOND_EMAIL),
-        "{printed}"
     );
 }
 

@@ -31,19 +31,47 @@ fn sources() -> Vec<PathBuf> {
 
 /// The file with its comments blanked and its test module dropped, so what is
 /// left is what Perch says. Lines rather than bytes, to keep the numbering a
-/// failure reports.
+/// failure reports. A `///` inside a clap-derived item is kept as a literal:
+/// clap renders it into `--help`, so it is said rather than commented.
 fn what_perch_says(text: &str) -> String {
     let text = match text.find("\n#[cfg(test)]") {
         Some(at) => &text[..at],
         None => text,
     };
+    let mut depth = 0usize;
+    let mut clap_item = false;
     text.lines()
-        .map(|line| match line.trim_start().starts_with("//") {
-            true => "",
-            false => line,
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if !clap_item && trimmed.starts_with("#[derive(") && derives_clap(trimmed) {
+                clap_item = true;
+            }
+            if trimmed.starts_with("//") {
+                return match clap_item && trimmed.starts_with("///") {
+                    true => format!("\"{}\"", trimmed[3..].replace('"', "'")),
+                    false => String::new(),
+                };
+            }
+            if clap_item {
+                depth += line.matches('{').count();
+                let closed = line.matches('}').count();
+                if closed >= depth && depth > 0 {
+                    depth = 0;
+                    clap_item = false;
+                } else {
+                    depth -= closed;
+                }
+            }
+            line.to_string()
         })
-        .collect::<Vec<&str>>()
+        .collect::<Vec<String>>()
         .join("\n")
+}
+
+fn derives_clap(attribute: &str) -> bool {
+    ["Parser", "Subcommand", "Args"]
+        .iter()
+        .any(|derive| attribute.contains(derive))
 }
 
 /// Every string literal, as one line each with the line it opens on. A literal
@@ -139,6 +167,31 @@ fn the_row_is_the_only_exception_and_something_takes_it() {
         "no labeled row carries a dash any more, so the exception is a clause \
          with nothing under it and goes"
     );
+}
+
+/// clap renders a `///` on a derived item into `--help`, and an ordinary `///`
+/// into nothing a terminal sees.
+#[test]
+fn a_doc_comment_on_a_clap_item_is_something_perch_says() {
+    let source = "\
+/// A module — with a dash.
+#[derive(Debug, clap::Args)]
+pub struct Flags {
+    /// One line — and its reasoning.
+    #[arg(long)]
+    pub flag: bool,
+}
+
+/// A plain item — its dash is a comment's.
+pub struct Plain {
+    pub field: u8,
+}
+";
+    let said: Vec<String> = literals(&what_perch_says(source))
+        .into_iter()
+        .map(|(_, said)| said)
+        .collect();
+    assert_eq!(said, vec![" One line — and its reasoning.".to_string()]);
 }
 
 /// Named so a failure above can be read: what the scan takes a literal to be.

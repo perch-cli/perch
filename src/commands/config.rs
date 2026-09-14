@@ -28,21 +28,17 @@ use crate::say;
 /// words away could not.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum ConfigCommand {
-    /// Set one Setting on one Scope, and say what it now means.
+    /// Set one Setting on one Scope.
     #[command(long_about = how_a_setting_is_set())]
     Set {
-        /// `<scope> <key> <value>`.
+        /// `<scope> <key> <value>`
         #[arg(value_name = "WORDS", num_args = 1.., required = true, allow_hyphen_values = true)]
         words: Vec<String>,
     },
 
     /// Read Settings back.
-    ///
-    /// With nothing named it prints every Scope's Config in full, each Scope's
-    /// page under its name. A Scope prints its own page, and a Scope and a key
-    /// print the value alone.
     Get {
-        /// Nothing, `<scope>`, or `<scope> <key>`.
+        /// Nothing, `<scope>`, or `<scope> <key>`
         #[arg(value_name = "WORDS", num_args = 0.., allow_hyphen_values = true)]
         words: Vec<String>,
     },
@@ -97,10 +93,8 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             Ok(scope) => {
                 Setting::parse(second, &scope)?;
                 Err(PerchError::Invalid(format!(
-                    "`perch config set {first} {second}` names {} and a key, but \
-                     nothing to set it to. `perch config set <scope> <key> \
-                     <value>` sets one.",
-                    scope.mentioned(),
+                    "`perch config set {first} {second}` names no value. `perch \
+                     config set {first} {second} <value>` sets one.",
                 )))
             }
             // A key where the Scope goes is a Setting with no subject, and
@@ -183,29 +177,11 @@ fn how_a_setting_is_set() -> String {
         .map(|key| column.row(key.as_str(), &Shown::of(&key.takes())))
         .collect();
     format!(
-        "Set one Setting on one Scope, and say what it now means.\n\
+        "Set one Setting on one Scope.\n\
          \n\
-         A Scope is a Group by name, or `{UNGROUPED}` for the Accounts in no \
-         Group.\n\
-         \n\
-         The Settings, and the values each takes:\n\
-         {rows}\n\
-         \n\
-         Every Scope carries all of them but `{interchangeable}`, which the \
-         Accounts in no Group alone carry: the declaration that they may be \
-         Cycled among at all.\n\
-         \n\
-         The Strategies:\n\
-         {strategies}\n\
-         \n\
-         `perch config get` reads every Setting back.",
-        interchangeable = Setting::Interchangeable.as_str(),
+         `<scope>` is a Group by name, or `{UNGROUPED}`. `<key>` and `<value>`:\n\
+         {rows}",
         rows = rows.join("\n"),
-        strategies = crate::config::the_strategies()
-            .iter()
-            .map(|line| format!("  {line}"))
-            .collect::<Vec<_>>()
-            .join("\n"),
     )
 }
 
@@ -228,10 +204,8 @@ fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
     match Scope::named(registry, name) {
         Ok(scope) => Ok(scope),
         Err(NotAScope::MeansEveryScope) => Err(PerchError::NotFound(format!(
-            "There is no Scope every other one falls back to, so there is no \
-             `{name}` to name: every Setting is said about the Scope it governs. \
-             A Scope is a Group by name, or `{UNGROUPED}` for the Accounts in no \
-             Group, and `perch config get` prints every one of them."
+            "There is no Scope called `{name}`. `perch config get` reads every \
+             Scope there is."
         ))),
         Err(NotAScope::NoSuchGroup) => {
             Err(a_setting_is_not_a_scope(name)
@@ -247,18 +221,16 @@ fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
 fn a_setting_is_not_a_scope(word: &str) -> Option<PerchError> {
     let key = Setting::parse_quietly(word)?.as_str();
     Some(PerchError::NotFound(format!(
-        "`{key}` is a Setting rather than a Scope, and a Setting is said about \
-         the Scope it governs: `perch config set <scope> {key} <value>` sets one \
-         and `perch config get <scope> {key}` reads it."
+        "`{key}` is a Setting, not a Scope. `perch config set <scope> {key} \
+         <value>` sets it."
     )))
 }
 
 /// Two words with no Scope among them: a Setting with no subject.
 fn no_scope_was_named(registry: &Registry, key: &str, value: &str) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config set {key} {value}` names no Scope, and every Setting is \
-         said about the Scope it governs. `perch config set <scope> {key} \
-         {value}` sets one. {}",
+        "`perch config set {key} {value}` names no Scope. `perch config set \
+         <scope> {key} {value}` does. {}",
         the_scopes(registry),
     ))
 }
@@ -267,19 +239,16 @@ fn no_scope_was_named(registry: &Registry, key: &str, value: &str) -> PerchError
 /// missing Scope ends with it, because "name a Scope" is no use to somebody who
 /// does not know what theirs are called.
 fn the_scopes(registry: &Registry) -> String {
-    let groups: Vec<&str> = registry.groups.keys().map(String::as_str).collect();
-    let held = match groups.is_empty() {
-        true => "No Groups have been declared yet.".to_string(),
-        false => format!("Groups Perch holds: {}.", groups.join(", ")),
-    };
-    format!("`{UNGROUPED}` addresses the Accounts in no Group. {held}")
+    let mut scopes = vec![format!("`{UNGROUPED}`")];
+    scopes.extend(registry.groups.keys().map(|group| format!("`{group}`")));
+    format!("The Scopes are {}.", scopes.join(", "))
 }
 
 /// The form `set` takes, said whenever the words said were not it.
 fn how_set_is_addressed(registry: &Registry, words: &[String]) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config set` was given {}. It takes `perch config set <scope> \
-         <key> <value>`, where a Scope is a Group or `{UNGROUPED}`. {}",
+        "`perch config set` takes `perch config set <scope> <key> <value>`, \
+         not {}. {}",
         say::words(words.len()),
         the_scopes(registry),
     ))
@@ -290,9 +259,7 @@ fn how_set_is_addressed(registry: &Registry, words: &[String]) -> PerchError {
 /// serving both would name a form that does not exist.
 fn how_get_is_addressed(words: &[String]) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config get` was given {}. It takes `perch config get <scope> \
-         <key>`, or a Scope alone to read every Setting it holds. `perch config \
-         get` on its own reads every Scope there is.",
+        "`perch config get` takes `perch config get [<scope> [<key>]]`, not {}.",
         say::words(words.len()),
     ))
 }
@@ -330,7 +297,10 @@ mod tests {
             "the form with a subject in it is named, with the words they typed \
              already in it: {said}"
         );
-        assert!(said.contains("Groups Perch holds: work."), "{said}");
+        assert!(
+            said.contains("The Scopes are `ungrouped`, `work`."),
+            "{said}"
+        );
         assert_eq!(
             registry.settings(&work()).strategy,
             Strategy::MostHeadroom,
@@ -461,7 +431,7 @@ mod tests {
         let refused = set(&mut registry, &words(&["work", "interchangeable", "true"]))
             .expect_err("a Group is that declaration rather than holding one");
         let said = refused.to_string();
-        assert!(said.contains("only they carry it"), "{said}");
+        assert!(said.contains("of `ungrouped` alone"), "{said}");
         assert!(
             said.contains("perch config set ungrouped interchangeable"),
             "{said}"
@@ -521,7 +491,7 @@ mod tests {
             .expect_err("a Setting on its own is about nothing");
 
         let said = refused.to_string();
-        assert!(said.contains("rather than a Scope"), "{said}");
+        assert!(said.contains("is a Setting, not a Scope"), "{said}");
         assert!(!said.contains("No Group called"), "{said}");
     }
 
@@ -533,7 +503,9 @@ mod tests {
             .expect_err("that is a Scope and a key, with no value");
 
         let said = refused.to_string();
-        assert!(said.contains("Group `work`"), "{said}");
-        assert!(said.contains("<scope> <key> <value>"), "{said}");
+        assert!(
+            said.contains("perch config set work strategy <value>"),
+            "{said}"
+        );
     }
 }

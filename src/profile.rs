@@ -137,22 +137,6 @@ impl Placed {
         if self.wrote_the_identity_file {
             let _ = host.remove_file(&self.store.identity_file);
         }
-        let taken_back = match (self.wrote_a_credential, self.wrote_the_identity_file) {
-            (true, true) => "The Credential and the `.claude.json`",
-            (true, false) => "The Credential",
-            // Whatever the store holds belongs to whoever left the directory
-            // behind.
-            (false, true) => "The `.claude.json`",
-            // Nothing of this placement's landed, so the directory is exactly
-            // as its owner left it.
-            (false, false) => return,
-        };
-        host.note(&format!(
-            "{} was already on this machine, so it was left where it is rather \
-             than removed with what was placed here. {taken_back} written into \
-             it has been taken back out.",
-            self.store.config_dir.display(),
-        ));
     }
 
     /// What a placement that stopped does with its ledger, per [`IfItFails`].
@@ -242,8 +226,7 @@ fn discard_a_bad_copy(host: &dyn Host, store: &CredentialStore, why: &NotKept) {
         return;
     }
     host.note(&format!(
-        "{} was left holding a Credential that did not read back intact, so it \
-         was removed rather than left for Claude Code to find.",
+        "{} held a Credential that did not read back intact, so it was removed.",
         store.describe()
     ));
     if store.forget(host).is_err() {
@@ -374,10 +357,8 @@ pub fn discard(host: &dyn Host, store: &Store) {
 
     if !still_holding.is_empty() {
         host.note(&format!(
-            "{} would not give up the Credential it holds for {}, so that \
-             directory was left where it is: it is the only thing that can \
-             still name the store. `perch holdings purge` empties it, and the \
-             next `perch add` reaps it.",
+            "{} would not give up the Credential it holds for {}, so it was \
+             left. `perch holdings purge` empties it.",
             still_holding.join(" and "),
             store.config_dir.display(),
         ));

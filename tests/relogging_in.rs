@@ -76,7 +76,7 @@ fn a_repair_that_stands_says_so_when_only_the_report_could_not_be_written() {
     .expect_err("the report could not be written");
 
     assert!(
-        refused.to_string().contains("repair itself finished"),
+        refused.to_string().contains("The repair finished"),
         "the failure says which half of the command it was: {refused}"
     );
     assert!(
@@ -140,10 +140,7 @@ fn a_repaired_account_that_is_still_disabled_is_told_so() {
 
     result.expect("the Account is repaired");
     assert!(
-        printed.contains(
-            "Cycling still will not choose it: it is disabled, which a repair \
-             does not undo."
-        ),
+        printed.contains("Note: it is disabled, so Cycling will not choose it."),
         "{printed}"
     );
 }
@@ -715,11 +712,11 @@ fn a_repair_that_could_not_be_recorded_says_the_login_worked_and_not_to_switch()
     let error = result.expect_err("the repair could not be recorded");
     let said = error.to_string();
     assert!(
-        said.contains("The login itself worked"),
+        said.contains("The repair stands, and Perch still records"),
         "the browser round trip is not repeated for nothing: {said}"
     );
     assert!(
-        said.contains("Do not run `perch switch`"),
+        said.contains("A `perch switch` before then"),
         "and the Capture that would destroy the repair is named: {said}"
     );
     assert_eq!(
@@ -751,7 +748,7 @@ fn a_repair_whose_landing_could_not_be_recorded_says_so_rather_than_claiming_it_
     let error = result.expect_err("the landing could not be recorded");
     let said = error.to_string();
     assert!(
-        said.contains("fresh Credential is the live one"),
+        said.contains("The Switch worked"),
         "the half that happened is said, so the browser round trip is not \
          repeated for nothing: {said}"
     );
@@ -786,7 +783,7 @@ fn a_repair_that_could_not_be_made_live_still_stands_and_says_what_is_left() {
 
     let error = result.expect_err("the live Credential could not be replaced");
     assert!(
-        error.to_string().contains("The repair itself stands"),
+        error.to_string().contains("The repair stands"),
         "a partial outcome says which half happened: {error}"
     );
     assert_eq!(
@@ -829,7 +826,7 @@ fn a_repair_whose_identity_patch_failed_is_live_and_still_recorded_as_active() {
     assert!(
         error
             .to_string()
-            .contains("its fresh Credential is the live one"),
+            .contains("is active, but Claude Code still displays"),
         "it says the repair stands rather than the opposite: {error}"
     );
     assert!(
@@ -882,7 +879,7 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
     assert!(
         error
             .to_string()
-            .contains("goes on using the one that stopped working"),
+            .contains("the live Credential was not replaced"),
         "and that the live Credential really is still the broken one: {error}"
     );
     assert_eq!(
@@ -931,13 +928,11 @@ fn an_account_removed_while_its_login_was_open_says_the_login_still_worked() {
     assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
     let said = refusal.to_string();
     assert!(
-        said.contains(&format!(
-            "{SECOND_EMAIL} was removed while that login was happening"
-        )),
+        said.contains(&format!("{SECOND_EMAIL} was removed during that login")),
         "{said}"
     );
     assert!(
-        said.contains("The login itself worked") && said.contains("perch add"),
+        said.contains("perch add"),
         "it says the Credential is not lost, and how to keep it: {said}"
     );
 }

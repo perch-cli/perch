@@ -64,12 +64,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Registry is written. What is left is saying so, and raised bare, a terminal
     // that has gone away makes a machine that *is* restored exit non-zero.
     report(out, path, &export).map_err(|error| {
-        error.with_note(
-            "The Import itself finished: every Credential the Export held is \
-             restored and Perch's Registry is written. Only the report of it \
-             could not be, so there is nothing to run again. `perch list` says \
-             what arrived.",
-        )
+        error.with_note("The Import finished. Only the report could not be printed.")
     })
 }
 
@@ -80,7 +75,7 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
     match host.read_file(path) {
         Ok(sealed) => Ok(sealed),
         Err(HostError::NotFound { .. }) => Err(PerchError::NotFound(format!(
-            "There is no file at {}, so there is nothing to import.",
+            "There is no file at {}.",
             path.display(),
         ))),
         // An Export is `age`'s *armored* form, so the read is a read of text and
@@ -88,11 +83,8 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
         // four refusals can speak. Plain `age -p` writes the binary default.
         Err(HostError::Io(err)) if err.kind() == std::io::ErrorKind::InvalidData => {
             Err(PerchError::Invalid(format!(
-                "{} is not text, so it is not an Export. An Export is `age`'s \
-                 armored form, which is what `perch holdings export` writes \
-                 and what `age -a -p` writes.\n\
-                 A binary `age` file can be turned into one: `age -d <file> | \
-                 age -a -p > <armored>`.",
+                "{} is not text, so it is not an Export. `age -d <file> | age -a \
+                 -p > <armored>` makes one.",
                 path.display(),
             )))
         }
@@ -108,9 +100,7 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
 fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
     ask::a_passphrase(host, out, "Passphrase: ")?.ok_or_else(|| {
         PerchError::Invalid(
-            "No passphrase was typed, and there is no way into an Export without \
-             one. Nothing was imported."
-                .to_string(),
+            "No passphrase was typed, and nothing opens an Export without one.".to_string(),
         )
     })
 }
@@ -139,13 +129,8 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
         say::line(
             out,
             &format!(
-                "The Export held no Credential for {}, so the {} restored \
-                 without one. {repair}",
+                "Note: the Export held no Credential for {}. {repair}",
                 bare.join(", "),
-                match bare.len() {
-                    1 => "Account was",
-                    _ => "Accounts were",
-                },
             ),
         )?;
     }

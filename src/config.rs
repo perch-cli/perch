@@ -69,9 +69,8 @@ impl Setting {
     /// spelled at two sites is how the two come to name different remedies.
     fn only_the_ungrouped_scope_carries_it() -> PerchError {
         PerchError::Invalid(format!(
-            "`{}` is the declaration that the Accounts in no Group are \
-             interchangeable at all, and only they carry it. `perch config set \
-             {UNGROUPED} {} <value>` says it.",
+            "`{}` is a Setting of `{UNGROUPED}` alone. `perch config set \
+             {UNGROUPED} {} <value>` sets it.",
             Setting::Interchangeable.as_str(),
             Setting::Interchangeable.as_str(),
         ))
@@ -167,7 +166,7 @@ impl Setting {
                 unreachable!("the Ungrouped Scope is always there to write to")
             };
             return Err(PerchError::NotFound(format!(
-                "no Group is called `{name}`, so there is nothing to set on it."
+                "No Group is called `{name}`."
             )));
         };
         *held = settings;
@@ -327,9 +326,12 @@ fn strategy(value: &str) -> Result<Strategy> {
         .find(|candidate| value.eq_ignore_ascii_case(candidate.as_str()))
         .ok_or_else(|| {
             PerchError::Invalid(format!(
-                "`{value}` is not a Strategy Perch implements. The ones it \
-                 implements are:\n  {}",
-                the_strategies().join("\n  "),
+                "`{value}` is not a Strategy. They are {}.",
+                Strategy::ALL
+                    .iter()
+                    .map(|strategy| format!("`{}`", strategy.as_str()))
+                    .collect::<Vec<String>>()
+                    .join(" and "),
             ))
         })
 }

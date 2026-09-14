@@ -209,15 +209,12 @@ fn tighten_if_loose(host: &dyn Host, path: &std::path::Path) {
     // nothing ever to mention it again.
     match host.make_private(path) {
         Ok(()) => host.note(&format!(
-            "{} held a Credential that others could read ({mode:04o}). \
-             Its permissions have been narrowed to you alone.",
+            "{} was readable by others ({mode:04o}) and is now yours alone.",
             path.display()
         )),
         Err(err) => host.note(&format!(
-            "{} holds a Credential that others could read ({mode:04o}), and its \
-             permissions could not be narrowed: {err}. \
-             Anyone who can read that file can act as this Account until it is \
-             `chmod 600`.",
+            "{} is readable by others ({mode:04o}) and could not be narrowed: \
+             {err}. `chmod 600` it.",
             path.display()
         )),
     }

@@ -58,8 +58,8 @@ fn adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<Registry>
             // Nothing to adopt, and nothing worth writing: an empty Profile
             // would only be a second thing to explain later.
             return Err(PerchError::NotFound(format!(
-                "No Claude Code login found (Claude Code {version}).\n\
-                 Run `claude` and log in, then run Perch again."
+                "No Claude Code login found (Claude Code {version}). Run `claude` \
+                 and log in, then run Perch again."
             )));
         }
     };
@@ -139,9 +139,5 @@ fn report(host: &dyn Host, findings: &Findings) {
 
     // One remark rather than two: that the Profile is the first and that it is
     // active are the same piece of news about the same machine.
-    host.note(&format!(
-        "Adopted the Claude Code login as your first Profile, now active: \
-         {description}. Claude Code {}.",
-        findings.version
-    ));
+    host.note(&format!("Adopted the Claude Code login as {description}."));
 }

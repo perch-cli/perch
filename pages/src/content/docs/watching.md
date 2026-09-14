@@ -13,7 +13,7 @@ and `perch watcher check` runs one round for a scheduler.
 
 ```
 $ perch watcher run
-Watching you@example.com within Group `work`. Reading how full it is every 2m30s, and Switching within that Scope when its fullest Quota Window reaches 80%, to an Account at 70% or under, and never twice inside 15 minutes. Ctrl-C stops.
+Watching you@example.com within Group `work`, every 2m30s. Switching at 80% to an Account at 70% or under. Ctrl-C stops.
 2026-08-04T12:00:00Z  waiting   40% used, fullest 5-hour
 2026-08-04T12:02:30Z  switched  86% used, fullest 5-hour → overflow@example.com
 ^C
@@ -40,8 +40,8 @@ The watcher acts only where a Scope has said it may. Until then it holds:
 
 ```
 $ perch watcher run
-Started. Nothing is being decided yet; the next line says what is holding it. Ctrl-C stops.
-2026-08-04T12:00:00Z  held      unread — Group `work` has not been told the watcher may act on it, so nothing is being watched. `perch config set work watcher-may-act true` says it may. Asking again in 2m30s.
+Started. The next line says what is holding it. Ctrl-C stops.
+2026-08-04T12:00:00Z  held      unread — Group `work` does not let the watcher act, so nothing is watched. `perch config set work watcher-may-act true` does. Asking again in 2m30s.
 ```
 
 A hold is not an exit. Run the command it names in another terminal and the
@@ -53,7 +53,7 @@ well as `watcher-may-act`.
 
 ```
 $ perch watcher run
-Watching you@example.com within Group `work`. Reading how full it is every 2m30s, and Switching within that Scope when its fullest Quota Window reaches 80%, to an Account at 70% or under, and never twice inside 15 minutes. Ctrl-C stops.
+Watching you@example.com within Group `work`, every 2m30s. Switching at 80% to an Account at 70% or under. Ctrl-C stops.
 2026-08-04T12:00:00Z  nowhere   86% used, fullest 5-hour — Nothing within Group `work` is worth Switching to yet: overflow@example.com is at 74% used and nothing over 70% is worth moving to.
 2026-08-04T12:02:30Z  nowhere   88% used, fullest 5-hour — Nothing within Group `work` is worth Switching to yet: overflow@example.com is at 74% used and nothing over 70% is worth moving to. The candidates were read 2 minutes ago, so they are not asked again for another 12 minutes.
 ```
@@ -89,9 +89,7 @@ Ctrl-C that arrived between reading a figure and acting on it.
 
 ```
 $ perch watcher install
-Installed the Service. It runs /opt/homebrew/bin/perch as a LaunchAgent.
-It finds Claude Code at /Users/you/.local/bin/claude, carried in the unit rather than looked up on the service manager's own PATH.
-Its decisions go to /Users/you/.config/perch/watch.log.
+Installed the Watcher. It checks every 150 seconds.
 
 $ perch watcher status
 A Service is installed as a LaunchAgent, and is running.
@@ -108,20 +106,24 @@ The Service is the same loop, started when you log in: a LaunchAgent on macOS,
 a `systemd --user` unit on Linux, a Scheduled Task on Windows. It is installed
 for your user, and `sudo perch watcher install` is refused.
 
-On Linux the decisions go to the journal, and the status line says the command
-to read them:
+The unit carries the `claude` the install found on your PATH, so the Service
+runs the same Claude Code your shell does. `perch watcher status` says where
+the unit and the log are. On Linux the decisions go to the journal, and the
+status line says the command to read them:
 
 ```
-$ perch watcher install
-Installed the Service. It runs /usr/local/bin/perch as a systemd user unit.
-It finds Claude Code at /usr/bin/claude, carried in the unit rather than looked up on the service manager's own PATH.
+$ perch watcher status
+A Service is installed as a systemd user unit, and is running.
+Its unit is /home/you/.config/systemd/user/perch-watch.service.
+It runs /usr/local/bin/perch.
 Its decisions go to journalctl --user -u perch-watch -f.
+A Watcher is running on this machine and holds the watcher lock.
 ```
 
-An install that finds no `claude` still succeeds, and the Service holds until
-you run `perch watcher install` again with Claude Code on your PATH. Re-running
-`install` is also the repair after the binary moves; `perch upgrade` does that
-for you and says if it could not. In a log, a hold that has not changed is
+An install that finds no `claude` still succeeds and says so, and the Service
+holds until you run `perch watcher install` again with Claude Code on your
+PATH. Re-running `install` is also the repair after the binary moves;
+`perch upgrade` does that for you and says if it could not. In a log, a hold that has not changed is
 said once an hour rather than every round.
 
 `perch watcher status` exits 0 whether or not anything is installed. Branch on

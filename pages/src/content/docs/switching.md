@@ -12,7 +12,6 @@ declare which Accounts are interchangeable.
 
 ```
 $ perch switch overflow
-`overflow` is an Alias for overflow@example.com.
 Switched to overflow@example.com (as `overflow`).
 Utilization   5-hour  12%  (as of 4m ago)
               7-day   40%  (as of 4m ago)
@@ -76,11 +75,9 @@ $ perch group add work
 Declared the Group `work`.
 
 $ perch group move you@example.com work
-`you@example.com` is an Account.
 Moved you@example.com into `work`.
 
 $ perch group move overflow@example.com work
-`overflow@example.com` is an Account.
 Moved overflow@example.com into `work`.
 
 $ perch group list

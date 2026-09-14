@@ -5,10 +5,11 @@ itself only where the reader has something to do about it.**
 
 A thing that happens on every single run is the definition of predictable, and
 predictability is earned by the guide rather than re-earned by every invocation. A
-refusal is usually the opposite: nothing happened, the person cannot see why, and the
-next step is not obvious. That is the moment the prose is the product — and the test is
-the next step rather than the refusal, because a refusal saying nothing needs doing
-leaves nobody with a next step to find.
+refusal looks like the opposite: nothing happened, and the person cannot see why. It is
+not. What the person needs from a refusal is the same two things they need from a
+success, what Perch decided and what to type next, and the mechanism behind the
+decision is the guide's to explain once rather than the refusal's to explain at every
+occurrence.
 
 Under all of it sits one sentence, and everything below is it applied to a surface:
 
@@ -41,20 +42,38 @@ making is that the Switch stayed inside the Group, and it is better made beside 
 Account it landed on than in a sentence of its own before anybody knows where they are
 going.
 
-**The Capture line is cut, and this is the part worth arguing.** A Capture happens
-before every Switch without exception (ADR a-switch-is-written-down-first), which is
-exactly what makes *Captured you@example.com's live Credential into its own Profile* the
-ordinary case announcing that it was ordinary. The reassurance it carries is real, and it
-is the guide's to establish once rather than the command's to repeat forever. What is
-*not* cut is any of the other Capture outcomes — each of them is a case where what
-happened is not what the guide describes. The rule one level down is the rule above it:
-silence on the path that always runs, prose on the paths that do not.
+**The Capture line is cut, and so is every other Capture outcome that needs nothing
+done.** A Capture happens before every Switch without exception
+(ADR a-switch-is-written-down-first), which is exactly what makes *Captured
+you@example.com's live Credential into its own Profile* the ordinary case announcing that
+it was ordinary. The reassurance it carries is real, and it is the guide's to establish
+once rather than the command's to repeat forever. The first version of this decision kept
+the other outcomes, on the ground that each is a case the guide does not describe. That
+was Perch narrating its bookkeeping: a Credential that could not be Captured because
+Claude Code was logged out, or because the Profile already held a newer one, changes
+nothing the person will do next, and a sentence about it is a sentence they have to read
+to learn that.
+
+> **Bookkeeping is silent unless the person has to act.** A Capture that could not
+> happen and needs nothing done is not said. One that needs a command gets one line
+> under the verdict, opening `Note:`, that names the command.
+
+The one Capture outcome that survives is the login made outside Perch that a Switch is
+about to replace: *Note: alice@x's login was replaced outside Perch. `perch add` keeps
+it.* The person may want that login, and nothing else on the screen tells them it exists.
+
+**No path on a success line.** *Installed the Watcher. Its decisions go to
+/Users/you/Library/Logs/perch/watcher.log* tells the person where a file is on the one
+occasion they have no reason to open it. A path appears in a refusal that needs the
+person to open something, and in `perch probe` and `perch triage`, where locating things
+is the command's job. Everywhere else the guide says where Perch keeps things, and says it
+once.
 
 The figures keep their age. A figure without `(as of 4m ago)` is a promise Perch cannot
 make (ADR a-figure-carries-its-age), and shortening output is not license to start making
 it.
 
-## A refusal that needs nothing done
+## A refusal is the verdict and the next command
 
 The landing line above cut its ranking rationale. One function away, the same clause
 survived into the refusal that says you are already on the best Account:
@@ -66,22 +85,28 @@ is true of every one of its Quota Windows — 5-hour is its fullest, as of 1m ag
 was changed — `perch list work --refresh` reads current figures.
 ```
 
-Forty-four words, and the same argument the landing line was not allowed to make. What
-let it through was the exemption for refusals, and the exemption rests on three claims:
-nothing happened, the person cannot see why, and the next step is not obvious. Two of
-them are false here. The person can see why — they asked to be moved somewhere better
-and are already there — and the next step is nothing at all.
+Forty-four words, and the same argument the landing line was not allowed to make. The
+first version of this decision let it through under an exemption for refusals, on the
+claim that a refusal is where the person cannot see why and the next step is not obvious.
+Measured on the tree when this was revised, refusals were 78% of the prose, and what filled them was
+not next steps. It was mechanism: *This Installation came from Homebrew, which installs
+whatever the formula names and cannot be pointed at 0.3.5. `brew upgrade perch` takes the
+newest. To hold a particular Release, install it with the installer script instead, which
+takes `PERCH_VERSION`.* Why Homebrew works that way is true on every run and is the
+guide's to say.
 
-So the exemption is not about refusing. It is about whether the reader is left with
-something to find:
+> **A refusal is the verdict and the next command.** No mechanism, and no rationale for
+> why the underlying system behaves as it does. Two lines at most: what Perch declined,
+> then the command that gets the person past it, where one exists.
 
-> **A refusal that needs something done keeps its prose. A refusal that needs nothing
-> done gets the acting command's budget.**
-
-The specimen becomes its verdict:
+The two specimens become their verdicts:
 
 ```
 you@example.com is already the best Account in Group `work`.
+```
+
+```
+Homebrew cannot install a particular Release. `brew upgrade perch` takes the newest.
 ```
 
 The figure goes with the argument it was serving. A figure Perch quotes carries its age
@@ -90,6 +115,9 @@ command away and exists to show them.
 
 The exit code does not move. `EXIT_NOTHING_TO_DO` is what the Watcher's loop branches on
 and what a shell prompt tests, and it is not output.
+
+A refusal's `--json` document is not prose and is not touched. It is the shape a script
+reads, and a script is owed the same shape after this decision as before it.
 
 ### What was changed is said only where something was
 
@@ -183,7 +211,26 @@ about nothing else.
 
 It stops at what Perch says. Comments, `docs/adr/`, the guide and `tests/` keep theirs —
 the reader this is for is the one at a terminal, and a test asserting what Perch says has
-to be free to quote it.
+to be free to quote it. A `///` on a clap-derived item is not a comment by that test: clap
+renders it into `--help`, so the reader is the one at a terminal, and the gate reads it.
+
+## `--help`
+
+`--help` is the largest thing Perch says, and the first version of this decision did not
+name it. Unswept, `perch upgrade --help` opened with ninety words on who owns a Homebrew
+binary and who owns an npm one, and a subcommand's one-line description ran to 28 words
+with a dash in it. That is a second guide, unindexed, rendered at 80 columns, read by
+somebody who typed `--help` to learn what to type next.
+
+> **`--help` is bound by this decision.** A command's description is one line, under
+> twelve words, no em dash. The paragraph beneath it is deleted, or moves to the guide if
+> it says something the guide does not. An argument's description is a phrase.
+
+What `--help` is for is the shape of the command line: which words, which flags, what
+each takes. The guide says what happens when you run it (ADR
+the-guide-says-what-to-type), and a `--help` that says it too is wrong from the moment
+one of them changes.
+
 
 ## The sentence, and how it is asserted
 

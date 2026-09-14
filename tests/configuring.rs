@@ -520,7 +520,7 @@ fn a_set_naming_a_key_but_no_scope_is_refused_and_names_the_scopes_there_are() {
     assert!(message.contains("names no Scope"), "{message}");
     assert!(message.contains("ungrouped"), "{message}");
     assert!(
-        message.contains("Groups Perch holds: work."),
+        message.contains("The Scopes are `ungrouped`, `work`."),
         "the Scopes there are to name: {message}"
     );
     assert_eq!(
@@ -550,7 +550,7 @@ fn a_set_naming_neither_a_scope_nor_a_key_is_answered_about_the_scope() {
     assert!(
         refusal
             .to_string()
-            .contains("every Setting is said about the Scope it governs"),
+            .contains("`perch config get` reads every Scope"),
         "and `global` still meets the refusal written for it: {refusal}"
     );
 }
@@ -573,7 +573,7 @@ fn naming_global_as_a_scope_says_there_is_no_such_scope_rather_than_offering_a_g
              worse: {message}"
         );
         assert!(
-            message.contains("every Setting is said about the Scope it governs"),
+            message.contains("`perch config get` reads every Scope"),
             "the reason there is no such word is what makes the refusal useful: \
              {message}"
         );
@@ -601,10 +601,6 @@ fn global_is_still_a_reserved_word_and_the_refusal_says_why() {
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     let said = refusal.to_string();
     assert!(said.contains("every Scope at once"), "{said}");
-    assert!(
-        said.contains("perch config set <scope> <key> <value>"),
-        "and the form that does exist is named: {said}"
-    );
     assert!(
         registry_of(&host).groups.is_empty(),
         "and no Group was declared"
@@ -706,7 +702,7 @@ fn a_key_named_with_no_value_is_refused_with_the_form_the_command_takes() {
         "the one form there is, which has a subject in it: {message}"
     );
     assert!(
-        message.contains("Groups Perch holds: work."),
+        message.contains("The Scopes are `ungrouped`, `work`."),
         "and the Scopes it could be about: {message}"
     );
 }
@@ -735,9 +731,9 @@ fn a_get_of_a_key_alone_says_a_setting_is_read_about_a_scope() {
     let refusal = result.expect_err("a Setting on its own is about nothing");
     assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
     let said = refusal.to_string();
-    assert!(said.contains("rather than a Scope"), "{said}");
+    assert!(said.contains("is a Setting, not a Scope"), "{said}");
     assert!(
-        said.contains("perch config get <scope> strategy"),
+        said.contains("perch config set <scope> strategy"),
         "and the form that reads it is named: {said}"
     );
 }
@@ -751,10 +747,9 @@ fn a_get_of_too_many_words_is_answered_with_the_forms_get_takes() {
     let refusal = result.expect_err("`get` takes at most two words");
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     let said = refusal.to_string();
-    assert!(said.contains("was given 3 words"), "{said}");
-    assert!(said.contains("perch config get <scope> <key>"), "{said}");
+    assert!(said.contains("not 3 words"), "{said}");
     assert!(
-        said.contains("reads every Scope there is"),
+        said.contains("perch config get [<scope> [<key>]]"),
         "it names the bare form too: {said}"
     );
     assert!(
@@ -770,7 +765,7 @@ fn a_single_word_is_counted_as_one_word() {
     let (result, _) = config_set(&host, &["strategy"]);
 
     let said = result.expect_err("`set` needs a value").to_string();
-    assert!(said.contains("was given 1 word"), "{said}");
+    assert!(said.contains("not 1 word"), "{said}");
     assert!(!said.contains("1 words"), "{said}");
 }
 
@@ -785,11 +780,7 @@ fn a_set_naming_a_group_and_a_key_says_the_value_is_what_is_missing() {
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     let said = refusal.to_string();
     assert!(
-        said.contains("names Group `work` and a key, but nothing to set it to"),
-        "{said}"
-    );
-    assert!(
-        said.contains("perch config set <scope> <key> <value>"),
+        said.contains("`perch config set work strategy <value>` sets one"),
         "{said}"
     );
     assert_eq!(
@@ -1025,7 +1016,7 @@ fn a_group_neither_shows_nor_takes_the_declaration_that_is_a_group() {
         .expect_err("a Group is that declaration rather than holding one");
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     let said = refusal.to_string();
-    assert!(said.contains("only they carry it"), "{said}");
+    assert!(said.contains("of `ungrouped` alone"), "{said}");
     assert!(
         said.contains("perch config set ungrouped interchangeable <value>"),
         "and where it is said instead: {said}"

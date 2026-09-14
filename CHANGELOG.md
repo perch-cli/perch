@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 
+- Perch says the verdict and the next command, and nothing else. Every
+  refusal is at most two lines: what Perch declined, then the command that
+  gets you past it. What a Switch did with the Credential it was leaving is no
+  longer narrated unless you have to act on it, a success line names no file
+  path, and `--help` describes each command in one line and leaves what
+  happens when you run it to the Guide. Exit codes, `--json` documents and
+  every command and flag are unchanged
+  ([#440](https://github.com/perch-cli/perch/issues/440))
 - The Guide says what to type. Every section of the nine task pages now opens
   with a transcript taken from this build, and the prose beneath it says what
   is on the screen, what to do next, and what Perch will not do. Why Perch

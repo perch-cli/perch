@@ -160,8 +160,9 @@ impl NotIdle {
         } = consequence;
         match self {
             NotIdle::Live(clients) => PerchError::ProfileLive(format!(
-                "A client is running against {}.\n{nothing_happened} {quit_it}",
-                clause(&clients)
+                "A client is running against {}.\n{}",
+                clause(&clients),
+                [*nothing_happened, *quit_it].join(" ").trim(),
             )),
             NotIdle::Unsure(unsure) => unsure.refusal(installed).with_note(nothing_happened),
         }
@@ -183,9 +184,8 @@ pub struct Consequence {
 /// What a Switch, a repair, a removal and a watched round all say: they leave
 /// exactly nothing behind, and they offer the same two ways out.
 pub const NOTHING_WAS_CHANGED: Consequence = Consequence {
-    nothing_happened: "Nothing was changed.",
-    quit_it: "That Credential belongs to it until it exits. Quit it, or switch \
-              to a different Account.",
+    nothing_happened: "",
+    quit_it: "Quit it, or `perch switch` to another Account.",
 };
 
 /// Which clients, and where — the opening every refusal about a Live Profile

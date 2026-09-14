@@ -289,9 +289,8 @@ fn record_active(
     registry.settle(Some(incoming.to_string()));
     registry::save(host, perch, registry).map_err(|error| {
         error.with_note(&format!(
-            "The Switch itself worked: {incoming}'s Credential is the live one. \
-             Perch could not record that, so its own view of which Account is \
-             active is behind until this is fixed."
+            "The Switch worked: {incoming}'s Credential is the live one. Only \
+             the record of it could not be written."
         ))
     })
 }
@@ -379,25 +378,25 @@ fn perform(
 
         let captured = holds
             .around(|| capture(host, &prepared, incoming, outgoing, registry))
-            .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
+            .map_err(|error| error.with_note(NOTHING_SWITCHED))?;
 
         holds
             .around_a_registry_write(|perch| {
                 write_it_down(host, perch, registry, &leaving, incoming)
             })
-            .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
+            .map_err(|error| error.with_note(NOTHING_SWITCHED))?;
         wrote_it_down = true;
 
         holds
             .around(|| {
                 profile::store_credential(host, &prepared.store, prepared.credential.as_str())
             })
-            .map_err(|error| error.with_note(&only_captured(&captured, outgoing, incoming)))?;
+            .map_err(|error| error.with_note(NOTHING_SWITCHED))?;
         incoming_is_live = true;
 
         holds
             .around(|| patch_identity(host, &prepared))
-            .map_err(|error| error.with_note(&live_but_unnamed(&prepared, outgoing, incoming)))?;
+            .map_err(|error| error.with_note(&live_but_unnamed(outgoing, incoming)))?;
 
         Ok(captured)
     });
@@ -427,10 +426,7 @@ fn write_it_down(
 
     if let Err(error) = registry::save(host, perch, registry) {
         registry.abandon_landing(before);
-        return Err(error.with_note(
-            "Perch does not move the live Credential until it has written down \
-             that it is about to, so nothing was moved.",
-        ));
+        return Err(error);
     }
     Ok(())
 }
@@ -515,9 +511,7 @@ pub fn resolve_a_landing<E>(
             Err(lost) => return Ok(Resolved::Stopped(lost)),
             Ok(read) => read.map_err(|would_not_answer| {
                 would_not_answer.with_note(&format!(
-                    "A Switch to {arriving} was in flight and was not recorded, \
-                     and the live Credential is the only thing that says whether \
-                     it happened.\n\
+                    "A Switch to {arriving} was in flight and was not recorded. \
                      Make that store readable and run this again."
                 ))
             })?,
@@ -620,21 +614,17 @@ fn whose_the_live_credential_is<E>(
 fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> String {
     let said = format!(
         "A Switch to {arriving} was written down and never recorded, and the live \
-         Credential is not the one Perch holds for {arriving}"
+         Credential is none Perch holds"
     );
     match leaving {
         Some(leaving) => format!(
-            "{said}, nor the one it holds for {leaving}, nor any other it holds. \
-             It may be {arriving}'s, Rotated since the Switch finished, or \
-             {leaving}'s, Rotated since it failed to start.\n\
-             `perch relogin {arriving}` finishes that Switch and `perch relogin \
+            "{said}. It may be {arriving}'s or {leaving}'s, Rotated since.\n\
+             `perch relogin {arriving}` finishes that Switch; `perch relogin \
              {leaving}` abandons it."
         ),
         None => format!(
-            "{said}, nor any other it holds, and Perch was on no Account before \
-             it, so nothing says whose it is.\n\
-             `perch relogin {arriving}` replaces whatever is live with a fresh \
-             login for {arriving}."
+            "{said}.\n\
+             `perch relogin {arriving}` replaces it with a fresh login."
         ),
     }
 }
@@ -672,9 +662,7 @@ pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result
         return Ok(());
     };
     Err(PerchError::Conflict(format!(
-        "{} and {} share one Profile, and so one Credential. Their addresses \
-         differ only in characters a Profile directory does not keep apart, so \
-         Perch cannot act as either.\n\
+        "{} and {} share one Profile, so Perch cannot act as either.\n\
          `perch remove` one of them, then `perch add` it again.",
         account.email(),
         sharer.email(),
@@ -755,10 +743,8 @@ fn capture(
         }
         Err(would_not_answer) => {
             return Err(would_not_answer.with_note(&format!(
-                "The live Credential could not be read, so it could not be \
-                 Captured into {}'s Profile, and it may be that Account's own, \
-                 newer than the copy Perch holds. Make that store readable and \
-                 run this again.",
+                "The live Credential could not be read, so it was not Captured \
+                 for {}. Make that store readable and run this again.",
                 outgoing.email(),
             )));
         }
@@ -953,55 +939,19 @@ fn identity_block_for(host: &dyn Host, incoming: &Account, kept_in: &Store) -> R
     Ok(held.unwrap_or_else(|| incoming.identity.oauth_account_block()))
 }
 
-fn nothing_happened(outgoing: Option<&Account>) -> String {
-    match outgoing {
-        Some(outgoing) => format!(
-            "Nothing was switched. {} is still the active Account and its live \
-             Credential is untouched.",
-            outgoing.email()
-        ),
-        None => "Nothing was switched.".to_string(),
-    }
-}
+/// Kept on every step short of the live write, where a half-done Switch is what
+/// the reader cannot see (ADR a-refusal-is-a-promise).
+const NOTHING_SWITCHED: &str = "Nothing was switched.";
 
-fn only_captured(captured: &Captured, outgoing: Option<&Account>, incoming: &Account) -> String {
-    let mut note = match (captured, outgoing) {
-        (Captured::Copied { from }, _) => format!(
-            "{from}'s live Credential was Captured into its own Profile first, \
-             so nothing has been lost."
-        ),
-        (Captured::NotTheirs { outgoing, live }, _) => format!(
-            "The live Credential belongs to {live} rather than to {outgoing}, so \
-             it was left where it was and {outgoing}'s Profile is untouched."
-        ),
-        (Captured::Superseded { outgoing }, _) => format!(
-            "{outgoing}'s Profile already held a newer Credential than the live \
-             one, so it was kept rather than written over."
-        ),
-        (_, Some(outgoing)) => format!("{}'s Profile is unchanged.", outgoing.email()),
-        (_, None) => String::new(),
-    };
-    if !note.is_empty() {
-        note.push(' ');
-    }
-    note.push_str(&format!(
-        "The live Credential was not replaced, so {} was not made active.",
-        incoming.email()
-    ));
-    note
-}
-
-fn live_but_unnamed(prepared: &Prepared, outgoing: Option<&Account>, incoming: &Account) -> String {
+fn live_but_unnamed(outgoing: Option<&Account>, incoming: &Account) -> String {
     let named = match outgoing {
         Some(outgoing) => outgoing.email().to_string(),
         None => "another Account".to_string(),
     };
     format!(
-        "{incoming} is active, but {file} still names {named}, so Claude Code \
-         will act as {incoming} while displaying {named}.\n\
-         Run `perch switch {incoming}` again to finish the job.",
+        "{incoming} is active, but Claude Code still displays {named}.\n\
+         `perch switch {incoming}` again finishes the job.",
         incoming = incoming.email(),
-        file = prepared.store.identity_file.display(),
     )
 }
 

@@ -77,9 +77,7 @@ pub enum Refused {
     Stopped(Lost),
 }
 
-const THROTTLED: &str = "Anthropic is rate-limiting reads of this Account's \
-                         Utilization, at about 28-30 an hour. The window \
-                         does not refill early";
+const THROTTLED: &str = "Anthropic is rate-limiting reads of this Account (about 28-30 an hour)";
 const REJECTED: &str = "Anthropic did not accept the Credential";
 const UNRECOGNIZED: &str = "Anthropic answered something Perch does not understand";
 const FAILED: &str = "Anthropic answered with a failure";

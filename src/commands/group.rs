@@ -27,36 +27,32 @@ use crate::target::{self, AccountTarget};
 /// lives with the command line that parses it.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum GroupCommand {
-    /// Declare a Group. It starts empty and at the compiled-in defaults —
-    /// nothing said about another Scope reaches it, including a grant the
-    /// watcher already holds somewhere else.
+    /// Declare an empty Group
     Add {
-        /// The name, which shares one namespace with Aliases.
+        /// The Group's name
         name: String,
     },
 
-    /// Forget a Group. Refused while it still holds Accounts, which are named.
+    /// Forget a Group that holds no Accounts
     Remove { name: String },
 
-    /// Rename a Group, keeping its Settings, its Accounts and the cooldown the
-    /// watcher is pacing it by. Nothing about it changes but what it is called.
+    /// Rename a Group
     Rename {
-        /// The Group as it is called now.
+        /// The current name
         from: String,
-        /// What to call it instead. Refused if an Alias or another Group already
-        /// answers to it, the same way declaring one is.
+        /// The new name
         to: String,
     },
 
-    /// Move an Account into a Group, keeping its Profile, Credential and Alias.
+    /// Move an Account into a Group
     Move {
-        /// The Account: its Alias, or its email address.
+        /// An Alias or email address
         target: String,
-        /// The Group to move it into, or `none` to leave every Group.
+        /// A Group, or `none`
         group: String,
     },
 
-    /// Show every Group with its Accounts and its configuration.
+    /// Show every Group with its Accounts and Settings
     List,
 }
 
@@ -87,7 +83,7 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
         GroupCommand::Move { target, group } => {
             let account = target::resolve_account(registry, &target)?;
             let moved = move_account(registry, &account, &group)?;
-            Ok(vec![account.matched, moved])
+            Ok(vec![moved])
         }
         // Answered above, before the lock, because it writes nothing and taking
         // the write lock to read is the wait this command refuses to make.
@@ -112,9 +108,11 @@ fn remove(registry: &mut Registry, name: &str) -> Result<String> {
         .collect();
     if !held.is_empty() {
         return Err(PerchError::Conflict(format!(
-            "The Group `{declared}` still holds {}:\n  {}\nMove them first with `perch group move <target> <group>`, or out of every Group with `perch group move <target> {NO_GROUP}`.",
+            "The Group `{declared}` still holds {}: {}.\n\
+             `perch group move <target> <group>` or `perch group move <target> \
+             {NO_GROUP}` moves them out.",
             say::accounts(held.len()),
-            held.join("\n  ")
+            held.join(", ")
         )));
     }
 
@@ -193,9 +191,8 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
             None => "in no Group".to_string(),
         };
         return PerchError::NotFound(format!(
-            "No Group called `{name}`. That is an Account Perch holds, {sits}. \
-             This takes the Group rather than one of the Accounts in it, and \
-             `perch group list` shows the ones that have been declared."
+            "No Group called `{name}`; that is an Account, {sits}. `perch group \
+             list` shows the Groups."
         ));
     }
     // A word that could never be a Group is told so rather than offered a
@@ -209,8 +206,7 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
     // offer to declare it: none of the commands reaching here declares one.
     if let Some((alias, email)) = registry.declared_alias(name) {
         return PerchError::NotFound(format!(
-            "No Group called `{name}`. `{alias}` is an Alias for {email}, and a \
-             name cannot be both, so no Group can be called that. {}",
+            "No Group called `{name}`; `{alias}` is an Alias for {email}. {}",
             groups_perch_holds(registry)
         ));
     }
@@ -254,8 +250,7 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
     if registry.groups.is_empty() {
         say::line(
             out,
-            "No Groups yet. `perch group add <name>` declares one, and\n\
-             `perch group move <target> <name>` puts an Account in it.\n",
+            "No Groups yet. `perch group add <name>` declares one.\n",
         )?;
     }
 

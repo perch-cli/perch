@@ -156,12 +156,9 @@ impl Attempt {
     fn note(&self) -> Option<String> {
         match &self.outcome {
             Outcome::Observed => None,
-            Outcome::Throttled | Outcome::Failed { .. } => self
-                .why_unread()
-                .map(|why| format!("{why} {THE_CACHE_ANSWERS}")),
+            Outcome::Throttled | Outcome::Failed { .. } => self.why_unread(),
             Outcome::JustRead => Some(format!(
-                "{}: a Watcher is reading this Account every {}, and read it \
-                 less than that ago. The figure it read is what you see.",
+                "{}: the Watcher read it less than {} ago.",
                 self.named,
                 crate::watch::how_often(),
             )),
@@ -752,8 +749,7 @@ impl Turn<'_> {
 
         Err(Outcome::Failed {
             why: format!(
-                "{} and a client is running against it ({}), so renewing it would \
-                 log that session out.",
+                "{} and a client is running against it ({}), so it was not Renewed.",
                 because.clause(),
                 running
                     .iter()
@@ -805,8 +801,8 @@ impl Turn<'_> {
         if let Some(sharer) = &self.asked.shares_its_profile_with {
             return Err(Outcome::Failed {
                 why: format!(
-                    "{} and it shares one Credential Store with {sharer}, so Renewing \
-                     may retire a refresh token that is not this Account's to spend.",
+                    "{} and it shares a Credential Store with {sharer}, so it was not \
+                     Renewed.",
                     because.clause(),
                 ),
                 spent: because.spent(),
@@ -906,9 +902,8 @@ fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -
                 spent: true,
                 why: format!(
                     "Anthropic renewed this Account without Rotating its refresh \
-                 token, so nothing was retired and this is not a Quarantine: \
-                 {error}\n\
-                 Worth trying again."
+                     token: {error}\n\
+                     Try again."
                 ),
             }
         }
@@ -917,11 +912,6 @@ fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -
 
 const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
                             this Account could be read.";
-
-/// What a surface showing figures adds to every read that failed. Added at that
-/// surface rather than written into each reason, because a Watcher says the same
-/// reasons and uses no cached figure.
-const THE_CACHE_ANSWERS: &str = "The cached figure is what you see.";
 
 /// A reason as a sentence a second one can follow: a failure wrapped from elsewhere
 /// does not always end in a stop.
@@ -1350,11 +1340,7 @@ mod tests {
         let notes = report.notes();
         assert_eq!(notes.len(), 2);
         assert!(notes[0].starts_with("someone@example.com: "), "{notes:?}");
-        assert!(notes[0].contains("cached figure"), "{notes:?}");
-        assert_eq!(
-            notes[1], "overflow@example.com: no token. The cached figure is what you see.",
-            "every read that failed leaves the cache answering, and the note says so"
-        );
+        assert_eq!(notes[1], "overflow@example.com: no token.");
         assert_eq!(
             report.unread(),
             vec![

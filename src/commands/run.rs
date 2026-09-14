@@ -24,13 +24,10 @@ use crate::{carry, probe, reconcile, target};
 /// takes: one that is not text is refused by the parser rather than mangled here.
 #[derive(Debug, Clone, clap::Args)]
 pub struct RunArgs {
-    /// The Account to run as: its Alias, or its email address. A Group has
-    /// no single meaning here, so naming one is refused.
+    /// An Alias or email address
     pub target: String,
 
-    /// What to run, after a mandatory `--`: a program and its arguments, or
-    /// Claude Code's own arguments where the first word is a flag. Nothing
-    /// here is read by Perch, so a `--json` after `--` is the program's.
+    /// After `--`, a program and its arguments, or Claude Code's own
     #[arg(last = true, allow_hyphen_values = true, num_args = .., value_name = "COMMAND")]
     pub command: Vec<String>,
 }
@@ -48,7 +45,6 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // A Group names a set of Accounts declared interchangeable, which is
     // nothing a Run can act on: there is no one Profile to point a process at.
     let found = target::resolve_account(&registry, &args.target)?;
-    host.note(&found.matched);
     refuse_a_quarantined_account(&registry, &found.email)?;
     // Beside the Quarantine refusal, and for a reason of the same size: a
     // Profile two Accounts share holds one Credential, so the client runs as
@@ -83,12 +79,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
         settled.as_ref(),
     );
 
-    host.note(&launching(
-        &registry,
-        &found.email,
-        &launch.said,
-        settled.as_ref(),
-    ));
+    host.note(&launching(&registry, &found.email, &launch.said));
     // Flushed before the client is handed the terminal: a command run before
     // this one may have left something in the buffer, and it would be delivered
     // after the output of the thing it was announcing.
@@ -238,36 +229,13 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> 
     )
 }
 
-/// What is about to happen, and what is not.
-///
-/// The second half is the whole point of the command: somebody who typed `run`
-/// where they meant `switch` sees that nothing moved before the client takes the
-/// screen.
-fn launching(
-    registry: &Registry,
-    email: &str,
-    said: &str,
-    settled: Option<&registry::Settled>,
-) -> String {
-    let named = registry.named_for_the_user(email);
-    // Nothing about who is active where nothing has settled who is active:
-    // saying it about the Account a Switch was leaving is saying it about the
-    // one Account it may no longer be true of.
-    let active = settled.and_then(|settled| Some((settled, registry.active().whose()?)));
-    match active {
-        // Both Accounts named the way every other command names one, through
-        // `is_active` — the one place the Registry answers a question about an
-        // address, so an Alias `upsert` has respelled is not named twice.
-        Some((settled, active)) if !registry.is_active(settled, email) => format!(
-            "Running {said} as {named}, in this terminal alone. {} stays the \
-             active Account everywhere else.",
-            registry.named_for_the_user(active)
-        ),
-        // Running the Account that is already active is not a mistake worth
-        // refusing: the Run still gets a Profile of its own, and the session it
-        // launches is not the one a later Switch moves out from under.
-        _ => format!("Running {said} as {named}, in this terminal alone."),
-    }
+/// What is about to happen. Nothing about who stays active elsewhere: that is
+/// what a Run is, and the guide's to say (ADR perch-says-what-it-did).
+fn launching(registry: &Registry, email: &str, said: &str) -> String {
+    format!(
+        "Running {said} as {}, in this terminal alone.",
+        registry.named_for_the_user(email)
+    )
 }
 
 #[cfg(test)]

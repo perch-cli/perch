@@ -96,7 +96,6 @@ fn naming_a_group_cycles_within_that_group() {
     let (result, printed) = run_switch(&host, "work");
 
     result.expect("the Group names somewhere to go");
-    assert!(printed.contains("`work` is a Group."), "{printed}");
     assert_eq!(active(&host).as_deref(), Some(THIRD_EMAIL), "{printed}");
 }
 

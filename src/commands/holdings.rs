@@ -19,54 +19,21 @@ use crate::host::Host;
 /// What was asked of `perch holdings`.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum HoldingsCommand {
-    /// Write everything Perch holds to one encrypted file.
-    ///
-    /// The Registry and every Credential, in the `age` format, so a dead
-    /// machine or a new laptop does not cost a login for every subscription.
-    /// There is no per-Account form: a selective export is a partial restore.
-    ///
-    /// The passphrase is prompted and confirmed, and cannot be passed as an
-    /// argument — an argument sits in the process table for anything on this
-    /// machine to read. Without a terminal to type it at, the export is
-    /// refused.
+    /// Write the Registry and every Credential to one encrypted file
     Export {
-        /// Where to write the file. Nothing is written over: a path that is
-        /// already taken is refused.
+        /// Where to write the Export
         path: PathBuf,
     },
 
-    /// Put a whole machine back from a file `perch holdings export` wrote.
-    ///
-    /// The exact inverse of an export: the Registry and every Credential, so a
-    /// new machine arrives with the setup the old one had rather than a pile of
-    /// nameless logins. Credentials land wherever this machine's Claude Code
-    /// keeps one, whatever store the file was written from.
-    ///
-    /// It refuses a Perch that already holds an Account and names `perch
-    /// holdings purge` as the way to make room — merging two machines is a
-    /// different feature. Nothing is made active by an import; `perch switch`
-    /// is what lands.
+    /// Restore a machine from an Export
     Import {
-        /// The file to restore from. The passphrase is prompted, and a wrong
-        /// one fails before anything is written.
+        /// The Export to restore from
         path: PathBuf,
     },
 
-    /// Give the machine back the state it had before Perch.
-    ///
-    /// Every Profile, every Credential Perch holds and its own Registry, gone
-    /// in one act — the exact inverse of an import, and what makes room for
-    /// one. It takes no target: giving up one Account is `perch remove`.
-    ///
-    /// It offers to write an export first, lists the Accounts that will go by
-    /// email address, and wants the word `purge` typed rather than a letter.
-    /// Whatever Claude Code is logged in as is left exactly where it is.
+    /// Delete every Profile, every Credential and the Registry
     Purge {
-        /// Purge without being asked, and write no export.
-        ///
-        /// An export is a path you name and a passphrase you type, neither of
-        /// which a script can be asked for — so this answers both questions at
-        /// once. Without a terminal and without this flag, a purge is refused.
+        /// Ask nothing, and write no Export
         #[arg(long)]
         yes: bool,
     },

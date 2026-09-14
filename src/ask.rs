@@ -109,11 +109,7 @@ pub fn needs_a_terminal(host: &dyn Host, command: &str) -> Result<()> {
         return Ok(());
     }
     Err(PerchError::Invalid(format!(
-        "An Export is encrypted with a passphrase, and there is no terminal to \
-         prompt for one on.\n\
-         There is no flag that answers ahead of time: a passphrase passed as an \
-         argument sits in the process table for anything on this machine to \
-         read. Run `{command}` where you can type."
+        "There is no terminal to type a passphrase on. Run `{command}` at one."
     )))
 }
 

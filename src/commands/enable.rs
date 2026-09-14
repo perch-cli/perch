@@ -39,7 +39,7 @@ pub fn run(host: &dyn Host, command: EnableCommand, out: &mut dyn Write) -> Resu
     only_the_registry(host, out, |registry| {
         let account = target::resolve_account(registry, command.target())?;
         let said = set(registry, &account, &command)?;
-        Ok(vec![account.matched, said])
+        Ok(vec![said])
     })
 }
 
@@ -75,10 +75,9 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
 fn what_the_quarantine_still_denies(quarantine: Option<Quarantine>, target: &str) -> String {
     match quarantine {
         Some(why) => format!(
-            " It is Quarantined, though: {}. Nothing switches to it, Cycling \
-             or you. {}",
+            " It is Quarantined: {}. {}",
             why.because(),
-            registry::how_to_repair(target),
+            registry::how_to_repair(target)
         ),
         None => String::new(),
     }

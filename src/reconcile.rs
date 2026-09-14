@@ -183,8 +183,7 @@ fn unlink(host: &dyn Host, at: &Path) -> Result<()> {
 
 /// What to do about a link that will not go: the directory it sits in is the
 /// thing refusing, and its permissions are the user's.
-const WILL_NOT_GO: &str = "That link is Perch's own and is being replaced, so what refused is the directory holding \
-     it. Check that you own it and can write to it.";
+const WILL_NOT_GO: &str = "Check that you own the directory and can write to it.";
 
 /// Clears away links into the Default Profile that no longer stand for
 /// anything: a dangling link is not inert, because Claude Code takes its locks
@@ -239,9 +238,7 @@ fn refused(at: &Path, why: &str, remedy: &str) -> PerchError {
         .into_owned();
 
     PerchError::Other(format!(
-        "`{entry}` could not be made reachable from {}: {why}.\n\n\
-         Perch shares by linking and never by copying, so the Run is refused \
-         rather than served a copy. {remedy}",
+        "`{entry}` could not be linked into {}: {why}.\n{remedy}",
         at.parent().unwrap_or(at).display(),
     ))
 }
@@ -251,19 +248,17 @@ fn refused(at: &Path, why: &str, remedy: &str) -> PerchError {
 /// onto another filesystem.
 fn no_link_here(host: &dyn Host) -> &'static str {
     if host.platform() == Platform::Windows {
-        "Turning on Developer Mode allows symbolic links; a Profile on a \
-         filesystem that carries no links at all has to be moved to one that does."
+        "Turn on Developer Mode, or move the Profile to a filesystem that \
+         carries links."
     } else {
-        "A Profile on a filesystem that carries no links has to be moved to one \
-         that does."
+        "Move the Profile to a filesystem that carries links."
     }
 }
 
 /// What to do about something sitting where a share belongs. Naming the act
 /// matters: without it this reads as a Run that can never happen again, and it
 /// is one `mv` from happening.
-const MOVE_IT_ASIDE: &str = "Whatever is at that path is not Perch's to delete, so move it aside or \
-     remove it yourself and run again.";
+const MOVE_IT_ASIDE: &str = "Move it aside and run again.";
 
 /// Whether a link stands for exactly this path.
 ///

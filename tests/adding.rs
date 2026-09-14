@@ -76,7 +76,7 @@ fn an_add_that_landed_says_so_when_only_the_report_could_not_be_written() {
             .expect_err("the report could not be written");
 
     assert!(
-        refused.to_string().contains("Account was added"),
+        refused.to_string().contains("was added"),
         "the failure says which half of the command it was: {refused}"
     );
     assert!(
@@ -174,13 +174,10 @@ fn the_account_you_were_using_stays_active_and_untouched() {
     assert!(result.is_ok(), "{:?}", result.err());
 
     assert_the_active_account_survived(&host);
-    // Asserted whole, because the claim *is* the sentence — and said once,
-    // before the browser opens, rather than again in the report afterwards.
+    // Asserted whole, because the claim *is* the sentence: what the login is
+    // for, and nothing reassuring about the Account being left alone.
     assert!(
-        printed.contains(&format!(
-            "Logging in to a new Profile. {EMAIL} stays active and its session \
-             is untouched."
-        )),
+        printed.contains("Logging in to a new Profile."),
         "the user should be told the session they are in survived:\n{printed}"
     );
     assert!(
@@ -640,7 +637,7 @@ fn a_profile_the_registry_would_not_record_is_taken_back_out_again() {
 
     let refusal = result.expect_err("the registry could not be written");
     assert!(
-        refusal.to_string().contains("taken back out"),
+        refusal.to_string().contains("Nothing was added"),
         "it says the machine is as it was: {refusal}"
     );
     assert_eq!(
@@ -1036,7 +1033,7 @@ fn a_store_that_will_not_give_a_credential_up_keeps_the_directory_that_names_it(
     assert!(
         host.notes()
             .iter()
-            .any(|note| note.contains("name the store")),
+            .any(|note| note.contains("would not give up the Credential")),
         "and the remark says why it is still there: {:?}",
         host.notes()
     );

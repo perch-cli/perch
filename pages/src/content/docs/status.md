@@ -113,7 +113,7 @@ table. The command still succeeds:
 
 ```
 $ perch status --refresh
-you@example.com: Anthropic is rate-limiting reads of this Account's Utilization, at about 28-30 an hour. The window does not refill early. The cached figure is what you see.
+you@example.com: Anthropic is rate-limiting reads of this Account (about 28-30 an hour).
 Account       you@example.com
 Organization  Acme
 Plan          pro

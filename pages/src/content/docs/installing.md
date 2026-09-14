@@ -195,7 +195,7 @@ of its own.
 
 ```
 $ perch status
-Adopted the Claude Code login as your first Profile, now active: you@example.com (Acme, pro). Claude Code 2.1.221.
+Adopted the Claude Code login as you@example.com (Acme, pro).
 Account       you@example.com
 Organization  Acme
 Plan          pro
