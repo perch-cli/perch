@@ -544,6 +544,14 @@ card grid is the Guide's index, so the two cannot disagree about which pages
 exist.
 _Avoid_: landing page, home page, index
 
+**Wizard**:
+A walk through organizing the Holdings, one question per step at the terminal,
+each step being a command that exists on its own and lands when it is answered.
+Every step shows what is there now, so a run that keeps every default changes
+nothing, and every step says the command it stood for. Refused where there is no
+terminal, naming those commands instead (ADR perch-does-not-draw).
+_Avoid_: setup, onboarding, tour, init, TUI
+
 ## Proving it works
 
 **Behavior**:

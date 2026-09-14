@@ -19,6 +19,7 @@ use perch::commands::triage::{self, TriageArgs};
 use perch::commands::upgrade::{self, UpgradeArgs};
 use perch::commands::version;
 use perch::commands::watcher::{self, WatcherCommand};
+use perch::commands::wizard;
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
 use perch::report;
@@ -118,6 +119,9 @@ enum Command {
         #[command(subcommand)]
         action: WatcherCommand,
     },
+
+    /// Organize what Perch holds, one question at a time.
+    Wizard,
 }
 
 /// The flag clap once generated, caught before the parser so the refusal can
@@ -266,6 +270,7 @@ impl Command {
             Command::Watcher { action } => {
                 Orders::of(move |host, out| watcher::run(host, action, out))
             }
+            Command::Wizard => Orders::of(move |host, out| ok(wizard::run(host, out))),
         }
     }
 }

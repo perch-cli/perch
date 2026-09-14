@@ -24,6 +24,7 @@ pub mod upgrade;
 pub mod version;
 pub mod watch;
 pub mod watcher;
+pub mod wizard;
 
 use std::io::Write;
 

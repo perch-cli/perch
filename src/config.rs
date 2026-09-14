@@ -252,23 +252,10 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
         return None;
     }
 
-    // The declaration before the grant, which is the order it has to be said in
-    // and the order the arms carry.
-    let needed: Vec<Setting> = match crate::cycle::may_act_within(registry, scope) {
-        crate::cycle::MayAct::May => return None,
-        crate::cycle::MayAct::Undeclared { granted: true } => vec![Setting::Interchangeable],
-        crate::cycle::MayAct::Undeclared { granted: false } => {
-            vec![Setting::Interchangeable, Setting::WatcherMayAct]
-        }
-        crate::cycle::MayAct::Ungranted => vec![Setting::WatcherMayAct],
-    };
-
-    // Named from the vocabulary rather than spelled here, for the reason at the
-    // top of this module.
-    let says: Vec<String> = needed
-        .iter()
-        .map(|key| format!("`perch config set {} {} true`", scope.word(), key.as_str()))
-        .collect();
+    let says = grants_still_needed(registry, scope);
+    if says.is_empty() {
+        return None;
+    }
     Some(format!(
         "{} now holds {}, and nothing Cycles between them unasked: {} {} it may.",
         scope.described(),
@@ -276,6 +263,25 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
         says.join(" and "),
         if says.len() == 1 { "says" } else { "say" },
     ))
+}
+
+/// The `perch config set` lines a Scope still needs before the Watcher may act
+/// within it, the declaration before the grant, and none where it already may.
+/// Named from the vocabulary rather than spelled at each surface, for the
+/// reason at the top of this module.
+pub fn grants_still_needed(registry: &Registry, scope: &Scope) -> Vec<String> {
+    let needed: Vec<Setting> = match crate::cycle::may_act_within(registry, scope) {
+        crate::cycle::MayAct::May => Vec::new(),
+        crate::cycle::MayAct::Undeclared { granted: true } => vec![Setting::Interchangeable],
+        crate::cycle::MayAct::Undeclared { granted: false } => {
+            vec![Setting::Interchangeable, Setting::WatcherMayAct]
+        }
+        crate::cycle::MayAct::Ungranted => vec![Setting::WatcherMayAct],
+    };
+    needed
+        .iter()
+        .map(|key| format!("`perch config set {} {} true`", scope.word(), key.as_str()))
+        .collect()
 }
 
 /// The keys one Scope carries, in the order they are offered.

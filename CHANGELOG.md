@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+
+- `perch wizard` organizes what Perch holds one question at a time: what you
+  hold, more Accounts, each Account's Group, each Scope's Settings, and the
+  Watcher as a Service. Enter keeps what is there, so a run that keeps every
+  default changes nothing, and a step that changed something prints the
+  command that does the same on its own. Steps land as they are answered, so
+  Ctrl-C keeps what was done. Without a terminal it refuses and lists the five
+  commands. The first `perch status` on a fresh machine now points at it
+  ([#441](https://github.com/perch-cli/perch/issues/441))
+
 ### Changed
 
 - Perch says the verdict and the next command, and nothing else. Every
