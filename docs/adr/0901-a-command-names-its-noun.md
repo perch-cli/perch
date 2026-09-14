@@ -12,13 +12,13 @@ noun-then-verb throughout, with one noun so pervasive it goes unwritten.
 | | |
 | --- | --- |
 | Top level, Account elided (10) | `add` `alias` `disable` `enable` `list` `relogin` `remove` `run` `status` `switch` |
-| Top level, Perch itself (2) | `upgrade` `version` |
+| Top level, Perch itself (3) | `upgrade` `version` `wizard` |
 | `config` (2) | `set` `get` |
 | `group` (5) | `add` `remove` `rename` `move` `list` |
 | `watcher` (5) | `run` `check` `install` `uninstall` `status` |
 | `holdings` (3) | `export` `import` `purge` |
 
-**Sixteen names, twenty-seven invocable forms.** The count is not the finding,
+**Seventeen names, twenty-eight invocable forms.** The count is not the finding,
 and it is written down because a wrong number left standing is read as a right
 one.
 
@@ -35,7 +35,7 @@ administration under its noun, the Account's included:
 > `status` `switch` `run` `list` · `account` `config` `group` `watcher`
 > `holdings`
 
-Nine top-level names against sixteen. This rule is **one** idea whose line takes
+Ten top-level names against seventeen. This rule is **one** idea whose line takes
 no judgment — does an Account name what the command is about, yes or no. The rival
 is **two** ideas, and the second has to be adjudicated per command, badly.
 `perch relogin` is the way back from a Quarantine, which bites mid-task.
@@ -299,7 +299,7 @@ command performs would be a second copy of the surface.
 
 ## Consequences
 
-Sixteen names and twenty-seven forms, and a reader who learns `perch group add`
+Seventeen names and twenty-eight forms, and a reader who learns `perch group add`
 can predict where `perch holdings export` lives. What is bought is not a smaller
 surface — nineteen looked-up names cost one idea if a rule places them and
 nineteen facts if nothing does.

@@ -140,4 +140,8 @@ fn report(host: &dyn Host, findings: &Findings) {
     // One remark rather than two: that the Profile is the first and that it is
     // active are the same piece of news about the same machine.
     host.note(&format!("Adopted the Claude Code login as {description}."));
+    // Once, here: adoption is the one moment Perch knows the person is new.
+    host.note(
+        "`perch wizard` walks you through adding Accounts, Groups, Settings and the Watcher.",
+    );
 }

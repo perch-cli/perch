@@ -101,6 +101,9 @@ when you log in — a LaunchAgent, a `systemd --user` unit, or a Scheduled Task,
 whichever your machine has. Perch never backgrounds itself: it writes the unit
 and hands the job over, and `perch watcher uninstall` takes it back.
 
+`perch wizard` asks you steps 2 to 5 one question at a time. Enter keeps
+whatever is already set, and each answer prints the command it stood for.
+
 One more worth knowing early: `perch run <target>` launches Claude Code as one
 Account in one terminal without changing which is active.
 

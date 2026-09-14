@@ -150,11 +150,11 @@ impl Drop for Scratch {
 }
 
 /// Every command the binary dispatches, as `--help` lists them: the ten that
-/// elide the Account, the two that are Perch's own, and the four nouns that are
-/// written (ADR a-command-names-its-noun).
-const COMMANDS: [&str; 16] = [
+/// elide the Account, the three that are Perch's own, and the four nouns that
+/// are written (ADR a-command-names-its-noun).
+const COMMANDS: [&str; 17] = [
     "add", "alias", "config", "disable", "enable", "group", "holdings", "list", "relogin",
-    "remove", "run", "status", "switch", "upgrade", "version", "watcher",
+    "remove", "run", "status", "switch", "upgrade", "version", "watcher", "wizard",
 ];
 
 /// Exactly as the Homebrew formula's test block asserts on it. One line and no

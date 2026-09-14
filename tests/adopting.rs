@@ -266,6 +266,17 @@ fn adoption_happens_once() {
         "{:?}",
         host.notes()
     );
+    // Adoption is the one moment Perch knows the person is new, so the Wizard
+    // is offered there and nowhere else.
+    assert_eq!(
+        host.notes()
+            .iter()
+            .filter(|note| note.contains("`perch wizard`"))
+            .count(),
+        1,
+        "{:?}",
+        host.notes()
+    );
     assert!(!first_output.contains("Adopted"), "{first_output}");
     assert!(
         !second_output.contains("Adopted"),
