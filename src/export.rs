@@ -103,7 +103,13 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
         let bundle = account
             .provider()
             .adapter()
-            .snapshot(host, &registry.profile_context(host, account)?)?;
+            .snapshot(host, &registry.profile_context(host, account)?)
+            .map_err(|error| {
+                error.with_note(&format!(
+                    "{}'s Credential could not be read, so no Export was written.",
+                    account.key()
+                ))
+            })?;
         gathered.profiles.insert(account.key().to_string(), bundle);
     }
 
@@ -262,28 +268,22 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
         // -r` rather than `age -p`. Told as a wrong passphrase, it invites
         // somebody to retype forever one that was never involved.
         age::DecryptError::NoMatchingKeys => PerchError::Invalid(
-            "This is an `age` file, but it was not written with a passphrase, so \
-             no passphrase will open it. An Export always is."
-                .to_string(),
+            "This file was not written with a passphrase, so it is not an Export.".to_string(),
         ),
         // The file is intact and the passphrase may well be right: nothing here
         // is worth typing again, and everything here is worth trying on a
         // machine with more to spend.
         age::DecryptError::ExcessiveWork { required, .. } => PerchError::Invalid(format!(
-            "This file was sealed with more work than Perch will spend opening \
-             one (2^{required} scrypt rounds, against a ceiling of \
-             2^{MAX_WORK_FACTOR}). Nothing is wrong with the file and the \
-             passphrase is not in question. `age -d` opens it where this will \
-             not."
+            "This file takes 2^{required} scrypt rounds to open, more than Perch \
+             spends. `age -d` opens it."
         )),
         // This *is* the Export and it did not come through intact: a header
         // whose MAC fails, or a payload that stops early. Its own answer, or a
         // damaged copy of the right file sends somebody looking for another.
         damaged @ (age::DecryptError::InvalidMac | age::DecryptError::Io(_)) => {
             PerchError::Invalid(format!(
-                "This is an `age` file and it did not come through intact \
-                 ({damaged}). The passphrase is not in question, and nothing will \
-                 open this copy. Find another one."
+                "This `age` file did not come through intact ({damaged}). Find \
+                 another copy."
             ))
         }
         other => PerchError::Invalid(format!("This is not an `age` file Perch can read: {other}")),
@@ -361,10 +361,8 @@ fn no_perch_wrote(claimed: Option<u64>) -> PerchError {
     PerchError::Malformed {
         path: "the Export".to_string(),
         detail: format!(
-            "it says it is export version {}, which is a version no Perch has \
-             written. The earliest is {}. Nothing was imported.",
+            "it is export version {}, which no Perch has written.",
             claimed.unwrap_or_default(),
-            EARLIEST_VERSION,
         ),
     }
 }
@@ -658,7 +656,7 @@ mod tests {
         assert!(
             no_passphrase
                 .to_string()
-                .contains("passphrase will open it"),
+                .contains("not written with a passphrase"),
             "{no_passphrase}"
         );
 
@@ -886,7 +884,6 @@ mod tests {
 
         let refused = gather(&host, &registry).expect_err("nothing can be read");
         assert!(refused.to_string().contains("one@example.com"), "{refused}");
-        assert!(refused.to_string().contains("partial restore"), "{refused}");
     }
 }
 

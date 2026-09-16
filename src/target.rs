@@ -84,8 +84,7 @@ pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarge
             },
         }),
         None => Err(PerchError::Invalid(format!(
-            "{} This acts on one Account, so name the Account itself: \
-             its Alias, or its email address.",
+            "{} Name one Account: its Alias, or its email address.",
             found.matched()
         ))),
     }

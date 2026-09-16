@@ -33,19 +33,15 @@ use crate::utilization;
 /// under is answered with what *was* declared.
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct ListArgs {
-    /// Which Accounts to show: a Group by name, or `ungrouped` for the
-    /// Accounts in no Group. Without one, every Account Perch holds.
+    /// A Group by name, or `ungrouped`
     #[arg(value_name = "SCOPE")]
     pub scope: Option<String>,
 
-    /// Read current Utilization from each Account's provider first.
-    /// Claude's hourly allowance and Codex Profile liveness can defer a read;
-    /// deferred or failed reads retain the cached figure and its original age.
+    /// Read Utilization from each provider first
     #[arg(long)]
     pub refresh: bool,
 
-    /// Emit machine-readable output, with an observation time on every
-    /// Utilization figure.
+    /// Print JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -168,10 +164,8 @@ fn narrowed(registry: &Registry, name: &str) -> Result<Scope> {
         // A listing has the happier answer: the whole of it is what the word
         // asks for.
         Err(config::NotAScope::MeansEveryScope) => Err(PerchError::NotFound(format!(
-            "There is no Scope called `{name}`. It is how people say every \
-             Scope at once, which is what a bare `perch list` shows. Narrowing \
-             takes a Group by name, or `{UNGROUPED}` for the Accounts in no \
-             Group."
+            "There is no Scope called `{name}`. A bare `perch list` shows every \
+             Scope; a Group or `{UNGROUPED}` narrows it."
         ))),
         Err(config::NotAScope::NoSuchGroup) => Err(group::no_such_group(registry, name)),
     }

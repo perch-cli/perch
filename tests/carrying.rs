@@ -411,7 +411,7 @@ fn a_profile_that_cannot_be_written_is_remarked_on_and_the_run_happens_anyway() 
     assert!(
         notes
             .iter()
-            .any(|note| note.contains(".claude.json") && note.contains("launched anyway")),
+            .any(|note| note.contains(".claude.json") && note.contains("Claude Code settings")),
         "{notes:?}"
     );
 }

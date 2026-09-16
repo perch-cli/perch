@@ -191,8 +191,8 @@ pub(crate) fn from_profiles(
     // the file turns onboarding questions on every Run into a `chmod`.
     if let Err(err) = host::write_atomically(host, &destination, &patched) {
         host.note(&format!(
-            "{} could not be written ({err}), so this Account starts as though \
-             Claude Code had never run for you. The client was launched anyway.",
+            "{} could not be written ({err}), so this Account starts without your \
+             Claude Code settings.",
             destination.display()
         ));
     }

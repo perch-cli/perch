@@ -93,7 +93,6 @@ impl DefaultChange for Edit<'_> {
             .around(|| patch_identity(self.host, &self.prepared))
             .map_err(|error| DefaultFailure {
                 error: error.with_note(&live_but_unnamed(
-                    &self.prepared,
                     self.request.outgoing.as_ref(),
                     &self.request.incoming,
                 )),
@@ -181,10 +180,8 @@ fn capture(
         }
         Err(would_not_answer) => {
             return Err(would_not_answer.with_note(&format!(
-                "The live Credential could not be read, so it could not be \
-                 Captured into {}'s Profile, and it may be that Account's own, \
-                 newer than the copy Perch holds. Make that store readable and \
-                 run this again.",
+                "The live Credential could not be read, so it was not Captured \
+                 for {}. Make that store readable and run this again.",
                 outgoing.key(),
             )));
         }
@@ -390,17 +387,15 @@ fn identity_block_for(host: &dyn Host, incoming: &Account, kept_in: &Store) -> R
     Ok(held.unwrap_or_else(|| super::identity::compose(&incoming.identity)))
 }
 
-fn live_but_unnamed(prepared: &Prepared, outgoing: Option<&Account>, incoming: &Account) -> String {
+fn live_but_unnamed(outgoing: Option<&Account>, incoming: &Account) -> String {
     let named = match outgoing {
         Some(outgoing) => outgoing.key().to_string(),
         None => "another Account".to_string(),
     };
     format!(
-        "{incoming} is active, but {file} still names {named}, so Claude Code \
-         will act as {incoming} while displaying {named}.\n\
-         Run `perch switch {incoming}` again to finish the job.",
+        "{incoming} is active, but Claude Code still displays {named}.\n\
+         `perch switch {incoming}` again finishes the job.",
         incoming = incoming.key(),
-        file = prepared.store.identity_file.display(),
     )
 }
 

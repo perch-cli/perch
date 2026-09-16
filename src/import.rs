@@ -42,20 +42,9 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
         (held, 0) => say::accounts(held),
         (held, declared) => format!("{} and {}", say::accounts(held), say::groups(declared)),
     };
-    // Said only where a Group is part of what is held: an Import refused over
-    // Accounts alone is refused for the sentence above it.
-    let declarations = match groups {
-        0 => "",
-        _ => {
-            " A Group and what it carries are declarations this machine holds \
-              alone."
-        }
-    };
     Err(PerchError::Conflict(format!(
-        "Perch already holds {holding}, and an Import does not merge onto a \
-         machine that holds anything.{declarations}\n\
-         Nothing was imported and the file was not opened. `perch holdings \
-         purge` makes room, and offers to write an Export first."
+        "Perch already holds {holding}, and an Import lands only on an empty \
+         machine. `perch holdings purge` makes room."
     )))
 }
 
@@ -113,10 +102,7 @@ pub fn place(
             return Err(PerchError::Malformed {
                 path: "the Export".to_string(),
                 detail: format!(
-                    "it holds {what} for {}, which it does not list as an \
-                     Account. Nothing was imported: a file with no Account to \
-                     belong to would be restored into a Profile nothing names, \
-                     or not at all, and neither is the whole file.",
+                    "it holds {what} for {}, which it does not list as an Account.",
                     unlisted.join(", "),
                 ),
             });
@@ -134,9 +120,7 @@ pub fn place(
                     path: "the Export".to_string(),
                     detail: format!(
                         "it holds {what} under both {clash} and {key}, which are \
-                         one address. Nothing was imported: only one of the two \
-                         would ever be restored, and an Import that quietly kept \
-                         one and dropped the other is not the whole file.",
+                         one address.",
                     ),
                 });
             }
@@ -153,11 +137,8 @@ pub fn place(
     for account in &export.registry.accounts {
         if holdings::slug(account.key()).is_empty() {
             return Err(PerchError::Invalid(format!(
-                "The Export holds an Account recorded as `{}`, which has no \
-                 character a Profile directory can be named after, so Perch \
-                 cannot say where its Credential would be kept.\n\
-                 Nothing was imported. That Account has to be removed on a \
-                 machine that still holds it, and the Export taken again.",
+                "The Export holds `{}`, which no Profile directory can be named \
+                 after. Remove it where it is held and export again.",
                 account.key(),
             )));
         }
@@ -178,10 +159,8 @@ pub fn place(
             account,
         ) {
             return Err(PerchError::Conflict(format!(
-                "{} and {} share the Profile they would be kept in, so importing \
-                 both would mean each one's Credential replacing the other's.\n\
-                 Nothing was imported. One of the two has to be removed on a \
-                 machine that still holds it, and the Export taken again.",
+                "{} and {} would share one Profile.\n\
+                 Remove one on a machine that holds it and take the Export again.",
                 clash.key(),
                 account.key(),
             )));
@@ -212,7 +191,9 @@ pub fn place(
             cleanup.record(restore.rollback());
         }
         return Err(match cleanup.result() {
-            Ok(()) if written => error.with_note("Nothing was imported. Restored Profiles have been taken back out; the Export can be imported again."),
+            Ok(()) if written => {
+                error.with_note("Nothing was imported. Run `perch holdings import` again.")
+            }
             Ok(()) => error,
             Err(cleanup) => error.with_note(&cleanup.to_string()),
         });
@@ -373,7 +354,10 @@ mod tests {
         })
         .expect_err("the registry could not be written");
 
-        assert!(refused.to_string().contains("taken back out"), "{refused}");
+        assert!(
+            refused.to_string().contains("Nothing was imported"),
+            "{refused}"
+        );
         assert!(
             !host.path_exists(&store.config_dir),
             "the Profile this Import made is gone with it"

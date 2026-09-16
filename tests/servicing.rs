@@ -182,13 +182,9 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
          starts a stopped unit and does nothing to a running one, which is the \
          state re-installing after an Upgrade is always in"
     );
-    // Asserted whole, because the claim is the sentence (ADR perch-says-what-it-did):
-    // what it did, and which of this machine's binaries the unit was written against.
+    // Asserted whole, because the claim is the sentence (ADR perch-says-what-it-did).
     assert!(
-        printed.contains(&format!(
-            "Installed the Service. It runs {} as a systemd user unit.",
-            host.current_exe().expect("the fixture has one").display()
-        )),
+        printed.contains("Installed the Watcher. It checks every 150 seconds."),
         "{printed}"
     );
 }
@@ -197,7 +193,7 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
 fn installing_carries_the_claude_code_the_install_resolved_into_the_unit() {
     let host = linux();
 
-    let (result, printed) = run_service(&host, WatcherCommand::Install);
+    let (result, _) = run_service(&host, WatcherCommand::Install);
 
     assert_eq!(result.expect("the service manager answered"), EXIT_OK);
     let unit = host
@@ -206,10 +202,6 @@ fn installing_carries_the_claude_code_the_install_resolved_into_the_unit() {
     assert!(
         unit.contains(r#"Environment="PERCH_CLAUDE_BIN=/usr/bin/claude""#),
         "the unit hands the Watcher the Claude Code the install resolved: {unit}"
-    );
-    assert!(
-        printed.contains("Claude Code at /usr/bin/claude"),
-        "and the install says which one it carried: {printed}"
     );
 }
 
@@ -302,12 +294,8 @@ fn an_install_passes_over_a_claude_that_cannot_run_where_the_service_will_run_it
     );
     assert!(!unit.contains("cmux"), "{unit}");
     assert!(
-        printed.contains("Claude Code at /usr/bin/claude"),
-        "{printed}"
-    );
-    assert!(
-        printed.contains(SHIM) && printed.contains("passed over") && printed.contains("127"),
-        "the install names what it passed over, and the exit that damned it: {printed}"
+        !printed.contains(SHIM),
+        "what was passed over changes nothing the person does, so it is not said: {printed}"
     );
 }
 
@@ -616,8 +604,8 @@ fn a_start_that_fails_over_a_service_that_was_working_leaves_the_unit_where_it_i
         "and nothing claims otherwise: {refusal}"
     );
     assert!(
-        refusal.to_string().contains("perch watcher status"),
-        "and it says how to see what is there now: {refusal}"
+        refusal.to_string().contains("perch watcher uninstall"),
+        "and it names the command that takes it away: {refusal}"
     );
 }
 
@@ -732,7 +720,7 @@ fn uninstalling_what_was_never_installed_is_nothing_to_do_rather_than_a_failure(
     let (result, printed) = run_service(&host, WatcherCommand::Uninstall);
 
     assert_eq!(result.expect("nothing failed"), EXIT_NOTHING_TO_DO);
-    assert!(printed.contains("no Service installed"), "{printed}");
+    assert!(printed.contains("No Service is installed."), "{printed}");
 }
 
 #[test]
@@ -892,7 +880,7 @@ fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
     assert_eq!(result.expect("not a refusal"), EXIT_OK);
     assert!(printed.contains("watcher-may-act"), "{printed}");
     assert!(
-        printed.contains("will hold"),
+        printed.contains("the Service holds"),
         "and it says what that means rather than only what is missing: {printed}"
     );
 }
@@ -934,7 +922,7 @@ fn a_grant_the_watcher_will_never_act_on_still_says_the_service_will_hold() {
 
     assert_eq!(result.expect("not a refusal"), EXIT_OK);
     assert!(
-        printed.contains("will hold"),
+        printed.contains("the Service holds"),
         "a grant the Watcher will never act on is not a Service that will act: \
          {printed}"
     );
@@ -957,7 +945,7 @@ fn a_purge_stops_the_service_before_it_deletes_anything() {
         "the unit goes with everything else: {printed}"
     );
     assert!(
-        printed.contains("The Service goes too, and goes first"),
+        printed.contains("The Service goes too"),
         "and the confirmation said so, because a unit lives outside Perch's \
          home and consent to one is not consent to the other: {printed}"
     );
@@ -1131,8 +1119,8 @@ fn a_mac_gets_a_launchagent_in_its_own_place_bootstrapped_into_its_own_session()
         "launchd keeps no log of its own, so the unit names one: {plist}"
     );
     assert!(
-        printed.contains("watch.log"),
-        "and the install says where it is: {printed}"
+        !printed.contains("watch.log"),
+        "and a success line names no path (ADR perch-says-what-it-did): {printed}"
     );
 }
 
@@ -1651,7 +1639,7 @@ fn a_mixed_service_carries_both_providers_and_only_declared_environment() {
         .with_env("CODEX_HOME", "/native/codex")
         .with_env("OPENAI_API_KEY", "do-not-persist")
         .with_env("ANTHROPIC_API_KEY", "also-do-not-persist");
-    let (result, printed) = run_service(&host, WatcherCommand::Install);
+    let (result, _) = run_service(&host, WatcherCommand::Install);
     assert_eq!(result.unwrap(), EXIT_OK);
     let unit = host.read_file(std::path::Path::new(UNIT)).unwrap();
     for entry in [
@@ -1663,7 +1651,6 @@ fn a_mixed_service_carries_both_providers_and_only_declared_environment() {
         assert!(unit.contains(entry), "{unit}");
     }
     assert!(!unit.contains("do-not-persist"));
-    assert!(printed.contains("/usr/bin/claude") && printed.contains("/usr/bin/codex"));
 }
 
 #[test]

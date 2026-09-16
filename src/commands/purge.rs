@@ -30,13 +30,12 @@ const THE_WORD: &str = "purge";
 /// one place because both ways out of the offer end here, and the two are one
 /// instruction.
 const RUN_IT_AGAIN: &str = "Nothing was purged. Run `perch holdings purge` again; \
-     answering `n` to the offer purges without one.";
+     `n` to the offer purges without an Export.";
 
 /// What agreeing to a Purge costs, said in one place: both of the sentences the
 /// question can open with end on it, and two copies would sooner or later be
 /// two different promises about the same act.
-const NOTHING_UNDOES_IT: &str = "Nothing undoes it: only a fresh login brings an \
-     Account back, and it comes back as a new one.";
+const NOTHING_UNDOES_IT: &str = "Nothing undoes it.";
 
 /// `yes` answers both questions ahead of time: purge, and write no Export.
 pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
@@ -49,11 +48,9 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // artifact that lives inside it.
     let home = holdings::perch_home(host)?;
     if !host.path_exists(&home) {
-        return Err(PerchError::NothingToDo(format!(
-            "{} is not there, so Perch is holding nothing on this machine and \
-             there is nothing to give back.",
-            home.display(),
-        )));
+        return Err(PerchError::NothingToDo(
+            "Perch holds nothing on this machine, so there is nothing to purge.".to_string(),
+        ));
     }
 
     let perch = holdings::lock(host)?;
@@ -122,14 +119,11 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         .map_err(and_the_export)?;
 
     let purged = purge::erase(host, &mut perch, &registry, &fresh).map_err(and_the_export)?;
-    // The Export's whereabouts is the report's *last* line, so a report that
-    // failed before it leaves the Holdings gone and the file holding them named
-    // nowhere. What the note adds is that there is nothing to run again.
-    report(out, &home, &purged, exported.as_deref()).map_err(|error| {
-        and_the_export(error.with_note(
-            "The Purge itself finished: the Holdings are gone, and only the \
-             report could not be printed.",
-        ))
+    // A report that fails leaves the Holdings gone and the Export unnamed, so
+    // `and_the_export` names it. What the note adds is that there is nothing to
+    // run again.
+    report(out, &purged).map_err(|error| {
+        and_the_export(error.with_note("The Purge finished. Only the report could not be printed."))
     })
 }
 
@@ -147,14 +141,12 @@ fn still_standing(error: PerchError, exported: Option<&std::path::Path>) -> Perc
 
 /// Where an Export this run wrote is, and what it holds.
 ///
-/// One sentence in one place: a Purge names the file when it is declined, when
-/// it fails and when it finishes, and those three differ only in what they say
-/// happened around it.
+/// One sentence in one place: a Purge names the file when it is declined and
+/// when it fails, the two ways out that leave the reader with an Export they
+/// may need. A Purge that finished names no path.
 fn the_export_is_at(path: &Path) -> String {
     format!(
-        "The Export is at {}, and holds a working Credential for every Account. \
-         Keep it somewhere you would keep those. `perch holdings purge` will not \
-         write over it.",
+        "The Export is at {}, and a second Purge will not write over it.",
         path.display(),
     )
 }
@@ -169,9 +161,8 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
         return Ok(());
     }
     Err(PerchError::Invalid(
-        "There is no terminal to confirm on, and a Purge deletes every Profile, \
-         every Credential Perch holds and its own registry.\n\
-         Nothing was purged. Pass `--yes` to purge without being asked."
+        "There is no terminal to confirm on. Pass `--yes` to purge without being \
+         asked."
             .to_string(),
     ))
 }
@@ -189,9 +180,8 @@ fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> (Regist
         Ok(held) => (held.unwrap_or_default(), true),
         Err(unreadable) => {
             host.note(&format!(
-                "{unreadable}\n\nSo the Accounts cannot be named. Every Profile \
-                 under {} is emptied and deleted regardless, and the count below \
-                 is of Profiles rather than of Accounts.",
+                "{unreadable}\nSo the Accounts cannot be named, and the count \
+                 below is of Profiles under {}.",
                 home.display(),
             ));
             (Registry::default(), false)
@@ -215,11 +205,7 @@ fn what_will_go(
     // because it is the one thing a Purge takes that lives *outside* Perch's home
     // (ADR the-machine-runs-the-watcher).
     let and_the_service = match service {
-        true => {
-            "\nThe Service goes too, and goes first: nothing may be \
-                 Switching Credentials into Profiles this is deleting. Its unit \
-                 is removed, so nothing starts at your next login."
-        }
+        true => "\nThe Service goes too, so nothing starts at your next login.",
         false => "",
     };
 
@@ -239,9 +225,8 @@ fn what_will_go(
                 home.display(),
             ),
             profiles => format!(
-                "Perch holds {} under {} that it cannot name{}. A Purge empties \
-                 every one of their Credential Stores and deletes {} itself. \
-                 {NOTHING_UNDOES_IT}{and_the_service}",
+                "Perch holds {} under {} that it cannot name{}. A Purge deletes \
+                 their Credentials and {} itself. {NOTHING_UNDOES_IT}{and_the_service}",
                 say::profiles(profiles),
                 home.display(),
                 // Only where the Registry is the reason: one that parsed and
@@ -258,8 +243,8 @@ fn what_will_go(
 
     format!(
         "Perch holds {}: {}.\n\
-         A Purge deletes every one of their Profiles, every Credential Perch \
-         holds for them, and {} itself. {NOTHING_UNDOES_IT}\n\
+         A Purge deletes their Profiles, their Credentials, and {} itself. \
+         {NOTHING_UNDOES_IT}\n\
          Claude Code goes on running as whatever it is logged in as.\
          {and_the_service}",
         say::accounts(accounts.len()),
@@ -350,10 +335,8 @@ fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
     let separator = |character: char| character == '/' || (on_windows && character == '\\');
     let Some(rest) = rest.strip_prefix(separator) else {
         return Err(PerchError::Invalid(format!(
-            "`{typed}` begins with a `~` that does not name this machine's home, \
-             and Perch will not read it as the name of a file.\n\
-             Nothing was purged. Run `perch holdings purge` again and name a \
-             path, such as `~/perch.age`."
+            "`{typed}` begins with a `~` that is not this machine's home.\n\
+             Nothing was purged. Name a path such as `~/perch.age`."
         )));
     };
     match host.home_dir() {
@@ -380,37 +363,23 @@ fn agreed(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
 }
 
 /// What was given back.
-fn report(
-    out: &mut dyn Write,
-    home: &Path,
-    purged: &Purged,
-    exported: Option<&Path>,
-) -> Result<()> {
+fn report(out: &mut dyn Write, purged: &Purged) -> Result<()> {
     // Said as what happened rather than as a count, because "Purged 0 Accounts"
     // is not a sentence — and holding none is a real state here: it is what a
     // Purge that stopped in its last step leaves for the next one to finish.
     say::line(
         out,
         &match (purged.accounts, purged.unnamed.profiles) {
-            (0, 0) => format!(
-                "Perch was holding no Accounts here, so {} was all there was left \
-                 to take, and it is gone.",
-                home.display(),
-            ),
+            (0, 0) => "Perch held no Accounts here, and its home is gone.".to_string(),
             // The Profiles, because the Registry named no Account and they are
             // the only count there is. Never "no Accounts": a machine whose
             // Registry would not parse still held every one of these.
             (0, profiles) => format!(
-                "Purged {} Perch could not name, {} among them, and {} is gone.",
+                "Purged {} Perch could not name, {} among them.",
                 say::profiles(profiles),
                 say::credentials(purged.unnamed.credentials),
-                home.display(),
             ),
-            (accounts, _) => format!(
-                "Purged {}, and {} is gone.",
-                say::accounts(accounts),
-                home.display(),
-            ),
+            (accounts, _) => format!("Purged {}.", say::accounts(accounts)),
         },
     )?;
 
@@ -441,13 +410,6 @@ fn report(
 
     for note in &purged.notes {
         say::line(out, note)?;
-    }
-
-    // The sentence every *other* way out of this command says about a file this
-    // one wrote: the path is the only thing left that names the Holdings, and
-    // the run that destroyed them is where it matters most.
-    if let Some(path) = exported {
-        say::line(out, &the_export_is_at(path))?;
     }
 
     Ok(())

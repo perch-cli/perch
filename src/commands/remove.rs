@@ -44,10 +44,10 @@ fn why_the_default_profile(consequence: &Consequence) -> Option<&'static str> {
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct RemoveArgs {
-    /// The Account: its Alias, or its email address.
+    /// An Alias or email address
     pub target: String,
 
-    /// Remove it without being asked to confirm.
+    /// Skip the confirmation
     #[arg(long)]
     pub yes: bool,
 }
@@ -81,7 +81,6 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let account = registry.held(&found.email)?.clone();
     registry.select_provider(account.provider());
     let settled = crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
-    say::line(out, &found.matched)?;
 
     // Before the question rather than after: an Account Perch may not touch is
     // not one to ask about giving up (ADR a-profile-is-live-by-evidence).
@@ -119,15 +118,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // Somewhere to land before anything is deleted. A failure here has cost
     // nothing: the Account is still held, and its Credential is still live.
     if let Some(successor) = &consequence.successor {
-        land_on(
-            host,
-            &mut perch,
-            out,
-            &mut registry,
-            successor,
-            &account,
-            &fresh,
-        )?;
+        land_on(host, &mut perch, out, &mut registry, successor, &fresh)?;
     }
 
     let deleted = delete_the_credential_and_its_profile(host, &registry, &account, &fresh)?;
@@ -137,8 +128,9 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     registry.forget(account.key());
     registry::save(host, &mut perch, &mut registry).map_err(|error| {
         error.with_note(&format!(
-            "The Credential Perch held for {} is already deleted, so the Account \
-             it still records is one it can no longer switch to.",
+            "The Credential is deleted, and {} is still recorded. Run `perch \
+             remove {}` again.",
+            account.key(),
             account.key()
         ))
     })?;
@@ -146,10 +138,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // On disk by here, so an unnoted failure sends a script back to give up an
     // Account it has already given up.
     report(host, out, &named, alias.as_deref(), &consequence, &deleted).map_err(|error| {
-        error.with_note(
-            "The Remove itself finished: the Account is given up and its \
-             Credential deleted, and only the report could not be printed.",
-        )
+        error.with_note("The Remove finished. Only the report could not be printed.")
     })
 }
 
@@ -206,9 +195,8 @@ fn agreed(
     }
     if !host.is_interactive() {
         return Err(PerchError::Invalid(format!(
-            "There is no terminal to confirm on, and this removal is one Perch \
-             asks about: {}\n\
-             Pass `--yes` to remove it without being asked.",
+            "There is no terminal to confirm on. {}\n\
+             Pass `--yes` to remove it unasked.",
             what_it_would_leave(registry, account, consequence),
         )));
     }
@@ -238,29 +226,21 @@ fn what_it_would_leave(
 
     said.push_str(&match &consequence.successor {
         Some(successor) => format!(
-            "{} will be made active first, so nothing is left running as an \
-             Account Perch has forgotten. `perch switch <target>` first if you \
-             would rather land somewhere else. The login being given up goes \
-             with it, and holding it again would mean `perch add`.",
+            "{} will be made active first; `perch switch <target>` before this \
+             lands somewhere else. Its Credential is deleted with it.",
             registry.named_for_the_user(successor.key()),
         ),
         // Removing the *active* Account with nowhere to land leaves the machine
         // running as it, which is worth saying. Removing the last Account when
         // Perch is on nobody describes a state that is not theirs.
-        None if consequence.is_active => format!(
-            "Nothing Perch holds can be left active in its place, so it will \
-             hold no active Account afterwards. {} goes on running as \
-             {}, but the Credential Perch holds is deleted, so anything that \
-             replaces the live one ends that login for good.",
-            account.provider().adapter().name(),
-            account.key(),
-        ),
-        None => format!(
-            "Perch is on no Account, so nothing is switched away from. The \
-             Credential Perch holds for {} is deleted, and Perch will hold no \
-             Accounts at all afterwards.",
-            account.key(),
-        ),
+        None if consequence.is_active => {
+            "Perch will hold no active Account afterwards, and its Credential is \
+             deleted."
+                .to_string()
+        }
+        None => {
+            "Its Credential is deleted, and Perch will hold no Accounts afterwards.".to_string()
+        }
     });
     said
 }
@@ -270,17 +250,12 @@ fn what_it_would_leave(
 /// rather than with the rest of the Registry at the end, because everything
 /// between is destructive and can fail. Written whether the landing finished or
 /// not: a Credential that reached the Default Profile is live either way.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the witness made it eight; a struct with one caller would only rename the list"
-)]
 fn land_on(
     host: &dyn Host,
     perch: &mut Held<'_>,
     out: &mut dyn Write,
     registry: &mut Registry,
     successor: &Account,
-    leaving: &Account,
     _fresh: &wait::Fresh,
 ) -> Result<()> {
     let landed = switch::make_live(host, perch, registry, successor, WHY_THE_DEFAULT_PROFILE);
@@ -290,27 +265,20 @@ fn land_on(
         registry.settle(Some(successor.key().to_string()));
         registry::save(host, perch, registry).map_err(|error| {
             error.with_note(&format!(
-                "Nothing was removed. {}'s Credential is the live one now, so \
-                 `perch switch {}` puts the record right before anything else is \
-                 tried.",
-                successor.key(),
+                "Nothing was removed. `perch switch {}` puts the record right.",
                 successor.key(),
             ))
         })?;
     }
 
     landed.map_err(|stopped| {
-        let held = format!("Nothing was removed, and {} is still held", leaving.key());
-        stopped.error.with_note(&if stopped.moved {
-            format!(
-                "{held}. Its Credential is no longer the live one: {}'s is, and \
-                 Perch records it as active. Run `perch switch {}` to finish \
-                 landing there, then `perch remove` again.",
+        stopped.error.with_note(&match stopped.moved {
+            true => format!(
+                "Nothing was removed. `perch switch {}` finishes landing there; \
+                 then `perch remove` again.",
                 successor.key(),
-                successor.key(),
-            )
-        } else {
-            format!("{held}, and its Credential is still the live one.")
+            ),
+            false => "Nothing was removed.".to_string(),
         })
     })?;
 
@@ -366,12 +334,17 @@ fn delete_the_credential_and_its_profile(
         .provider()
         .adapter()
         .forget_credential(host, &account.profile(host)?)
-        .map_err(|error| error.with_note(&format!("Credential deletion for {} did not finish. Some stores may already be empty; run `perch remove {}` again to finish.", account.key(), account.key())))?;
+        .map_err(|error| {
+            error.with_note(&format!(
+                "Removing {}'s Credential did not finish. Run `perch remove {}` again.",
+                account.key(),
+                account.key()
+            ))
+        })?;
     let dir = account.profile_dir(host)?;
     if host.remove_dir_all(&dir).is_err() {
         host.note(&format!(
-            "{} held no Credential by the end and could not be removed. Nothing \
-             in it is secret, and deleting it by hand is safe.",
+            "{} could not be removed. Nothing in it is secret; delete it by hand.",
             dir.display()
         ));
     }
@@ -413,17 +386,9 @@ fn report(
             out,
             "Perch now holds no Accounts and no active Account. `perch add` logs one in.",
         ),
-        (None, remaining) if consequence.is_active => say::line(
+        (None, _) if consequence.is_active => say::line(
             out,
-            &format!(
-                "Perch holds no active Account now. `perch switch <target>` \
-                 makes {} active.",
-                if remaining == 1 {
-                    "the one it still holds".to_string()
-                } else {
-                    format!("one of the {remaining} it still holds")
-                }
-            ),
+            "Perch holds no active Account. `perch switch <target>` makes one active.",
         ),
         (None, _) => Ok(()),
     }

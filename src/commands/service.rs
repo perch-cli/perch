@@ -41,18 +41,11 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     let replaced = is_installed(host, at.as_deref())?;
 
     if let Err(failed) = write_and_start(host, &unit, at.as_deref()) {
-        // Named for what this platform keeps, because Windows keeps no file. What is
-        // true on all three is that something is registered and was not started.
-        let kept = match at.is_some() {
-            true => "The unit file has been replaced and is left where it is",
-            false => "What was registered is left where it is",
-        };
         if replaced {
-            return Err(failed.with_note(&format!(
-                "The Service was not started. {kept}, so it starts at the next \
-                 login. `perch watcher status` says what is there now, and \
+            return Err(failed.with_note(
+                "The Service was not started, and starts at the next login. \
                  `perch watcher uninstall` takes it away.",
-            )));
+            ));
         }
         if let Some(at) = &at {
             // In `uninstall`'s order, for the reason `service::forgetting` gives:
@@ -62,41 +55,28 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             let _ = host.remove_file(at);
             let _ = drive(host, manager.forgetting());
         }
-        return Err(failed.with_note(&format!(
-            "Nothing was installed{}. Perch is unchanged, and `perch watcher \
-             run` in a terminal still works.",
-            match at.is_some() {
-                true => ", and the unit file was taken back",
-                false => "",
-            },
-        )));
+        return Err(failed
+            .with_note("Nothing was installed. `perch watcher run` in a terminal still works."));
     }
 
-    // What it did and which binary it baked in, and nothing about starting at login
-    // (ADR perch-says-what-it-did). The log stays, because where a Service writes
-    // differs by platform.
+    // No path and nothing about starting at login (ADR perch-says-what-it-did):
+    // `perch watcher status` says where the unit and the log are.
     say::line(
         out,
         &format!(
-            "{} {} as {}.",
+            "{} the Watcher. It checks every {} seconds.",
             match replaced {
-                true => "Replaced the Service, and it now runs",
-                false => "Installed the Service. It runs",
+                true => "Replaced",
+                false => "Installed",
             },
-            unit.binary.display(),
-            manager.described(),
+            crate::watch::REFRESH_INTERVAL_MILLIS / 1000,
         ),
     )?;
     for (provider, resolved) in &providers {
-        say::line(out, &said_about_provider(*provider, resolved))?;
+        if let Some(note) = said_about_provider(*provider, resolved) {
+            say::line(out, &note)?;
+        }
     }
-    say::line(
-        out,
-        &format!(
-            "Its decisions go to {}.",
-            manager.log_is_at(unit.log.as_deref()),
-        ),
-    )?;
 
     if any_scope_may_act(host) == Some(false) {
         say::line(out, service::HOLDS_FOR_A_GRANT)?;
@@ -121,8 +101,7 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // at every logon while this says it is gone.
     if is_installed(host, at.as_deref())? {
         return Err(PerchError::Busy(format!(
-            "The Service is still installed, so it was not taken back.\n\
-             It is {} and something is refusing to unregister it.",
+            "The Service is still installed as {}, and would not unregister.",
             manager.described(),
         )));
     }
@@ -135,11 +114,7 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         // The code for a request that was already true: a machine with no Service is
         // the machine an `uninstall` was asked to produce.
         false => {
-            say::line(
-                out,
-                "There is no Service installed, so there was nothing to take \
-                 back.",
-            )?;
+            say::line(out, "No Service is installed.")?;
             Ok(EXIT_NOTHING_TO_DO)
         }
     }
@@ -222,9 +197,8 @@ pub fn take_back_before_a_purge(
         if watcher_is_running(host) {
             return Err(PerchError::Busy(
                 "A Watcher is running, so nothing was purged.\n\
-                 It would go on Switching Credentials into Profiles this command \
-                 is deleting. Ctrl-C in the terminal running `perch watcher \
-                 run` stops it, then run this again."
+                 Ctrl-C the terminal running `perch watcher run`, then run this \
+                 again."
                     .to_string(),
             ));
         }
@@ -238,10 +212,8 @@ pub fn take_back_before_a_purge(
     // reads `inactive` while the process it started winds down mid-Switch.
     if watcher_is_running(host) || still_held_by_the_service_manager(host) {
         return Err(PerchError::Busy(format!(
-            "The Service is still running, so nothing was purged.\n\
-             It would go on Switching Credentials into Profiles this command is \
-             deleting. Stop it with `perch watcher uninstall` and run this \
-             again. It is {} and something is refusing to stop it.",
+            "The Service is still running as {}, so nothing was purged.\n\
+             `perch watcher uninstall` stops it; then run this again.",
             manager.described(),
         )));
     }
@@ -326,21 +298,12 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
     });
 
     Some(match refreshed {
-        Ok((binary, providers)) => {
-            let mut said = format!(
-                "The Service was restarted, and now runs {}.",
-                binary.display()
-            );
+        Ok((_, providers)) => {
+            let mut said = "The Service was restarted.".to_string();
             for (provider, resolved) in &providers {
-                if !matches!(
-                    resolved,
-                    ResolvedExecutable::Carried {
-                        passed_over: None,
-                        ..
-                    }
-                ) {
-                    said.push(' ');
-                    said.push_str(&said_about_provider(*provider, resolved));
+                if let Some(note) = said_about_provider(*provider, resolved) {
+                    said.push('\n');
+                    said.push_str(&note);
                 }
             }
             said
@@ -348,9 +311,8 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
         // A warning with its repair, because the old binary may be gone and the Service
         // may not come up at the next login.
         Err(why) => format!(
-            "The Service could not be restarted against the new binary: {why}\n\
-             Perch itself upgraded. Run `perch watcher install` to point the \
-             Service at it. Until then it may not come up when you log in.",
+            "The Service could not be restarted: {why}\n\
+             `perch watcher install` points it at the new Perch.",
         ),
     })
 }
@@ -397,10 +359,12 @@ fn describe(host: &dyn Host) -> Result<(Unit, Vec<(Provider, ResolvedExecutable)
 /// Discovered executables must run under the service manager's environment
 /// (ADR carried-means-rehearsed).
 enum ResolvedExecutable {
+    /// Runs where the Service will run it, so the unit carries it.
     Carried {
         at: PathBuf,
-        passed_over: Option<(PathBuf, i32)>,
     },
+    /// Nothing on the shell's PATH answers to the name. Not a refusal: the
+    /// executable arriving later is ordinary, and `install` says the Service will hold.
     NoneFound,
     NoneRuns {
         at: PathBuf,
@@ -417,7 +381,6 @@ fn resolved_executable(
     if let Some(overridden) = &setup.explicit_path {
         return ResolvedExecutable::Carried {
             at: overridden.clone(),
-            passed_over: None,
         };
     }
     let candidates = &setup.candidates;
@@ -425,10 +388,7 @@ fn resolved_executable(
         return ResolvedExecutable::NoneFound;
     };
     let Some(path) = manager.path_for_services() else {
-        return ResolvedExecutable::Carried {
-            at: first.clone(),
-            passed_over: None,
-        };
+        return ResolvedExecutable::Carried { at: first.clone() };
     };
 
     let mut passed_over = None;
@@ -437,7 +397,6 @@ fn resolved_executable(
             Ok(()) => {
                 return ResolvedExecutable::Carried {
                     at: candidate.clone(),
-                    passed_over,
                 };
             }
             Err(status) => {
@@ -481,36 +440,24 @@ fn rehearsed(
     }
 }
 
-fn said_about_provider(provider: Provider, resolved: &ResolvedExecutable) -> String {
+/// The note an install owes about a provider's executable, where it owes one: a
+/// carried one is the ordinary case, and one passed over changes nothing the
+/// person will do.
+fn said_about_provider(provider: Provider, resolved: &ResolvedExecutable) -> Option<String> {
     let name = provider.name();
     let executable = provider.executable_name();
     let override_key = provider.id().executable_override();
     match resolved {
-        ResolvedExecutable::Carried { at, passed_over } => format!(
-            "It finds {name} at {}, carried in the unit rather than \
-             looked up on the service manager's own PATH.{}",
+        ResolvedExecutable::Carried { .. } => None,
+        ResolvedExecutable::NoneRuns { at, status } => Some(format!(
+            "Note: {} exits {status} under the Service, so {name} holds. Point \
+             {override_key} at a {name} that runs, then `perch watcher install` again.",
             at.display(),
-            match passed_over {
-                None => String::new(),
-                Some((skipped, status)) => format!(
-                    " The `{executable}` ahead of it on this shell's PATH, {}, was \
-                     passed over: run with the Service's own PATH, it exits {status}.",
-                    skipped.display(),
-                ),
-            },
-        ),
-        ResolvedExecutable::NoneRuns { at, status } => format!(
-            "A `{executable}` was found at {}, but run with the Service's own PATH \
-             it exits {status}, so the unit carries none for {name}. Its Watcher \
-             rounds will hold, saying why in the log. Point {override_key} at a \
-             {name} that runs on its own, and `perch watcher install` again carries it.",
-            at.display(),
-        ),
-        ResolvedExecutable::NoneFound => format!(
-            "No `{executable}` was found from this shell, so the unit carries none \
-             for {name}. Its Watcher rounds will hold, saying why in the log. Once \
-             {name} is installed, `perch watcher install` again carries it."
-        ),
+        )),
+        ResolvedExecutable::NoneFound => Some(format!(
+            "Note: no `{executable}` was found, so {name} holds. `perch watcher \
+             install` again once {name} is installed."
+        )),
     }
 }
 
@@ -662,8 +609,8 @@ fn gone_or_refused(host: &dyn Host, step: &Driven, args: &[&str]) -> Result<()> 
     {
         if waited >= u64::from(service::LEAVES_WITHIN_SECONDS) * 1000 {
             return Err(PerchError::Busy(format!(
-                "the old Service had not stopped after {} seconds (`{}` still \
-                 answers), so nothing was started over it",
+                "The old Service had not stopped after {} seconds, so nothing \
+                 was started over it. `{}` still answers.",
                 service::LEAVES_WITHIN_SECONDS,
                 step.as_typed(),
             )));
@@ -683,10 +630,8 @@ fn refuse_as_root(host: &dyn Host) -> Result<()> {
         return Ok(());
     }
     Err(PerchError::Invalid(
-        "A Service belongs to one person, and this is running as root.\n\
-         Every Profile Perch holds is under a home directory, so a Service \
-         installed this way would watch root's Registry rather than yours. Run \
-         `perch watcher install` as yourself, without `sudo`."
+        "This is running as root, and a Service belongs to one person. Run \
+         `perch watcher install` without `sudo`."
             .to_string(),
     ))
 }

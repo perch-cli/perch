@@ -9,7 +9,7 @@ sidebar:
 | Command | What it does |
 | ------- | ------------ |
 | `perch status [--refresh] [--json]` | the active Account and how full it is |
-| `perch list [<scope>] [--refresh] [--json]` | every Account, its Alias, Group, state, Headroom and Utilization, in the order a Cycle ranks them — or one Group's, or the ungrouped ones', with what that Scope has left to draw on |
+| `perch list [<scope>] [--refresh] [--json]` | every Account, its Alias, Group, state, Headroom and Utilization, in the order a Cycle ranks them, or one Scope's with its Reserve |
 | `perch add [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
 | `perch alias <target> <name>` / `perch alias <target> --unset` | name an Account, or free the name |
 | `perch switch <target>` | make an Account active everywhere |
@@ -28,14 +28,14 @@ sidebar:
 | `perch holdings purge [--yes]` | give the machine back the state it had before Perch |
 | `perch upgrade [--release <tag>] [--check] [--json] [--channel <name>] [--yes]` | replace this Perch with a newer Release, through the Channel that installed it |
 | `perch version` | which Perch is installed, and a line more when a newer Release exists |
+| `perch wizard` | organize what Perch holds one question at a time: Accounts, Groups, Settings and the Watcher |
 | `perch probe [--json] [--raw]` | everything Perch can see of this machine, for pasting into a bug report |
 | `perch triage [--model <name>] [--raw]` | hand that to Claude Code, and let it investigate this machine and help you file the issue |
 
 ## Reporting something broken
 
 `perch probe` gathers what a report needs, and `perch triage` hands it to Claude
-Code and lets the agent do the writing. Both are in
-[troubleshooting](troubleshooting.md).
+Code. Both are in [troubleshooting](troubleshooting.md).
 
 ## Exit codes
 
@@ -46,90 +46,58 @@ Code and lets the agent do the writing. Both are in
 | 2 | the command line was not understood |
 | 10 | refused: an assumption about the installed Claude Code failed |
 | 11 | the keychain is locked, denied, or unavailable |
-| 12 | there is no such thing — no login, no such Account, no such Group |
-| 13 | it collides with something that is already there — an Account added twice, a name already spoken for, a path an Export would have written over, an Import onto a Perch that already holds an Account |
-| 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it, a command that needs a terminal run where there is none |
-| 15 | there was nothing to do — you are already on that Account, a check found nothing to do now, or Perch is holding nothing on this machine to purge |
+| 12 | there is no such thing: no login, no such Account, no such Group |
+| 13 | it collides with something that is already there: an Account added twice, a name already spoken for, a path an Export would have written over, an Import onto a Perch that already holds an Account |
+| 14 | Perch understood it and will not accept it: an ambiguous name, a value out of range, a Group that has not said the watcher may act on it, a command that needs a terminal run where there is none |
+| 15 | there was nothing to do: you are already on that Account, a check found nothing to do now, or Perch is holding nothing on this machine to purge |
 | 16 | refused: a client is running against that Profile, so what is in it is not Perch's to write or to delete |
-| 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
+| 17 | a Cycle found nowhere to land: every Account in the Group is exhausted, or none is a candidate |
 | 18 | a bare Cycle, or a watcher, on an Account nobody has declared interchangeable with anything |
-| 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it |
-| 20 | held: a lock somebody else has, or a `perch watcher check` with no current figure to decide on. Nothing is wrong and nothing was changed — ask again shortly |
+| 19 | that Account is Quarantined: its Credential no longer works, and `perch relogin` repairs it |
+| 20 | held: a lock somebody else has, or a `perch watcher check` with no current figure to decide on. Nothing is wrong and nothing was changed. Ask again shortly |
 
-`perch run` is the one command these do not describe once it has launched
-something: what the client exited with is what Perch exits with, so a script
-wrapping it reads the program's own code rather than Perch's. Everything that
-stops a Run before the launch — a command line without `--`, an unknown Target,
-a Group, a Quarantine, a Reconcile that could not be made — is in the table
-above.
+`perch run` exits with what the client exited with, once it has launched
+something. `perch upgrade` exits with what `brew` or `npm` exited with, once it
+has handed the work to a Channel.
 
-`perch upgrade` is the same once it has handed the work to a Channel: what
-`brew` or `npm` exited with is what Perch exits with. `perch upgrade --check`
-exits 0 whether or not there is a newer Release — it is a question, and
-answering it is success either way, so branch on `--json`'s `upgrade_available`
-rather than on the code.
-
-`perch watcher status` is the same shape of question and exits 0 whether or not
-a Service is installed — branch on `--json`'s `installed`, `running` and
-`watching`, which are three different facts. `perch watcher uninstall` exits 15
-when there was nothing to take back. A Check that finds another Watcher holding
-the lock exits 20; a Watcher that meets a held lock at startup says who holds it
-and waits instead, and one whose lock is taken over mid-run stops, says so, and
-exits 0 — being replaced is not a failure.
+`perch upgrade --check` and `perch watcher status` exit 0 either way. Branch on
+`--json`: `upgrade_available` for the one, `installed`, `running` and
+`watching` for the other. `perch watcher uninstall` exits 15 when there was
+nothing to take back. A Watcher whose lock is taken over mid-run stops, says
+so, and exits 0.
 
 ## Where things are
 
-- `~/.config/perch/registry.json` — Perch's own state, versioned.
-- `~/.config/perch/.watch.lock` — held for as long as a Watcher runs, which is
-  what makes it the only one on the machine. Given back however the process
-  ends; a second Watcher starting up says who holds it and waits rather than
-  deciding alongside them, and a Watcher whose lock is taken over mid-run stops
-  and says so.
-- `~/.config/perch/trail.log`, and `~/.config/perch/trail.log.1` once the first
-  has grown past a megabyte and been moved aside. What each command was asked
-  and what it decided, which `perch probe` reads back. Never written where Perch
-  has no home yet, so a machine Perch holds nothing on stays one.
-- `~/.config/perch/watch.log` — where a Service's decisions go on macOS and
-  Windows, whose service managers keep no log of their own. On Linux there is no
-  such file: systemd captures standard output into the journal, so `journalctl
-  --user -u perch-watch -f` is the line.
-- The unit a Service is installed as, which is the one thing Perch writes
-  *outside* `$PERCH_HOME` — `~/Library/LaunchAgents/cli.perch.watch.plist` on
-  macOS, `~/.config/systemd/user/perch-watch.service` on Linux, and a Scheduled
-  Task named `Perch\Watch` on Windows, which Windows keeps rather than Perch.
-  `perch watcher uninstall` removes it, and so does `perch holdings purge`.
-- `~/.config/perch/profiles/<account>/` — one directory per Account. Its path is
-  what gives that Account a private Credential Store.
-- `$PERCH_HOME` overrides `~/.config/perch`. Home is `$USERPROFILE` on Windows
-  and `$HOME` elsewhere; a machine that cannot say where home is gets a refusal,
-  never a write into the filesystem root. `~/.config` is created if it is not
-  there, and the same path is used on every platform, Windows included, rather
-  than `%APPDATA%` — one rule to document and to support, and `$PERCH_HOME` for
-  anybody who wants a different one.
-- `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch walks
-  `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd` an npm
-  install leaves works from every shell. `perch watcher install` resolves
-  `claude` the same way and writes the answer into the unit under this name,
-  because the service manager's own `PATH` is not yours.
+- `~/.config/perch/registry.json` is Perch's own state, versioned.
+- `~/.config/perch/.watch.lock` is held for as long as a Watcher runs. A second
+  Watcher says who holds it and waits.
+- `~/.config/perch/trail.log`, and `trail.log.1` once the first has grown past
+  a megabyte, is what each command was asked and what it exited with. `perch
+  probe` reads it back.
+- `~/.config/perch/watch.log` is where a Service's decisions go on macOS and
+  Windows. On Linux `journalctl --user -u perch-watch -f` reads them.
+- The Service's unit is the one thing Perch writes outside `$PERCH_HOME`:
+  `~/Library/LaunchAgents/cli.perch.watch.plist` on macOS,
+  `~/.config/systemd/user/perch-watch.service` on Linux, and a Scheduled Task
+  named `Perch\Watch` on Windows. `perch watcher uninstall` removes it, and so
+  does `perch holdings purge`.
+- `~/.config/perch/profiles/<account>/` is one directory per Account, and
+  gives that Account its private Credential Store.
+- `$PERCH_HOME` overrides `~/.config/perch`, on every platform. Home is
+  `$USERPROFILE` on Windows and `$HOME` elsewhere.
+- `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it Perch walks
+  `PATH`, and `PATHEXT` on Windows. `perch watcher install` writes the answer
+  into the unit.
 - `$PERCH_NO_UPGRADE_CHECK` stops `perch version` asking whether a newer
-  Release exists. Checked before the request, so nothing goes out. That check is
-  the only place Perch looks for its own updates; `perch status` never touches
-  the network.
+  Release exists. Nothing else in Perch looks.
 - `$PERCH_INSTALL_DIR` is where the installer script puts the binary, in place
   of `~/.local/bin` and of `%LOCALAPPDATA%\Perch\bin` on Windows. `perch
-  upgrade` reads it too, because it is what tells an Installation the installer
-  made from a binary somebody unpacked by hand, which Perch refuses to write
-  over.
-- `$PERCH_VERSION` holds the installer script to one Release rather than the
-  newest. Read by the installers rather than by Perch: `perch upgrade --release`
-  sets it when it hands the work back to one, so it is yours to set only when you
-  are running the installer yourself.
+  upgrade` reads it too.
+- `$PERCH_VERSION` holds the installer script to one Release. `perch upgrade
+  --release` sets it for you.
 
-A Credential lives wherever the installed Claude Code would put it: the keychain
-on macOS, reached by driving `/usr/bin/security`, and a `.credentials.json`
-inside the Profile everywhere else — created readable by its owner alone, and
-tightened if it is ever found looser. Perch drives `curl` by absolute path —
-`/usr/bin/curl`, or `%SystemRoot%\System32\curl.exe` on Windows — to reach
-Anthropic, with the URL, the headers and the body all handed over on standard
-input: an access token passed as an argument would sit in the process table for
-anything on the machine to read.
+A Credential lives wherever the installed Claude Code would put it: the
+keychain on macOS, and a `.credentials.json` inside the Profile everywhere
+else, readable by its owner alone. Perch reaches Anthropic through `curl` at
+`/usr/bin/curl`, or `%SystemRoot%\System32\curl.exe` on Windows, with the
+token on standard input rather than on the command line.

@@ -253,24 +253,6 @@ fn a_target_resolves_as_an_alias_then_an_account_then_a_group() {
 }
 
 #[test]
-fn a_command_acting_on_a_target_says_which_kind_matched() {
-    let host = machine_with_a_named_second_account();
-    declare_group(&host, "work");
-
-    let (_, by_alias) = move_to_group(&host, "overflow", "work");
-    let (_, by_email) = move_to_group(&host, SECOND_EMAIL, "work");
-
-    assert!(
-        by_alias.contains("Alias") && by_alias.contains(SECOND_EMAIL),
-        "a Target that matched an Alias should say so, and say what it reached:\n{by_alias}"
-    );
-    assert!(
-        by_email.contains("Account"),
-        "and a Target that matched an Account should say that instead:\n{by_email}"
-    );
-}
-
-#[test]
 fn a_target_perch_cannot_place_is_refused_with_the_names_it_nearly_matched() {
     let host = machine_with_a_named_second_account();
     declare_group(&host, "work");

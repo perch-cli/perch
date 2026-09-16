@@ -7,11 +7,10 @@ edition = "2024"
 rust-version = "1.97"
 description = "Run Claude Code as whichever Claude account you want, without logging in again"
 
-# The pair the Rust ecosystem uses, and for the reason it uses it: MIT carries
-# no patent language at all, and Apache-2.0 — which does — cannot be combined
-# with GPLv2. Offering both lets whoever is downstream take the one that solves
-# their problem, and costs the project nothing but a second file.
-license = "MIT OR Apache-2.0"
+# Copyleft rather than the ecosystem's permissive pair: Perch holds a person's
+# Credentials, and whoever receives a changed Perch receives its source too. A
+# §7 term in ADDITIONAL-TERMS reserves the name (ADR what-you-change-stays-open).
+license = "GPL-3.0-or-later"
 
 # No `publish = false` here: release-plz reads it as "this package is not mine"
 # and skips the package silently. crates.io is not one of Perch's Channels

@@ -4,241 +4,153 @@ sidebar:
   order: 2
 ---
 
-An Account is one Claude login Perch holds. This is how you gain one, name one,
-keep one out of Cycling, repair one and give one up.
+An Account is one Claude login Perch holds. Gain one, name one, keep one out
+of Cycling, repair one, give one up.
 
 ## Adopting the login you already have
 
-The first command you run adopts the Claude Code login already on the machine as
-your first Profile, so nothing is lost and nothing has to be logged into again.
-
 ```
 $ perch status
-Adopted the Claude Code login as your first Profile, now active: you@example.com (Acme, pro). Claude Code 2.1.221.
-
+Adopted the Claude Code login as you@example.com (Acme, pro).
 Account       you@example.com
 Organization  Acme
 Plan          pro
 Utilization   never observed
 ```
 
-Adoption leaves that first Account ungrouped, which matters for
-[Cycling](switching.md#cycling): being ungrouped is the *absence* of a
-declaration that Accounts are interchangeable rather than a weaker form of one.
+The first command you run takes the Claude Code login already on the machine as
+your first Account. Nothing is logged into again. That Account is in no Group,
+so a bare `perch switch` has nothing to Cycle to until you put it in one, or
+declare the ungrouped Accounts interchangeable.
 
 ## Adding an Account
 
-`perch add` gains an Account by running a login in a Profile of its own, so the
-Account you are using stays active and its session is untouched. It says so
-before the browser opens, which is where that promise is load-bearing, and does
-not say it again afterwards — every Add leaves the active Account where it was.
-
 ```
 $ perch add --group work --alias overflow
+Logging in to a new Profile.
+Quit Claude Code when the login is done.
+
+Added overflow@example.com (Overflow Ltd, max).
+Alias:  overflow
+Group:  work
+Group `work` now holds 2 Accounts, and nothing Cycles between them unasked: `perch config set work watcher-may-act true` says it may.
 ```
 
-`--group <name>` says which Group the new Account joins, and `--no-group` says
-it joins none. One of the two is required where there is no terminal, because
-the Group is otherwise a question — the Account's organization is offered as a
-default for you to confirm — and a script has nobody to answer it. `--alias
-<name>` names the Account in the same breath, so it never has to be typed as an
-email address.
+A browser opens for the login. Log in as the new Account, then quit Claude Code
+to come back. The Account you were on stays active in every terminal.
 
-Where the Add leaves a Scope holding two Accounts or more that nothing may Cycle
-between unasked, it says so and names the Settings that would say otherwise:
+`--group <name>` puts the new Account in a Group, and `--no-group` puts it in
+none. Without either, Perch offers the Account's organization as the Group and
+asks you to confirm. `--alias <name>` names the Account at the same time.
 
 ```
 $ perch add --no-group
-Added overflow@example.com (Overflow Ltd, max).
+Logging in to a new Profile.
+Quit Claude Code when the login is done.
+
+Added spare@example.com (Spare Ltd, pro).
 Group:  none
-The Ungrouped Scope now holds 2 Accounts, and nothing Cycles between them unasked: `perch config set ungrouped interchangeable true` and `perch config set ungrouped watcher-may-act true` say it may.
 ```
 
-A Group needs only `watcher-may-act`, because a Group is already your statement
-that its Accounts are interchangeable. Either way `perch add` says it rather
-than asking it — see [Configuration](configuration.md).
+In a script, pass one of the two flags, or the Add is refused.
 
 ## Naming an Account
 
-`perch alias <target> <name>` gives an Account a short name to reach it by, and
-`perch alias <target> --unset` frees the name again. The Account comes first,
-the way it does everywhere else in Perch, and both forms reach it the same way
-every command does: by the name it already answers to, or by its email address.
-So a name you have forgotten is freed by naming the Account it is on.
-
 ```
 $ perch alias overflow@example.com overflow
+`overflow` now names overflow@example.com.
+
 $ perch alias overflow --unset
-$ perch alias overflow@example.com --unset
+`overflow` no longer names overflow@example.com.
 ```
 
-Aliases and Group names share one namespace, so a name the other half already
-answers to is refused — which is what keeps a Target from ever being ambiguous.
+Every command that takes a Target takes the Alias or the email address. To
+free a name you have forgotten, name the Account it is on.
 
-**A name is made of letters, digits, `_` and `-`, and opens with a letter, a
-digit or `_`.** Every alphabet counts, so `café`, `дом` and `日本-dev` are names,
-and `2fa` is one because a digit may open one. Anything else is refused, naming
-the character as it draws and as it is spelled. A Target is typed at a shell
-prompt, often on a second machine months later, so a name of symbols is one
-somebody has to work out how to produce before any command can reach it, and a
-name opening with `-` is one `perch run` could never be given at all: its program
-goes after the `--` that would rescue such a name anywhere else.
-
-A character that draws as nothing is refused for a second reason. Two names the
-screen cannot tell apart would be one row in every listing, and a character a
-terminal acts on moves the column and colors the row.
-
-Two names differing only in case are one name, so `work` and `Work` collide the
-way `work` and `work` do. Three words are refused outright, and
-[Configuration](configuration.md#scope-policy-and-inheritance) says why: `ungrouped` and `none`, which
-address the Accounts in no Group, and `global`, which is what people reach for
-when they mean every Scope at once.
+Aliases and Group names share one namespace. A name is letters, digits, `_` and
+`-` in any alphabet, opening with a letter, a digit or `_`. `work` and `Work`
+are the same name. `ungrouped`, `none` and `global` are refused as names.
 
 ## Keeping an Account out of Cycling
 
-`perch disable` keeps an Account out of Cycling without giving it up — for the
-subscription you are holding for one particular thing and would rather Perch did
-not spend on something else.
-
 ```
 $ perch disable spare
-`spare` is an Alias for spare@example.com.
 Disabled spare@example.com (as `spare`).
 
 $ perch enable spare
-`spare` is an Alias for spare@example.com.
 Enabled spare@example.com (as `spare`).
 ```
 
-A disabled Account is excluded from Cycling and from nothing else. It keeps its
-Alias, its Group and its stored Credential, `perch list` shows it as `disabled`,
-and naming it on `perch switch` still switches to it — so putting it back needs
-no login, only `perch enable`. Removing the Account is the blunt instrument this
-exists to avoid. That is the whole of what the pair promises, and it is promised
-here rather than repeated on every run of either command.
+A disabled Account keeps its Alias, its Group and its Credential. `perch list`
+shows it as `disabled`, and `perch switch spare` still switches to it. Only
+Cycling passes it over. Disabling every Account in a Group is allowed, and a
+bare `perch switch` there then finds nowhere to land.
 
-A Quarantined Account is the exception, because none of that promise is true of
-one: its Credential does not work whatever the Cycling pool says, so `perch
-disable` and `perch enable` both say so and name the repair.
+Enabling does not repair a Quarantined Account:
 
 ```
 $ perch enable spare
-`spare` is an Alias for spare@example.com.
-Enabled spare@example.com (as `spare`). It is Quarantined, though — Anthropic would not renew its Credential — so nothing switches to it, Cycling or you. `perch relogin spare@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+spare@example.com (as `spare`) was already enabled. It is Quarantined: the provider would not renew its Credential. `perch relogin spare@example.com` repairs it.
 ```
-
-Disabling every Account in a Group is allowed. A bare `perch switch` there then
-reports having no candidate (exit 17) rather than quietly landing you on
-something you had taken out of Cycling.
 
 ## When an Account breaks
 
-A Credential can stop working for good: Anthropic retires a refresh token, a
-Rotation is lost between two writes, a login is ended somewhere else. Perch
-never drops such an Account — an Account that vanishes reads as data loss, and a
-broken one reads as something needing attention. It is **Quarantined**: still
-listed, still named, shown as broken, and shown with the reason.
-
 ```
-$ perch status --refresh
-Account       overflow@example.com
-Organization  Overflow Ltd
+$ perch status
+Account       you@example.com
+Organization  Acme
 Plan          pro
-Quarantine    Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+Quarantine    the provider would not renew its Credential. `perch relogin you@example.com` repairs it.
 Utilization   never observed
 ```
 
-`perch status` is about one Account, so it says both halves on the one line it
-has: what happened, and the command that repairs it. A listing shows a set, so
-there the reason is per Account and the repair is said once beneath all of them.
-
-Cycling never chooses a Quarantined Account, and naming one on `perch switch` is
-refused with exit code 19 rather than making a Credential live that does not
-work — which would cost you the Account you are on. Enabling one does not repair
-it: whether Cycling may choose an Account and whether its Credential works are
-separate facts with separate fixes, so both are always said.
-
-`perch relogin <target>` repairs it, and repairs it **in place**.
+An Account whose Credential stopped working is Quarantined. It stays listed
+and named, with the reason and the repair beside it. Cycling never chooses it,
+and `perch switch` onto it is refused.
 
 ```
 $ perch relogin overflow
-`overflow` is an Alias for overflow@example.com.
-Logging in again to repair overflow@example.com. someone@example.com stays active and its session is untouched.
-Quit Claude Code when the login is done to come back here.
+Logging in again to repair overflow@example.com.
+Quit Claude Code when the login is done.
 
 Repaired overflow@example.com (as `overflow`). It is no longer Quarantined.
 ```
 
-The Account keeps its Alias, its Group, whether Cycling may choose it and its
-place in the listing — only the Credential is replaced. That is why the repair
-does not report the three it left alone; `perch list` is where they are read.
-The login runs in a directory of its own, so the Account you are working in is
-untouched throughout, including when the login is abandoned, which changes
-nothing at all. A login as a different Account is refused: an Alias you chose
-for one Account is not handed to another because a browser was signed into
-somebody else.
+Log in as the same Account in the browser that opens. The Account keeps its
+Alias, its Group, its place in the listing and whether Cycling may choose it.
+Only the Credential is replaced. A login as a different Account is refused.
+Abandoning the login changes nothing.
 
-The one thing a repair leaves alone that it *does* say is a disabled Account,
-because a working Credential that Cycling still passes over is a second thing to
-undo:
-
-```
-Repaired overflow@example.com (as `overflow`). It is no longer Quarantined.
-Cycling still will not choose it: it is disabled, which a repair does not undo.
-```
-
-Relogging in the Account you are **on** also makes its fresh Credential the live
-one, because a repair only its own Profile can see would leave the Account
-broken everywhere it is actually used. A healthy Account may be relogged in too
-— nothing about the command depends on the Quarantine.
+Relogging in the Account you are on also makes the fresh Credential the live
+one. A healthy Account may be relogged in too.
 
 ## Giving up an Account
 
-`perch remove <target>` is for the subscription that has been retired. It forgets
-the Account and deletes the Credential Perch holds for it, so it stops being
-listed, stops being a Cycle candidate, and the Alias it answered to comes free.
-
 ```
 $ perch remove spare
-`spare` is an Alias for spare@example.com.
 Removed spare@example.com (as `spare`).
 The Alias `spare` is free to use again.
 ```
 
-Deleting the Credential and dropping the Account out of the listing is what
-every Remove does, so the report does not say it. The two cases where something
-else happened do speak: an Account whose Credential Stores held nothing to
-delete, and one whose Credential is shared with another Account and was left
-where it is.
+The Account is forgotten and the Credential Perch holds for it is deleted. The
+Group it was in stays declared.
 
-Removing the Account you are **on** is the case that needs care, because the
-live Credential belongs to it. Perch names the Account it will leave active,
-lands on it first, and asks before any of it happens.
+Removing the Account you are on asks first, and lands you somewhere else before
+anything is deleted:
 
 ```
-$ perch remove work
-`work` is an Alias for someone@example.com.
-someone@example.com (as `work`) is the active Account. overflow@example.com (as `overflow`) will be made active first, so nothing is left running as an Account Perch has forgotten. `perch switch <target>` first if you would rather land somewhere else. The login being given up goes with it, and holding it again would mean `perch add`.
-Remove someone@example.com (as `work`)? [y/N]: y
+$ perch remove work-main
+you@example.com (as `work-main`) is the active Account. overflow@example.com (as `overflow`) will be made active first; `perch switch <target>` before this lands somewhere else. Its Credential is deleted with it.
+Remove you@example.com (as `work-main`)? [y/N]: y
 overflow@example.com (as `overflow`) is the active Account now.
-Removed someone@example.com (as `work`).
-The Alias `work` is free to use again.
+Removed you@example.com (as `work-main`).
+The Alias `work-main` is free to use again.
 ```
 
-The Account it lands on is one in the same Group where there is one, because a
-Group is your own statement that those Accounts are interchangeable — never a
-Quarantined Account, whose Credential does not work, and never a disabled one,
-which is an Account you have said should not be chosen for you. It is not ranked
-on how full it is: it is named before you agree to it, and `perch switch` is how
-you choose differently.
-
-Removing the last Account, or the active one when nothing is left that Perch
-would land on, is allowed and confirmed the same way. It says that Perch will
-hold no active Account afterwards, and it does not log you out: the live
-Credential is not Perch's to take away, but the copy Perch holds is deleted, so
-whatever replaces the live one ends that login for good.
+It lands on an Account in the same Group where there is one, never on a
+disabled or Quarantined Account, and never ranked by Headroom. `perch switch
+<target>` first if you want a different landing. Removing the last Account is
+allowed and confirmed the same way, and does not log Claude Code out.
 
 `--yes` agrees in advance. Without a terminal and without the flag, a removal
-that would have asked is refused rather than assumed, and end of input is a no.
-The Group the Account was in stays declared — a Group is something you said, not
-a summary of where the Accounts happen to be.
+that would have asked is refused instead, and end of input is a no.

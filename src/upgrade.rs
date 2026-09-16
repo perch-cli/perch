@@ -189,11 +189,8 @@ fn refuse_a_release_homebrew_cannot_take(release: &Option<String>) -> Result<()>
     match release {
         None => Ok(()),
         Some(named) => Err(PerchError::Invalid(format!(
-            "This Installation came from Homebrew, which installs whatever the \
-             formula names and cannot be pointed at {named}.\n\
-             `brew upgrade perch` takes the newest. To hold a particular \
-             Release, install it with the installer script instead, which takes \
-             `PERCH_VERSION`."
+            "Homebrew cannot install {named} in particular. `brew upgrade perch` \
+             takes the newest."
         ))),
     }
 }
@@ -210,9 +207,8 @@ fn refuse_npm_replacing_a_running_perch(host: &dyn Host, release: &Option<String
     // Nothing done rather than done: `NothingToDo` is already the code for a
     // request understood and a machine left as it was.
     Err(PerchError::NothingToDo(format!(
-        "This Installation came from npm, and npm cannot replace `perch.exe` \
-         while it is running. Nothing was upgraded.\n\
-         Run this from a terminal where Perch is not running:\n\
+        "npm cannot replace `perch.exe` while it is running.\n\
+         From a terminal where Perch is not running:\n\
          \n    npm {}\n",
         npm_arguments(named.as_deref()).join(" ")
     )))
@@ -369,9 +365,7 @@ pub fn version_typed(typed: &str) -> Result<String> {
     match plausible {
         true => Ok(bare.to_string()),
         false => Err(PerchError::Invalid(format!(
-            "`{typed}` is not a Release. They are numbered `0.2.0`, with or \
-             without the leading `v`.\n\
-             `perch upgrade` without `--release` takes the newest."
+            "`{typed}` is not a Release. One looks like `0.2.0` or `v0.2.0`."
         ))),
     }
 }
@@ -485,8 +479,8 @@ pub fn newest(host: &dyn Host, within_millis: Option<u64>) -> Result<String> {
 
     if answered.status != 200 {
         return Err(PerchError::Other(format!(
-            "asking which Release is newest came back {} rather than 200.\n\
-             The Releases are at https://github.com/{REPO}/releases.",
+            "GitHub answered {} when asked which Release is newest.\n\
+             https://github.com/{REPO}/releases lists them.",
             answered.status
         )));
     }
@@ -565,10 +559,7 @@ fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<Stri
     };
     let brew = brew.ok_or_else(|| {
         PerchError::NotFound(
-            "this Installation came from Homebrew, and no `brew` was found to \
-             hand it back to.\n\
-             `brew upgrade perch` is the command, once `brew` is on PATH."
-                .to_string(),
+            "No `brew` was found on PATH. `brew upgrade perch` once there is.".to_string(),
         )
     })?;
     Ok((brew, vec!["upgrade".to_string(), "perch".to_string()]))
@@ -582,10 +573,7 @@ fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<Stri
 fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, Vec<String>)> {
     let npm = crate::host::programs::on_path(host, "npm").ok_or_else(|| {
         PerchError::NotFound(
-            "this Installation came from npm, and no `npm` was found to hand it \
-             back to.\n\
-             `npm update -g perch-cli` is the command, once `npm` is on PATH."
-                .to_string(),
+            "No `npm` was found on PATH. `npm update -g perch-cli` once there is.".to_string(),
         )
     })?;
     Ok((npm, npm_arguments(version)))
@@ -934,7 +922,10 @@ mod tests {
             .refuse_what_it_cannot_take(&host, &Some("0.3.0".to_string()))
             .expect_err("Homebrew installs what the formula names");
 
-        assert!(refused.to_string().contains("PERCH_VERSION"), "{refused}");
+        assert!(
+            refused.to_string().contains("brew upgrade perch"),
+            "{refused}"
+        );
         assert!(homebrew().refuse_what_it_cannot_take(&host, &None).is_ok());
     }
 

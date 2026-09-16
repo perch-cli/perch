@@ -368,10 +368,7 @@ impl Environment for RealHost {
         match held.into_string() {
             Ok(value) => Some(value),
             Err(_) => {
-                self.note(&format!(
-                    "{key} is set to something that is not text, so Perch cannot \
-                     read it and is carrying on as though it were unset."
-                ));
+                self.note(&format!("{key} is not text, so Perch reads it as unset."));
                 None
             }
         }
@@ -663,10 +660,8 @@ impl Keys for RealHost {
                 // table. Said out loud, because an invariant with a silent
                 // exception is not one.
                 self.note(
-                    "A Credential was too large for `security`'s stdin buffer, so it was \
-                     given to it as a command-line argument instead. While that ran, any \
-                     process on this machine running as you could have read it off the \
-                     process table.",
+                    "A Credential was too large for `security`'s stdin and went on its \
+                     command line, where any process running as you could read it.",
                 );
                 let hex = keychain::hex_encode(secret.as_bytes());
                 let args = [

@@ -729,7 +729,6 @@ fn an_unreadable_codex_session_is_refused_without_claiming_a_claude_version() {
     assert_eq!(error.exit_code(), perch::error::EXIT_PROBE_REFUSED);
     let said = error.to_string();
     assert!(said.contains(&marker.display().to_string()), "{said}");
-    assert!(said.contains("Nothing was changed"), "{said}");
     assert!(!said.contains("Claude"), "{said}");
 }
 
@@ -1206,9 +1205,7 @@ fn claude_enrollment_and_relogin_keep_storage_stable_when_email_changes() {
     .0
     .unwrap_err();
     assert!(
-        duplicate
-            .to_string()
-            .contains("two Profiles for one Account"),
+        duplicate.to_string().contains("already holds"),
         "{duplicate}"
     );
     assert_eq!(registry::load(&host).unwrap().unwrap().accounts.len(), 1);

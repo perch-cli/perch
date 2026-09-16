@@ -19,13 +19,10 @@ use crate::target;
 pub struct RunArgs {
     #[command(flatten)]
     pub provider: super::selection::Selection,
-    /// The Account to run as: its Alias, or its email address. A Group has
-    /// no single meaning here, so naming one is refused.
+    /// An Alias or email address
     pub target: String,
 
-    /// What to run, after a mandatory `--`: a program and its arguments, or
-    /// The selected provider's arguments where the first word is a flag. Nothing
-    /// here is read by Perch, so a `--json` after `--` is the program's.
+    /// After `--`, a program and its arguments, or the provider's own
     #[arg(last = true, allow_hyphen_values = true, num_args = .., value_name = "COMMAND")]
     pub command: Vec<String>,
 }
@@ -74,7 +71,6 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
         )));
     }
     refuse_a_quarantined_account(&registry, account.key())?;
-    host.note(&found.matched);
     let held = crate::holdings::lock(host)?;
     let latest = registry::load(host)?.ok_or_else(|| {
         PerchError::NotFound("The configuration disappeared before launch".into())
@@ -139,15 +135,6 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
         "Running {program} as {}, in this terminal alone.",
         latest.named_for_the_user(account.key())
     ));
-    if !matches!(active, crate::registry::Active::Landing { .. })
-        && let Some(key) = active.whose()
-    {
-        host.note(&format!(
-            "{} stays the active Account for {} everywhere else.",
-            latest.named_for_the_user(key),
-            account.provider().adapter().name()
-        ));
-    }
     out.flush().map_err(crate::say::failed)?;
     launch.execute(host)
 }

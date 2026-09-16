@@ -9,7 +9,7 @@
     "type": "git",
     "url": "git+https://github.com/perch-cli/perch.git"
   },
-  "license": "MIT OR Apache-2.0",
+  "license": "GPL-3.0-or-later",
   "author": "Mads Skov Schiellerup",
   "bin": {
     "perch": "bin/perch.js"

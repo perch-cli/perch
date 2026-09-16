@@ -21,15 +21,11 @@ use crate::{commands, holdings, registry, say, service, trail, upgrade};
 
 #[derive(Debug, clap::Args)]
 pub struct ProbeArgs {
-    /// Print what a script reads, rather than what a person does.
+    /// Print JSON
     #[arg(long)]
     pub json: bool,
 
-    /// Print the email addresses, names and paths as they are.
-    ///
-    /// What leaves this machine is placeholders unless you ask otherwise, since
-    /// what a Probe is for is being pasted somewhere else. The Account numbers
-    /// are stable, so a report stays readable without them.
+    /// Print email addresses, names and paths as they are
     #[arg(long)]
     pub raw: bool,
 }

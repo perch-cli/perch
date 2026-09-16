@@ -4,127 +4,105 @@ sidebar:
   order: 9
 ---
 
-Two commands for the same moment. `perch probe` gathers everything Perch can see
-of this machine, and `perch triage` hands that to your preferred provider and lets it do the
-investigating and the writing. Neither changes anything: no Registry brought
-forward, no line added to the Trail, nothing repaired behind your back.
+`perch probe` gathers everything Perch can see of this machine. `perch triage`
+hands that to Claude Code, or to Codex when `run-provider` is `codex`, and
+lets it investigate and write the report. Neither changes anything.
 
 ## What Perch can see of this machine
-
-`perch probe` gathers what a report needs and would otherwise be typed by hand:
-which Perch and which provider CLIs, how Perch was installed, where its files are,
-what the Holdings hold, which native assumptions each provider can check,
-and what has been run here lately.
 
 ```
 $ perch probe
 Findings
-  <account 3> is Quarantined, so Cycling will not choose it and a Switch to it
-  refuses. `perch relogin <account 3>` is the way back. (exit 19)
+  <account 2> is Quarantined, so Cycling will not choose it and a Switch to it refuses. `perch relogin <account 2>` is the way back. (exit 19)
 
-Perch         0.3.5 (linux x86_64), installed by npm
-Claude Code   2.1.221, at <home>/.local/share/claude/bin/claude
-Home          <home>/.config/perch, Registry version 6
-Active        <account 1>
-Holdings      4 Accounts in 2 Groups, 1 Quarantined, 0 Disabled
-Watcher       installed, running, may act somewhere
-Its log       <home>/.config/perch/watch.log
-Trail         412 lines, last written 2026-08-28 09:16:41Z
-...
+Perch         0.3.8 (linux x86_64)
+Binary        /somewhere/nobody/installs/perch
+Claude Code   2.1.221, at /usr/bin/claude
+Codex         0.50.0, at /usr/bin/codex
+Home          <home>/.config/perch, Registry version 9
+Active        claude: <account 1>; codex: nobody
+Holdings      2 Accounts in 1 Group, 1 Quarantined, 0 Disabled
+Watcher       no Service installed
+Trail         4 lines, last written 2026-08-04 11:59:00Z
+
+Assumptions
+  held     claude: Claude Code is installed and reports a version
+  held     claude: a Credential is kept in the keychain namespace, or the file, that the config directory derives
+  held     claude: the keychain item is stored under the login name
+  held     claude: the credential store holds a claudeAiOauth block
+  held     claude: the identity file holds an oauthAccount block
+  unread   claude: a session marker names its process and when the session started
+
+Trail
+  11:20:00  switch overflow  exit 19
+  11:59:00  list  exit 0
 ```
 
-The judgment comes first and the facts sit under it, so the facts still stand
-where the judgment is wrong. A finding only ever restates something Perch
-already works out to decide a refusal, and carries the code that refusal exits
-with.
+The findings come first and the facts under them. Each finding carries the
+exit code of the refusal it would cause. `Active` names the active Account for
+each provider, or the Landing a killed Switch left. Each provider's row says
+which CLI was found and where; Claude Code's assumptions are checked, Codex
+reports its installation only.
 
 Email addresses, Alias and Group names and your home directory come out as
-placeholders, because the point of this is pasting it somewhere else. The
-numbers are the Account's place in the Registry, so `<account 3>` is the same
-Account every time you run it — two reports a week apart are comparable.
-`--raw` prints the names as they are, and is worth checking before you paste.
+placeholders, ready to paste. `<account 2>` is the same Account every time you
+run it. `perch probe --raw` prints the names as they are. `--json` prints the
+same as a document: each CLI's details and assumptions under `providers`,
+keyed `claude` and `codex`, and `holdings.active` keyed the same way. A finding
+about one CLI carries its provider.
 
-It reads and judges and repairs nothing. No network, no Registry brought
-forward, no line added to the Trail, and it exits `0` whatever it finds.
+The **Trail** is what each command was asked and what it exited with, two
+lines per command. A command that started and never ended, whose process is
+gone, is reported as one that died. Words after `--` are counted, not
+recorded. The Trail is never exported, and a Purge takes it.
 
-Every command writes two lines to the **Trail** as it goes, one when it starts
-and one when it ends: what was typed, and what it exited with. Words after `--`
-go to the launched provider and are counted rather than recorded. A start with no end
-whose process is gone is a command that died without a word, and `perch probe`
-says so — one whose process is still running is not, which is why the Watcher
-sitting in its loop is never reported as a failure. The Watcher adds a line of
-its own when it Switches. The Trail is not one of the Holdings — it is never
-exported, and a Purge takes it with everything else.
-
-`perch probe` names the Watcher's own log and does not read it. On macOS and
-Windows that is `watch.log` beside the Registry; on Linux systemd keeps it, and
-what the Probe prints is the `journalctl` line to run.
-
-Probe JSON groups CLI details and native assumptions under `providers`. Findings
-include a provider identifier when they concern a particular CLI.
-`holdings.active` maps each provider to its Default or Landing state. Codex currently
-reports installation details; Claude also checks its native credential and
-identity assumptions.
+`perch probe` names the Watcher's log and does not read it. On Linux that is
+the `journalctl` line it prints. It reads no network, brings no Registry
+forward, and exits 0 whatever it finds.
 
 ## Letting an agent do it
 
-Writing all of that out by hand is the last thing anybody wants to do at the
-moment they need to. `perch triage` hands the job to your configured provider. It uses the Run preference, which
-defaults to Claude and can be set with `perch config set --global run-provider codex`.
-
 ```
 $ perch triage
-What Perch can see of this machine is at
-<home>/.config/perch/triage/run-1787059012431. Starting Claude Code, which will
-ask what went wrong.
+Starting Claude Code on what Perch sees of this machine, at /Users/you/.config/perch/triage/run-1787059012431.
 ```
 
-The agent asks what went wrong in your own words, reads the evidence Perch just
-wrote, investigates this machine, searches the existing issues, and drafts a
-report. It shows you the whole thing and posts nothing without an explicit yes.
-Where the fix is a Perch command, it says which and runs it only if you agree.
+Claude Code opens, asks what went wrong in your own words, reads the evidence
+Perch just wrote, investigates this machine, searches the existing issues, and
+drafts a report. It shows you the whole thing and posts nothing without your
+yes. Where the fix is a Perch command, it names it and runs it only if you
+agree. `perch config set --global run-provider codex` hands the session to
+Codex instead.
 
-Perch itself only gathers. Two copies of the probe are written: one with your
-real email addresses and paths, which is what the agent works from, and one with
-placeholders, which is the copy that goes into the issue. That redaction is
-Perch's own rather than something the agent is asked to remember, so an address
-does not reach a public issue because a model was careless. `--raw` writes the
-real names to both, and is for whoever is working on the command itself.
+Two copies of the Probe are written: one with your real addresses and paths,
+which the agent works from, and one with placeholders, which goes into the
+issue. `--raw` writes the real names to both. `--model <name>` passes a model
+to the CLI it starts.
 
-Some things are off limits and the agent is told so: it never reads a Credential,
-never edits the Registry by hand, never patches Perch's source, and never runs
-`perch holdings purge` or `perch holdings import` as a fix. Anything that touches
-the Holdings at all comes after an offer to write an Export first.
-
-`--model` passes a model straight through to the selected provider, for when its default is
-not the one you want.
+The agent never reads a Credential, never edits the Registry by hand, never
+patches Perch's source, and never runs `perch holdings purge` or `perch
+holdings import` as a fix. Anything that touches the Holdings comes after an
+offer to write an Export. The newest three runs are kept under
+`~/.config/perch/triage/`.
 
 ### When nothing gets launched
 
-If the selected provider is not installed, or the Account you are on is Quarantined, the
-session would open at a login prompt instead of a triage. Perch does not launch
-it, says which of those it found, and tells you where the three files are:
-
 ```
 $ perch triage
-Claude Code will not come up as this machine stands, so Perch has not launched
-it. The Probe found:
-  you@example.com is the active Account and it is Quarantined: the provider would
-  not renew its Credential.
+Claude Code will not come up as this machine stands, so Perch has not launched it. The Probe found:
+  you@example.com is the active Account and it is Quarantined: the provider would not renew its Credential.
 
 What Perch can see of this machine is written down:
-  <home>/.config/perch/triage/run-1787059012431/prompt.md
-  <home>/.config/perch/triage/run-1787059012431/probe.raw.txt
-  <home>/.config/perch/triage/run-1787059012431/probe.txt
+  /Users/you/.config/perch/triage/run-1787059012431/prompt.md
+  /Users/you/.config/perch/triage/run-1787059012431/probe.raw.txt
+  /Users/you/.config/perch/triage/run-1787059012431/probe.txt
 
-Paste prompt.md into any coding agent to run the triage by hand, or open an issue
-at https://github.com/perch-cli/perch/issues.
+Paste prompt.md into any coding agent to run the triage by hand, or open an issue at https://github.com/perch-cli/perch/issues.
 ```
 
-`prompt.md` carries the whole playbook, so pasting it into any agent gets you the
-same session. The newest three runs are kept and older ones are dropped, and a
-Purge takes the lot with the rest of what Perch holds.
+`prompt.md` carries the whole playbook, so pasting it into any agent gets you
+the same session.
 
-A **security problem** never goes to a public issue.
+A security problem never goes to a public issue.
 [Report it privately](https://github.com/perch-cli/perch/security/advisories/new)
-instead, because Perch holds provider credentials.
+instead.
