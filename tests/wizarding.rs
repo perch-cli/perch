@@ -406,10 +406,11 @@ fn with_one_cli_installed_no_provider_is_asked() {
 }
 
 #[test]
-fn a_scope_holding_both_providers_asks_the_grant_for_the_one_a_cycle_can_choose() {
+fn a_scope_holding_both_providers_asks_the_grant_per_provider() {
     let mut answers = enter_throughout();
     // Add, three Groups, `run-provider`, the Ungrouped Scope's four Settings,
-    // then `work`'s Strategy and workload; the grant is the twelfth question.
+    // then `work`'s Strategy and workload; Claude Code's grant is the twelfth
+    // question and Codex's the thirteenth.
     answers[11] = "true";
     let host = one_group_holding_both_providers().with_answers(&answers);
 
@@ -421,8 +422,8 @@ fn a_scope_holding_both_providers_asks_the_grant_for_the_one_a_cycle_can_choose(
         "{printed}"
     );
     assert!(
-        !printed.contains("`watcher-may-act` for Codex"),
-        "no grant makes the Watcher Cycle Codex Accounts:\n{printed}"
+        printed.contains("`watcher-may-act` for Codex within Group `work` [false]"),
+        "{printed}"
     );
     assert_eq!(
         typed_forms(&printed),
@@ -440,7 +441,8 @@ fn a_mixed_scope_names_its_grant_with_the_provider_before_the_service_is_offered
     assert!(
         printed.contains(
             "Group `work` does not let the Watcher act: `perch config set work \
-             --provider claude watcher-may-act true` first."
+             --provider claude watcher-may-act true` and `perch config set work \
+             --provider codex watcher-may-act true` first."
         ),
         "{printed}"
     );
@@ -482,7 +484,7 @@ fn run_provider_is_not_asked_while_only_one_provider_holds_accounts() {
 }
 
 #[test]
-fn a_scope_of_codex_accounts_alone_is_asked_no_setting() {
+fn a_scope_of_codex_accounts_alone_is_asked_its_settings() {
     let host = with_codex_installed(one_grouped_one_not(), "workspace-1", "person@example.com");
     perch::commands::add::run(
         &host,
@@ -505,8 +507,8 @@ fn a_scope_of_codex_accounts_alone_is_asked_no_setting() {
     assert!(result.is_ok(), "{:?}", result.err());
     assert!(printed.contains("within Group `work`"), "{printed}");
     assert!(
-        !printed.contains("within Group `codex`"),
-        "nothing Cycles a Codex Account, so no Setting there is asked:\n{printed}"
+        printed.contains("`strategy` within Group `codex`"),
+        "Codex Accounts Cycle, so their Scope is asked:\n{printed}"
     );
 }
 

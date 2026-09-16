@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Codex Accounts Switch and Cycle. `perch switch <codex account>` writes the
+  login the next `codex` starts with into Codex's file store, Capturing the
+  Renewed copy of the Account it leaves; the Watcher Cycles Codex Accounts
+  among themselves under their own `watcher-may-act` grant, and a Landing left
+  in flight is settled by the identity in the live file. A Codex already open
+  keeps its Account until it is restarted, and the Switch says so. A Default
+  kept in the keyring is refused, naming the `cli_auth_credentials_store`
+  line to set; a home Codex has never configured is pinned to the file store
+  by the Switch.
 - `perch wizard` organizes what Perch holds one question at a time: what you
   hold, more Accounts, each Account's Group, each Scope's Settings, and the
   Watcher as a Service. Enter keeps what is there, so a run that keeps every
@@ -24,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] Experimental Codex Accounts: `perch add --codex`, isolated
   `perch run --codex`, relogin, removal, and on-demand Utilization through the
   Codex app-server. Personal and company Workspaces can share an email and use
-  separate Aliases. Codex live Switching and unattended Cycling remain unavailable.
+  separate Aliases.
 - [**breaking**] Run accepts `--claude` and `--codex`. Its global `run-provider`
   preference defaults to `claude`, with fallback to the other installed CLI.
   Explicit selection, Account mismatch, authentication, and child failure never
@@ -146,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] Watcher checks visit every configured provider independently.
   Mixed-provider output identifies the provider. A failed check is returned after
   the other providers are checked; otherwise the greatest round exit code is
-  returned. Unsupported Codex live Switching does not prevent Claude rounds.
+  returned. One provider's failed round does not prevent the other's.
 - Listings identify Codex Workspaces. Mixed Groups are listed without a joint
   quota ranking, and Claude Cycling and Watcher candidates exclude Codex.
 

@@ -285,9 +285,9 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
 
 /// The `perch config set` lines a Scope still needs before the Watcher may act
 /// within it, the declaration before the grant, and none where it already may.
-/// Asked per provider whose Accounts a Cycle may choose: a Scope of Codex
-/// Accounts alone needs nothing, since no grant makes the Watcher Cycle them.
-/// The grant names its provider where the Scope holds more than one.
+/// Asked per provider whose Accounts a Cycle may choose, and none for a
+/// provider that never Switches live. The grant names its provider where the
+/// Scope holds more than one.
 pub fn grants_still_needed(registry: &Registry, scope: &Scope) -> Vec<String> {
     let held: std::collections::BTreeSet<_> = scope
         .accounts(registry)

@@ -325,6 +325,12 @@ pub(super) trait Adapter: Sync {
     fn login_instruction(&self) -> Option<&'static str> {
         None
     }
+    /// What a Switch cannot promise about clients already open, where the
+    /// provider has no evidence of them; `None` where a running client is
+    /// refused instead.
+    fn switched_note(&self) -> Option<&'static str> {
+        None
+    }
     fn install<'a>(
         &self,
         host: &'a dyn Host,
@@ -526,6 +532,9 @@ impl Provider {
     }
     pub fn login_instruction(&self) -> Option<&'static str> {
         self.adapter.login_instruction()
+    }
+    pub fn switched_note(&self) -> Option<&'static str> {
+        self.adapter.switched_note()
     }
     pub fn executable_name(&self) -> &'static str {
         self.adapter.executable_name()

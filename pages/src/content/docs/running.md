@@ -43,9 +43,7 @@ Running Codex as person@example.com (as `personal`), in this terminal alone.
 ```
 
 A Codex Account runs with its own `CODEX_HOME`, so its login, configuration and
-history stay apart from every other Account's. Codex support is experimental:
-`perch switch` and the Watcher do not choose Codex Accounts, so a Codex Account
-is reached by `perch run` alone.
+history stay apart from every other Account's. Codex support is experimental.
 
 ```
 $ perch run --claude personal

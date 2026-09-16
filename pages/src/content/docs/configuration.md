@@ -52,7 +52,7 @@ is allowed, and means the watcher moves only onto an Account with nothing used.
 A Group holding both Claude and Codex Accounts refuses `watcher-may-act`
 without `--provider`: `perch config set work --provider claude watcher-may-act
 true`. Permission for one provider grants nothing to the other, and the
-Watcher does not Cycle Codex Accounts yet.
+Watcher Cycles each provider's Accounts among themselves.
 
 ## Strategy and workload
 

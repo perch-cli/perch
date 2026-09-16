@@ -285,6 +285,10 @@ fn report(
         },
     )?;
 
+    if let Some(note) = incoming.provider().adapter().switched_note() {
+        say::line(out, note)?;
+    }
+
     // The one Capture outcome with something to do about it: a login made
     // outside Perch that this Switch replaced, which nothing else on the screen
     // says existed. Every other outcome is silent.

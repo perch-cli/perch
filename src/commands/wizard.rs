@@ -209,8 +209,8 @@ fn move_into(host: &dyn Host, out: &mut dyn Write, target: &str, group: &str) ->
 }
 
 /// Step four: `run-provider` where both providers' Accounts are held, then the
-/// Settings of every Scope a Cycle can choose within. A Scope of Codex Accounts
-/// alone is passed over, because nothing Cycles them and no Setting there is read.
+/// Settings of every Scope a Cycle can choose within. A Scope held only by
+/// providers that never Switch live is passed over: no Setting there is read.
 fn setting(host: &dyn Host, out: &mut dyn Write) -> Result<Step> {
     let registry = adopt::ensure_adopted(host)?;
     if providers_among(&registry.accounts.iter().collect::<Vec<_>>()).len() > 1

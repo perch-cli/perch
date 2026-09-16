@@ -124,8 +124,7 @@ A Watcher is running on this machine and holds the watcher lock.
 
 An install that finds no `claude` or no `codex` still succeeds and names the
 provider it could not carry; `perch watcher install` again once that CLI is
-installed carries it. A carried Codex does not make the Watcher Cycle Codex
-Accounts. Re-running `install` is also the repair after the binary moves;
+installed carries it. Re-running `install` is also the repair after the binary moves;
 `perch upgrade` does that for you and says if it could not. In a log, a hold that has not changed is
 said once an hour rather than every round.
 

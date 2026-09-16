@@ -68,8 +68,9 @@ Group:  none
 `--codex` logs in with the Codex CLI instead, and the login returns on its own.
 Each Codex Workspace is its own Account, so one email can be held twice, once
 per Workspace: give each an Alias, since the shared email then names neither.
-Codex support is experimental. `perch switch` and the Watcher leave Codex
-Accounts alone; `perch run` is how one is used.
+Codex support is experimental. A Switch to a Codex Account changes the login
+the next `codex` starts with; one already open keeps its Account until it is
+restarted.
 
 ## Naming an Account
 

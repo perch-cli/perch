@@ -26,8 +26,8 @@ Utilization   5-hour    12%  (as of 4m ago)
 ```
 
 Codex Accounts are experimental: `perch add --codex --alias personal --no-group`
-holds one, and `perch run personal` launches it. Switching and the Watcher stay
-with Claude Code for now.
+holds one, `perch run personal` launches it, and `perch switch personal` makes
+it the login the next `codex` starts with.
 
 ## Install
 

@@ -7,7 +7,7 @@ registers adapters and is the source of supported identifiers, CLI discovery,
 and capabilities. A new provider must not require branches in existing commands.
 
 A capability distinguishes an unavailable operation from a failed operation.
-Codex can expose isolated Runs while declining live Switching. The common
+A provider can expose isolated Runs while declining live Switching. The common
 Watcher and Cycle logic operate on one Provider and never compare capacity from
 different tools. Each Provider keeps independent active and pacing state.
 

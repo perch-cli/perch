@@ -32,6 +32,28 @@ A login made outside Perch, sitting in the live store when you Switch, is
 replaced, and a `Note:` line under the verdict says whose it was. `perch add`
 logs it in again as an Account.
 
+## Switching a Codex Account
+
+```
+$ perch switch work
+Switched to work@example.com (as `work`).
+Note: a Codex already open keeps its Account until it is restarted.
+Utilization   never observed
+```
+
+Codex has its own active Account, so a Switch between Codex Accounts leaves
+the Claude Code one where it is, and the other way round. The Switch writes
+the login Codex reads at its next start; a Codex already running keeps the
+Account it opened with, so restart it. Perch switches Codex's file store only:
+
+```
+$ perch switch work
+Codex keeps its login in the keyring, which Perch does not switch. Put `cli_auth_credentials_store = "file"` in /Users/you/.codex/config.toml first.   # exit 14
+```
+
+A Group holding Accounts of both providers needs the provider named for a
+Cycle: `perch switch work --codex`.
+
 ## Cycling
 
 ```
