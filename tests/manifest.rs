@@ -239,7 +239,11 @@ fn unknown_nested_configuration_and_runtime_keys_are_refused() {
         manifest[key] = value;
         let host = machine().with_file(CONFIG, &manifest.to_string());
         let error = registry::load(&host).unwrap_err().to_string();
-        assert!(error.contains(unknown) && error.contains(CONFIG), "{error}");
+        // The file's name rather than its path: the Host spells the separator.
+        assert!(
+            error.contains(unknown) && error.contains("config.json"),
+            "{error}"
+        );
     }
     let runtime = json!({"version":registry::CURRENT_VERSION,"active":{"landing":{"leavign":"one@example.com","arriving":"one@example.com"}},"checks":{},"accounts":{}});
     let host = machine()
@@ -247,7 +251,7 @@ fn unknown_nested_configuration_and_runtime_keys_are_refused() {
         .with_file(CLAUDE_STATE, &runtime.to_string());
     let error = registry::load(&host).unwrap_err().to_string();
     assert!(
-        error.contains("leavign") && error.contains(CLAUDE_STATE),
+        error.contains("leavign") && error.contains("state.json"),
         "{error}"
     );
 }
