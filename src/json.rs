@@ -362,6 +362,40 @@ fn indent_to_match(block: &str, indentation: usize) -> Secret {
     written
 }
 
+/// Duplicate names cannot silently discard an Account or a secret artifact.
+pub(crate) fn unique_map<'de, D, K, V>(
+    deserializer: D,
+) -> Result<std::collections::BTreeMap<K, V>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    K: serde::Deserialize<'de> + Ord,
+    V: serde::Deserialize<'de>,
+{
+    struct Unique<K, V>(std::marker::PhantomData<(K, V)>);
+    impl<'de, K: serde::Deserialize<'de> + Ord, V: serde::Deserialize<'de>> serde::de::Visitor<'de>
+        for Unique<K, V>
+    {
+        type Value = std::collections::BTreeMap<K, V>;
+        fn expecting(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            out.write_str("an object with unique names")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut entries = std::collections::BTreeMap::new();
+            while let Some(key) = map.next_key::<K>()? {
+                if entries.contains_key(&key) {
+                    return Err(serde::de::Error::custom("duplicate object name"));
+                }
+                entries.insert(key, map.next_value()?);
+            }
+            Ok(entries)
+        }
+    }
+    deserializer.deserialize_map(Unique(std::marker::PhantomData))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

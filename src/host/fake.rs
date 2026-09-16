@@ -155,7 +155,7 @@ pub struct KeychainLock {
 /// What a login does when Perch launches one: whatever Claude Code would have
 /// left behind in the config directory it was pointed at, and the status it
 /// exited with. Written as a closure so the derivation of a Profile's keychain
-/// namespace stays in [`crate::probe`] and out of the fake.
+/// namespace belongs to the provider.
 pub type Login = Box<dyn Fn(&FakeHost, &Path) -> i32>;
 
 /// Something that happens while Perch waits — contending for a lock, or putting
@@ -1413,6 +1413,15 @@ impl port::Clock for FakeHost {
 }
 
 impl port::Environment for FakeHost {
+    fn inherited_env(&self) -> Vec<(String, String)> {
+        self.environment
+            .vars
+            .borrow()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
+    }
+
     fn home_dir(&self) -> Result<PathBuf, HostError> {
         Ok(self.environment.home.clone())
     }
@@ -2216,13 +2225,42 @@ impl port::Keys for FakeHost {
 /// Whether a program is named as a path rather than as a word `PATH` answers.
 ///
 /// Off the platform the Host reports rather than through `Path::parent`, for
-/// [`crate::probe::rooted`]'s reason: a backslash separates on Windows alone, so
+/// [`crate::host::programs::rooted`]'s reason: a backslash separates on Windows alone, so
 /// a fake claiming it must not answer by the runner it is on.
 fn names_a_place(program: &str, on_windows: bool) -> bool {
     program.contains('/') || (on_windows && program.contains('\\'))
 }
 
 impl port::Processes for FakeHost {
+    fn exec_interactive_under(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<i32, HostError> {
+        self.exec_interactive(program, args, env)
+    }
+
+    fn rpc(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+        _requests: &[String],
+        control: port::RpcControl<'_>,
+    ) -> Result<Vec<String>, HostError> {
+        (control.checkpoint)()?;
+        if control.timeout.is_zero() {
+            return Err(HostError::Other("RPC deadline expired".into()));
+        }
+        let output = self.exec_under(program, args, env)?;
+        (control.checkpoint)()?;
+        if !output.succeeded() {
+            return Err(HostError::Other("RPC child failed".into()));
+        }
+        Ok(output.stdout.lines().map(str::to_owned).collect())
+    }
+
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
         self.record(Effect::Exec {
             program: program.to_string(),
@@ -2277,7 +2315,7 @@ impl port::Processes for FakeHost {
     ) -> Result<i32, HostError> {
         let config_dir = env
             .iter()
-            .find(|(key, _)| *key == "CLAUDE_CONFIG_DIR")
+            .find(|(key, _)| matches!(*key, "CLAUDE_CONFIG_DIR" | "CODEX_HOME"))
             .map(|(_, value)| PathBuf::from(value))
             .unwrap_or_else(|| self.environment.home.join(".claude"));
 
@@ -2588,9 +2626,11 @@ mod tests {
         let host = FakeHost::new().with_link(
             Link::Symbolic,
             "/Users/someone/.claude/.oauth_refresh.lock",
-            "/Users/someone/.config/perch/profiles/a/.oauth_refresh.lock",
+            "/Users/someone/.config/perch/providers/claude/profiles/a/.oauth_refresh.lock",
         );
-        let at = Path::new("/Users/someone/.config/perch/profiles/a/.oauth_refresh.lock");
+        let at = Path::new(
+            "/Users/someone/.config/perch/providers/claude/profiles/a/.oauth_refresh.lock",
+        );
 
         // The target never existed, so the link dangles.
         assert!(!host.path_exists(at), "the link resolves to nothing");
@@ -2610,7 +2650,8 @@ mod tests {
     /// wherever whoever planted it wanted the secret to land.
     #[test]
     fn a_private_write_over_a_planted_link_replaces_it_rather_than_following_it() {
-        let planted = Path::new("/Users/someone/.config/perch/profiles/a/.credentials.json");
+        let planted =
+            Path::new("/Users/someone/.config/perch/providers/claude/profiles/a/.credentials.json");
         let elsewhere = Path::new("/tmp/somewhere-a-stranger-can-read");
         let host = FakeHost::new().with_link(Link::Symbolic, elsewhere, planted);
 

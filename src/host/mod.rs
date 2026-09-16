@@ -23,6 +23,7 @@ use zeroize::Zeroizing;
 /// carry it (see the `fakes` feature in `Cargo.toml`).
 #[cfg(any(test, feature = "fakes"))]
 pub mod fake;
+pub mod programs;
 pub mod real;
 
 #[cfg(any(test, feature = "fakes"))]
@@ -106,7 +107,7 @@ pub struct HttpRequest<'a> {
 impl std::fmt::Debug for HttpRequest<'_> {
     /// The url and the header *names*, never a header value and never the body.
     /// An access token travels as a header and the renewal's body is a refresh
-    /// token outright ([`crate::anthropic::renew`]).
+    /// token outright (the provider’s renewal operation).
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let names: Vec<&str> = self.headers.iter().map(|(name, _)| *name).collect();
         write!(
@@ -170,7 +171,7 @@ pub struct HttpResponse {
 impl std::fmt::Debug for HttpResponse {
     /// The status and the size, never the body. The token endpoint answers a
     /// renewal with the new access token and the rotated refresh token in that
-    /// body ([`crate::anthropic::renew`]), so this is the shape a Credential
+    /// body (the provider’s renewal operation), so this is the shape a Credential
     /// arrives in — redacted for the same reason the request that asked for it
     /// is.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -198,7 +199,7 @@ pub enum Platform {
 /// How one path is made to stand for another, which is the whole of how Shared
 /// State reaches the Profile a Run launches (ADR everything-but-the-account).
 /// Three kinds, because only symbolic links need Developer Mode or elevation on
-/// Windows. Which kind is used where is [`crate::reconcile`]'s decision; making
+/// Windows. Which kind is used where is the native provider's decision; making
 /// one is the Host's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Link {
@@ -544,6 +545,9 @@ pub trait Environment {
     /// was *there* and could not be read is a remark on the way past.
     fn env_var(&self, key: &str) -> Option<String>;
 
+    /// Child tools retain project variables while provider auth overrides are removed.
+    fn inherited_env(&self) -> Vec<(String, String)>;
+
     /// Which platform this is, which is what decides where a Credential is
     /// written.
     fn platform(&self) -> Platform;
@@ -642,7 +646,7 @@ pub trait Files {
 }
 
 /// How one path is made to stand for another. [`Link`] says which kinds there
-/// are and [`crate::reconcile`] chooses between them; making, reading and
+/// are and the native provider chooses between them; making, reading and
 /// removing one is the machine's.
 pub trait Links {
     /// Makes `at` a link of `kind` standing for `target`. A kind the platform
@@ -684,9 +688,33 @@ pub trait Keys {
     fn keychain_delete(&self, service: &str, account: &str) -> Result<(), KeychainError>;
 }
 
+/// Checkpoints renew access and may stop an exchange while child I/O is pending.
+pub struct RpcControl<'a> {
+    pub timeout: std::time::Duration,
+    pub checkpoint: &'a mut dyn FnMut() -> Result<(), HostError>,
+}
+
 /// Other programs, and the processes Perch reads to find out what is holding
 /// what.
 pub trait Processes {
+    /// Attaches the terminal with only the supplied environment, excluding other auth modes.
+    fn exec_interactive_under(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<i32, HostError>;
+
+    /// Exchanges JSON lines with a child, matching response IDs and bounding its lifetime.
+    fn rpc(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+        requests: &[String],
+        control: RpcControl<'_>,
+    ) -> Result<Vec<String>, HostError>;
+
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError>;
 
     /// Runs a program under exactly the given environment, nothing of this

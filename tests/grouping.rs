@@ -42,7 +42,10 @@ fn paced(host: &FakeHost, group: &str) -> perch::registry::Checked {
     let record = perch::registry::Checked {
         switched_at: host.now(),
     };
-    registry.checks.insert(group.to_string(), record.clone());
+    registry
+        .state_mut()
+        .checks
+        .insert(group.to_string(), record.clone());
     save_registry(host, &registry);
     record
 }
@@ -67,9 +70,7 @@ fn a_declared_group_survives_a_restart() {
         "{printed}"
     );
 
-    let config = *registry_of(&host)
-        .group("work")
-        .expect("the Group is written down, not derived from the Accounts in it");
+    let config = registry_of(&host).settings(&perch::config::Scope::Group("work".into()));
     assert_eq!(
         config,
         perch::config::Settings::default(),
@@ -147,7 +148,7 @@ fn an_account_moves_between_groups_and_the_move_survives_a_restart() {
     );
     assert_eq!(
         registry_of(&host)
-            .account(SECOND_EMAIL)
+            .account(SECOND_KEY)
             .unwrap()
             .group
             .as_deref(),
@@ -159,12 +160,12 @@ fn an_account_moves_between_groups_and_the_move_survives_a_restart() {
 #[test]
 fn an_account_is_moved_without_being_removed_and_re_added() {
     let host = machine_with_two_accounts();
-    let before = registry_of(&host).account(SECOND_EMAIL).unwrap().clone();
+    let before = registry_of(&host).account(SECOND_KEY).unwrap().clone();
     declare_group(&host, "work");
 
     move_to_group(&host, SECOND_EMAIL, "work").0.unwrap();
 
-    let after = registry_of(&host).account(SECOND_EMAIL).unwrap().clone();
+    let after = registry_of(&host).account(SECOND_KEY).unwrap().clone();
     assert_eq!(after.group.as_deref(), Some("work"));
     assert_eq!(
         after.identity, before.identity,
@@ -187,6 +188,7 @@ fn an_account_can_be_moved_by_its_alias() {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             alias: Some("overflow".into()),
             ..AddArgs::default()
@@ -201,7 +203,7 @@ fn an_account_can_be_moved_by_its_alias() {
     assert!(result.is_ok(), "{:?}", result.err());
     assert_eq!(
         registry_of(&host)
-            .account(SECOND_EMAIL)
+            .account(SECOND_KEY)
             .unwrap()
             .group
             .as_deref(),
@@ -223,7 +225,7 @@ fn an_account_can_be_moved_out_of_every_group() {
         let (result, _) = move_to_group(&host, SECOND_EMAIL, word);
         result.unwrap_or_else(|err| panic!("`{word}` takes it out: {err}"));
         assert_eq!(
-            registry_of(&host).account(SECOND_EMAIL).unwrap().group,
+            registry_of(&host).account(SECOND_KEY).unwrap().group,
             None,
             "`{word}`"
         );
@@ -233,7 +235,7 @@ fn an_account_can_be_moved_out_of_every_group() {
 
     assert!(result.is_ok(), "{:?}", result.err());
     assert_eq!(
-        registry_of(&host).account(SECOND_EMAIL).unwrap().group,
+        registry_of(&host).account(SECOND_KEY).unwrap().group,
         None,
         "an Account that joined a Group must be able to leave it again"
     );
@@ -256,10 +258,7 @@ fn moving_into_a_group_perch_does_not_hold_is_refused_and_nothing_moves() {
         message.contains("work") && message.contains("group add"),
         "the user should be told the Group and how to declare it:\n{message}"
     );
-    assert_eq!(
-        registry_of(&host).account(SECOND_EMAIL).unwrap().group,
-        None
-    );
+    assert_eq!(registry_of(&host).account(SECOND_KEY).unwrap().group, None);
 }
 
 #[test]
@@ -284,6 +283,7 @@ fn a_group_name_already_spoken_for_is_refused() {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             alias: Some("overflow".into()),
             ..AddArgs::default()
@@ -409,7 +409,7 @@ fn a_group_named_in_passing_joins_the_one_that_exists_however_it_is_capitalized(
         registry.groups.keys().collect::<Vec<_>>()
     );
     assert_eq!(
-        registry.account(THIRD_EMAIL).unwrap().group.as_deref(),
+        registry.account(THIRD_KEY).unwrap().group.as_deref(),
         Some("work"),
         "and the Account is in the Group that exists, not beside it"
     );
@@ -503,7 +503,7 @@ fn group_list_says_so_when_nothing_has_been_declared() {
 fn a_stored_configuration_outside_its_range_is_refused_rather_than_read_as_something_else() {
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
-        r#"{"version":2,"accounts":[],"groups":{"work":{"strategy":"most-headroom","watcher_may_act":true,"watcher_threshold_percent":150}}}"#,
+        &serde_json::json!({"format":"perch-config","version":perch::registry::CURRENT_VERSION,"groups":{"work":{"watcher":{"threshold_percent":150}}}}).to_string(),
     );
 
     let (result, _) = run_group(&host, GroupCommand::List);
@@ -521,7 +521,7 @@ fn a_stored_configuration_outside_its_range_is_refused_rather_than_read_as_somet
 fn a_stored_strategy_perch_does_not_know_is_refused() {
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
-        r#"{"version":2,"accounts":[],"groups":{"work":{"strategy":"whatever-is-cheapest"}}}"#,
+        &serde_json::json!({"format":"perch-config","version":perch::registry::CURRENT_VERSION,"groups":{"work":{"cycle":{"strategy":"whatever-is-cheapest"}}}}).to_string(),
     );
 
     let (result, _) = run_group(&host, GroupCommand::List);
@@ -573,10 +573,10 @@ fn moving_an_ungrouped_account_out_of_a_group_says_it_was_already_in_none() {
 
     result.expect("it is already where it was asked to be");
     assert!(
-        printed.contains(&format!("{EMAIL} was already in no Group.")),
+        printed.contains(&format!("{LABEL} was already in no Group.")),
         "{printed}"
     );
-    assert_eq!(registry_of(&host).account(EMAIL).expect("held").group, None);
+    assert_eq!(registry_of(&host).account(KEY).expect("held").group, None);
 }
 
 #[test]
@@ -656,8 +656,7 @@ fn a_rename_keeps_the_settings_the_group_holds() {
     let registry = registry_of(&host);
     assert_eq!(
         registry
-            .group("day-job")
-            .expect("the Group is there under its new name")
+            .settings(&perch::config::Scope::Group("day-job".into()))
             .watcher_threshold_percent,
         55,
         "the rules somebody set came with the name"
@@ -769,8 +768,7 @@ fn recapitalizing_a_group_is_a_rename_rather_than_a_collision_with_itself() {
     );
     assert_eq!(
         registry
-            .group("Work")
-            .expect("the Group is there")
+            .settings(&perch::config::Scope::Group("Work".into()))
             .watcher_threshold_percent,
         55,
         "and it kept what it carries"

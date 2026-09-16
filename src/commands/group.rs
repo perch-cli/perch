@@ -108,7 +108,7 @@ fn remove(registry: &mut Registry, name: &str) -> Result<String> {
     let held: Vec<String> = registry
         .accounts_in(&declared)
         .iter()
-        .map(|account| registry.named_for_the_user(account.email()))
+        .map(|account| registry.named_for_the_user(account.key()))
         .collect();
     if !held.is_empty() {
         return Err(PerchError::Conflict(format!(
@@ -168,6 +168,7 @@ fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) ->
     let account = registry.held_mut(&email)?;
     let previous = account.group.take();
     account.group = destination.clone();
+    let email = registry.named_for_the_user(&email);
 
     Ok(match (previous, destination) {
         (Some(from), Some(to)) if from == to => format!("{email} was already in `{to}`."),
@@ -207,7 +208,8 @@ pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
     // Aliases and Group names share one namespace, so a name already answering
     // for an Account is one no Group may be called. Said without the tail's
     // offer to declare it: none of the commands reaching here declares one.
-    if let Some((alias, email)) = registry.declared_alias(name) {
+    if let Some((alias, key)) = registry.declared_alias(name) {
+        let email = registry.named_for_the_user(key);
         return PerchError::NotFound(format!(
             "No Group called `{name}`. `{alias}` is an Alias for {email}, and a \
              name cannot be both, so no Group can be called that. {}",
@@ -269,7 +271,7 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         } else {
             for (index, account) in members.iter().enumerate() {
                 let label = if index == 0 { "Accounts" } else { "" };
-                write_line(out, label, &registry.named_for_the_user(account.email()))?;
+                write_line(out, label, &registry.named_for_the_user(account.key()))?;
             }
         }
         describe_configuration(out, registry, &Scope::Group(name.clone()))?;
@@ -283,7 +285,7 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         say::line(out, listing::IN_NO_GROUP)?;
         for (index, account) in ungrouped.iter().enumerate() {
             let label = if index == 0 { "Accounts" } else { "" };
-            write_line(out, label, &registry.named_for_the_user(account.email()))?;
+            write_line(out, label, &registry.named_for_the_user(account.key()))?;
         }
         // The rule and then what it currently answers, said by the one function
         // all three surfaces that show this Scope ask — a second spelling of it

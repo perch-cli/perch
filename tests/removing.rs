@@ -10,14 +10,14 @@ mod common;
 
 use common::*;
 use perch::commands::remove::RemoveArgs;
+use perch::domain::Identity;
 use perch::error::{EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
 use perch::host::prelude::*;
 use perch::host::{FakeHost, Refusing};
-use perch::probe::Identity;
 use perch::registry::{Account, Active};
 
-const FIRST_PROFILE: &str = "/Users/someone/.config/perch/profiles/someone-example-com";
-const SECOND_PROFILE: &str = "/Users/someone/.config/perch/profiles/overflow-example-com";
+const FIRST_PROFILE: &str = "/Users/someone/.config/perch/providers/claude/profiles/claude-17a9e82e199f9341793949dfee4b65fa3f875bc724112bdc0218fa39715c529b";
+const SECOND_PROFILE: &str = "/Users/someone/.config/perch/providers/claude/profiles/claude-47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9";
 
 /// The config directory every client reads — where a Switch, and the landing a
 /// removal makes, has to write.
@@ -33,7 +33,9 @@ fn live_credential(host: &FakeHost) -> Option<String> {
 }
 
 fn holds(host: &FakeHost, email: &str) -> bool {
-    registry_of(host).account(email).is_some()
+    registry_of(host)
+        .account(&fixture_key(host, email))
+        .is_some()
 }
 
 /// A Remove deletes the Credential and saves the Registry before it reports, so
@@ -118,7 +120,7 @@ fn removing_an_account_forgets_it_and_deletes_the_credential_perch_held() {
     // it was ordinary (ADR perch-says-what-it-did).
     assert_eq!(
         printed.trim_end().lines().last(),
-        Some(format!("Removed {SECOND_EMAIL}.").as_str()),
+        Some(format!("Removed {SECOND_LABEL}.").as_str()),
         "{printed}"
     );
 }
@@ -137,7 +139,7 @@ fn the_alias_a_removed_account_answered_to_is_free_to_use_again() {
     set_alias(&host, "spare", EMAIL)
         .0
         .expect("the name is free for another Account");
-    assert_eq!(registry_of(&host).alias_of(EMAIL), Some("spare"));
+    assert_eq!(registry_of(&host).alias_of(KEY), Some("spare"));
 }
 
 #[test]
@@ -156,7 +158,7 @@ fn a_removed_account_is_no_longer_a_cycle_candidate() {
     cycled.expect("there is still somewhere to go");
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(THIRD_EMAIL),
+        Some(THIRD_KEY),
         "a Cycle cannot land on an Account Perch has forgotten: {printed}"
     );
 }
@@ -173,7 +175,7 @@ fn removing_an_account_leaves_every_other_account_and_the_live_credential_alone(
         Some(CREDENTIAL),
         "removing an Account nobody is on switches nothing"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
     assert_eq!(credential_of(&host, THIRD_EMAIL), kept);
     assert!(
         host.http_calls().is_empty(),
@@ -214,7 +216,7 @@ fn removing_the_active_account_names_what_will_be_active_and_asks_first() {
         "and Perch landed there rather than leaving the machine running as an \
          Account it no longer holds"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -238,7 +240,7 @@ fn a_removal_that_fails_after_landing_still_records_who_is_live() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "and the record says so, rather than going on naming the Account whose \
          Credential a Switch would now overwrite"
     );
@@ -262,7 +264,7 @@ fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happe
         "one of the two stores is already empty: {said}"
     );
     assert!(
-        said.contains("may no longer work") && said.contains("perch remove"),
+        said.contains("Some stores may already be empty") && said.contains("perch remove"),
         "so the user is told what state the Account is in and how to finish: \
          {said}"
     );
@@ -280,7 +282,7 @@ fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happe
     );
     assert_eq!(
         registry_of(&host)
-            .account(EMAIL)
+            .account(KEY)
             .expect("the Account is still held")
             .quarantine,
         None,
@@ -299,7 +301,7 @@ fn declining_removes_nothing_at_all() {
     assert!(holds(&host, EMAIL), "{printed}");
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 #[test]
@@ -312,7 +314,7 @@ fn the_account_left_active_is_one_the_user_declared_interchangeable() {
     result.expect("removed");
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(THIRD_EMAIL),
+        Some(THIRD_KEY),
         "the Group is the one landing place the user endorsed in advance, so it \
          is preferred over the Account that merely comes first: {printed}"
     );
@@ -392,7 +394,7 @@ fn without_a_terminal_the_active_account_goes_only_when_asked_for_outright() {
 
     result.expect("every capability is available non-interactively (ADR perch-does-not-draw)");
     assert!(!holds(&host, EMAIL), "{printed}");
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -453,7 +455,7 @@ fn the_account_you_are_on_is_given_up_on_a_machine_with_no_claude_code_either() 
     assert!(!holds(&host, EMAIL), "{printed}");
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "and it landed on the successor rather than leaving nobody active: \n{printed}"
     );
     assert_eq!(
@@ -547,6 +549,9 @@ fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
     let mut registry = registry_of(&host);
     for email in ["some-one@example.com", "some.one@example.com"] {
         registry.upsert(Account {
+            storage_key: None,
+            provider: perch::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: email.to_string(),
                 account_uuid: None,
@@ -622,10 +627,7 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
     // that never happened.
     assert!(
         printed.contains(&format!(
-            "Removed {SECOND_EMAIL}. Neither of its Credential Stores held \
-             anything to delete, and on macOS a keychain item is filed under \
-             `$USER`, so one written under a different login name is still \
-             there."
+            "Removed {SECOND_LABEL}. Its Credential Store held nothing to delete."
         )),
         "nothing was deleted, so nothing says it was, and the reason a \
          Credential might still be out there is named:\n{printed}"
@@ -645,7 +647,7 @@ fn a_removal_off_macos_explains_the_store_that_machine_actually_has() {
 
     result.expect("the Account is still forgotten");
     assert!(
-        printed.contains("held anything to delete"),
+        printed.contains("held nothing to delete"),
         "the sentence this is about is printed at all:\n{printed}"
     );
     assert!(
@@ -687,7 +689,7 @@ fn a_question_somebody_takes_their_time_over_does_not_cost_the_lock() {
 
     result.expect("the removal runs");
     assert!(printed.contains("Removed"), "{printed}");
-    assert!(registry_of(&host).account(EMAIL).is_none());
+    assert!(registry_of(&host).account(KEY).is_none());
     assert!(
         perch::holdings::lock(&host).is_ok(),
         "and the lock was given back rather than left behind"
@@ -717,7 +719,7 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
     );
     assert!(!printed.contains("Removed"), "{printed}");
     assert!(
-        registry_of(&host).account(EMAIL).is_some(),
+        registry_of(&host).account(KEY).is_some(),
         "the Account is still held"
     );
     assert_eq!(
@@ -813,7 +815,7 @@ fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
         .to_string();
     assert!(
         said.contains(&format!(
-            "The Credential Perch held for {SECOND_EMAIL} is already deleted"
+            "The Credential Perch held for {SECOND_KEY} is already deleted"
         )),
         "{said}"
     );
@@ -826,7 +828,7 @@ fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
 #[test]
 fn a_landing_perch_cannot_write_down_removes_nothing_and_moves_nothing() {
     let host = machine_with_two_accounts().with_a_path_refusing(
-        REGISTRY_PATH,
+        "/Users/someone/.config/perch/providers/claude/state.json",
         Refusing::Write,
         "read-only",
     );

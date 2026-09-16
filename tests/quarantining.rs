@@ -12,7 +12,6 @@
 mod common;
 
 use common::*;
-use perch::anthropic::{PROFILE_URL, TOKEN_URL, USAGE_URL};
 use perch::error::{EXIT_NOTHING_TO_DO, EXIT_QUARANTINED};
 use perch::host::{FakeHost, Refusing};
 use perch::registry::Quarantine;
@@ -63,7 +62,9 @@ fn about_to_renew(credential: &str) -> FakeHost {
 }
 
 fn is_held(host: &FakeHost, email: &str) -> bool {
-    registry_of(host).account(email).is_some()
+    registry_of(host)
+        .account(&fixture_key(host, email))
+        .is_some()
 }
 
 #[test]
@@ -82,7 +83,7 @@ fn a_credential_anthropic_will_not_renew_quarantines_its_account() {
          again with it gets the same answer forever: {printed}"
     );
     assert!(
-        is_held(&host, EMAIL) && registry_of(&host).active().whose() == Some(EMAIL),
+        is_held(&host, EMAIL) && registry_of(&host).active().whose() == Some(KEY),
         "the Account is kept and stays active — a Quarantine is a state, not a \
          removal: {printed}"
     );
@@ -94,7 +95,7 @@ fn a_credential_anthropic_will_not_renew_quarantines_its_account() {
          then the Account's own line said the whole thing again: {printed}"
     );
     assert!(
-        printed.contains("Anthropic would not renew its Credential"),
+        printed.contains("the provider would not renew its Credential"),
         "{printed}"
     );
 }
@@ -300,7 +301,7 @@ fn the_reason_is_shown_by_list_and_by_status() {
         "the state stays in the table: {printed}"
     );
     assert!(
-        printed.contains("Rotated") && printed.contains("perch relogin overflow@example.com"),
+        printed.contains("Rotated") && printed.contains(&format!("perch relogin {SECOND_KEY}")),
         "and the reason is written out under it, with the one command that puts \
          it right: {printed}"
     );
@@ -354,7 +355,7 @@ fn switching_to_a_quarantined_account_by_name_is_refused_with_a_code_of_its_own(
         Some(CREDENTIAL),
         "and the Account being worked in is exactly where it was"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 #[test]
@@ -395,7 +396,7 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
         "a Cycle lands nowhere rather than on an Account Perch has just watched \
          Anthropic turn down: {error}"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 #[test]
@@ -406,7 +407,9 @@ fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
     // one names somebody else.
     host.set_file(
         IDENTITY_PATH,
-        &IDENTITY_FILE.replace(EMAIL, "stranger@example.com"),
+        &IDENTITY_FILE
+            .replace(EMAIL, "stranger@example.com")
+            .replace("account-uuid-1", "stranger-uuid"),
     );
 
     let (result, printed) = run_status_refresh(&host, false);
@@ -432,7 +435,7 @@ fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
 #[test]
 fn a_switch_in_flight_is_not_evidence_that_the_account_arriving_is_broken() {
     let host = machine_with_two_accounts();
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     // The copy in the arriving Account's own Profile, overtaken by a Rotation
     // of the live one: it has to renew before it can be read, and the refresh
     // token it renews with is the retired one.

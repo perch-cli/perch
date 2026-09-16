@@ -4,6 +4,39 @@ sidebar:
   order: 6
 ---
 
+`perch run <target>` launches Claude Code or Codex against one Account's
+Profile. Select the provider explicitly with either flag:
+
+```sh
+perch run --claude work
+perch run personal --codex
+perch config set --global run-provider codex
+```
+
+Without a flag, Perch tries the configured provider (Claude by default), then
+the other CLI if the preferred CLI is absent. An explicit flag never falls back.
+An Account from the other provider is refused with the matching flag suggested.
+A failed login, exhausted quota, or child failure does not trigger fallback.
+
+Codex support is experimental. Add a subscription-backed Account with
+`perch add --codex --alias personal --no-group`. Each user and Workspace pair
+has its own `CODEX_HOME`, file Credential, configuration, and history. Use
+Aliases when the same email names more than one Workspace. An unaliased Account
+can also be reached by its `id` from `perch list --json`. `perch list --refresh`
+asks the Codex app-server for percentage quotas when the Profile is idle;
+otherwise the cached figure keeps its original age. Credit and spend-control
+states that Perch cannot represent remain unknown or retain the prior cache.
+
+Runs stay on their selected Account. Codex live Switching and unattended Codex
+Cycling are not available yet; Claude's Watcher only chooses Claude Accounts.
+Groups may contain both providers, and each Account remains visible.
+
+After `--`, a leading flag goes to the selected coding tool. A program name runs
+that program with the named Account's Profile, without requiring either coding
+CLI. The client's exit code becomes Perch's exit code.
+
+## Claude shared state
+
 `perch run <target>` launches Claude Code as an Account without changing which
 one is active. It is the other half of `switch`: a Switch is about the whole
 machine, and a Run is about one process.
@@ -106,4 +139,4 @@ $ echo $?
 Both readings of that line are real — Perch has a `--json` and so does Claude
 Code — so Perch takes neither and hands you back the line that would have
 worked. A program typed without the separator (`perch run dev npm test`) is told
-the same thing: nothing but `--` follows a Target.
+the same thing: program arguments follow `--`; provider flags belong to Perch.

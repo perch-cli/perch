@@ -7,7 +7,7 @@
 //!
 //! A lock artifact is a directory: `mkdir` either creates one or fails, so the
 //! same call asks and answers. Which directories, in which order and under what
-//! staleness is [`crate::probe`]'s.
+//! staleness belongs to the provider.
 
 use std::path::{Path, PathBuf};
 
@@ -418,7 +418,7 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
 /// Where a process says it is the one clearing this abandoned lock.
 ///
 /// Beside the lock rather than inside it, because what is being claimed is the
-/// right to *delete* the lock. [`crate::reconcile`] holds it back along with the
+/// right to *delete* the lock. the native provider holds it back along with the
 /// lock it guards (ADR everything-but-the-account).
 fn takeover_claim(lock: &LockSpec) -> PathBuf {
     let mut claim = lock.dir.clone().into_os_string();
@@ -870,7 +870,9 @@ mod tests {
     #[test]
     fn the_directory_a_lock_brings_into_being_is_the_owners_alone() {
         let host = FakeHost::new();
-        let lock = a_lock("/Users/someone/.config/perch/profiles/some-account/.oauth_refresh.lock");
+        let lock = a_lock(
+            "/Users/someone/.config/perch/providers/claude/profiles/some-account/.oauth_refresh.lock",
+        );
 
         let held = take_all(&host, vec![lock.clone()]).expect("the lock is free");
         drop(held);

@@ -39,7 +39,7 @@ pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Resul
         AliasCommand::Unset { target } => {
             let account = target::resolve_account(registry, &target)?;
             let held = unset(registry, &account)?;
-            let email = &account.email;
+            let email = registry.held(&account.email)?.email();
             Ok(vec![
                 account.matched.clone(),
                 format!("`{held}` no longer names {email}."),
@@ -53,7 +53,7 @@ pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Resul
 fn set(registry: &mut Registry, name: &str, account: &AccountTarget) -> Result<String> {
     let previous = registry.name_account(name, &account.email)?;
 
-    let email = &account.email;
+    let email = registry.held(&account.email)?.email();
     Ok(match previous {
         Some(previous) if previous == name => format!("`{name}` already names {email}."),
         Some(previous) => format!("`{name}` now names {email}, which `{previous}` no longer does."),
@@ -73,7 +73,7 @@ fn unset(registry: &mut Registry, account: &AccountTarget) -> Result<String> {
         }
         None => Err(PerchError::NotFound(format!(
             "{} answers to no Alias, so there is none to free.",
-            account.email
+            registry.named_for_the_user(&account.email)
         ))),
     }
 }

@@ -1,7 +1,7 @@
 //! The three Anthropic endpoints Perch talks to, and the only place in Perch
 //! that knows an address.
 //!
-//! None of this is a published contract, so it is held the way [`crate::probe`]
+//! None of this is a published contract, so it is held the way [`crate::providers::claude::probe`]
 //! holds Claude Code's internals (ADR an-assumption-is-probed): one module
 //! carries every assumption, and a reply Perch cannot make sense of is reported
 //! as such rather than guessed at. What is assumed is that the usage endpoint
@@ -13,9 +13,9 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::domain::WindowUtilization;
 use crate::host::{Host, HttpRequest, HttpResponse};
 use crate::lock::{Lost, StillOurs};
-use crate::registry::WindowUtilization;
 use crate::secret::Secret;
 
 /// Where an Account's Quota Windows are read from. Roughly 28-30 requests per
@@ -164,17 +164,40 @@ pub fn whose(
     host: &dyn Host,
     access_token: &str,
     still_ours: StillOurs<'_>,
-) -> Result<String, Refused> {
-    let document = read(host, PROFILE_URL, access_token, still_ours)?;
-    email_in(&document).ok_or_else(|| {
+) -> Result<TokenOwner, Refused> {
+    owner_in(&read(host, PROFILE_URL, access_token, still_ours)?)
+}
+
+pub(super) struct TokenOwner {
+    pub email: String,
+    pub subject: Option<super::super::provider::AccountIdentity>,
+}
+
+fn owner_in(document: &Value) -> Result<TokenOwner, Refused> {
+    let email = email_in(document).ok_or_else(|| {
         Refused::Unrecognized(
             "the profile endpoint named no email address, so whose an access \
-             token is cannot be established from Anthropic. The check that keeps \
-             one Account's figures out of another's falls back to what this \
-             machine holds."
+             token is cannot be established from Anthropic."
                 .to_string(),
         )
-    })
+    })?;
+    let subject = document
+        .pointer("/account/uuid")
+        .and_then(Value::as_str)
+        .zip(
+            document
+                .pointer("/organization/uuid")
+                .and_then(Value::as_str),
+        )
+        .and_then(|(user, workspace)| {
+            super::super::provider::AccountIdentity::new(
+                super::super::provider::Id::Claude,
+                user.into(),
+                workspace.into(),
+            )
+            .ok()
+        });
+    Ok(TokenOwner { email, subject })
 }
 
 /// Renews an access token, and reports the Rotation when there was one.
@@ -399,6 +422,7 @@ fn limits_in(
             return Err(drifted(&named, "percent"));
         };
         windows.push(WindowUtilization {
+            group: group_of(&named).map(str::to_string),
             resets_at: reset_time_in(&named, entry, said),
             window: named,
             // A window cannot be less than empty or more than full, and clamping
@@ -655,6 +679,7 @@ fn window_from(
 ) -> WindowUtilization {
     let named = window_name(name);
     WindowUtilization {
+        group: group_of(&named).map(str::to_string),
         // A window cannot be less than empty or more than full, and clamping
         // here is what stops a figure outside that becoming "105% headroom" in a
         // sentence somebody is asked to act on.

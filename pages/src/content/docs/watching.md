@@ -252,12 +252,19 @@ never at boot: every Profile Perch holds is under your home directory, and on
 macOS there is no unlocked keychain before somebody logs in. Installing it under
 `sudo` is refused for that reason.
 
-**Claude Code travels in the unit.** A service manager starts the Watcher with
-almost no PATH of its own, so `install` finds `claude` the way every other
-command does — your PATH, or `$PERCH_CLAUDE_BIN` if you set it — and writes the
-answer into the unit. An install that finds none still succeeds, says the
-Service will hold, and re-running `perch watcher install` once Claude Code is
-there carries it in.
+**Provider executables travel in the unit.** A service manager starts the Watcher
+with little PATH of its own. Installation resolves every enabled provider using
+its configured `cli-path`, then `PERCH_CLAUDE_BIN` or `PERCH_CODEX_BIN`, then PATH.
+Explicit paths are carried unchanged. PATH candidates are checked under the
+service manager's environment, and the first that runs is carried.
+
+A missing or unusable CLI does not prevent installation or remove another
+provider's executable. Installation names the affected provider and the repair:
+re-run `perch watcher install` after fixing its installation. Disabled providers
+contribute no environment. The unit carries `PERCH_HOME` and the enabled
+providers' declared config directories (`CLAUDE_CONFIG_DIR` and `CODEX_HOME`),
+without copying the shell's credentials. Carrying Codex does not enable its
+currently unsupported unattended Cycling.
 
 **Where the decisions go** differs by platform, because the log is the service
 manager's job rather than Perch's. On Linux systemd captures standard output

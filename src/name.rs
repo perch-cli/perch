@@ -339,137 +339,22 @@ pub struct Rules {
     fold: Fold,
 }
 
-/// The two words that address the Accounts in no Group, as version 2 reserved
-/// them. Version 1 reserved only [`NO_GROUP`].
 const THE_UNGROUPED_WORDS: &[&str] = &[UNGROUPED, NO_GROUP];
 
-/// The set version 3 refused, frozen. Identical to [`crate::host::UNSHOWABLE`]
-/// today and deliberately not shared with it: the live set grows, and version 3
-/// is what a published Perch enforced rather than what this one does.
-const UNSHOWABLE_V3: &[(char, char)] = &[
-    ('\u{0000}', '\u{001F}'),
-    ('\u{007F}', '\u{009F}'),
-    ('\u{00AD}', '\u{00AD}'),
-    ('\u{034F}', '\u{034F}'),
-    ('\u{061C}', '\u{061C}'),
-    ('\u{115F}', '\u{1160}'),
-    ('\u{17B4}', '\u{17B5}'),
-    ('\u{180B}', '\u{180F}'),
-    ('\u{200B}', '\u{200F}'),
-    ('\u{202A}', '\u{202E}'),
-    ('\u{2060}', '\u{206F}'),
-    ('\u{3164}', '\u{3164}'),
-    ('\u{FE00}', '\u{FE0F}'),
-    ('\u{FEFF}', '\u{FEFF}'),
-    ('\u{FFA0}', '\u{FFA0}'),
-    ('\u{FFF0}', '\u{FFF8}'),
-    ('\u{1BCA0}', '\u{1BCA3}'),
-    ('\u{1D173}', '\u{1D17A}'),
-    ('\u{E0000}', '\u{E0FFF}'),
-];
+const CURRENT_RULES: Rules = Rules {
+    rules: &[
+        Rule::Empty,
+        Rule::Unshowable(crate::host::UNSHOWABLE),
+        Rule::NotAnIdentifier,
+        Rule::OpensWrong,
+        Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
+        Rule::MeansEveryScope(&[GLOBAL]),
+    ],
+    fold: Fold::OneSigma,
+};
 
-/// One row per Registry version, in order, so the count is the newest version.
-/// Each below the last is stated at the loosest of the builds that stamped that
-/// version, a rule joining part way through one being a rule that version did
-/// not have for all its life.
-pub const ROWS: &[Rules] = &[
-    // Version 1, at the loosest of the three published builds. Unreleased ones
-    // stamped it too and refused less; a name only those accepted predates the
-    // first release, and is named at `load` rather than renamed.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Whitespace,
-            Rule::LikeAnAddress,
-            Rule::AddressesTheUngrouped(&[NO_GROUP]),
-        ],
-        fold: Fold::Lowercase,
-    },
-    // Version 2, at the loosest of the builds that stamped it: a character rule
-    // joined part way through its life and the version did not move with it, so
-    // this is the earlier shape, which refused no character at all.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Whitespace,
-            Rule::LikeAnAddress,
-            Rule::LeadingDash,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::Lowercase,
-    },
-    // Version 3, which refused the whole unshowable set and had no allow-list.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Whitespace,
-            Rule::Unshowable(UNSHOWABLE_V3),
-            Rule::LikeAnAddress,
-            Rule::LeadingDash,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::Lowercase,
-    },
-    // Version 4. The live unshowable set, because "current" is whatever this
-    // build does — and the allow-list, which subsumes whitespace, the `@` and
-    // the leading `-` the three rows above name one at a time.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Unshowable(crate::host::UNSHOWABLE),
-            Rule::NotAnIdentifier,
-            Rule::OpensWrong,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::OneSigma,
-    },
-    // Version 5. Version 4's rules, because the shape that moved was
-    // a Setting rather than a name — written out rather than aliased, or the
-    // next divergence would be an edit to two versions.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Unshowable(crate::host::UNSHOWABLE),
-            Rule::NotAnIdentifier,
-            Rule::OpensWrong,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::OneSigma,
-    },
-    // Version 6, this build. Version 5's rules: the shape that moved was again a
-    // Setting, `prefer-fable` (ADR fable-is-spent-first).
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Unshowable(crate::host::UNSHOWABLE),
-            Rule::NotAnIdentifier,
-            Rule::OpensWrong,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::OneSigma,
-    },
-];
-
-/// The rules a Perch that stamped this version enforced.
-///
-/// The newest row for a number no row names, which is every number at or above
-/// this build's: those are the narrowest rules there are, so a name they accept
-/// is one every earlier build accepted too.
-pub fn rules_for(version: u64) -> &'static Rules {
-    let at = usize::try_from(version)
-        .unwrap_or(usize::MAX)
-        .saturating_sub(1);
-    ROWS.get(at).unwrap_or(current())
-}
-
-/// The rules this build enforces, which is the last row.
 pub fn current() -> &'static Rules {
-    ROWS.last().expect("the table is never empty")
+    &CURRENT_RULES
 }
 
 impl Rules {

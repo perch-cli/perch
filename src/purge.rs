@@ -11,17 +11,15 @@
 
 use std::path::PathBuf;
 
-use crate::credentials::{self, Forgotten};
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
 use crate::live;
 use crate::lock;
-use crate::probe::{self, Installed};
 use crate::registry::{Account, Registry};
 
 /// What a Purge took.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Purged {
     /// How many Accounts Perch is no longer holding.
     pub accounts: usize,
@@ -33,6 +31,7 @@ pub struct Purged {
     /// reported as nothing, because on a Registry that will not parse this is
     /// *every* Profile on the machine, and a Purge is what nothing undoes.
     pub unnamed: Unnamed,
+    pub notes: Vec<String>,
 }
 
 /// The Profiles under Perch's home that the Registry does not name, and how many
@@ -57,19 +56,18 @@ const NOTHING_WAS_PURGED: live::Consequence = live::Consequence {
 /// ADR a-profile-is-live-by-evidence's rule at its extreme: a Purge deletes those
 /// directories rather than writing into them, and doubt counts as a client. Asked
 /// of the same set [`forget_what_the_registry_does_not_name`] empties.
-pub fn refuse_while_anything_is_running(
-    host: &dyn Host,
-    registry: &Registry,
-    installed: &Installed,
-) -> Result<()> {
+pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) -> Result<()> {
     let mut places: Vec<live::Place> = registry
         .accounts
         .iter()
         .filter_map(|account| {
-            account
-                .profile_dir(host)
-                .ok()
-                .map(|dir| live::Place::new(format!("the Profile of {}", account.email()), dir))
+            account.profile_dir(host).ok().map(|dir| {
+                live::Place::new(
+                    account.provider(),
+                    format!("the Profile of {}", account.key()),
+                    dir,
+                )
+            })
         })
         .collect();
 
@@ -79,18 +77,27 @@ pub fn refuse_while_anything_is_running(
     places.extend(
         what_the_registry_does_not_name(host, registry)?
             .into_iter()
-            .map(|dir| {
+            .map(|profile| {
                 live::Place::new(
-                    format!("{}, which no Account of Perch's names", dir.display()),
-                    dir,
+                    profile.provider,
+                    format!(
+                        "{}, which no Account of Perch's names",
+                        profile.dir.display()
+                    ),
+                    profile.dir,
                 )
             }),
     );
 
     match live::ask(host, &places) {
         live::Answer::Idle(_) => Ok(()),
-        live::Answer::NotIdle(not_idle) => Err(not_idle.refusal(installed, &NOTHING_WAS_PURGED)),
+        live::Answer::NotIdle(not_idle) => Err(not_idle.refusal(&NOTHING_WAS_PURGED)),
     }
+}
+
+struct ManagedProfile {
+    provider: crate::providers::provider::Id,
+    dir: PathBuf,
 }
 
 /// Every directory under Perch's home that is or was a Profile: one under
@@ -98,30 +105,35 @@ pub fn refuse_while_anything_is_running(
 ///
 /// A parent that is not there is ordinary; every other failure stops the Purge,
 /// or an unlistable `pending/` reads as empty and `erase` takes the home whole.
-fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
+fn everything_perch_holds(host: &dyn Host) -> Result<Vec<ManagedProfile>> {
     let mut found = Vec::new();
-    for parent in [
-        holdings::profiles_dir(host),
-        holdings::pending_logins_dir(host),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        match host.list_dir(&parent) {
-            // Directories, as the name says: a `.DS_Store` beside them is not a
-            // Profile, and counting one tells somebody agreeing to a Purge that
-            // Perch holds a Profile it cannot name.
-            Ok(entries) => found.extend(entries.into_iter().filter(|at| !host.is_file(at))),
-            Err(crate::host::HostError::NotFound { .. }) => {}
-            Err(err) => {
-                return Err(
-                    PerchError::file_read(parent.clone(), err).with_note(&format!(
-                        "Nothing was purged. Until Perch can list {}, it cannot say \
+    for provider in crate::providers::provider::catalog() {
+        for directory in ["profiles", "pending"] {
+            let parent = provider.id().home(host)?.join(directory);
+            match host.list_dir(&parent) {
+                // Directories, as the name says: a `.DS_Store` beside them is not a
+                // Profile, and counting one tells somebody agreeing to a Purge that
+                // Perch holds a Profile it cannot name.
+                Ok(entries) => found.extend(
+                    entries
+                        .into_iter()
+                        .filter(|at| !host.is_file(at))
+                        .map(|dir| ManagedProfile {
+                            provider: provider.id(),
+                            dir,
+                        }),
+                ),
+                Err(crate::host::HostError::NotFound { .. }) => {}
+                Err(err) => {
+                    return Err(
+                        PerchError::file_read(parent.clone(), err).with_note(&format!(
+                            "Nothing was purged. Until Perch can list {}, it cannot say \
                      which Profiles are under it, and one that goes unlisted is \
                      a Credential left behind with nothing to name it by.",
-                        parent.display(),
-                    )),
-                );
+                            parent.display(),
+                        )),
+                    );
+                }
             }
         }
     }
@@ -148,14 +160,20 @@ pub fn erase(
     // check, because what happens here is unbounded: one Store per Account, and
     // a keychain delete can stop for a dialog while the hold goes stale.
     let mut credentials = 0;
+    let mut notes = Vec::new();
     for account in &registry.accounts {
         perch.renew();
-        if forget_the_credential(host, account)? {
-            credentials += 1;
+        let removed = forget_the_credential(host, account).map_err(incomplete_purge)?;
+        credentials += usize::from(removed.removed);
+        if let Some(note) = removed.note
+            && !notes.contains(&note)
+        {
+            notes.push(note);
         }
     }
     perch.renew();
-    let unnamed = forget_what_the_registry_does_not_name(host, registry)?;
+    let unnamed = forget_what_the_registry_does_not_name(host, registry, &mut notes)
+        .map_err(incomplete_purge)?;
 
     // The last thing asked before the one deletion running this again cannot
     // finish, and not through `still_ours`: its sentence is that nothing was
@@ -185,6 +203,7 @@ pub fn erase(
         accounts: registry.accounts.len(),
         credentials,
         unnamed,
+        notes,
     })
 }
 
@@ -193,24 +212,23 @@ pub fn erase(
 /// directory, so a home taken whole destroys the only name reaching a keychain
 /// item outside it. Counted apart from the Accounts — nobody believes in these —
 /// and never as nothing, because a Registry that will not parse names none of them.
-fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<Unnamed> {
+fn forget_what_the_registry_does_not_name(
+    host: &dyn Host,
+    registry: &Registry,
+    notes: &mut Vec<String>,
+) -> Result<Unnamed> {
     let mut counted = Unnamed::default();
-    for dir in what_the_registry_does_not_name(host, registry)? {
-        // The same answer `forget_the_credential` gives, and for its reason: a
-        // store that cannot even be named is one whose Credential cannot be
-        // deleted, and passing over it reports a machine given back.
-        let store = probe::store_for_profile(host, &dir).map_err(|error| {
-            error.with_note(&format!(
-                "Perch's Registry is untouched and every Credential already \
-                 deleted is already gone. {} is still there, and until Perch \
-                 can say which Credential Store it belongs to there is no way \
-                 to tell whether one is being left behind.",
-                dir.display(),
-            ))
-        })?;
+    for profile in what_the_registry_does_not_name(host, registry)? {
         counted.profiles += 1;
-        if empty_the_stores(host, &store)? {
-            counted.credentials += 1;
+        let removed = profile
+            .provider
+            .adapter()
+            .forget_profile_credential(host, &profile.dir)?;
+        counted.credentials += usize::from(removed.removed);
+        if let Some(note) = removed.note
+            && !notes.contains(&note)
+        {
+            notes.push(note);
         }
     }
     Ok(counted)
@@ -230,7 +248,10 @@ pub fn profiles_held(host: &dyn Host) -> Result<usize> {
 /// One walk, because the refusal and the deletion have to be looking at the same
 /// set: what `refuse_while_anything_is_running` declines to purge is exactly what
 /// `forget_what_the_registry_does_not_name` empties.
-fn what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<Vec<PathBuf>> {
+fn what_the_registry_does_not_name(
+    host: &dyn Host,
+    registry: &Registry,
+) -> Result<Vec<ManagedProfile>> {
     let recorded: Vec<PathBuf> = registry
         .accounts
         .iter()
@@ -238,56 +259,41 @@ fn what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Resu
         .collect();
     Ok(everything_perch_holds(host)?
         .into_iter()
-        .filter(|dir| !recorded.contains(dir))
+        .filter(|profile| !recorded.contains(&profile.dir))
         .collect())
 }
 
-/// Empties both of a Profile's Credential Stores, and says whether either held
-/// anything.
-///
-/// One function for two passes over the same act, because the sentence a failure
-/// carries is the whole of what a half-finished Purge can promise.
-fn empty_the_stores(host: &dyn Host, store: &probe::Store) -> Result<bool> {
-    let mut held = false;
-    for kept_in in credentials::stores_for(host, store) {
-        let forgotten = kept_in.forget(host).map_err(|error| {
-            error.with_note(&format!(
-                "Perch's Registry is untouched and every Credential already \
-                 deleted is already gone, so `perch holdings purge` can be run \
-                 again once {} can be written to, and it will finish.",
-                kept_in.describe(),
-            ))
-        })?;
-        held |= forgotten == Forgotten::Credential;
+fn forget_the_credential(
+    host: &dyn Host,
+    account: &Account,
+) -> Result<crate::providers::provider::CredentialRemoval> {
+    if account.profile_dir(host).is_err() {
+        return Ok(crate::providers::provider::CredentialRemoval::default());
     }
-    Ok(held)
+    account
+        .provider()
+        .adapter()
+        .forget_credential(host, &account.profile(host)?)
 }
 
-/// Takes an Account's Credential out of both of its stores, and says whether
-/// either of them held one.
-fn forget_the_credential(host: &dyn Host, account: &Account) -> Result<bool> {
-    // An address no Profile could be named after has no Profile and no Store to
-    // empty. One reaches the Registry only by hand, and a Purge is taking it out
-    // by hand, automated — so it must not be the command such an Account stops.
-    let Ok(dir) = account.profile_dir(host) else {
-        return Ok(false);
-    };
-    // Anything the store itself refuses to say is propagated rather than skipped
-    // the same way: a store that cannot be named is one whose Credential cannot
-    // be deleted, and passing over it reports a machine given back regardless.
-    let store = probe::store_for_profile(host, &dir)?;
-    empty_the_stores(host, &store)
+fn incomplete_purge(error: PerchError) -> PerchError {
+    error.with_note("The Purge did not finish. Some Credential Stores may already be empty; run again with `perch holdings purge` to finish.")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::claude_fixture as credentials;
+    use crate::domain::Identity;
     use crate::host::prelude::*;
     use crate::host::{FakeHost, Platform};
-    use crate::probe::Identity;
+    use crate::test_support::AccountStoreFixture as _;
 
     fn account(email: &str) -> Account {
         Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: email.into(),
                 account_uuid: None,
@@ -338,7 +344,8 @@ mod tests {
                 Purged {
                     accounts: 2,
                     credentials: 2,
-                    unnamed: Unnamed::default()
+                    unnamed: Unnamed::default(),
+                    notes: Vec::new(),
                 },
                 "{platform:?}"
             );
@@ -379,14 +386,10 @@ mod tests {
         )
         .expect("nothing refuses");
 
-        assert_eq!(
-            purged,
-            Purged {
-                accounts: 2,
-                credentials: 1,
-                unnamed: Unnamed::default()
-            }
-        );
+        assert_eq!(purged.accounts, 2);
+        assert_eq!(purged.credentials, 1);
+        assert_eq!(purged.unnamed, Unnamed::default());
+        assert_eq!(purged.notes.len(), 1);
     }
 
     /// Reporting a machine given back while a keychain goes on holding a working
@@ -452,13 +455,13 @@ mod tests {
             .profile_dir(&host)
             .unwrap();
         host.set_file(
-            probe::session_marker_at(&profile, crate::host::fake::THIS_PROCESS),
-            &probe::session_marker(crate::host::fake::THIS_PROCESS, host.now()),
+            profile.join(format!("sessions/{}.json", crate::host::fake::THIS_PROCESS)),
+            &serde_json::json!({"startedAt": host.now().timestamp_millis(), "writtenBy": "perch"})
+                .to_string(),
         );
 
-        let refused =
-            refuse_while_anything_is_running(&host, &registry, &Installed::unknown("2.1.221"))
-                .expect_err("something is holding that Profile");
+        let refused = refuse_while_anything_is_running(&host, &registry)
+            .expect_err("something is holding that Profile");
 
         assert_eq!(refused.exit_code(), crate::error::EXIT_PROFILE_LIVE);
         assert!(refused.to_string().contains("two@example.com"), "{refused}");

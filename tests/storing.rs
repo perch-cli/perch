@@ -10,7 +10,7 @@ mod common;
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::EXIT_KEYCHAIN_UNAVAILABLE;
-use perch::host::{FakeHost, Files, Platform, Refusing};
+use perch::host::{FakeHost, Platform, Refusing};
 
 /// The Credential of an Account that has since Rotated several times: what a
 /// copy left behind in the store Perch stopped writing to would be.
@@ -79,7 +79,7 @@ fn a_credential_file_others_could_read_is_tightened_and_reported_rather_than_ref
     assert_eq!(host.mode_of(CREDENTIALS_PATH), Some(0o600));
     // The note spells the path the way this platform joins it, so the
     // expectation derives the same spelling rather than writing one by hand.
-    let displayed = perch::probe::default_store(&host)
+    let displayed = common::claude_fixture::default_store(&host)
         .expect("the store derives")
         .credentials_file
         .display()
@@ -104,7 +104,7 @@ fn a_credential_file_that_cannot_be_tightened_is_still_said_out_loud() {
     let (result, _) = run_status(&host, false);
 
     result.expect("a loose file is not a reason to refuse a working machine");
-    let displayed = perch::probe::default_store(&host)
+    let displayed = common::claude_fixture::default_store(&host)
         .expect("the store derives")
         .credentials_file
         .display()
@@ -137,6 +137,7 @@ fn a_second_account_off_macos_gets_a_file_of_its_own() {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -176,7 +177,7 @@ fn a_switch_off_macos_moves_the_credential_between_files() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "{printed}"
     );
 }
@@ -292,7 +293,7 @@ fn a_superseded_copy_that_survives_in_the_store_read_first_is_a_failure() {
     // Derived rather than spelled out: a Windows build joins with the other
     // separator, so a fixture writing the path by hand would name something the
     // message never says.
-    let live = perch::probe::default_store(&host)
+    let live = common::claude_fixture::default_store(&host)
         .expect("home is known")
         .credentials_file;
     // Readable, and neither writable nor removable: the file is still there and
@@ -353,6 +354,7 @@ fn two_accounts_off_macos_with_a_keychain() -> FakeHost {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -368,6 +370,7 @@ fn two_accounts_off_macos() -> FakeHost {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -383,8 +386,8 @@ fn the_platform_decides_which_store_is_written_first() {
         let host = machine_with_claude_code()
             .with_platform(platform)
             .with_file(IDENTITY_PATH, IDENTITY_FILE);
-        let default = perch::probe::default_store(&host).expect("USER is set");
-        let [primary, _] = perch::credentials::stores_for(&host, &default);
+        let default = common::claude_fixture::default_store(&host).expect("USER is set");
+        let [primary, _] = common::claude_fixture::stores_for(&host, &default);
         primary.write(&host, CREDENTIAL).expect("logged in");
 
         run_status(&host, false).0.expect("the login is adopted");
@@ -445,7 +448,7 @@ fn a_switch_neither_store_would_keep_intact_stops_at_the_write() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "the Account being left is still the active one"
     );
     assert_eq!(
@@ -496,110 +499,5 @@ fn a_store_that_would_not_take_the_write_at_all_keeps_the_credential_it_had() {
         Some(CREDENTIAL),
         "the Credential that was already live is untouched"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
-}
-
-/// A Store that will not say what it holds is refused where it may hold
-/// something, and let be where it holds nothing under this name.
-///
-/// The keychain is read first on macOS, so a Credential behind a locked one
-/// wins every read after it opens rather than none.
-#[test]
-fn a_store_that_will_not_answer_is_refused_only_where_it_may_hold_a_credential() {
-    let host = machine_with_two_accounts();
-    let store = store_of(&host, EMAIL);
-    host.lock_keychain("User interaction is not allowed");
-    host.forget_notes();
-
-    let refused = perch::profile::store_credential(&host, &store, CREDENTIAL)
-        .expect_err("a locked keychain may be holding the Credential this replaces");
-    let said = refused.to_string();
-    assert!(
-        said.contains("would not say whether it still holds"),
-        "the refusal says what could not be established: {said}"
-    );
-    assert!(
-        said.contains("Open it and run this again"),
-        "and the remedy is opening it, not emptying it: {said}"
-    );
-
-    // The same lock, for a name the keychain holds nothing under: it answers
-    // "no such item" through the lock, and nothing survives the lock opening.
-    let untouched = store_of(&host, "nobody@example.com");
-    perch::profile::make_dir(&host, &untouched.config_dir).expect("the Profile can be made");
-    perch::profile::store_credential(&host, &untouched, CREDENTIAL)
-        .expect("nothing is stored under this name");
-}
-
-/// A keychain item is keyed on a Profile directory's path and outlives the
-/// directory, so a directory the machine does not have is no evidence about
-/// what the keychain holds under its name. The case: `rm -rf ~/.perch` leaves
-/// every item behind, and the Import that follows writes the same paths.
-#[test]
-fn a_profile_the_machine_does_not_have_is_still_refused_where_the_keychain_kept_one() {
-    let host = machine_with_two_accounts();
-    let store = store_of(&host, EMAIL);
-
-    // The directory goes and the keychain item stays, which is the state a hand
-    // removal leaves. Perch has never seen this Profile directory.
-    host.remove_dir_all(&store.config_dir)
-        .expect("the directory can be taken out from under it");
-    assert!(!host.path_exists(&store.config_dir));
-    assert!(
-        host.keychain_item(&store.keychain_service, LOGIN_NAME)
-            .is_some()
-    );
-
-    host.lock_keychain("User interaction is not allowed");
-    host.forget_notes();
-    perch::profile::place(
-        &host,
-        &store.config_dir,
-        Some(STALE),
-        None,
-        perch::profile::IfItFails::TakeBack,
-    )
-    .expect_err("the copy behind the lock wins every read after it opens");
-}
-
-/// A store that refuses the removal and then says it holds nothing is a remark
-/// rather than a refusal: the copy that would have won a read is not there.
-///
-/// Off macOS the file is the store read first, so it is the one a Credential in
-/// the keychain beside it has to be cleared out of.
-#[test]
-fn a_superseded_copy_that_is_already_gone_is_noted_and_not_refused() {
-    let host = logged_in_machine_off_macos().with_keychain_off_macos();
-    let store = store_of(&host, EMAIL);
-    perch::profile::make_dir(&host, &store.config_dir).expect("the Profile can be made");
-    // Never written and refusing the removal anyway, which is the state a
-    // directory somebody took the write bit off leaves.
-    let host = host
-        .with_a_path_refusing(
-            &store.credentials_file,
-            Refusing::Write,
-            "Permission denied (os error 13)",
-        )
-        .with_a_path_refusing(
-            &store.credentials_file,
-            Refusing::Delete,
-            "Permission denied (os error 13)",
-        );
-
-    perch::profile::store_credential(&host, &store, CREDENTIAL)
-        .expect("the keychain took it and the file holds nothing to supersede it");
-
-    assert_eq!(
-        host.keychain_item(&store.keychain_service, LOGIN_NAME)
-            .as_deref(),
-        Some(CREDENTIAL),
-        "the Credential is where the write landed"
-    );
-    assert!(
-        host.notes()
-            .iter()
-            .any(|note| note.contains("A superseded copy of a Credential could not be removed")),
-        "and the machine says the store would not give a copy up: {:?}",
-        host.notes()
-    );
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }

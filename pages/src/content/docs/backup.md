@@ -36,6 +36,10 @@ per-Group form, because a selective export can only ever restore part of your
 Holdings — and a partial restore is exactly the loss this file exists to
 prevent, however deliberately it was asked for.
 
+Each Account's Profile bundle can hold up to 16 MiB of content in 256 artifacts,
+with artifact names up to 1024 bytes. Export and Import refuse larger bundles
+without truncating them. Keep the original files if a backup is refused.
+
 **The passphrase is required rather than offered**, prompted, confirmed, and
 never shown as you type it. It cannot be passed as an argument and there is no
 flag that answers ahead of time: an argument sits in the process table for

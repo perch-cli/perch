@@ -256,7 +256,7 @@ pub fn installer_dir(host: &dyn Host) -> Result<PathBuf> {
 
 /// A path built from its parts, spelled with `/`.
 ///
-/// Rather than `Path::join`, for the reason [`crate::probe::on_path`] gives:
+/// Rather than `Path::join`, for the reason [`crate::host::programs::on_path`] gives:
 /// `join` follows the platform this build runs on, where everything here follows
 /// the platform the *Host* reports. [`segments`] reads either separator.
 fn beneath(parts: &[&str]) -> PathBuf {
@@ -556,7 +556,7 @@ pub fn version_report(host: &dyn Host) -> String {
 /// two `brew`s, and only the one that owns this Installation can replace it.
 fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<String>)> {
     let brew = match prefix.as_os_str().is_empty() {
-        true => crate::probe::on_path(host, "brew"),
+        true => crate::host::programs::on_path(host, "brew"),
         // Asked for rather than assumed, so a prefix whose `bin/brew` has gone
         // reaches the refusal below — which names the command to type — rather
         // than a "No such file or directory" from running it.
@@ -580,7 +580,7 @@ fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<Stri
 /// with the version attached — a different command rather than a flag on the
 /// same one.
 fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, Vec<String>)> {
-    let npm = crate::probe::on_path(host, "npm").ok_or_else(|| {
+    let npm = crate::host::programs::on_path(host, "npm").ok_or_else(|| {
         PerchError::NotFound(
             "this Installation came from npm, and no `npm` was found to hand it \
              back to.\n\

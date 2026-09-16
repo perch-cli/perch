@@ -1,5 +1,9 @@
 # A Run is one shot
 
+The multiple-provider design extends tool selection and permits provider flags
+before the separator (ADR run-has-a-provider-preference). The pinned invocation
+and arbitrary-program behavior remain the contracts described here.
+
 `perch run <target>` launches Claude Code against a chosen Account by setting
 `CLAUDE_CONFIG_DIR` for that process alone, leaving the active Account and every
 other terminal untouched. `perch run <target> -- <args>` forwards everything

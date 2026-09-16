@@ -19,9 +19,10 @@
 
 mod common;
 
+use common::session_fixture;
+
 use chrono::{DateTime, Duration, Utc};
 use common::*;
-use perch::anthropic::{PROFILE_URL, TOKEN_URL, USAGE_URL};
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_INVALID, EXIT_NOT_INTERCHANGEABLE};
 use perch::host::fake::{Effect, THIS_PROCESS};
@@ -75,7 +76,7 @@ fn a_watcher_on_a_machine_with_no_login_holds_rather_than_exiting() {
 
     outcome.expect("a machine with nothing to adopt is held on, not exited on");
     assert!(
-        said.contains("No Claude Code login"),
+        said.contains("no active Account"),
         "and the held line says what is missing: {said}"
     );
     assert!(
@@ -93,7 +94,7 @@ fn a_check_on_a_machine_with_no_login_still_reports_the_refusal() {
 
     let refused = outcome.expect_err("a scheduler has to be told");
     assert!(
-        refused.to_string().contains("No Claude Code login"),
+        refused.to_string().contains("no active Account"),
         "{refused}"
     );
 }
@@ -162,7 +163,7 @@ fn a_client_that_starts_during_the_lock_wait_is_refused_and_the_loop_carries_on(
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing was switched"
     );
     assert!(
@@ -291,7 +292,7 @@ fn crossing_the_threshold_switches_and_the_line_says_what_it_switched_on() {
          nobody questioned (ADR perch-says-what-it-did): {switched}"
     );
 
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY));
     assert_eq!(
         credential_of(&host, SECOND_EMAIL).as_deref(),
         Some(SPARE),
@@ -314,7 +315,7 @@ fn acting_captures_the_outgoing_credential_before_it_writes_the_incoming_one() {
         Some(ROTATED),
         "the Account it left keeps the Rotation it earned while it was live"
     );
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -352,7 +353,7 @@ fn a_reading_that_failed_holds_the_decision_rather_than_falling_back_to_the_cach
     assert!(held.contains("rate-limiting"), "and why: {held}");
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "nothing was switched on a figure Perch already had"
     );
     assert_eq!(
@@ -385,7 +386,7 @@ fn a_refresh_that_fails_across_a_threshold_crossing_never_switches() {
         0,
         "the crossing is only in a figure nobody could confirm: {printed}"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(ACTIVE),
@@ -511,7 +512,7 @@ fn a_reply_perch_cannot_read_is_a_failed_refresh_rather_than_a_reading_of_zero()
         vec![150_000, 300_000],
         "and it backs off the same way, because it is the same failure"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 #[test]
@@ -535,7 +536,7 @@ fn a_live_profiles_token_is_never_renewed_to_get_a_figure() {
         host.sent_to(TOKEN_URL).is_empty(),
         "nothing was renewed under a running session"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 /// A Back-off paces questions nobody is answering. A Renewal refused because a
@@ -703,7 +704,7 @@ fn nowhere_to_go_is_a_decision_and_the_loop_goes_on_watching() {
             "however long the reason is: {decision}"
         );
     }
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 #[test]
@@ -726,7 +727,7 @@ fn a_candidate_only_just_emptier_than_the_threshold_is_never_switched_to() {
     }
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing moved: {printed}"
     );
 }
@@ -744,7 +745,7 @@ fn a_destination_nearly_as_full_as_the_account_being_left_is_refused() {
         "nothing here is worth moving to, and doing it anyway is the walk \
          upward: {printed}"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
     assert_eq!(
         decisions(&printed).len(),
         6,
@@ -891,7 +892,7 @@ fn a_candidate_anthropic_refused_to_let_it_read_holds_the_round_rather_than_judg
         "the first read that works finds the candidate empty and moves: {}",
         decisions[2]
     );
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY));
 }
 
 /// A machine where the Account being watched fills up, the watcher moves off it, and
@@ -974,7 +975,7 @@ fn the_account_just_left_is_returned_to_once_the_cooldown_has_run_out() {
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and it is returned to once the cooldown has run out: {printed}"
     );
 }
@@ -1053,7 +1054,7 @@ fn a_narrower_margin_lets_a_group_take_a_candidate_the_default_refuses() {
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "and the move lands: {printed}"
     );
 }
@@ -1098,7 +1099,7 @@ fn a_switch_the_machine_turned_away_is_said_and_the_loop_carries_on() {
     }
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing was changed"
     );
     assert_eq!(
@@ -1157,7 +1158,7 @@ fn an_account_the_watcher_finds_broken_is_recorded_rather_than_rediscovered() {
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing was switched onto it"
     );
     // The second round has the Quarantine to read, so it never gets as far as trying:
@@ -1187,7 +1188,7 @@ fn a_quarantine_the_watcher_reports_names_the_account_the_way_the_user_does() {
         "the Alias is how the user would say it:\n{printed}"
     );
     assert!(
-        printed.contains(&format!("perch relogin {SECOND_EMAIL}")),
+        printed.contains(&format!("perch relogin {SECOND_KEY}")),
         "and the repair is still a Target that can be typed:\n{printed}"
     );
 }
@@ -1268,7 +1269,10 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
             _ => None,
         })
         .collect();
-    let registry = perch::holdings::registry_path(&host).expect("home is known");
+    let registry = perch::providers::provider::Id::Claude
+        .home(&host)
+        .unwrap()
+        .join("state.json");
     assert!(
         written
             .iter()
@@ -1277,7 +1281,7 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
             .all(|path| path
                 .to_string_lossy()
                 .starts_with(&*registry.to_string_lossy())),
-        "the registry is the only file a watcher writes, and it writes that \
+        "provider runtime is the only file a watcher writes, and it writes that \
          because a Switch happened: {written:?}"
     );
 }
@@ -1322,7 +1326,7 @@ fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
 fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() {
     let unaccountable = || {
         let host = watching(&[99.0], 1.0);
-        a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+        a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
         // A Rotation after the interruption: the corner nothing on the machine can
         // account for.
         host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
@@ -1356,7 +1360,7 @@ fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() 
 #[test]
 fn a_landing_in_flight_leaves_the_opening_line_naming_nobody() {
     let host = watching(&[42.0], 5.0);
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
 
     let (result, printed) = run_watch(&host);
 
@@ -1376,7 +1380,7 @@ fn a_landing_in_flight_leaves_the_opening_line_naming_nobody() {
     // opening a deferral rather than a refusal.
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "the Landing is settled onto the Account that was being left: {printed}"
     );
     let decisions = decisions(&printed);
@@ -1410,7 +1414,7 @@ fn a_grant_said_about_a_group_leaves_ungrouped_accounts_alone() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing moved underneath them, at 99% used with an empty Account \
          beside it (ADR a-group-is-a-declaration) — which is the whole of what the grant protects, \
          and is exactly as true of a watcher that holds as of one that exits"
@@ -1445,7 +1449,7 @@ fn a_watcher_acts_among_ungrouped_accounts_once_both_declarations_are_made() {
     assert!(printed.contains("switched"), "{printed}");
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "{printed}"
     );
 }
@@ -1530,9 +1534,11 @@ fn the_run_fixture_marks_the_profile_of_the_account_it_names() {
     let host = watched();
     a_run_against(&host, EMAIL, host.now());
 
-    let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
+    let profile =
+        perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, &host, KEY)
+            .expect("home is known");
     assert!(
-        host.path_exists(&perch::probe::session_marker_at(&profile, THIS_PROCESS)),
+        host.path_exists(&session_fixture::session_marker_at(&profile, THIS_PROCESS)),
         "the marker is in the Account's own Profile"
     );
 }
@@ -1566,7 +1572,7 @@ fn a_switch_that_changed_something_and_then_failed_stops_the_loop() {
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "which Account is active is a fact about which Credential is live, so \
          it is recorded as what happened rather than as what was asked for \
          and never a Landing nobody wrote down"
@@ -1627,7 +1633,7 @@ fn a_200_carrying_no_quota_window_holds_the_round_rather_than_reading_as_empty()
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing was switched on the strength of it"
     );
 }
@@ -1651,7 +1657,7 @@ fn nowhere_to_go_says_which_candidates_could_not_be_read() {
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and the loop stayed where it was"
     );
 }
@@ -1993,7 +1999,7 @@ fn a_check_held_settling_a_landing_says_so_on_standard_output() {
     let host = watching(&[86.0], 5.0);
     // A Switch that died between writing the Landing down and moving anything, so the
     // next round has one to settle.
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     // And a Claude Code holding the lock that settling it needs.
     let holding_since = host.now();
     let host = host.with_dir_held_since("/Users/someone/.claude.json.lock", holding_since);
@@ -2021,6 +2027,7 @@ fn a_watcher_asked_to_stop_reads_nothing_and_pays_nothing() {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -2124,7 +2131,7 @@ fn a_stop_between_two_requests_of_one_turn_sends_no_more_of_them() {
         "no Rotation was written: {printed}"
     );
     let account = registry_of(&host)
-        .account(EMAIL)
+        .account(KEY)
         .cloned()
         .expect("the Account is still held");
     assert!(
@@ -2189,7 +2196,7 @@ fn a_stopped_watcher_arriving_on_a_landing_reads_no_credential_store() {
     // Nought requests have gone out and nought is what it takes: the stop is in
     // hand before the round opens.
     let host = watched().with_interrupt_after_requests(0);
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.forget_effects();
 
     let (result, printed) = run_watch_once(&host);
@@ -2211,8 +2218,8 @@ fn a_stopped_watcher_arriving_on_a_landing_reads_no_credential_store() {
     assert_eq!(
         *registry_of(&host).active(),
         Active::Landing {
-            leaving: Some(EMAIL.to_string()),
-            arriving: SECOND_EMAIL.to_string(),
+            leaving: Some(KEY.to_string()),
+            arriving: SECOND_KEY.to_string(),
         },
         "and nothing was written, so the Landing is still there for whatever \
          settles it next: {printed}"
@@ -2240,7 +2247,7 @@ fn a_watch_handed_over_between_two_reads_of_the_walk_settles_nothing() {
         .once_while_waiting(move |host| {
             let _ = host.remove_dir_all(std::path::Path::new(lock));
         });
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.forget_effects();
 
     let (result, printed) = run_watch(&host);
@@ -2265,5 +2272,66 @@ fn a_watch_handed_over_between_two_reads_of_the_walk_settles_nothing() {
         matches!(&registry_of(&host).active(), Active::Landing { .. }),
         "and nothing was settled, because a Watcher that stopped reading \
          established nothing: {printed}"
+    );
+}
+
+fn with_a_codex_account(host: FakeHost) -> FakeHost {
+    use perch::providers::provider::{AccountIdentity, Id};
+    let mut registry = registry_of(&host);
+    let mut account = registry.accounts[0].clone();
+    account.provider = Id::Codex;
+    account.identity.email = "codex@example.com".into();
+    account.identity.account_uuid = Some("subject".into());
+    account.identity.organization_uuid = Some("workspace".into());
+    account.provider_identity =
+        Some(AccountIdentity::new(Id::Codex, "subject".into(), "workspace".into()).unwrap());
+    account.utilization = None;
+    let key = account.key().to_string();
+    registry.upsert(account);
+    registry.select_provider(Id::Codex);
+    registry.settle(Some(key));
+    registry.select_provider(Id::Claude);
+    save_registry(&host, &registry);
+    host
+}
+
+#[test]
+fn unsupported_codex_switching_does_not_stop_later_claude_watcher_rounds() {
+    let host = with_a_codex_account(watching(&[20.0, 30.0, 40.0], 80.0));
+    let codex_before = registry_of(&host)
+        .active_for(perch::providers::provider::Id::Codex)
+        .clone();
+    let (result, said) = run_watch(&host);
+    result.expect("Claude continues while Codex is held");
+    assert!(
+        said.contains("claude:") && said.contains("codex:"),
+        "{said}"
+    );
+    assert_eq!(host.sent_to(USAGE_URL).len(), 3, "{said}");
+    assert_eq!(
+        *registry_of(&host).active_for(perch::providers::provider::Id::Codex),
+        codex_before
+    );
+}
+
+#[test]
+fn a_mixed_provider_check_reports_codex_refusal_after_claude_can_switch() {
+    let host = with_a_codex_account(watching(&[95.0], 10.0));
+    let codex_before = registry_of(&host)
+        .active_for(perch::providers::provider::Id::Codex)
+        .clone();
+    let (result, said) = run_watch_once(&host);
+    assert!(result.is_err(), "Codex has no supported live Switch");
+    assert!(said.contains("switched"), "{said}");
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry
+            .active_for(perch::providers::provider::Id::Claude)
+            .whose(),
+        Some(SECOND_KEY)
+    );
+    assert_eq!(
+        *registry.active_for(perch::providers::provider::Id::Codex),
+        codex_before
     );
 }

@@ -1,8 +1,8 @@
 # Perch triage playbook
 
 You are working inside a coding-agent session on the machine of somebody whose
-Perch (https://github.com/perch-cli/perch) is misbehaving. Perch runs Claude Code
-as whichever Claude account you want, without going through the login flow again.
+Perch (https://github.com/perch-cli/perch) is misbehaving. Perch runs supported
+provider CLIs, currently Claude Code and Codex, with isolated Account Profiles.
 Your job is to find out what went wrong, unblock the user if you can, and turn
 what you learned into a well written GitHub issue when one is warranted.
 
@@ -23,7 +23,7 @@ command they ran is worth more than a paraphrase of it.
 ## 2. Read the evidence
 
 Read `probe.raw.txt` before investigating anything. It carries which Perch and
-which Claude Code are installed, where Perch's home is and what version the
+which provider CLIs are installed, where Perch's home is and what version the
 registry on disk states, which Account is active, what the Holdings hold, which
 of Perch's assumptions still hold, and the recent lines of the Trail.
 
@@ -34,10 +34,11 @@ over one, and each carries the exit code it would refuse with. A finding is
 therefore not a guess: it is Perch saying which of its own rules this machine
 breaks. Start there.
 
-**Assumptions.** Perch reads Claude Code's files and none of it is a public
-contract, so each assumption reads `held`, `broke` or `unread`. They are listed
-in the order Perch reaches them, so everything after the one that `broke` is
-honestly reported as never having been asked rather than as fine.
+**Assumptions.** Providers report the native checks they support as `held`,
+`broke` or `unread`, in the order they are reached. Base a conclusion only on
+checks the report names. Codex currently reports installation details; a
+successful version check does not establish that its authentication works.
+Keep findings attributed to their provider when investigating mixed Accounts.
 
 ## 3. Check for a newer playbook
 
@@ -60,11 +61,11 @@ Work from evidence. In rough order of value:
 - The exact sentence Perch printed, and the exit code beside it. Perch says why
   it refused, and that sentence names which belief stopped holding. It is almost
   always the fastest way in.
-- The registry, at `registry.json` under Perch's home. Read it freely. Never edit
-  it by hand, whatever you find in it.
-- Which Claude Code is installed and what it does on its own. A Perch that stopped
-  recognizing Claude Code's files is a real class of bug, and `broke` on an
-  assumption is what it looks like.
+- Perch metadata: `config.json` and `providers/<provider>/state.json` under its
+  home. Read these files for Accounts, Groups, settings, and runtime state.
+  Change metadata through Perch commands rather than hand-editing it.
+- Which provider CLI is involved and what it does on its own. A `broke` native
+  assumption can indicate that its formats differ from those Perch recognizes.
 - The Watcher, where the problem is a switch that did or did not happen: whether a
   Service is installed, whether it is running, and what its own log says. The
   probe names where that log is.
@@ -81,17 +82,16 @@ maintainer somewhere the bug is not.
 
 ## 5. What you must not read, and what you must not change
 
-Perch holds Claude accounts. A Credential is an OAuth secret, and it lives in
-three places: an entry in the operating system's keychain, a `.credentials.json`
-file inside a Profile directory, and an `Authorization` header. Never read any of
-them. That means, by name and on every platform, no `security find-generic-password`,
-no `secret-tool lookup`, no `Get-StoredCredential` or its equivalents, and no
-reading of any `.credentials.json`. Perch itself never renders one, and neither
-do you. If you need to know whether a Credential is usable, the probe already
-answered that.
+Perch holds provider Credentials. Never read credential files, keychain values,
+tokens, or Authorization headers. This includes Claude's `.credentials.json`,
+Codex's `auth.json`, and credential material inside native Profile directories.
+Do not invoke credential retrieval commands such as
+`security find-generic-password`, `secret-tool lookup`, or
+`Get-StoredCredential`.
 
-Everything else under Perch's home is fair game, including the registry, since it
-holds the same names in plaintext that the Trail does.
+Use Perch's evidence, metadata, and Trail to investigate. Treat native Profile
+files as sensitive; they are outside the diagnostic reading scope. If the Probe
+does not establish credential usability, record that as unknown.
 
 Fixes are Perch commands the user approved, one at a time, each explained before
 it is run. Never a hand-edit of the registry, and never a patch to Perch's source

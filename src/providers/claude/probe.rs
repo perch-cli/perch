@@ -1,24 +1,20 @@
-//! What Perch believes about the installed Claude Code, and how confident it is
+//! Claude native format recognition, Credential Stores, and lock assumptions
 //! (ADR an-assumption-is-probed).
 //!
-//! Every path, service-name derivation and struct shape Perch depends on is
-//! reverse-engineered and none of it is a public contract. They live here, in
-//! one module, and nowhere else — so when Claude Code drifts, there is exactly
-//! one place that stops recognizing it, and every dangerous operation is gated
-//! on the verdict it returns.
+//! Native formats are undocumented; an unrecognized shape requires a refusal.
 
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError, Platform};
 use crate::json;
 use crate::lock::{self, Held, Holds, LockSpec};
+use crate::providers::claude::credentials;
 use crate::secret::Secret;
 
 /// Named assumptions. A refusal quotes one of these, so the failure a user
@@ -34,11 +30,7 @@ pub mod assumption {
         "a session marker names its process and when the session started";
 }
 
-/// Which Claude Code Perch is talking to. Quoted, never compared: every refusal
-/// this module raises names the assumption that failed *and* the version it was
-/// reading. A value rather than a `&str` for two reasons — reading it is a
-/// `PATH` walk and a subprocess, so a command asks once; and a caller with no
-/// version to give has [`Installed::unknown`] rather than a made-up string.
+/// A native refusal quotes the installed version; long-lived operations read it lazily.
 #[derive(Clone)]
 pub enum Installed<'h> {
     /// The version, already read or already given.
@@ -47,6 +39,7 @@ pub enum Installed<'h> {
     /// answered once it has.
     Asking {
         host: &'h dyn Host,
+        executable: PathBuf,
         said: std::cell::OnceCell<String>,
     },
     /// No Claude Code to ask, and why. A state rather than a failure, because
@@ -56,45 +49,28 @@ pub enum Installed<'h> {
 }
 
 impl<'h> Installed<'h> {
-    // Four constructors, named by what a command will do without Claude Code.
-    // Each answers absence differently, so the name is the whole choice: a
-    // caller never picks mechanics that quietly answer the wrong way.
-
-    /// For a command that will stop without Claude Code. The `Err` is the
-    /// refusal it raises — or, in `perch probe`, the finding it reports.
-    /// Asked once per command: the answer cannot change under a process
-    /// that is already running.
-    pub fn for_a_refusal(host: &dyn Host) -> Result<Installed<'static>> {
-        Ok(Installed::Said(claude_version(host)?))
-    }
-
-    /// For a command that reports absence and carries on. A Remove, a Purge,
-    /// an Import and an Export run on a machine whose Claude Code may be gone,
-    /// and refusing for want of a version would hold a Credential hostage to a
-    /// program neither of them needs. Absence reads `(not installed)`.
-    pub fn for_a_report(host: &dyn Host) -> Installed<'static> {
-        Installed::for_a_refusal(host).unwrap_or_else(|_| Installed::unknown("(not installed)"))
-    }
-
-    /// For the figures a command shows. Absence is the state the probe found,
-    /// reason and all, so every Account's turn downstream answers it in its
-    /// own words rather than this read deciding for them.
-    pub fn for_the_figures(host: &dyn Host) -> Installed<'static> {
-        Installed::for_a_refusal(host).unwrap_or_else(|why| Installed::Absent {
-            why: why.to_string(),
-        })
-    }
-
-    /// For a process that outlives a command, where asking every round forks a
-    /// Node program to quote a string most rounds never quote. Only the version
-    /// waits: a refusal quotes the Claude Code installed when it was raised
-    /// rather than when the process started.
+    /// The executable is fixed for this round; its version is read only if a
+    /// refusal needs it, so successful observations do not fork a CLI.
     pub fn for_every_round(host: &'h dyn Host) -> Installed<'h> {
         // Claude Code being *there* is still established now, a round with none
         // having nothing to do — and it is a `PATH` walk rather than a fork.
-        match claude_bin(host) {
-            Ok(_) => Installed::Asking {
+        Self::from_installation(
+            host,
+            crate::providers::provider::Id::Claude
+                .adapter()
+                .configured(host)
+                .and_then(|provider| provider.installation(host)),
+        )
+    }
+
+    pub(super) fn from_installation(
+        host: &'h dyn Host,
+        installation: Result<crate::providers::provider::Installation>,
+    ) -> Installed<'h> {
+        match installation {
+            Ok(installation) => Installed::Asking {
                 host,
+                executable: installation.executable().to_path_buf(),
                 said: std::cell::OnceCell::new(),
             },
             Err(why) => Installed::Absent {
@@ -113,6 +89,7 @@ impl<'h> Installed<'h> {
 
     /// When the question could not be asked, or is not the thing being tested.
     /// `said` is what a refusal will quote.
+    #[cfg(test)]
     pub fn unknown(said: &str) -> Installed<'static> {
         Installed::Said(said.to_string())
     }
@@ -123,9 +100,13 @@ impl<'h> Installed<'h> {
             Installed::Said(said) => said,
             // The binary was found when this was made, so what is left to fail
             // is running it — which is what `unknown` exists to say.
-            Installed::Asking { host, said } => {
-                said.get_or_init(|| claude_version(*host).unwrap_or_else(|_| "unknown".to_string()))
-            }
+            Installed::Asking {
+                host,
+                executable,
+                said,
+            } => said.get_or_init(|| {
+                version_at(*host, executable).unwrap_or_else(|_| "unknown".to_string())
+            }),
             // Reached from inside a refusal being built, with nothing there to
             // hand a second failure to.
             Installed::Absent { .. } => "unknown",
@@ -137,17 +118,7 @@ impl<'h> Installed<'h> {
 /// unset. Every other config directory gets this plus a hash of its path.
 pub const DEFAULT_SERVICE: &str = "Claude Code-credentials";
 
-/// The non-secret description of an Account, as Claude Code records it: what
-/// Claude Code displays to say who you are. Perch stores it verbatim, so the
-/// Registry and the probe describe an Account with one type rather than two.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Identity {
-    pub email: String,
-    pub account_uuid: Option<String>,
-    pub organization_name: Option<String>,
-    pub organization_uuid: Option<String>,
-}
+pub use crate::domain::Identity;
 
 /// A Credential, kept as the exact bytes the keychain holds — the only fields
 /// read out are the ones something needs. The three secret ones are `Zeroizing`
@@ -250,7 +221,7 @@ struct OauthAccount {
 /// Identity, and both of the Credential Stores it might hold a Credential in
 /// (ADR claude-code-chooses-the-store). Not itself a Credential Store — this is
 /// the config directory and everything derived from it, and
-/// [`crate::credentials::CredentialStore`] is the glossary's term.
+/// [`crate::providers::claude::credentials::CredentialStore`] is the glossary's term.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Store {
     pub config_dir: PathBuf,
@@ -278,119 +249,23 @@ pub enum Verdict {
     NoLogin { version: String, store: Store },
 }
 
-/// The variable naming Claude Code outright: an override at a terminal, and
-/// what a unit carries so a Service resolves the same `claude` its installer did.
-pub const CLAUDE_BIN_VAR: &str = "PERCH_CLAUDE_BIN";
-
 /// The Claude Code binary Perch runs, resolved by Perch rather than left to
 /// `Command::new`: Rust appends only `.exe` and never consults `PATHEXT`, so the
 /// `claude.cmd` that `npm i -g` installs works in every shell and would be
 /// invisible to a bare `Command::new("claude")`. `$PERCH_CLAUDE_BIN` overrides
 /// the search and passes through verbatim.
+#[cfg(test)]
 pub fn claude_bin(host: &dyn Host) -> Result<PathBuf> {
-    if let Some(overridden) = host.env_var(CLAUDE_BIN_VAR) {
-        return Ok(PathBuf::from(overridden));
-    }
-
-    if host.env_var("PATH").is_none() {
-        return Err(refusal(
-            assumption::INSTALLED,
-            "PATH is unset, so there is nowhere to look for `claude`. \
-             Point PERCH_CLAUDE_BIN at it instead",
-            "not installed",
-        ));
-    }
-
-    on_path(host, "claude").ok_or_else(|| {
-        refusal(
-            assumption::INSTALLED,
-            "no `claude` was found on PATH. Install Claude Code, or point \
-             PERCH_CLAUDE_BIN at it",
-            "not installed",
-        )
-    })
-}
-
-/// The first program of this name on `PATH`, or `None`. A search for any name
-/// rather than for `claude`, because `perch upgrade` hands the work back to
-/// `npm` on an npm Installation (ADR an-upgrade-asks-its-channel) and finding
-/// `npm.cmd` is the same problem. The name is taken as given: no extension is
-/// stripped and none is required.
-pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
-    all_on_path(host, name).into_iter().next()
-}
-
-/// Every program of this name on `PATH`, in `PATH`'s own order, each path once
-/// however many times its directory appears. What an install rehearses in
-/// order, carrying the first that runs where the Service will run it
-/// (ADR carried-means-rehearsed).
-pub fn all_on_path(host: &dyn Host, name: &str) -> Vec<PathBuf> {
-    let Some(path) = host.env_var("PATH") else {
-        return Vec::new();
-    };
-
-    let on_windows = host.platform() == crate::host::Platform::Windows;
-    let separator = if on_windows { ';' } else { ':' };
-    // What makes a name executable on Windows is carrying one of PATHEXT's
-    // extensions. Lowercase because that is how npm writes `claude.cmd`, and
-    // the real filesystem answers case-insensitively anyway.
-    let extensions: Vec<String> = if on_windows {
-        // The bare name too, and last rather than first, which is the ordering
-        // that keeps it safe: npm ships `npm` and `npm.cmd` side by side, and
-        // the extensionless one is a shell script Windows cannot run.
-        host.env_var("PATHEXT")
-            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
-            .split(';')
-            .filter(|extension| !extension.is_empty())
-            .map(str::to_lowercase)
-            .chain(std::iter::once(String::new()))
-            .collect()
-    } else {
-        vec![String::new()]
-    };
-
-    // Rooted directories only, as `curl_at` takes them: an empty element and a
-    // `.` both mean the working directory, and `perch upgrade` runs what it
-    // finds here.
-    let mut found = Vec::new();
-    for dir in path.split(separator).filter(|dir| rooted(dir, on_windows)) {
-        for extension in &extensions {
-            // Joined with '/' rather than `Path::join`, which picks the
-            // separator of whatever platform this build runs on: Windows
-            // accepts either, and two spellings are two machines.
-            let candidate = PathBuf::from(format!("{dir}/{name}{extension}"));
-            if host.is_file(&candidate) && !found.contains(&candidate) {
-                found.push(candidate);
-            }
-        }
-    }
-    found
-}
-
-/// Whether a path names a place from the root rather than from wherever Perch
-/// was run. Asked of the platform the host reports rather than through
-/// `Path::is_absolute`, which reads the separator of the platform this build
-/// runs on — the reason the search above joins with `/` by hand. Public because
-/// the conformance table asks it of a fake claiming a platform it is not on.
-pub fn rooted(dir: &str, on_windows: bool) -> bool {
-    if dir.starts_with('/') {
-        return true;
-    }
-    // A root of the current drive, and a drive named outright. `C:name` with no
-    // separator is relative to that drive's own working directory, which is what
-    // is being refused rather than a spelling of the root.
-    on_windows
-        && (dir.starts_with('\\')
-            || matches!(
-                dir.as_bytes(),
-                [drive, b':', separator, ..]
-                    if drive.is_ascii_alphabetic() && matches!(separator, b'\\' | b'/')
-            ))
+    crate::providers::provider::Id::Claude.executable(host)
 }
 
 /// Reads the installed version, refusing when there is nothing to read.
+#[cfg(test)]
 pub fn claude_version(host: &dyn Host) -> Result<String> {
-    let claude = claude_bin(host)?;
+    version_at(host, &claude_bin(host)?)
+}
+
+pub(super) fn version_at(host: &dyn Host, claude: &Path) -> Result<String> {
     let execution = host
         .exec(&claude.to_string_lossy(), &["--version"])
         .map_err(|err| {
@@ -913,157 +788,14 @@ impl Store {
         })
     }
 
-    /// Takes this Store's locks and keeps them, standing in for a mid-write
-    /// Claude Code: what a test contends `entered` against.
-    #[cfg(test)]
+    /// Native locks outlive individual reads while a Default change is in flight.
     pub fn seized<'h>(&self, host: &'h dyn Host) -> Result<Held<'h>> {
         lock::take_all(host, locks_for(self))
     }
 }
 
-/// What the directory of session markers is called inside a config directory.
-/// Two modules need it for opposite reasons: this one derives the markers it
-/// reads, and [`crate::reconcile`] holds it back from crossing — a directory
-/// whose contents answer *is a client running here* is meaningless shared.
-pub const SESSIONS: &str = "sessions";
-
-/// The lock Claude Code takes inside a config directory while it renews a
-/// Credential — the one of its three that is not a sibling of the directory but
-/// an entry in it, and so the one a Reconcile would otherwise enumerate. Named
-/// here for the reason [`SESSIONS`] is.
+/// Claude's renewal lock must remain local to its config directory.
 pub const REFRESH_LOCK: &str = ".oauth_refresh.lock";
-
-/// Where Claude Code records the sessions it is running: one `<pid>.json` per
-/// client, in the config directory it was launched against.
-pub fn sessions_dir(config_dir: &Path) -> PathBuf {
-    config_dir.join(SESSIONS)
-}
-
-/// The marker for one process running against a config directory.
-pub fn session_marker_at(config_dir: &Path, pid: u32) -> PathBuf {
-    sessions_dir(config_dir).join(format!("{pid}.json"))
-}
-
-/// The marker a Run writes to say a Profile is Live, in the shape Claude Code
-/// writes one and this module reads one back. Three fields and no more: the two
-/// that make it evidence, and one that says who wrote it. `started_at` is when
-/// the Run began rather than when the process did, which is what makes the file
-/// corroborate itself — the process it names began strictly earlier.
-pub fn session_marker(pid: u32, started_at: DateTime<Utc>) -> String {
-    serde_json::json!({
-        "pid": pid,
-        "startedAt": started_at.timestamp_millis(),
-        "writtenBy": "perch",
-    })
-    .to_string()
-}
-
-/// A config directory this process has made Live, for as long as this value is
-/// held. Perch writes session markers as well as reading them: a Run makes the
-/// Profile it launches Live (ADR a-run-is-one-shot), and a login makes the
-/// directory it is driving Live. A value with a `Drop` rather than a call to
-/// make, because a bare removal is the line the next early return walks past.
-pub struct Claim<'a> {
-    host: &'a dyn Host,
-    marker: PathBuf,
-}
-
-impl Drop for Claim<'_> {
-    /// However the operation ended, including not having started. A login's
-    /// directory is gone by now — `profile::discard` takes it whole — so this is
-    /// removing a file inside a directory that is not there, which the port says
-    /// is not a failure.
-    fn drop(&mut self) {
-        let _ = self.host.remove_file(&self.marker);
-    }
-}
-
-/// Makes a config directory Live, naming this process. Perch's own pid, because
-/// Perch waits for what it started, so the marker holds for exactly as long as
-/// the operation. Written atomically, because a plain write truncates and then
-/// fills and a file that can be read whole and says nothing settles as "not
-/// Live". Whether a claim that fails is fatal is the caller's to decide.
-pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
-    let pid = host.process_id();
-    let marker = session_marker_at(config_dir, pid);
-    let sessions = sessions_dir(config_dir);
-
-    // A `sessions` that is a link is refused rather than written through and
-    // rather than repaired, which is Reconcile's: `create_dir_all` at a link
-    // uses the target, so the Marker would land in the Default Profile.
-    if matches!(host.link_target(&sessions), Ok(Some(_))) {
-        return Err(PerchError::Other(format!(
-            "{} is a link rather than a directory of its own, so recording that \
-             a client is running here would write the marker into whatever it \
-             points at, and that directory would report this Run as its own. \
-             Nothing was launched.",
-            sessions.display()
-        )));
-    }
-
-    // Private, because this is the third path that brings a Profile directory
-    // into being and 0700 is what a Profile owes. One already there is left as
-    // it is, so the Default Profile keeps whatever mode it has.
-    host.create_private_dir_all(&sessions)
-        .and_then(|()| {
-            crate::host::write_atomically(host, &marker, &session_marker(pid, host.now()))
-        })
-        .map_err(|err| {
-            PerchError::Other(format!(
-                "{} could not be written ({err}), so Perch cannot record that a \
-                 client is running against this Profile, and another Perch would \
-                 be free to Capture or Renew the Credential that client is \
-                 holding. Nothing was launched.",
-                marker.display()
-            ))
-        })?;
-
-    Ok(Claim { host, marker })
-}
-
-/// The marker Claude Code writes for a running session, to the extent Perch
-/// reads it. `startedAt` is when the session began, in milliseconds since the
-/// epoch — which means the same thing on every platform, and is why it is the
-/// field matched rather than the platform-encoded `procStart`.
-#[derive(Deserialize)]
-struct SessionMarker {
-    #[serde(rename = "startedAt")]
-    started_at: Option<i64>,
-}
-
-/// What a session marker turned out to be. Three answers rather than an
-/// `Option`, because the two ways of having no timestamp resolve in opposite
-/// directions: one is a judgment about content, and the other is a file nothing
-/// has been established about.
-pub enum Marker {
-    /// It says when its session began.
-    Began(i64),
-    /// Perch read the whole file and it is not a marker, or is one that does
-    /// not say. A judgment about content, which is settled: a Profile is Live
-    /// when something says so, not when nothing does.
-    SaysNothing,
-    /// Perch could not read it. Nothing has been established either way.
-    Unreadable,
-}
-
-/// The marker's own record of when its session began.
-pub fn session_start_in(host: &dyn Host, marker: &Path) -> Marker {
-    // A marker that has gone between the listing and the read is one the client
-    // took with it on its way out, which is the ordinary end of a session
-    // rather than a doubt about one.
-    let contents = match host.read_file(marker) {
-        Ok(contents) => contents,
-        Err(HostError::NotFound { .. }) => return Marker::SaysNothing,
-        Err(_) => return Marker::Unreadable,
-    };
-    match serde_json::from_str::<SessionMarker>(&contents) {
-        Ok(recorded) => match recorded.started_at {
-            Some(at) => Marker::Began(at),
-            None => Marker::SaysNothing,
-        },
-        Err(_) => Marker::SaysNothing,
-    }
-}
 
 /// The key of `.claude.json` that says who the Account is, and the only key of
 /// that file Perch ever writes.
@@ -1111,37 +843,20 @@ pub fn oauth_account_block(contents: &str) -> Option<&str> {
     json::object_at(contents, IDENTITY_KEY)
 }
 
-impl Identity {
-    /// The `oauthAccount` block Claude Code would write for this Account, for
-    /// the Accounts whose Profile holds no identity file of its own.
-    pub fn oauth_account_block(&self) -> String {
-        let mut block = serde_json::Map::new();
-        if let Some(uuid) = &self.account_uuid {
-            block.insert("accountUuid".into(), uuid.clone().into());
-        }
-        block.insert("emailAddress".into(), self.email.clone().into());
-        if let Some(organization) = &self.organization_name {
-            block.insert("organizationName".into(), organization.clone().into());
-        }
-        if let Some(uuid) = &self.organization_uuid {
-            block.insert("organizationUuid".into(), uuid.clone().into());
-        }
-        serde_json::to_string_pretty(&serde_json::Value::Object(block))
-            .expect("a map of strings serializes")
-    }
+pub(super) fn probe_at(host: &dyn Host, store: Store, executable: &Path) -> Result<Verdict> {
+    let installed = Installed::Said(version_at(host, executable)?);
+    probe_with(host, store, &installed)
 }
 
-/// The one question this module exists to answer: what do we believe about the
-/// installed Claude Code, and how confident are we? The store is handed in
-/// rather than derived, because which directory counts as the Default Profile is
-/// a question about Perch's own layout, and this module is below the one that can
-/// answer it ([`crate::holdings::the_default_profile`]).
-pub fn probe(host: &dyn Host, store: Store) -> Result<Verdict> {
-    let installed = Installed::for_a_refusal(host)?;
+pub(super) fn probe_with(
+    host: &dyn Host,
+    store: Store,
+    installed: &Installed<'_>,
+) -> Result<Verdict> {
     let version = installed.version().to_string();
 
-    let credential = read_credential(host, &store, &installed)?;
-    let identity = read_identity(host, &store, &installed)?;
+    let credential = read_credential(host, &store, installed)?;
+    let identity = read_identity(host, &store, installed)?;
 
     match (credential, identity) {
         (Some(credential), Some(identity)) => Ok(Verdict::Recognized(Box::new(Findings {
@@ -1184,7 +899,7 @@ pub(crate) fn refusal(assumption: &str, detail: &str, version: &str) -> PerchErr
     PerchError::ProbeRefused(Box::new(crate::error::ProbeRefusal {
         assumption: assumption.to_string(),
         detail: detail.to_string(),
-        version: version.to_string(),
+        context: Some(format!("Claude Code {version}")),
         note: None,
     }))
 }
@@ -1261,6 +976,7 @@ mod tests {
     fn perch_claude_bin_overrides_the_search_verbatim() {
         let host = FakeHost::new()
             .with_env("PERCH_CLAUDE_BIN", "/somewhere/claude-nightly")
+            .with_file("/somewhere/claude-nightly", "")
             .with_env("PATH", "/usr/bin")
             .with_file("/usr/bin/claude", "");
 
@@ -1327,56 +1043,6 @@ mod tests {
         );
     }
 
-    /// "The name is taken as given — no extension is stripped and none is
-    /// required", which was true everywhere but the one platform that has
-    /// extensions. Built from `PATHEXT` alone, `npm.cmd` was only ever probed
-    /// as `npm.cmd.com`, `npm.cmd.exe`, `npm.cmd.bat` and `npm.cmd.cmd`.
-    #[test]
-    fn windows_finds_a_name_that_already_carries_its_extension() {
-        let host = FakeHost::new()
-            .with_platform(Platform::Windows)
-            .with_env("PATH", "C:/npm")
-            .with_env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-            .with_file("C:/npm/npm.cmd", "");
-
-        assert_eq!(
-            on_path(&host, "npm.cmd"),
-            Some(PathBuf::from("C:/npm/npm.cmd"))
-        );
-    }
-
-    /// And the bare name is asked *last*, which is what keeps that safe: npm
-    /// ships `npm` and `npm.cmd` side by side, and the extensionless one is a
-    /// shell script Windows cannot run.
-    #[test]
-    fn windows_prefers_the_spelling_it_can_execute_over_the_bare_name() {
-        let host = FakeHost::new()
-            .with_platform(Platform::Windows)
-            .with_env("PATH", "C:/npm")
-            .with_env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-            .with_file("C:/npm/npm", "")
-            .with_file("C:/npm/npm.cmd", "");
-
-        assert_eq!(on_path(&host, "npm"), Some(PathBuf::from("C:/npm/npm.cmd")));
-    }
-
-    #[test]
-    fn every_hit_on_path_is_answered_once_each_in_paths_own_order() {
-        let host = FakeHost::new()
-            // `/first` twice, as a shell that sources two profiles leaves it.
-            .with_env("PATH", "/first:/second:/first")
-            .with_file("/first/claude", "")
-            .with_file("/second/claude", "");
-
-        assert_eq!(
-            all_on_path(&host, "claude"),
-            vec![
-                PathBuf::from("/first/claude"),
-                PathBuf::from("/second/claude")
-            ],
-        );
-    }
-
     #[test]
     fn a_directory_named_claude_is_not_the_program() {
         let host = FakeHost::new()
@@ -1426,12 +1092,8 @@ mod tests {
         let host = FakeHost::new().with_env("PATH", "/usr/bin");
 
         let error = claude_bin(&host).unwrap_err();
-        assert!(
-            matches!(&error, PerchError::ProbeRefused(refusal)
-                if refusal.assumption == assumption::INSTALLED),
-            "{error}"
-        );
-        assert!(error.to_string().contains("PERCH_CLAUDE_BIN"), "{error}");
+        assert!(matches!(&error, PerchError::NotFound(_)), "{error}");
+        assert!(error.to_string().contains("PATH"), "{error}");
     }
 
     /// What `default_store` composes rather than any one derivation it composes
@@ -1496,7 +1158,10 @@ mod tests {
 
     #[test]
     fn every_other_directory_gets_a_hash_of_its_path() {
-        let service = service_name_for(Path::new("/Users/someone/.config/perch/profiles/a"), false);
+        let service = service_name_for(
+            Path::new("/Users/someone/.config/perch/providers/claude/profiles/a"),
+            false,
+        );
         let hash = service.strip_prefix("Claude Code-credentials-").unwrap();
         assert_eq!(hash.len(), 8);
         assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -1504,8 +1169,14 @@ mod tests {
 
     #[test]
     fn two_directories_get_two_namespaces() {
-        let one = service_name_for(Path::new("/Users/someone/.config/perch/profiles/a"), false);
-        let two = service_name_for(Path::new("/Users/someone/.config/perch/profiles/b"), false);
+        let one = service_name_for(
+            Path::new("/Users/someone/.config/perch/providers/claude/profiles/a"),
+            false,
+        );
+        let two = service_name_for(
+            Path::new("/Users/someone/.config/perch/providers/claude/profiles/b"),
+            false,
+        );
         assert_ne!(one, two);
     }
 
@@ -1633,49 +1304,6 @@ mod tests {
         assert_eq!(oauth_account_block(r#"{"projects": {}}"#), None);
     }
 
-    #[test]
-    fn a_composed_block_carries_what_the_identity_knows_and_no_nulls() {
-        let block = Identity {
-            email: "someone@example.com".into(),
-            account_uuid: Some("account-uuid-1".into()),
-            organization_name: None,
-            organization_uuid: None,
-        }
-        .oauth_account_block();
-
-        assert!(block.contains(r#""emailAddress": "someone@example.com""#));
-        assert!(block.contains(r#""accountUuid": "account-uuid-1""#));
-        assert!(!block.contains("organization"), "{block}");
-    }
-
-    /// The other half of the same rule: what the Identity does know is carried
-    /// through. An Account belonging to an organization is one Claude Code
-    /// displays by that organization, so a composed block that dropped it would
-    /// leave the client naming the person and not the team they are working as.
-    #[test]
-    fn a_composed_block_carries_the_organization_when_the_identity_has_one() {
-        let block = Identity {
-            email: "someone@example.com".into(),
-            account_uuid: Some("account-uuid-1".into()),
-            organization_name: Some("Example Ltd".into()),
-            organization_uuid: Some("org-uuid-9".into()),
-        }
-        .oauth_account_block();
-
-        assert!(
-            block.contains(r#""organizationName": "Example Ltd""#),
-            "{block}"
-        );
-        assert!(
-            block.contains(r#""organizationUuid": "org-uuid-9""#),
-            "{block}"
-        );
-        assert!(
-            block.contains(r#""emailAddress": "someone@example.com""#),
-            "{block}"
-        );
-    }
-
     /// Both halves of what makes an address usable, in one place: nothing
     /// nameable in it and there is no Profile to put it in, and no `@` in it and
     /// it is a Target an Alias or a Group name could not be told from — which is
@@ -1720,31 +1348,6 @@ mod tests {
                 PathBuf::from("/Users/someone/.claude.lock"),
                 PathBuf::from("/Users/someone/.claude.json.lock"),
             ]
-        );
-    }
-
-    /// The marker a Run writes and the marker Perch corroborates are the same
-    /// file, and this is the one place both shapes are stated — so a change to
-    /// either that forgot the other would leave a Run unable to say its own
-    /// Profile is Live.
-    #[test]
-    fn the_marker_a_run_writes_is_one_this_module_reads_back() {
-        let began = DateTime::from_timestamp_millis(NOON).expect("a time");
-        let written = session_marker(4242, began);
-
-        let host = FakeHost::new().with_file("/tmp/profile/sessions/4242.json", &written);
-        assert!(
-            matches!(
-                session_start_in(&host, Path::new("/tmp/profile/sessions/4242.json")),
-                Marker::Began(NOON)
-            ),
-            "the marker a Run writes says when its session began"
-        );
-        assert_eq!(
-            session_marker_at(Path::new("/tmp/profile"), 4242),
-            PathBuf::from("/tmp/profile/sessions/4242.json"),
-            "the marker is named after the process, where the corroboration \
-             reads the pid back out of the name"
         );
     }
 
@@ -1973,32 +1576,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_machine_with_no_claude_code_is_answered_rather_than_refused() {
-        assert_eq!(
-            Installed::for_a_report(&FakeHost::new()).version(),
-            "(not installed)"
-        );
-    }
-
-    #[test]
-    fn a_machine_that_has_one_is_answered_with_what_it_says() {
-        let host = FakeHost::new()
-            .with_env("PATH", "/usr/bin")
-            .with_file("/usr/bin/claude", "")
-            .with_exec(
-                "/usr/bin/claude",
-                &["--version"],
-                Execution {
-                    status: 0,
-                    stdout: "2.1.221 (Claude Code)".to_string(),
-                    stderr: String::new(),
-                },
-            );
-
-        assert_eq!(Installed::for_a_report(&host).version(), "2.1.221");
-    }
-
     fn versions_read_by(host: &FakeHost) -> usize {
         host.effects()
             .iter()
@@ -2025,7 +1602,7 @@ mod tests {
                 let crate::error::ProbeRefusal {
                     assumption,
                     detail,
-                    version,
+                    context,
                     ..
                 } = *refusal;
                 assert_eq!(assumption, assumption::INSTALLED);
@@ -2033,7 +1610,7 @@ mod tests {
                     detail.contains("could not run `claude --version`"),
                     "{detail}"
                 );
-                assert_eq!(version, "not installed");
+                assert_eq!(context.as_deref(), Some("Claude Code not installed"));
             }
             other => panic!("an assumption failed, so it is a refusal: {other:?}"),
         }

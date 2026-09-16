@@ -14,13 +14,11 @@ use std::path::{Path, PathBuf};
 
 use crate::ask;
 use crate::commands::{export, still_ours};
-use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::{Host, Platform};
-use crate::probe::Installed;
 use crate::purge::{self, Purged};
-use crate::registry::{self, Account, Registry};
+use crate::registry::{self, Registry};
 use crate::say;
 use crate::wait;
 
@@ -61,14 +59,12 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     let perch = holdings::lock(host)?;
     let (registry, readable) = whatever_can_be_read_of_the_registry(host, &home);
 
-    let installed = Installed::for_a_report(host);
-
     let mut holding = (perch, registry);
     // The hold first, the other way round from `perch remove`: a Registry this
     // Perch may no longer write is one it may no longer act on either.
     let mut standing = wait::Standing::of()
         .and(|(perch, _): &mut (crate::lock::Held<'_>, Registry)| still_ours(perch, "purged"))
-        .and(|(_, registry)| purge::refuse_while_anything_is_running(host, registry, &installed));
+        .and(|(_, registry)| purge::refuse_while_anything_is_running(host, registry));
     // Before the offer as well as after the question, because the ask up front
     // is what stops five questions to somebody this will refuse.
     standing.establish(&mut holding)?;
@@ -93,7 +89,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
             if yes {
                 return Ok(wait::Asked::Answered(()));
             }
-            offer_an_export(host, perch, registry, &mut exported, &installed, out)?;
+            offer_an_export(host, perch, registry, &mut exported, out)?;
             Ok(match agreed(host, out)? {
                 true => wait::Asked::Answered(()),
                 false => wait::Asked::Declined,
@@ -129,7 +125,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // The Export's whereabouts is the report's *last* line, so a report that
     // failed before it leaves the Holdings gone and the file holding them named
     // nowhere. What the note adds is that there is nothing to run again.
-    report(host, out, &home, &purged, exported.as_deref()).map_err(|error| {
+    report(out, &home, &purged, exported.as_deref()).map_err(|error| {
         and_the_export(error.with_note(
             "The Purge itself finished: the Holdings are gone, and only the \
              report could not be printed.",
@@ -227,7 +223,11 @@ fn what_will_go(
         false => "",
     };
 
-    let accounts: Vec<&str> = registry.accounts.iter().map(Account::email).collect();
+    let accounts: Vec<String> = registry
+        .accounts
+        .iter()
+        .map(|account| registry.named_for_the_user(account.key()))
+        .collect();
     if accounts.is_empty() {
         // The Profiles rather than the Accounts, because a Registry naming none of
         // them is the state where that count is the only one there is — and an
@@ -278,7 +278,6 @@ fn offer_an_export(
     perch: &mut crate::lock::Held<'_>,
     registry: &mut Registry,
     landed: &mut Option<PathBuf>,
-    installed: &Installed,
     out: &mut dyn Write,
 ) -> Result<()> {
     // Nothing to put in one. `perch holdings export` refuses this too, and
@@ -317,7 +316,7 @@ fn offer_an_export(
     // hear, which is whether the Purge happened.
     let noted = |error: PerchError| error.with_note(RUN_IT_AGAIN);
     let mut destination = export::Destination::for_an_export(host, &path).map_err(noted)?;
-    let written = export::write_the_export(host, perch, registry, &mut destination, installed, out);
+    let written = export::write_the_export(host, perch, registry, &mut destination, out);
     // Read off the Destination whether the call refused or not: the bytes land
     // before the report, and a terminal that has gone away fails the report.
     *landed = destination.landed().map(Path::to_path_buf);
@@ -333,9 +332,9 @@ fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
     let on_windows = host.platform() == Platform::Windows;
     let Some(rest) = typed.strip_prefix('~') else {
         // Rooted asked of the platform the *Host* reports, and joined with `/`
-        // by hand, for `probe::rooted`'s reason: `is_absolute` and `join` read
+        // by hand, for `host::programs::rooted`'s reason: `is_absolute` and `join` read
         // the separator of the platform this build runs on.
-        if typed.is_empty() || crate::probe::rooted(typed, on_windows) {
+        if typed.is_empty() || crate::host::programs::rooted(typed, on_windows) {
             return Ok(PathBuf::from(typed));
         }
         // Resolved rather than left for whoever writes it, because the guard
@@ -382,7 +381,6 @@ fn agreed(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
 
 /// What was given back.
 fn report(
-    host: &dyn Host,
     out: &mut dyn Write,
     home: &Path,
     purged: &Purged,
@@ -435,11 +433,14 @@ fn report(
         say::line(
             out,
             &format!(
-                "{} of them had nothing in either Credential Store to delete, and {}.",
+                "{} of them had no Credential to delete.",
                 say::accounts(purged.accounts - purged.credentials),
-                credentials::a_store_that_held_nothing(host),
             ),
         )?;
+    }
+
+    for note in &purged.notes {
+        say::line(out, note)?;
     }
 
     // The sentence every *other* way out of this command says about a file this

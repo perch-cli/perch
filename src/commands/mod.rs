@@ -16,6 +16,7 @@ pub mod purge;
 pub mod relogin;
 pub mod remove;
 pub mod run;
+pub mod selection;
 pub mod service;
 pub mod status;
 pub mod switch;
@@ -130,50 +131,15 @@ pub fn read_now(
     registry: &mut crate::registry::Registry,
     about: &[String],
 ) -> crate::observe::Report {
-    let installed = crate::probe::Installed::for_the_figures(host);
     crate::observe::refresh(
         host,
         perch,
         registry,
         about,
-        &installed,
         // Somebody typed this, so a Watcher running behind it is already
         // keeping the active Account's figure and this read is left to it.
         crate::observe::Spending::BesideTheWatcher,
     )
-}
-
-/// Brings the Registry on this machine forward, once, ahead of the command.
-///
-/// Shape 1's sequence without shape 1's door, which adopts a login where there
-/// is no Registry and a migration has nothing to adopt. Here rather than inside
-/// `load`, which cannot take a lock it is already being called under.
-pub fn bring_the_registry_forward(host: &dyn Host) -> Result<()> {
-    let path = crate::holdings::registry_path(host)?;
-    let Some(was) = crate::migration::behind(host, &path) else {
-        return Ok(());
-    };
-
-    let mut perch = crate::holdings::lock(host)?;
-    // Asked again under the lock rather than trusted from outside it: between
-    // the two reads, another Perch may have brought the same file forward.
-    if crate::migration::behind(host, &path).is_none() {
-        return Ok(());
-    }
-    let renamed = host
-        .read_file(&path)
-        .map(|held| crate::migration::renames(&held))
-        .unwrap_or_default();
-    let Some(mut registry) = crate::registry::load(host)? else {
-        return Ok(());
-    };
-    // Through `save` rather than by writing what the step returned: it stamps
-    // the version, refuses what a later `load` could not read, and replaces the
-    // file in one step, so a migration that fails leaves the old shape intact.
-    crate::registry::save(host, &mut perch, &mut registry)?;
-
-    host.note(&crate::migration::brought_forward_note(was, &renamed));
-    Ok(())
 }
 
 /// The Landing settled, for the four Switch paths somebody types.
@@ -194,5 +160,14 @@ pub fn a_settled_landing(
     )? {
         crate::switch::Resolved::Settled(settled) => Ok(settled),
         crate::switch::Resolved::Stopped(never) => match never {},
+    }
+}
+
+/// What every login says about the Account it is leaving alone, when there is
+/// one to leave alone.
+pub(crate) fn leaving_the_active_account_alone(active: Option<&str>) -> String {
+    match active {
+        Some(active) => format!(" {active} stays active and its session is untouched."),
+        None => String::new(),
     }
 }

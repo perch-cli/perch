@@ -86,7 +86,7 @@ fn active_email(registry: &Registry) -> Result<String> {
         .whose()
         .and_then(|email| registry.account(email))
     {
-        Some(account) => Ok(account.email().to_string()),
+        Some(account) => Ok(account.key().to_string()),
         None => Err(registry::no_active_account(registry, "")),
     }
 }
@@ -108,7 +108,11 @@ fn render_human(
     }
 
     let labeled = column::Labeled::the_account_column();
-    labeled.write(out, "Account", &Shown::of(account.email()))?;
+    labeled.write(
+        out,
+        "Account",
+        &Shown::of(&registry.named_for_the_user(account.key())),
+    )?;
     if let Some(organization) = &account.identity.organization_name {
         labeled.write(out, "Organization", &Shown::of(organization))?;
     }
@@ -125,7 +129,7 @@ fn render_human(
             &Shown::of(&format!(
                 "{}. {}",
                 why.because(),
-                registry::how_to_repair(account.email())
+                registry::how_to_repair(account.key())
             )),
         )?;
     }

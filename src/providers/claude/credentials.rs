@@ -6,7 +6,7 @@
 //! believed, because one that already exists can be looked at.
 //!
 //! Nothing here decides *what* to write. The read-back guard and the removal of
-//! a superseded copy live in [`crate::profile`].
+//! a superseded copy live in the provider's Profile implementation.
 
 use std::path::PathBuf;
 
@@ -15,7 +15,7 @@ use zeroize::Zeroizing;
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host, HostError, Platform};
 use crate::keychain::KeychainError;
-use crate::probe::Store;
+use crate::providers::claude::probe::Store;
 
 /// One place a Credential can be kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub fn stores_for(host: &dyn Host, config: &Store) -> [CredentialStore; 2] {
 #[derive(Clone, PartialEq, Eq)]
 pub struct StoredCredential {
     pub kept_in: CredentialStore,
-    /// `Zeroizing` for [`crate::probe::Credential`]'s reason, one step earlier:
+    /// `Zeroizing` for [`crate::providers::claude::probe::Credential`]'s reason, one step earlier:
     /// the first buffer on the machine to hold a live refresh token, and so the
     /// first worth wiping when it goes.
     pub credential: Zeroizing<String>,
@@ -223,42 +223,19 @@ fn tighten_if_loose(host: &dyn Host, path: &std::path::Path) {
     }
 }
 
-/// Why a Credential Store that Perch went to empty turned out to hold nothing,
-/// said about the store this machine actually has
-/// One function rather than a copy per
-/// caller: the day a third store is added is the day the copies disagree about
-/// where a Credential might still be.
-pub fn a_store_that_held_nothing(host: &dyn Host) -> &'static str {
-    match host.platform() {
-        // The item's account name is derived from `$USER`, so a Profile written
-        // under one login name keeps its Credential where a Perch under another
-        // will not look — the one way an empty store is not an empty Account.
-        Platform::MacOs => {
-            "on macOS a keychain item is filed under `$USER`, so one written \
-             under a different login name is still there"
-        }
-        // The store is a file inside the Profile, so the Profile going is the
-        // Credential going, and there is nowhere else for one to be.
-        _ => {
-            "its Credential Store is a file inside its Profile, and there was no \
-             file there"
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::host::FakeHost;
     use crate::host::Refusing;
-    use crate::probe;
+    use crate::providers::claude::probe;
 
     const CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test"}}"#;
 
     fn profile_store(host: &FakeHost) -> Store {
         probe::store_for_profile(
             host,
-            std::path::Path::new("/Users/someone/.config/perch/profiles/a"),
+            std::path::Path::new("/Users/someone/.config/perch/providers/claude/profiles/a"),
         )
         .expect("USER is set")
     }
@@ -281,7 +258,9 @@ mod tests {
         let host = FakeHost::new();
         assert_eq!(
             profile_store(&host).credentials_file,
-            std::path::Path::new("/Users/someone/.config/perch/profiles/a/.credentials.json")
+            std::path::Path::new(
+                "/Users/someone/.config/perch/providers/claude/profiles/a/.credentials.json"
+            )
         );
     }
 
@@ -366,7 +345,7 @@ mod tests {
         let host = FakeHost::new()
             .with_platform(Platform::Other)
             .with_file_mode(
-                "/Users/someone/.config/perch/profiles/a/.credentials.json",
+                "/Users/someone/.config/perch/providers/claude/profiles/a/.credentials.json",
                 0o644,
             );
         let store = profile_store(&host);

@@ -5,7 +5,7 @@
 //! owns is the evidence and the redaction on it.
 //!
 //! Changes nothing about the machine it describes, for a Probe's reasons
-//! (ADR a-trail-is-evidence). Claude Code is launched bare rather than through a
+//! (ADR a-trail-is-evidence). The selected provider is launched bare rather than through a
 //! Run, because Reconcile, Carry and a Marker are all machinery a Triage may be
 //! investigating (ADR a-run-is-one-shot).
 
@@ -15,8 +15,9 @@ use std::path::Path;
 use crate::commands::probe::{Gathered, finding};
 use crate::error::{EXIT_OK, PerchError, Result};
 use crate::host::Host;
+use crate::providers::provider::{DiagnosticSession, Id};
 use crate::registry::{self, Active};
-use crate::{commands, holdings, probe, report, say};
+use crate::{commands, holdings, report, say};
 
 /// The playbook the agent follows, and the repository's own copy of it. One
 /// string rather than two that a test compares, because a second copy is a
@@ -28,12 +29,12 @@ const PLAYBOOK: &str = include_str!("../../.github/triage/PLAYBOOK.md");
 /// nothing that running the command again does not give back.
 const KEPT: usize = 3;
 
-/// Findings that mean Claude Code would come up at a login prompt rather than at
-/// a triage: each is a Credential, or a Claude Code, that Perch could not read.
+/// Findings that mean the selected provider would come up at a login prompt rather than at
+/// a triage: each is a Credential, or a CLI, that Perch could not read.
 /// Quoted from the Probe rather than asked again, so what withholds the launch
 /// is the same sentence the evidence carries.
 const WITHHOLDS_THE_LAUNCH: [&str; 4] = [
-    finding::CLAUDE_CODE_UNREADABLE,
+    finding::PROVIDER_UNREADABLE,
     finding::ASSUMPTION_BROKE,
     finding::KEYCHAIN_UNAVAILABLE,
     finding::STORE_UNREADABLE,
@@ -41,7 +42,7 @@ const WITHHOLDS_THE_LAUNCH: [&str; 4] = [
 
 #[derive(Debug, clap::Args)]
 pub struct TriageArgs {
-    /// The model to hand Claude Code, where its own default will not do.
+    /// The model to hand the selected provider, where its own default will not do.
     ///
     /// Passed through untouched, and nothing by default: a model named in a
     /// released binary goes out of date on somebody else's schedule.
@@ -62,7 +63,7 @@ const PROMPT: &str = "prompt.md";
 const RAW: &str = "probe.raw.txt";
 const REDACTED: &str = "probe.txt";
 
-/// Gathers, writes, and hands the terminal to Claude Code — or says why it did
+/// Gathers, writes, and hands the terminal to the selected provider — or says why it did
 /// not, which is an answer rather than a refusal: the evidence is on disk either
 /// way, and that is the half of a Triage Perch owns.
 pub fn run(host: &dyn Host, args: TriageArgs, out: &mut dyn Write) -> Result<i32> {
@@ -84,7 +85,7 @@ pub fn run(host: &dyn Host, args: TriageArgs, out: &mut dyn Write) -> Result<i32
     prune(host);
 
     let Some(withheld) = withholding(host, &gathered) else {
-        return launch(host, &args, &at, out);
+        return launch(host, gathered.preferred_provider, &args, &at, out);
     };
 
     say::line(out, &withheld)?;
@@ -123,7 +124,7 @@ fn seed(at: &Path) -> String {
     )
 }
 
-/// Why Claude Code was not launched, or `None` where it will be.
+/// Why the selected provider was not launched, or `None` where it will be.
 ///
 /// Two questions, because a broken Credential shows up two ways: as a Probe that
 /// could not read one, and as the Registry's own record that the Account it
@@ -131,23 +132,24 @@ fn seed(at: &Path) -> String {
 fn withholding(host: &dyn Host, gathered: &Gathered) -> Option<String> {
     let unusable = |said: &str| {
         format!(
-            "Claude Code will not come up as this machine stands, so Perch has not \
-             launched it. The Probe found:\n  {said}"
+            "{} will not come up as this machine stands, so Perch has not \
+             launched it. The Probe found:\n  {said}",
+            gathered.preferred_provider.adapter().name(),
         )
     };
 
-    if let Some(found) = gathered
-        .found
-        .iter()
-        .find(|found| WITHHOLDS_THE_LAUNCH.contains(&found.code))
-    {
+    if let Some(found) = gathered.found.iter().find(|found| {
+        found
+            .provider
+            .is_none_or(|provider| provider == gathered.preferred_provider)
+            && WITHHOLDS_THE_LAUNCH.contains(&found.code)
+    }) {
         return Some(unusable(&found.said));
     }
 
-    // Read and let go. A Triage brings no Registry forward and saves none: the
-    // migration is one of the things it may have been run to look at.
+    // Diagnosis must remain available when the manifest cannot be loaded.
     let registry = registry::load(host).ok().flatten()?;
-    let Active::Settled(email) = registry.active() else {
+    let Active::Settled(email) = registry.active_for(gathered.preferred_provider) else {
         return None;
     };
     let quarantine = registry.account(email)?.quarantine.as_ref()?;
@@ -175,37 +177,35 @@ fn written(at: &Path) -> Vec<String> {
     ]
 }
 
-/// Hands the terminal over, and reports what Claude Code exited with.
+/// The native provider owns the launch arguments and environment.
 ///
 /// One argument rather than the playbook itself: a `.cmd` shim on Windows runs
 /// through `cmd.exe`, which will not carry a multi-kilobyte multiline word.
-fn launch(host: &dyn Host, args: &TriageArgs, at: &Path, out: &mut dyn Write) -> Result<i32> {
-    let claude = probe::claude_bin(host)?;
-    let mut handed: Vec<String> = Vec::new();
-    if let Some(model) = &args.model {
-        handed.push("--model".to_string());
-        handed.push(model.clone());
-    }
-    handed.push(format!(
+fn launch(
+    host: &dyn Host,
+    provider: Id,
+    args: &TriageArgs,
+    at: &Path,
+    out: &mut dyn Write,
+) -> Result<i32> {
+    let prompt = format!(
         "Read the file \"{}\" and follow its instructions exactly. It is your \
          Perch triage playbook, and it starts by asking what went wrong.",
         at.join(PROMPT).display()
-    ));
-
+    );
+    let installation = provider.adapter().configured(host)?.installation(host)?;
+    let prepared = installation.diagnostic_session(&DiagnosticSession {
+        model: args.model.as_deref(),
+        prompt: &prompt,
+    })?;
     host.note(&format!(
-        "What Perch can see of this machine is at {}. Starting Claude Code, \
+        "What Perch can see of this machine is at {}. Starting {}, \
          which will ask what went wrong.",
-        at.display()
+        at.display(),
+        provider.adapter().name()
     ));
-    // Before the terminal goes, for the reason a Run flushes: what an earlier
-    // command left buffered would otherwise arrive after the session it announced.
     out.flush().map_err(say::failed)?;
-
-    let handed: Vec<&str> = handed.iter().map(String::as_str).collect();
-    // No `CLAUDE_CONFIG_DIR`: a Triage launches whatever Claude Code the machine
-    // would launch on its own, because pointing one at a Profile is a Run.
-    host.exec_interactive(&claude.to_string_lossy(), &handed, &[])
-        .map_err(|err| PerchError::Other(format!("could not launch {}: {err}", claude.display())))
+    prepared.execute(host)
 }
 
 /// Drops all but the newest [`KEPT`] runs, this one among them.

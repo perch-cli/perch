@@ -1,0 +1,566 @@
+//! A third adapter exercises shared workflows without native Claude or Codex files.
+
+use super::*;
+use crate::host::FakeHost;
+use crate::host::prelude::*;
+use std::cell::Cell;
+
+thread_local! {
+    static CATALOG: Cell<Option<&'static [Provider]>> = const { Cell::new(None) };
+}
+
+pub(super) fn catalog_override() -> Option<&'static [Provider]> {
+    CATALOG.get()
+}
+
+fn with_fixture(test: impl FnOnce()) {
+    static PROVIDERS: &[Provider] = &[
+        Provider {
+            adapter: &super::super::claude::Claude,
+        },
+        Provider {
+            adapter: &super::super::codex::Codex,
+        },
+        Provider { adapter: &Fixture },
+    ];
+    struct Reset(Option<&'static [Provider]>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            CATALOG.set(self.0);
+        }
+    }
+    let _reset = Reset(CATALOG.replace(Some(PROVIDERS)));
+    test();
+}
+
+struct Fixture;
+impl Adapter for Fixture {
+    fn id(&self) -> Id {
+        Id::Fixture
+    }
+    fn name(&self) -> &'static str {
+        "Fixture"
+    }
+    fn executable_name(&self) -> &'static str {
+        "fixture"
+    }
+    fn service_environment(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn service_probe_args(&self) -> &'static [&'static str] {
+        &["--version"]
+    }
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            live_switch: false,
+            shared_state: false,
+        }
+    }
+    fn diagnostic_session(
+        &self,
+        installation: &Installation,
+        request: &DiagnosticSession<'_>,
+    ) -> Result<PreparedLaunch<'static>> {
+        super::super::diagnostics::session(installation, request)
+    }
+    fn diagnose(&self, _host: &dyn Host, installation: Result<Installation>) -> DiagnosticReport {
+        DiagnosticReport {
+            path: installation.ok().map(|installed| installed.executable),
+            version: Ok("fixture-1".into()),
+            assumptions: vec![],
+            findings: vec![],
+        }
+    }
+    fn session_evidence(
+        &self,
+        _host: &dyn Host,
+        _directory: &std::path::Path,
+    ) -> std::result::Result<Vec<SessionEvidence>, crate::live::Unsure> {
+        Ok(vec![])
+    }
+    fn check_replacement(
+        &self,
+        _host: &dyn Host,
+        _profile: &ProfileRef,
+        _reason: Option<&'static str>,
+    ) -> Result<()> {
+        Ok(())
+    }
+    fn authenticate(&self, host: &dyn Host, _installation: &Installation) -> Result<Authenticated> {
+        Ok(Authenticated {
+            provider: Id::Fixture,
+            identity: crate::domain::Identity {
+                email: "fixture@example.com".into(),
+                account_uuid: Some("fixture-user".into()),
+                organization_uuid: None,
+                organization_name: None,
+            },
+            subject: Some(AccountIdentity::from_subject(
+                Id::Fixture,
+                "fixture-user".into(),
+                None,
+            )?),
+            plan: host.env_var("FIXTURE_PLAN"),
+            credential: zeroize::Zeroizing::new(
+                host.env_var("FIXTURE_CREDENTIAL")
+                    .unwrap_or_else(|| "fixture credential".into()),
+            ),
+            configuration: None,
+        })
+    }
+    fn install<'a>(
+        &self,
+        host: &'a dyn Host,
+        profile: &ProfileRef,
+        authenticated: &Authenticated,
+        mode: InstallMode,
+    ) -> Result<AppliedProfile<'a>> {
+        let home = profile.directory.clone();
+        let applied = if mode == InstallMode::New {
+            host.create_private_dir_all(home.parent().unwrap())
+                .map_err(|error| PerchError::file_write(&home, error))?;
+            host.create_dir_exclusive(&home)
+                .map_err(|error| PerchError::file_write(&home, error))?;
+            let rollback = home.clone();
+            AppliedProfile::reversible(move || {
+                host.remove_dir_all(&rollback)
+                    .map_err(|error| PerchError::file_write(&rollback, error))
+            })
+        } else {
+            AppliedProfile::retained()
+        };
+        let path = home.join("fixture.auth");
+        host.write_private_file(&path, &authenticated.credential)
+            .map_err(|error| PerchError::file_write(&path, error))?;
+        Ok(applied)
+    }
+    fn forget_profile_credential(
+        &self,
+        host: &dyn Host,
+        home: &std::path::Path,
+    ) -> Result<CredentialRemoval> {
+        let path = home.join("fixture.auth");
+        host.remove_file(&path)
+            .map_err(|error| PerchError::file_write(&path, error))?;
+        Ok(CredentialRemoval {
+            removed: true,
+            note: None,
+        })
+    }
+    fn snapshot(&self, host: &dyn Host, context: &ProfileContext) -> Result<ProfileBundle> {
+        let path = context.profile.directory.join("fixture.auth");
+        let content = host
+            .read_file(&path)
+            .map_err(|error| PerchError::Other(error.to_string()))?;
+        let mut bundle = ProfileBundle::default();
+        bundle.insert("fixture.auth", ArtifactPurpose::Credential, content);
+        Ok(bundle)
+    }
+    fn prepare_restore<'a>(
+        &self,
+        host: &'a dyn Host,
+        request: RestoreRequest<'a>,
+    ) -> Result<Box<dyn Restore + 'a>> {
+        if let Some(bundle) = request.bundle {
+            bundle.expect(&[("fixture.auth", ArtifactPurpose::Credential)])?;
+        }
+        let home = request.profile.directory;
+        if host.path_exists(&home) {
+            return Err(PerchError::Conflict(
+                "Fixture Profile already exists".into(),
+            ));
+        }
+        Ok(Box::new(FixtureRestore {
+            host,
+            home,
+            content: request.bundle.and_then(|bundle| bundle.get("fixture.auth")),
+            created: false,
+            committed: false,
+        }))
+    }
+    fn observe(
+        &self,
+        _host: &dyn Host,
+        _held: &mut crate::lock::Held<'_>,
+        _request: Observation<'_>,
+        still_ours: crate::lock::StillOurs<'_>,
+    ) -> std::result::Result<Vec<crate::domain::WindowUtilization>, crate::observe::Outcome> {
+        still_ours().map_err(crate::observe::Outcome::Stopped)?;
+        Ok(vec![crate::domain::WindowUtilization {
+            group: None,
+            window: "fixture-quota".into(),
+            used_percent: 17.0,
+            resets_at: None,
+        }])
+    }
+    fn prepare_launch<'a>(
+        &self,
+        _host: &'a dyn Host,
+        request: &LaunchRequest<'_>,
+    ) -> Result<PreparedLaunch<'a>> {
+        assert!(request.shared_profiles.is_empty());
+        let program = match request.kind {
+            LaunchKind::Client(installation) => {
+                installation.executable().to_string_lossy().into_owned()
+            }
+            LaunchKind::Custom(program) => program.into(),
+        };
+        Ok(PreparedLaunch {
+            program,
+            arguments: request.arguments.to_vec(),
+            environment: LaunchEnvironment::Overlay(vec![]),
+            _claim: None,
+        })
+    }
+}
+
+struct FixtureRestore<'a> {
+    host: &'a dyn Host,
+    home: PathBuf,
+    content: Option<&'a str>,
+    created: bool,
+    committed: bool,
+}
+impl Restore for FixtureRestore<'_> {
+    fn write(&mut self) -> Result<()> {
+        self.host
+            .create_private_dir_all(self.home.parent().unwrap())
+            .map_err(|error| PerchError::file_write(&self.home, error))?;
+        self.host
+            .create_dir_exclusive(&self.home)
+            .map_err(|error| PerchError::file_write(&self.home, error))?;
+        self.created = true;
+        if let Some(content) = self.content {
+            let path = self.home.join("fixture.auth");
+            self.host
+                .write_private_file(&path, content)
+                .map_err(|error| PerchError::file_write(&path, error))?;
+        }
+        Ok(())
+    }
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+    fn rollback(&mut self) -> Result<()> {
+        if !self.created || self.committed {
+            return Ok(());
+        }
+        self.created = false;
+        self.host
+            .remove_dir_all(&self.home)
+            .map_err(|error| PerchError::file_write(&self.home, error))
+    }
+}
+impl Drop for FixtureRestore<'_> {
+    fn drop(&mut self) {
+        if self.created && !self.committed {
+            let _ = self.host.remove_dir_all(&self.home);
+        }
+    }
+}
+
+fn fixture_export() -> crate::export::Export {
+    let mut export = crate::export::Export {
+        version: crate::export::CURRENT_VERSION,
+        registry: crate::registry::Registry::default(),
+        profiles: Default::default(),
+    };
+    for user in ["first", "second"] {
+        let subject = AccountIdentity::from_subject(Id::Fixture, user.into(), None).unwrap();
+        let key = subject.key.clone();
+        export.registry.upsert(crate::registry::Account {
+            storage_key: None,
+            provider: Id::Fixture,
+            provider_identity: Some(subject),
+            identity: crate::domain::Identity {
+                email: format!("{user}@example.com"),
+                account_uuid: Some(user.into()),
+                organization_uuid: None,
+                organization_name: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+        let mut bundle = ProfileBundle::default();
+        bundle.insert(
+            "fixture.auth",
+            ArtifactPurpose::Credential,
+            format!("{user} credential"),
+        );
+        export.profiles.insert(key, bundle);
+    }
+    export
+}
+
+#[test]
+fn third_provider_restore_commits_only_after_metadata_and_rolls_back_every_profile_on_failure() {
+    with_fixture(|| {
+        let export = fixture_export();
+        for failed in [false, true] {
+            let host = FakeHost::new();
+            let profiles: Vec<_> = export
+                .registry
+                .accounts
+                .iter()
+                .map(|account| account.profile_dir(&host).unwrap())
+                .collect();
+            let (_, _, fresh) = crate::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+            let mut saved = false;
+            let result = crate::import::place(&host, &export, &fresh, || {
+                assert!(
+                    profiles
+                        .iter()
+                        .all(|path| host.is_file(&path.join("fixture.auth")))
+                );
+                if failed {
+                    return Err(PerchError::Other("fixture metadata failure".into()));
+                }
+                let mut held = crate::holdings::lock(&host)?;
+                let mut registry = export.registry.clone();
+                crate::registry::save(&host, &mut held, &mut registry)?;
+                saved = true;
+                Ok(())
+            });
+            assert_eq!(result.is_ok(), !failed);
+            assert_eq!(saved, !failed);
+            assert!(profiles.iter().all(|path| host.path_exists(path) != failed));
+            if failed {
+                assert!(crate::registry::load(&host).unwrap().is_none());
+            } else {
+                let restored = crate::registry::load(&host).unwrap().unwrap();
+                let snapshot = crate::export::gather(&host, &restored).unwrap();
+                assert_eq!(snapshot.profiles, export.profiles);
+            }
+        }
+    });
+}
+
+#[test]
+fn third_provider_restore_validates_every_bundle_before_any_profile_write() {
+    with_fixture(|| {
+        let mut export = fixture_export();
+        let last = export.registry.accounts.last().unwrap().key().to_string();
+        export.profiles.get_mut(&last).unwrap().insert(
+            "unknown",
+            ArtifactPurpose::Configuration,
+            "fixture".into(),
+        );
+        let host = FakeHost::new();
+        let (_, _, fresh) = crate::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+        let result = crate::import::place(&host, &export, &fresh, || {
+            panic!("invalid restore saved metadata")
+        });
+        assert!(result.is_err());
+        assert!(host.effects().is_empty(), "{:?}", host.effects());
+    });
+}
+
+#[test]
+fn third_provider_restore_rolls_back_an_earlier_profile_and_the_partial_failing_profile() {
+    with_fixture(|| {
+        let export = fixture_export();
+        let host = FakeHost::new();
+        let profiles: Vec<_> = export
+            .registry
+            .accounts
+            .iter()
+            .map(|account| account.profile_dir(&host).unwrap())
+            .collect();
+        let host = host.with_a_path_refusing(
+            profiles[1].join("fixture.auth"),
+            crate::host::Refusing::Write,
+            "fixture write failure",
+        );
+        let (_, _, fresh) = crate::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+        let result = crate::import::place(&host, &export, &fresh, || {
+            panic!("partial restore saved metadata")
+        });
+        assert!(result.is_err());
+        assert!(profiles.iter().all(|path| !host.path_exists(path)));
+    });
+}
+
+#[test]
+fn a_third_provider_uses_shared_commands_configuration_and_observation() {
+    with_fixture(|| {
+        use crate::commands::{add, config, list, run, selection::Selection};
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/fixture", "")
+            .with_login(|_, _| 0);
+        assert_eq!(Id::parse("fixture").unwrap(), Id::Fixture);
+        add::run(
+            &host,
+            add::AddArgs {
+                provider: Selection {
+                    provider: Some(Id::Fixture),
+                    ..Default::default()
+                },
+                group: Some("shared".into()),
+                alias: Some("third".into()),
+                no_group: false,
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        config::run(
+            &host,
+            config::ConfigCommand::Set {
+                words: vec!["--global".into(), "run-provider".into(), "fixture".into()],
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let mut registry = crate::registry::load(&host).unwrap().unwrap();
+        let account = registry.accounts[0].clone();
+        assert_eq!(account.provider(), Id::Fixture);
+        assert_eq!(registry.run_provider, Id::Fixture);
+        assert!(
+            account
+                .profile_dir(&host)
+                .unwrap()
+                .to_string_lossy()
+                .contains("providers/fixture/")
+        );
+        assert_eq!(
+            run::run(
+                &host,
+                run::RunArgs {
+                    provider: Selection::default(),
+                    target: "third".into(),
+                    command: vec!["--version".into()]
+                },
+                &mut Vec::new()
+            )
+            .unwrap(),
+            0
+        );
+        let mut output = Vec::new();
+        list::run(
+            &host,
+            list::ListArgs {
+                scope: Some("shared".into()),
+                refresh: true,
+                json: true,
+            },
+            &mut output,
+        )
+        .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fixture-quota"), "{output}");
+        assert!(output.contains("17.0"), "{output}");
+        let exported = crate::export::gather(&host, &registry).unwrap();
+        assert!(
+            exported
+                .profile_for(account.key())
+                .unwrap()
+                .has_credentials()
+        );
+        registry.select_provider(Id::Fixture);
+        let settled = crate::registry::nothing_in_flight(&registry).unwrap();
+        let error = match crate::round::permitted(&registry, &settled) {
+            Err(error) => error,
+            Ok(_) => panic!("unsupported Watcher admitted"),
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("fixture does not support automatic live Switching"),
+            "{error}"
+        );
+    });
+    assert_eq!(catalog().len(), 2);
+}
+
+#[test]
+fn third_provider_repair_keeps_the_fresh_credential_when_metadata_cannot_be_saved() {
+    with_fixture(|| {
+        use crate::commands::{add, relogin, selection::Selection};
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/fixture", "");
+        add::run(
+            &host,
+            add::AddArgs {
+                provider: Selection {
+                    provider: Some(Id::Fixture),
+                    ..Default::default()
+                },
+                group: None,
+                alias: Some("third".into()),
+                no_group: true,
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let registry = crate::registry::load(&host).unwrap().unwrap();
+        let account = &registry.accounts[0];
+        let credential = account.profile_dir(&host).unwrap().join("fixture.auth");
+        let manifest = crate::holdings::registry_path(&host).unwrap();
+        let original = host.read_file(&manifest).unwrap();
+        let host = host
+            .with_env("FIXTURE_CREDENTIAL", "renewed fixture credential")
+            .with_env("FIXTURE_PLAN", "renewed-plan")
+            .with_a_path_refusing(
+                &manifest,
+                crate::host::Refusing::Write,
+                "fixture metadata failure",
+            );
+        let result = relogin::run(
+            &host,
+            relogin::ReloginArgs {
+                target: "third".into(),
+            },
+            &mut Vec::new(),
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            host.read_file(&credential).unwrap(),
+            "renewed fixture credential"
+        );
+        assert_eq!(host.read_file(&manifest).unwrap(), original);
+    });
+}
+
+#[test]
+fn rollback_reports_every_failed_cleanup_without_claiming_profiles_were_removed() {
+    with_fixture(|| {
+        let export = fixture_export();
+        let mut host = FakeHost::new();
+        let profiles: Vec<_> = export
+            .registry
+            .accounts
+            .iter()
+            .map(|account| account.profile_dir(&host).unwrap())
+            .collect();
+        for path in &profiles {
+            host = host.with_a_path_refusing(
+                path,
+                crate::host::Refusing::Delete,
+                "fixture cleanup failure",
+            );
+        }
+        let (_, _, fresh) = crate::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+        let error = crate::import::place(&host, &export, &fresh, || {
+            Err(PerchError::Conflict("fixture metadata failure".into()))
+        })
+        .unwrap_err();
+        assert_eq!(error.exit_code(), crate::error::EXIT_CONFLICT);
+        let said = error.to_string();
+        assert!(said.contains("fixture metadata failure"), "{said}");
+        assert!(said.contains("Rollback incomplete"), "{said}");
+        assert!(
+            !said.contains("Profiles have been taken back out"),
+            "{said}"
+        );
+        for path in &profiles {
+            assert!(said.contains(&path.to_string_lossy().to_string()), "{said}");
+            assert!(host.is_file(&path.join("fixture.auth")));
+        }
+        assert!(!said.contains("first credential"));
+        assert!(!said.contains("second credential"));
+    });
+}

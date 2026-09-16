@@ -9,11 +9,12 @@
 //! Two rules, and everything here is one of them: what crosses is decided by a
 //! denylist read at Run time, and it crosses by link or the Run is refused.
 
+use super::profile;
 use std::path::{Path, PathBuf};
 
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host, HostError, Link, Platform};
-use crate::{probe, profile};
+use crate::providers::claude::probe;
 
 /// The entries that stay behind, for the two reasons there are to hold one
 /// back: the first two are the Account rather than the person, and the last two
@@ -23,7 +24,7 @@ use crate::{probe, profile};
 pub const HELD_BACK: [&str; 4] = [
     probe::CREDENTIALS_FILE,
     probe::IDENTITY_FILE,
-    probe::SESSIONS,
+    crate::providers::sessions::SESSIONS,
     probe::REFRESH_LOCK,
 ];
 
@@ -316,7 +317,7 @@ mod tests {
     #[test]
     fn a_share_another_run_established_first_is_not_a_refusal() {
         let target = Path::new("/Users/someone/.claude/CLAUDE.md");
-        let at = Path::new("/Users/someone/.config/perch/profiles/one/CLAUDE.md");
+        let at = Path::new("/Users/someone/.config/perch/providers/claude/profiles/one/CLAUDE.md");
         let host = crate::host::FakeHost::new()
             .with_file(target, "remember this")
             .with_link(Link::Symbolic, target, at);
@@ -329,7 +330,7 @@ mod tests {
     #[test]
     fn a_link_to_somewhere_else_in_the_way_is_still_refused() {
         let target = Path::new("/Users/someone/.claude/CLAUDE.md");
-        let at = Path::new("/Users/someone/.config/perch/profiles/one/CLAUDE.md");
+        let at = Path::new("/Users/someone/.config/perch/providers/claude/profiles/one/CLAUDE.md");
         let host = crate::host::FakeHost::new()
             .with_file(target, "remember this")
             .with_file("/Users/someone/elsewhere.md", "not it")
@@ -396,3 +397,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "reconcile/behavior.rs"]
+mod behavior;

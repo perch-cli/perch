@@ -1,0 +1,95 @@
+{
+  "format": "perch-config",
+  "version": 9,
+  "global": {
+    "run": {
+      "default_provider": "claude",
+      "fallback": "installed"
+    },
+    "watcher": {
+      "paused": false
+    }
+  },
+  "providers": {
+    "claude": {
+      "enabled": true,
+      "cli_path": null,
+      "options": {}
+    },
+    "codex": {
+      "enabled": true,
+      "cli_path": null,
+      "options": {}
+    }
+  },
+  "scope_defaults": {
+    "cycle": {
+      "strategy": "most-headroom"
+    },
+    "watcher": {
+      "threshold_percent": 80,
+      "margin_percent": 10
+    }
+  },
+  "groups": {
+    "work": {
+      "cycle": {
+        "strategy": "soonest-reset"
+      },
+      "providers": {
+        "claude": {
+          "watcher": {
+            "enabled": true
+          },
+          "options": {}
+        },
+        "codex": {
+          "watcher": {
+            "enabled": false,
+            "threshold_percent": 75
+          },
+          "options": {}
+        }
+      },
+      "id": "g1"
+    }
+  },
+  "ungrouped": {
+    "interchangeable": false,
+    "providers": {}
+  },
+  "accounts": {
+    "person@example.com": {
+      "provider": "claude",
+      "identity": {
+        "email": "person@example.com",
+        "account_uuid": "example-claude-subject",
+        "organization_uuid": "example-claude-workspace",
+        "organization_name": "Work"
+      },
+      "alias": "claude-work",
+      "group": "work",
+      "enabled": true,
+      "position": 0
+    },
+    "codex:604b6d80890a2da85256a78ec43d7423a788e9f5362b9eb80cb88909569cbefa": {
+      "provider": "codex",
+      "identity": {
+        "email": "person@example.com",
+        "account_uuid": "example-openai-subject",
+        "organization_uuid": "example-openai-workspace",
+        "organization_name": "Work"
+      },
+      "provider_identity": {
+        "user_id": "example-openai-subject",
+        "workspace_id": "example-openai-workspace",
+        "key": "codex:604b6d80890a2da85256a78ec43d7423a788e9f5362b9eb80cb88909569cbefa"
+      },
+      "alias": "codex-work",
+      "group": "work",
+      "enabled": true,
+      "position": 1
+    }
+  },
+  "next_group_id": 1
+}

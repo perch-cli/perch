@@ -25,6 +25,12 @@ Utilization   5-hour    12%  (as of 4m ago)
               7-day     40%  (as of 4m ago)
 ```
 
+Experimental Codex support adds separate subscription-backed Accounts and isolated
+Runs: `perch add --codex --alias personal --no-group`, then
+`perch run --codex personal`. Set the Run preference with
+`perch config set --global run-provider codex`. Codex live Switching and
+unattended Cycling are not available yet.
+
 ## Install
 
 Perch is pre-1.0: the command line may still change between releases, and the
@@ -123,7 +129,7 @@ Account in one terminal without changing which is active.
 | `perch holdings export` / `import` | back up everything Perch holds to one encrypted file, and put it back | [guide](pages/src/content/docs/backup.md) |
 | `perch holdings purge` | give the machine back the state it had before Perch | [guide](pages/src/content/docs/backup.md#giving-the-machine-back) |
 | `perch probe` | everything Perch can see of this machine, redacted and ready to paste | [guide](pages/src/content/docs/troubleshooting.md) |
-| `perch triage` | hand that to Claude Code, and let it investigate and help you file the issue | [guide](pages/src/content/docs/troubleshooting.md#letting-an-agent-do-it) |
+| `perch triage` | hand that to your preferred provider to investigate and help you file the issue | [guide](pages/src/content/docs/troubleshooting.md#letting-an-agent-do-it) |
 | `perch upgrade` | replace this Perch with a newer Release, through the channel that installed it | [guide](pages/src/content/docs/installing.md#upgrading) |
 | `perch version` | which Perch is installed, and a line more when a newer Release exists | [guide](pages/src/content/docs/installing.md#being-told-about-new-releases) |
 

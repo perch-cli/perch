@@ -90,7 +90,7 @@ terminal acts on moves the column and colors the row.
 
 Two names differing only in case are one name, so `work` and `Work` collide the
 way `work` and `work` do. Three words are refused outright, and
-[Configuration](configuration.md#scopes) says why: `ungrouped` and `none`, which
+[Configuration](configuration.md#scope-policy-and-inheritance) says why: `ungrouped` and `none`, which
 address the Accounts in no Group, and `global`, which is what people reach for
 when they mean every Scope at once.
 

@@ -6,15 +6,12 @@
 //! says who logged in, and nothing about whether that was who was wanted — the
 //! two callers differ on exactly that.
 
-use std::io::Write;
-
+use super::profile;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
 use crate::live;
-use crate::probe::{self, Credential, Identity, Installed};
-use crate::profile;
-use crate::say;
+use crate::providers::claude::probe::{self, Credential, Identity, Installed};
 use zeroize::Zeroizing;
 
 /// What a login left behind, taken out of the directory it ran in.
@@ -29,17 +26,12 @@ pub struct Produced {
     pub identity_json: Zeroizing<String>,
 }
 
-/// Launches a login and returns what it produced.
-///
-/// `purpose` is the line said before the browser opens: why Perch is asking, and
-/// which Account it is leaving alone. The directory the login runs in is removed
-/// whether it worked or not.
-pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Produced> {
+pub(crate) fn authenticate(host: &dyn Host, claude: &std::path::Path) -> Result<Produced> {
     // Everything that can fail without leaving anything behind happens first,
     // so the directory is made only once nothing before it can refuse.
-    let installed = Installed::for_a_refusal(host)?;
-    let claude = probe::claude_bin(host)?;
-    let dir = holdings::pending_login_dir(host, host.now())?;
+    let installed = Installed::Said(probe::version_at(host, claude)?);
+    let dir =
+        holdings::pending_login_dir(crate::providers::provider::Id::Claude, host, host.now())?;
     let store = probe::store_for_profile(host, &dir)?;
 
     // The login writes its Credential in here, so this is as much a place a
@@ -50,34 +42,22 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // Perch's own pid: Perch waits on this login as a Run waits on its client,
     // and a `claude` on an OAuth prompt has no session of its own to mark
     // (ADR a-run-is-one-shot). `profile::discard` takes it with the directory.
-    let live = probe::claim(host, &dir);
+    let live = crate::providers::sessions::claim(host, &dir);
 
     // Every way out from here takes the directory back out again, which a `?`
     // in the middle would quietly stop doing: one left by a failure is one
     // `reap_abandoned` will not tidy for thirty minutes.
-    let produced =
-        live.and_then(|_live| run_the_login(host, out, purpose, &claude, &store, &installed));
+    let produced = live.and_then(|_live| run_the_login(host, claude, &store, &installed));
     profile::discard(host, &store);
     produced
 }
 
 fn run_the_login(
     host: &dyn Host,
-    out: &mut dyn Write,
-    purpose: &str,
     claude: &std::path::Path,
     store: &probe::Store,
     installed: &Installed,
 ) -> Result<Produced> {
-    // Neither narrates a step Perch took: one is what the browser about to open
-    // is for, the other an instruction somebody has to follow before the command
-    // can finish (ADR perch-says-what-it-did).
-    say::line(out, purpose)?;
-    say::line(
-        out,
-        "Quit Claude Code when the login is done to come back here.\n",
-    )?;
-
     let status = host
         .exec_interactive(
             &claude.to_string_lossy(),
@@ -144,7 +124,8 @@ const ABANDONED_AFTER_MINUTES: i64 = 30;
 /// somebody could plausibly still be in, and nothing is running against it.
 /// Silent and best-effort — this is tidying on the way to what was asked for.
 pub fn reap_abandoned(host: &dyn Host) {
-    let Ok(pending) = holdings::pending_logins_dir(host) else {
+    let Ok(pending) = holdings::pending_logins_dir(crate::providers::provider::Id::Claude, host)
+    else {
         return;
     };
     // Absent is the ordinary case: no login has ever been run here.
@@ -166,7 +147,15 @@ pub fn reap_abandoned(host: &dyn Host) {
         // Age is evidence and not proof, so the same evidence every other write
         // asks for (ADR a-profile-is-live-by-evidence): a login somebody is in
         // the middle of is a Live Profile, and nothing reaps one however old.
-        if live::ask(host, &[live::Place::at(&dir)]).counts_as_live() {
+        if live::ask(
+            host,
+            &[live::Place::at(
+                crate::providers::provider::Id::Claude,
+                &dir,
+            )],
+        )
+        .counts_as_live()
+        {
             continue;
         }
         if let Ok(store) = probe::store_for_profile(host, &dir) {
@@ -175,70 +164,33 @@ pub fn reap_abandoned(host: &dyn Host) {
     }
 }
 
-/// What every login says about the Account it is leaving alone, when there is
-/// one to leave alone.
-pub fn leaving_the_active_account_alone(active: Option<&str>) -> String {
-    match active {
-        Some(active) => format!(" {active} stays active and its session is untouched."),
-        None => String::new(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::host::prelude::*;
-    use crate::host::{Execution, FakeHost, fake::Effect};
-
-    /// A writer that is not there — the ordinary closed pipe.
-    struct Closed;
-
-    impl Write for Closed {
-        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "the pipe closed",
-            ))
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn a_machine_with_claude_code() -> FakeHost {
-        FakeHost::new()
-            .with_env("PATH", "/usr/bin")
-            .with_file("/usr/bin/claude", "")
-            .with_exec(
-                "/usr/bin/claude",
-                &["--version"],
-                Execution {
-                    status: 0,
-                    stdout: "2.1.221 (Claude Code)\n".to_string(),
-                    stderr: String::new(),
-                },
-            )
-    }
-
-    /// A closed pipe is the failure that needs no arranging: it lands between
-    /// making the directory and discarding it.
-    #[test]
-    fn a_login_that_could_not_be_announced_takes_its_directory_back_out() {
-        let host = a_machine_with_claude_code();
-        let dir = holdings::pending_login_dir(&host, host.now()).expect("home is known");
-
-        assert!(
-            perform(&host, &mut Closed, "why Perch is asking").is_err(),
-            "the line before the browser could not be written"
-        );
-
-        assert!(
-            host.effects()
-                .iter()
-                .any(|effect| matches!(effect, Effect::RemovedDir(at) if at == &dir)),
-            "the directory it made for the login is gone again: {:?}",
-            host.effects()
-        );
-    }
+pub(super) fn discover(
+    host: &dyn Host,
+    executable: &std::path::Path,
+) -> Result<Option<super::super::provider::Discovered>> {
+    let findings = match probe::probe_at(
+        host,
+        crate::providers::claude::layout::default_profile(host)?,
+        executable,
+    )? {
+        probe::Verdict::Recognized(findings) => findings,
+        probe::Verdict::NoLogin { .. } => return Ok(None),
+    };
+    let configuration = host
+        .read_file(&findings.store.identity_file)
+        .ok()
+        .map(Zeroizing::new)
+        .and_then(|contents| probe::oauth_account_block(&contents).map(probe::fresh_identity_file))
+        .map(Zeroizing::new);
+    Ok(Some(super::super::provider::Discovered {
+        version: findings.version,
+        account: super::super::provider::Authenticated {
+            provider: super::super::provider::Id::Claude,
+            subject: Some(super::identity::subject(&findings.identity)?),
+            identity: findings.identity,
+            plan: findings.credential.subscription_type.clone(),
+            credential: Zeroizing::new(findings.credential.as_str().to_string()),
+            configuration,
+        },
+    }))
 }

@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- [**breaking**] Experimental Codex Accounts: `perch add --codex`, isolated
+  `perch run --codex`, relogin, removal, and on-demand Utilization through the
+  Codex app-server. Personal and company Workspaces can share an email and use
+  separate Aliases. Codex live Switching and unattended Cycling remain unavailable.
+- [**breaking**] Run accepts `--claude` and `--codex`. Its global `run-provider`
+  preference defaults to `claude`, with fallback to the other installed CLI.
+  Explicit selection, Account mismatch, authentication, and child failure never
+  trigger fallback. Custom commands keep the named Account's Profile.
+- [**breaking**] Account JSON includes `id`, `provider`, and `workspace`. Switch accepts
+  provider flags and refuses an ambiguous Cycle when Codex Accounts are held.
+
+### Changed
+
+- Failed Add, adoption, and Import operations report rollback failures instead of
+  claiming every Profile was removed. Cleanup attempts every owned resource and
+  preserves the original failure; repaired Credentials remain in place.
+- Run shares client state only with providers that support it. Provider discovery,
+  configuration, and shared workflows resolve through one catalog interface,
+  exercised with a third provider in isolated tests.
+- [**breaking**] Export and Import refuse Profile bundles exceeding 16 MiB of
+  content, 256 artifacts, or 1024 bytes per artifact name. Oversized bundles are
+  refused before encryption or Profile restoration.
+- Codex Utilization reads honor cancellation and renew the Registry lock while
+  waiting for app-server reads or writes. Cancellation, lost access, and deadlines
+  stop the child and release the Profile while retaining cached Utilization.
+- Diagnostic reports use one provider installation and version result. Interactive
+  diagnostic sessions keep that installation if provider settings change.
+- Discovery and Utilization reads keep their selected provider configuration.
+  Claude defers its version check without resolving a different executable;
+  Codex checks its installation before claiming a Profile for observation.
+- Add and Relogin keep one selected provider installation through authentication,
+  including Claude’s version check, when provider configuration changes.
+- Run keeps the provider installation selected at the start of the operation,
+  even if its configured CLI path or enabled setting changes during the lock
+  wait. Client and custom-command launches share a typed provider contract.
+- [**breaking**] Refresh results identify Accounts with `id` instead of storing a
+  stable Account key in a field named `email`.
+- Claude login and discovery enroll Accounts by stable subject and Workspace.
+  Relogin updates a changed email without moving the Profile; repeated enrollment
+  of the same identity is refused, and missing native account UUIDs are rejected.
+- Claude usage attribution checks the remote account and organization IDs for
+  stable Accounts. Matching email alone, missing IDs, and response drift cannot
+  authorize a quota read for a stable identity.
+- Claude Default matching, capture, and backup attribution recognize stable
+  subjects and Workspaces independently of email. A stable Account with no
+  readable live identity cannot capture or export the live Credential as its own.
+- Run refuses to launch when the selected Account’s provider or identity changes
+  while it waits for the Registry lock.
+- [**breaking**] Registry layout 9 and Export version 5 allow provider identities
+  without a Workspace. Codex still requires an authenticated Workspace. Older
+  layouts are refused with their files preserved.
+
+- Claude credential storage, native format recognition, and native lock assumptions
+  are private provider implementation details, accessed through the shared contract.
+
+- Managed Profile and pending-login paths explicitly identify their provider.
+  Claude’s native Default selection and fallback identity serialization live
+  inside its private adapter; shared Accounts expose provider-neutral Profiles.
+
+- Watcher installation and upgrade refresh resolve every enabled provider,
+  honoring configured CLI paths and carrying provider-declared config directories.
+  An unusable CLI does not remove another provider's executable from the service.
+
+- [**breaking**] Probe JSON reports native versions and assumptions under
+  `providers` instead of `claude_code` and the top-level `assumptions`. Native
+  findings carry their provider, and `holdings.active` is a provider-keyed map.
+  `provider-unreadable` replaces
+  `claude-code-unreadable`.
+- Triage uses the configured Run provider preference and prepares its session
+  through that provider. Probe includes installed providers and providers with
+  held Accounts, alongside the preferred provider.
+
+- Liveness checks use each Profile’s provider. Unreadable session evidence keeps
+  its refusal status without attributing another provider’s CLI version.
+
+- Purge reports credential-removal details from each provider, including Claude’s
+  platform-specific empty-store explanation.
+
+- [**breaking**] The prelaunch reset requires a fresh configuration. Registry
+  layout version 9 uses one `config.json` for Accounts, Groups, Aliases, provider
+  installation settings, and global/Scope policies. Provider runtime and native
+  Profiles live under `providers/<provider>/`. Old configurations are refused
+  with reset instructions; migrations are removed.
+- [**breaking**] Export version 5 stores opaque provider Profile bundles. Older
+  backups must be opened with the Perch build that wrote them.
+- [**breaking**] Provider selectors accept `--provider <name>` as well as the
+  Claude and Codex shorthands. Missing native CLIs exit with not-found status 12.
+- [**breaking**] Configuration supports Scope defaults, provider overrides,
+  `inherit` for policy overrides, `run-fallback`, and global `watcher-paused`.
+  Watcher grants apply to an explicit Scope/provider pair. `preferred-workload`
+  replaces `prefer-fable`; native policy options use `option.<name>`.
+- [**breaking**] Watcher checks visit every configured provider independently.
+  Mixed-provider output identifies the provider. A failed check is returned after
+  the other providers are checked; otherwise the greatest round exit code is
+  returned. Unsupported Codex live Switching does not prevent Claude rounds.
+- Listings identify Codex Workspaces. Mixed Groups are listed without a joint
+  quota ranking, and Claude Cycling and Watcher candidates exclude Codex.
+
+
 ## [0.3.8](https://github.com/perch-cli/perch/compare/v0.3.7...v0.3.8) - 2026-09-02
 ### Fixed
 

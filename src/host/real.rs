@@ -343,6 +343,12 @@ impl Clock for RealHost {
 }
 
 impl Environment for RealHost {
+    fn inherited_env(&self) -> Vec<(String, String)> {
+        std::env::vars_os()
+            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+            .collect()
+    }
+
     fn home_dir(&self) -> Result<PathBuf, HostError> {
         home_from(HOME_VARIABLE, std::env::var_os(HOME_VARIABLE))
     }
@@ -691,6 +697,17 @@ impl Keys for RealHost {
 }
 
 impl Processes for RealHost {
+    fn rpc(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+        requests: &[String],
+        control: super::RpcControl<'_>,
+    ) -> Result<Vec<String>, HostError> {
+        rpc_exchange(program, args, env, requests, control)
+    }
+
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
         Ok(run(Path::new(program), args, None)?)
     }
@@ -704,70 +721,22 @@ impl Processes for RealHost {
         Ok(run_under(Path::new(program), args, None, Some(env))?)
     }
 
+    fn exec_interactive_under(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<i32, HostError> {
+        interactive(program, args, env, true)
+    }
+
     fn exec_interactive(
         &self,
         program: &str,
         args: &[&str],
         env: &[(&str, &str)],
     ) -> Result<i32, HostError> {
-        let mut command = Command::new(program);
-        command
-            .args(args)
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-        for (key, value) in env {
-            command.env(key, value);
-        }
-        // Ctrl-C reaches every process in the foreground group, and belongs to
-        // the child while it runs. The child must not *inherit* the ignoring:
-        // `SIG_IGN` survives `exec`, so it would never see Ctrl-C at all.
-        #[cfg(unix)]
-        let guarding = {
-            use std::os::unix::process::CommandExt;
-
-            // SAFETY: `signal` is async-signal-safe and is the whole of what
-            // this closure calls, which is the rule between fork and exec.
-            unsafe {
-                command.pre_exec(|| {
-                    libc::signal(libc::SIGINT, libc::SIG_DFL);
-                    libc::signal(libc::SIGQUIT, libc::SIG_DFL);
-                    Ok(())
-                });
-            }
-
-            // SAFETY: replacing this process's own dispositions with `SIG_IGN`,
-            // keeping what was there to put back below.
-            let guarding = [libc::SIGINT, libc::SIGQUIT];
-            (
-                guarding,
-                guarding.map(|signal| unsafe { libc::signal(signal, libc::SIG_IGN) }),
-            )
-        };
-
-        // Named here for the reason `run` names it: `Command::status`'s error
-        // carries no path either, and a `claude` uninstalled between being
-        // found and being launched is a real state.
-        let ran = command.status();
-
-        // However the launch ended, including the one that never started.
-        // `SIG_ERR` is not a disposition but what `signal` answers when it could
-        // not install one, so handing it back installs an invalid handler.
-        #[cfg(unix)]
-        // SAFETY: restoring exactly the dispositions `signal` reported above.
-        unsafe {
-            let (guarding, previously) = guarding;
-            for (signal, was) in guarding.into_iter().zip(previously) {
-                if was != libc::SIG_ERR {
-                    libc::signal(signal, was);
-                }
-            }
-        }
-
-        let status = ran.map_err(|err| {
-            std::io::Error::new(err.kind(), format!("could not run {program}: {err}"))
-        })?;
-        Ok(ended_as(status))
+        interactive(program, args, env, false)
     }
 
     fn process_id(&self) -> u32 {
@@ -1962,6 +1931,196 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
         }
     }
     Ok(())
+}
+
+fn rpc_exchange(
+    program: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+    requests: &[String],
+    control: super::RpcControl<'_>,
+) -> Result<Vec<String>, HostError> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::time::Instant;
+    let deadline = Instant::now()
+        .checked_add(control.timeout)
+        .ok_or_else(|| HostError::Other("RPC deadline is out of range".into()))?;
+    let mut checkpoint = || {
+        (control.checkpoint)()?;
+        if Instant::now() >= deadline {
+            return Err(HostError::Other("RPC deadline expired".into()));
+        }
+        Ok(())
+    };
+    checkpoint()?;
+    let mut child = Command::new(program)
+        .args(args)
+        .env_clear()
+        .envs(env.iter().copied())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let result = (|| {
+        let mut input = child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("RPC stdin unavailable"))?;
+        let output = child
+            .stdout
+            .take()
+            .ok_or_else(|| std::io::Error::other("RPC stdout unavailable"))?;
+        let (sender, receiver) = std::sync::mpsc::sync_channel(16);
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(output);
+            loop {
+                let mut line = Vec::new();
+                let read = std::io::Read::take(&mut reader, 1_048_577).read_until(b'\n', &mut line);
+                let Ok(count) = read else { break };
+                if count == 0 {
+                    break;
+                }
+                if count > 1_048_576 {
+                    let _ = sender.send(Err(()));
+                    break;
+                }
+                let line = String::from_utf8(line).map_err(|_| ());
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let (write_request, writes) = std::sync::mpsc::channel::<String>();
+        let (written, completions) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            for request in writes {
+                let result = writeln!(input, "{request}").and_then(|_| input.flush());
+                let failed = result.is_err();
+                if written.send(result).is_err() || failed {
+                    break;
+                }
+            }
+        });
+        let mut replies = Vec::new();
+        let mut received = 0usize;
+        for request in requests {
+            let value: serde_json::Value =
+                serde_json::from_str(request).map_err(std::io::Error::other)?;
+            checkpoint()?;
+            write_request
+                .send(request.clone())
+                .map_err(|_| HostError::Other("RPC stdin closed".into()))?;
+            rpc_receive(&completions, deadline, &mut checkpoint)??;
+            let Some(id) = value.get("id") else { continue };
+            loop {
+                let line = rpc_receive(&receiver, deadline, &mut checkpoint)?.map_err(|_| {
+                    std::io::Error::other("RPC child returned an oversized or invalid line")
+                })?;
+                received += line.len();
+                if received > 2_097_152 {
+                    return Err(HostError::Other("RPC response limit exceeded".into()));
+                }
+                let reply: serde_json::Value = serde_json::from_str(&line)
+                    .map_err(|_| std::io::Error::other("RPC child returned invalid JSON"))?;
+                if reply.get("id") == Some(id) {
+                    replies.push(line);
+                    break;
+                }
+            }
+        }
+        checkpoint()?;
+        Ok(replies)
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    result
+}
+
+fn rpc_receive<T>(
+    receiver: &std::sync::mpsc::Receiver<T>,
+    deadline: std::time::Instant,
+    checkpoint: &mut dyn FnMut() -> Result<(), HostError>,
+) -> Result<T, HostError> {
+    loop {
+        checkpoint()?;
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match receiver.recv_timeout(remaining.min(std::time::Duration::from_millis(100))) {
+            Ok(value) => return Ok(value),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(HostError::Other("RPC child closed".into()));
+            }
+        }
+    }
+}
+
+fn interactive(
+    program: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+    clear: bool,
+) -> Result<i32, HostError> {
+    let mut command = Command::new(program);
+    if clear {
+        command.env_clear();
+    }
+    command
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    // Ctrl-C reaches every process in the foreground group, and belongs to
+    // the child while it runs. The child must not *inherit* the ignoring:
+    // `SIG_IGN` survives `exec`, so it would never see Ctrl-C at all.
+    #[cfg(unix)]
+    let guarding = {
+        use std::os::unix::process::CommandExt;
+
+        // SAFETY: `signal` is async-signal-safe and is the whole of what
+        // this closure calls, which is the rule between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                libc::signal(libc::SIGINT, libc::SIG_DFL);
+                libc::signal(libc::SIGQUIT, libc::SIG_DFL);
+                Ok(())
+            });
+        }
+
+        // SAFETY: replacing this process's own dispositions with `SIG_IGN`,
+        // keeping what was there to put back below.
+        let guarding = [libc::SIGINT, libc::SIGQUIT];
+        (
+            guarding,
+            guarding.map(|signal| unsafe { libc::signal(signal, libc::SIG_IGN) }),
+        )
+    };
+
+    // Named here for the reason `run` names it: `Command::status`'s error
+    // carries no path either, and a `claude` uninstalled between being
+    // found and being launched is a real state.
+    let ran = command.status();
+
+    // However the launch ended, including the one that never started.
+    // `SIG_ERR` is not a disposition but what `signal` answers when it could
+    // not install one, so handing it back installs an invalid handler.
+    #[cfg(unix)]
+    // SAFETY: restoring exactly the dispositions `signal` reported above.
+    unsafe {
+        let (guarding, previously) = guarding;
+        for (signal, was) in guarding.into_iter().zip(previously) {
+            if was != libc::SIG_ERR {
+                libc::signal(signal, was);
+            }
+        }
+    }
+
+    let status = ran.map_err(|err| {
+        std::io::Error::new(err.kind(), format!("could not run {program}: {err}"))
+    })?;
+    Ok(ended_as(status))
 }
 
 #[cfg(test)]

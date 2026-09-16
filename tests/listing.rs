@@ -11,9 +11,9 @@ mod common;
 use chrono::{DateTime, TimeZone, Utc};
 use common::*;
 use perch::config::Settings;
+use perch::domain::Identity;
 use perch::error::EXIT_NOT_FOUND;
 use perch::host::FakeHost;
-use perch::probe::Identity;
 use perch::registry::{Account, CachedUtilization, Quarantine, Registry, WindowUtilization};
 
 fn at(hour: u32, minute: u32) -> DateTime<Utc> {
@@ -22,6 +22,9 @@ fn at(hour: u32, minute: u32) -> DateTime<Utc> {
 
 fn account(email: &str, organization: &str) -> Account {
     Account {
+        storage_key: None,
+        provider: perch::providers::provider::Id::Claude,
+        provider_identity: None,
         identity: Identity {
             email: email.to_string(),
             account_uuid: Some(format!("uuid-{email}")),
@@ -42,6 +45,7 @@ fn observed(observed_at: DateTime<Utc>, windows: &[(&str, f64)]) -> CachedUtiliz
         windows: windows
             .iter()
             .map(|(window, used_percent)| WindowUtilization {
+                group: None,
                 window: window.to_string(),
                 used_percent: *used_percent,
                 resets_at: None,
@@ -73,7 +77,7 @@ fn machine_holding_three_accounts() -> FakeHost {
     registry.settle(Some(EMAIL.to_string()));
     registry
         .groups
-        .insert("work".to_string(), Settings::default());
+        .insert("work".to_string(), Settings::default().into());
     registry
         .name_account("overflow", SECOND_EMAIL)
         .expect("the name is free");
@@ -106,7 +110,7 @@ fn a_group_of(group: Option<&str>, active: &str, accounts: &[(&str, f64)]) -> Re
     if let Some(group) = group {
         registry
             .groups
-            .insert(group.to_string(), Settings::default());
+            .insert(group.to_string(), Settings::default().into());
     }
     for (email, used_percent) in accounts {
         let mut held = account(email, "Acme");
@@ -299,7 +303,7 @@ fn the_scope_the_active_account_is_in_comes_first() {
     for name in ["alpha", "zulu"] {
         registry
             .groups
-            .insert(name.to_string(), Settings::default());
+            .insert(name.to_string(), Settings::default().into());
     }
     let mut first = account(EMAIL, "Acme");
     first.group = Some("alpha".to_string());
@@ -659,7 +663,7 @@ fn list_ungrouped_shows_every_account_in_no_group() {
     registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
     registry
         .groups
-        .insert("work".to_string(), Settings::default());
+        .insert("work".to_string(), Settings::default().into());
     registry.settle(Some(EMAIL.to_string()));
     let host = machine_holding(&registry);
 
@@ -853,11 +857,11 @@ fn the_reserve_sits_between_the_legend_and_the_quarantine_reasons() {
         "the Reserve comes after the Switch note:\n{printed}"
     );
     assert!(
-        at("Reserve:") < at("Anthropic would not renew"),
+        at("Reserve:") < at("the provider would not renew"),
         "and before the reasons anything is broken:\n{printed}"
     );
     assert!(
-        at("Anthropic would not renew") < at("perch relogin"),
+        at("the provider would not renew") < at("perch relogin"),
         "which the repair closes rather than interleaves:\n{printed}"
     );
 }
@@ -899,7 +903,7 @@ fn the_repair_is_said_once_however_many_accounts_are_quarantined() {
         );
     }
     for reason in [
-        "Anthropic would not renew its Credential",
+        "the provider would not renew its Credential",
         "Perch holds no Credential for it",
     ] {
         assert_eq!(
@@ -921,7 +925,7 @@ fn one_quarantined_account_is_told_the_repair_for_itself() {
     result.unwrap();
     assert!(
         printed.contains(
-            "overflow@example.com (as `overflow`): Anthropic would not renew its \
+            "overflow@example.com (as `overflow`): the provider would not renew its \
              Credential."
         ),
         "the Account, as it is named, and what happened to it:\n{printed}"
@@ -960,7 +964,7 @@ fn a_narrowed_scope_holding_no_accounts_says_only_that() {
     registry.settle(Some(EMAIL.to_string()));
     registry
         .groups
-        .insert("spare".to_string(), Settings::default());
+        .insert("spare".to_string(), Settings::default().into());
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list_in(&host, "spare", false);
@@ -1026,7 +1030,7 @@ fn a_section_holding_no_accounts_carries_no_reserve() {
     registry.settle(Some(EMAIL.to_string()));
     registry
         .groups
-        .insert("spare".to_string(), Settings::default());
+        .insert("spare".to_string(), Settings::default().into());
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list_in(&host, "spare", true);
@@ -1312,7 +1316,7 @@ fn a_narrowed_scope_holding_no_accounts_still_says_a_switch_was_in_flight() {
     registry.begin_landing(Some(EMAIL.to_string()), SECOND_EMAIL);
     registry
         .groups
-        .insert("spare".to_string(), Settings::default());
+        .insert("spare".to_string(), Settings::default().into());
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list_in(&host, "spare", false);

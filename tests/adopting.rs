@@ -39,7 +39,7 @@ fn the_adopted_account_is_recorded_as_active() {
     let registry = registry::load(&host)
         .unwrap()
         .expect("a registry is written");
-    assert_eq!(registry.active().whose(), Some(EMAIL));
+    assert_eq!(registry.active().whose(), Some(KEY));
     assert_eq!(registry.accounts.len(), 1);
     assert_eq!(registry.accounts[0].plan.as_deref(), Some("pro"));
     assert_eq!(
@@ -77,7 +77,7 @@ fn the_profile_keeps_the_block_claude_code_wrote_for_the_adopted_account() {
     let kept = host
         .file(store_of(&host, EMAIL).identity_file)
         .expect("the Profile holds how Claude Code describes this Account");
-    let block = perch::probe::oauth_account_block(&kept).expect("a block");
+    let block = common::claude_fixture::oauth_account_block(&kept).expect("a block");
 
     assert!(
         block.contains(&format!("\"emailAddress\": \"{EMAIL}\"")),
@@ -220,8 +220,8 @@ fn claude_code_being_absent_is_refused_rather_than_assumed_away() {
     let (result, _) = run_status(&host, false);
 
     let error = result.expect_err("there is nothing to probe");
-    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
-    assert!(error.to_string().contains("Claude Code is installed"));
+    assert_eq!(error.exit_code(), EXIT_NOT_FOUND);
+    assert!(error.to_string().contains("Account"));
 }
 
 #[test]
@@ -309,8 +309,9 @@ fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {
         Refusing::Write,
         "no space left on device",
     );
-    let dir = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
-    let store = perch::probe::store_for_profile(&host, &dir).expect("USER is set");
+    let dir = perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, &host, KEY)
+        .expect("home is known");
+    let store = common::claude_fixture::store_for_profile(&host, &dir).expect("USER is set");
 
     let (result, _) = run_status(&host, false);
 

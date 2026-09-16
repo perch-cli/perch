@@ -13,44 +13,13 @@ use age::secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::credentials;
 use crate::error::{PerchError, Result};
-use crate::holdings;
 use crate::host::Host;
 use crate::name;
-use crate::registry::{self, Account, Registry};
+use crate::registry::{Account, Registry};
 
-/// The version this build writes, and the only one there has ever been.
-///
-/// The envelope's own. The Registry travels inside carrying its own version,
-/// which answers the same question about its own shape.
-pub const CURRENT_VERSION: u32 = 1;
-
-/// The Registry half of an Export, in the shape this build reads
-/// (ADR a-registry-comes-forward).
-///
-/// On the field rather than the unsealed document: this half holds no secret,
-/// and every Credential beside it would be a `String` nothing wipes.
-fn coming_forward<'de, D>(deserializer: D) -> std::result::Result<Registry, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::Error;
-
-    let document = serde_json::Value::deserialize(deserializer)?;
-    let text = serde_json::to_string(&document).map_err(D::Error::custom)?;
-    // The same floor `registry::load` holds: a version no Perch stamped names no
-    // shape, and an Import writes what it read back out under the current one.
-    if crate::migration::below_the_earliest(&text) {
-        return Err(D::Error::custom(format!(
-            "the Registry inside says it is a version no Perch has written, so \
-             Perch will not read it as version {}",
-            crate::registry::CURRENT_VERSION,
-        )));
-    }
-    let forwarded = crate::migration::forward(&text).map_err(D::Error::custom)?;
-    serde_json::from_str(forwarded.as_deref().unwrap_or(&text)).map_err(D::Error::custom)
-}
+/// The envelope version; the Registry inside carries its own layout version.
+pub const CURRENT_VERSION: u32 = 5;
 
 /// The most scrypt work [`unseal`] will spend opening one file, as `log2(N)`.
 ///
@@ -76,56 +45,30 @@ const _: () = assert!(WORK_FACTOR < MAX_WORK_FACTOR);
 /// The Export's own rather than the Registry's, which it equals by coincidence:
 /// the day that floor moves, every Export ever written claims a version the
 /// Registry's number says nothing wrote.
-const EARLIEST_VERSION: u32 = 1;
+const EARLIEST_VERSION: u32 = CURRENT_VERSION;
 
 const _: () = assert!(EARLIEST_VERSION <= CURRENT_VERSION);
 
 /// An Export, unsealed: what one `age` file holds before it is encrypted and
 /// after it is decrypted again.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Export {
     pub version: u32,
     /// The whole Registry — every Account, its Alias, its Group, whether
     /// Cycling may choose it, why it is Quarantined, and what each Group
     /// carries. Written whole rather than field by field, so a Setting added to
     /// a Group is in the next Export without anybody putting it there.
-    #[serde(deserialize_with = "coming_forward")]
     pub registry: Registry,
-    /// Every Credential Perch holds, by the address of the Account it belongs
-    /// to. Absent for an Account whose stores held nothing, which is how a
-    /// Quarantined Account travels — and required, unlike the two maps either
-    /// side: an empty map is a meaningful Export, and a missing key is a
-    /// document that never said anything about Credentials at all.
-    pub credentials: BTreeMap<String, String>,
-    /// Each Account's own `.claude.json`, by the address it belongs to.
-    ///
-    /// The half of a Profile that cannot be reconstructed *faithfully*: Claude
-    /// Code's `oauthAccount` block carries fields beyond the Registry's four,
-    /// and a Run Carries from it (ADR everything-but-the-account).
-    #[serde(default)]
-    pub identity_files: BTreeMap<String, String>,
-}
-
-/// Wiped when it goes out of scope: this is the one shape in Perch carrying
-/// every Credential on the machine at once, and it lives for the whole of an
-/// Export or an Import rather than for a call. Only the payload maps.
-/// Hand-written rather than derived, because `ZeroizeOnDrop` would want
-/// `Registry` to be `Zeroize`, which is not what it should become for a derive.
-impl Drop for Export {
-    fn drop(&mut self) {
-        for payload in self.payloads_mut() {
-            for held in payload.values_mut() {
-                held.zeroize();
-            }
-        }
-    }
+    #[serde(deserialize_with = "crate::json::unique_map")]
+    pub profiles: BTreeMap<String, crate::providers::provider::ProfileBundle>,
 }
 
 impl std::fmt::Debug for Export {
     /// Counts and addresses, never secrets: which Accounts an Export holds a
     /// Credential for is the question somebody debugging one has, and it is
     /// answerable without rendering a token. By hand for the reason
-    /// [`crate::probe::Credential`] is — a derived one prints every field, and a
+    /// native Credentials are — a derived one prints every field, and a
     /// formatting specifier is all that stands between these values and a log.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut said = formatter.debug_struct("Export");
@@ -143,155 +86,49 @@ impl std::fmt::Debug for Export {
 ///
 /// Nothing is Renewed and nothing is Rotated. A store that will not say what it
 /// holds stops the Export rather than being recorded as an Account with none.
-pub fn gather(
-    host: &dyn Host,
-    registry: &Registry,
-    installed: &crate::probe::Installed,
-) -> Result<Export> {
+pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
     // Filled in place rather than gathered beside it and moved in at the end:
     // `Export`'s `Drop` is what wipes these two maps, so a store that refuses
     // partway would otherwise free every Credential read before it untouched.
     let mut gathered = Export {
         version: CURRENT_VERSION,
         registry: registry.clone(),
-        credentials: BTreeMap::new(),
-        identity_files: BTreeMap::new(),
+        profiles: BTreeMap::new(),
     };
 
     for account in &registry.accounts {
-        if let Some(credential) = read_the_credential(host, registry, account, installed)? {
-            gathered
-                .credentials
-                .insert(account.email().to_string(), credential);
+        if crate::holdings::slug(account.key()).is_empty() {
+            continue;
         }
-        // Unlike the Credential, an identity file that will not be read does not
-        // stop the Export: an Import composes one from the Identity the Registry
-        // carries, so the whole file is worth more than one Profile's fidelity.
-        if let Some(contents) = read_the_identity_file(host, account) {
-            gathered
-                .identity_files
-                .insert(account.email().to_string(), contents);
-        }
+        let bundle = account
+            .provider()
+            .adapter()
+            .snapshot(host, &registry.profile_context(host, account)?)?;
+        gathered.profiles.insert(account.key().to_string(), bundle);
     }
 
     Ok(gathered)
 }
 
-/// The Credential to write for one Account: the live one where that is what the
-/// Account's Credential *is*, and the copy in its own Profile otherwise.
-///
-/// A Renewal Rotates the live copy and Anthropic retires what it replaced, so
-/// the active Account's Profile copy is the token likeliest to be dead already.
-fn read_the_credential(
-    host: &dyn Host,
-    registry: &Registry,
-    account: &Account,
-    installed: &crate::probe::Installed,
-) -> Result<Option<String>> {
-    // The live store first, and its own Profile as a fallback rather than the
-    // answer: `claude /logout` empties the live store and leaves the Account
-    // active, holding a Credential Perch has perfectly well.
-    if let Some(live) = the_live_store(host, registry, account, installed)?
-        && let Some(credential) = read_from(host, &live, account)?
-    {
-        return Ok(Some(credential));
-    }
-    // An address no Profile could be named after has no store to read, and it
-    // reaches the Registry only by hand. `perch holdings purge` takes such an
-    // Account out and offers an Export on the way, so this must not stop either.
-    let Ok(store) = account.store(host) else {
-        return Ok(None);
-    };
-    read_from(host, &store, account)
-}
-
-/// The Default Profile, where what is live in it is this Account's Credential.
-///
-/// On the evidence [`crate::switch::capture`] wants before it copies that same
-/// Credential anywhere (ADR a-switch-is-written-down-first): an Identity naming
-/// this Account, or naming nobody. Somebody else's is not this one's to export.
-fn the_live_store(
-    host: &dyn Host,
-    registry: &Registry,
-    account: &Account,
-    installed: &crate::probe::Installed,
-) -> Result<Option<crate::probe::Store>> {
-    // A *settled* Registry rather than `is_active`, which during a Landing
-    // answers with the Account being **left** while the live store may hold the
-    // arriving one's — one token under two addresses, and a Renewal kills one.
-    if !matches!(
-        registry.active(),
-        registry::Active::Settled(active) if name::same_name(active, account.email())
-    ) {
-        return Ok(None);
-    }
-    let live = holdings::the_default_profile(host)?;
-    // An Identity that is absent, or that will not be read, is not evidence
-    // against — only one naming somebody else is.
-    let somebody_else = matches!(
-        crate::probe::read_identity(host, &live, installed),
-        Ok(Some(identity)) if !name::same_name(&identity.email, account.email())
-    );
-    Ok((!somebody_else).then_some(live))
-}
-
-fn read_from(
-    host: &dyn Host,
-    store: &crate::probe::Store,
-    account: &Account,
-) -> Result<Option<String>> {
-    let held = credentials::read(host, store).map_err(|error| {
-        error.with_note(&format!(
-            "Nothing was written. An Export that left {} out would be a partial \
-             restore, which is the whole of what this file exists to prevent.",
-            account.email(),
-        ))
-    })?;
-    // Copied out of its `Zeroizing` rather than carried in it: `Export` wipes
-    // both of its maps in its own `Drop`, and the wrapper this came in wipes the
-    // buffer it leaves behind.
-    Ok(held.map(|held| held.credential.to_string()))
-}
-
-fn read_the_identity_file(host: &dyn Host, account: &Account) -> Option<String> {
-    let store = account.store(host).ok()?;
-    host.read_file(&store.identity_file).ok()
-}
-
 impl Export {
-    /// Every per-Account payload, under the noun a sentence about it uses. The one
-    /// list of the maps holding secrets: what has to be true of each — wiped on
-    /// drop, redacted in `Debug`, sized before sealing, validated against the
-    /// Account list — walks this rather than naming the fields again.
-    pub fn payloads(&self) -> [(&'static str, &BTreeMap<String, String>); 2] {
-        [
-            ("a Credential", &self.credentials),
-            ("a `.claude.json`", &self.identity_files),
-        ]
+    pub fn payloads(
+        &self,
+    ) -> [(
+        &'static str,
+        &BTreeMap<String, crate::providers::provider::ProfileBundle>,
+    ); 1] {
+        [("a Profile", &self.profiles)]
     }
-
-    /// The same maps, for the wipe.
-    fn payloads_mut(&mut self) -> [&mut BTreeMap<String, String>; 2] {
-        [&mut self.credentials, &mut self.identity_files]
+    pub fn profile_for(&self, key: &str) -> Option<&crate::providers::provider::ProfileBundle> {
+        self.profiles
+            .iter()
+            .find(|(held, _)| name::same_name(held, key))
+            .map(|(_, bundle)| bundle)
     }
 
     /// How many Accounts traveled in it.
     pub fn accounts(&self) -> usize {
         self.registry.accounts.len()
-    }
-
-    /// The Credential this Export carries for one Account, if it carries one.
-    ///
-    /// Keyed by `name::same_name`, which folds case, rather than by the
-    /// `BTreeMap` lookup the key type offers: an Export may be written by hand
-    /// with `age -a -p`, and placement and the report have to agree.
-    pub fn credential_for(&self, email: &str) -> Option<&String> {
-        by_name(&self.credentials, email)
-    }
-
-    /// The same, for the `.claude.json` that travels beside it.
-    pub fn identity_file_for(&self, email: &str) -> Option<&String> {
-        by_name(&self.identity_files, email)
     }
 
     /// The Accounts it holds no Credential for, in the order they are listed.
@@ -302,17 +139,13 @@ impl Export {
         self.registry
             .accounts
             .iter()
-            .map(Account::email)
-            .filter(|email| self.credential_for(email).is_none())
+            .map(Account::key)
+            .filter(|email| {
+                self.profile_for(email)
+                    .is_none_or(|bundle| !bundle.has_credentials())
+            })
             .collect()
     }
-}
-
-/// What one Account's entry is in a map an Export keys by address.
-fn by_name<'a>(held: &'a BTreeMap<String, String>, email: &str) -> Option<&'a String> {
-    held.iter()
-        .find(|(key, _)| name::same_name(key, email))
-        .map(|(_, value)| value)
 }
 
 /// The `age` file, as the text that goes in it.
@@ -321,6 +154,9 @@ fn by_name<'a>(held: &'a BTreeMap<String, String>, email: &str) -> Option<&'a St
 /// is a `str`, so it goes through the Host port's private write like every other
 /// file Perch creates rather than through a second, bytes-shaped one.
 pub fn seal(export: &Export, passphrase: &str) -> Result<String> {
+    for bundle in export.profiles.values() {
+        bundle.validate()?;
+    }
     // Serialized into a buffer this function owns and wipes. This is every
     // Credential on the machine in cleartext, and freed heap outlives the
     // process in a core dump, a swap file or a hibernation image.
@@ -350,7 +186,7 @@ impl Wiping {
             .payloads()
             .iter()
             .flat_map(|(_, held)| held.values())
-            .map(String::len)
+            .map(crate::providers::provider::ProfileBundle::bytes)
             .sum();
         Self {
             held: Zeroizing::new(Vec::with_capacity(carried * 2 + 8 * 1024)),
@@ -383,7 +219,7 @@ impl std::io::Write for Wiping {
 ///
 /// Four ways it can refuse, told apart because they ask for four different next
 /// moves — see [`would_not_open`].
-pub fn unseal(sealed: &str, passphrase: &str) -> Result<(Export, Vec<crate::migration::Renamed>)> {
+pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     let mut identity = age::scrypt::Identity::new(secret(passphrase));
 
     // Fixed rather than left to `age`, whose own bound is measured on the
@@ -406,32 +242,10 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<(Export, Vec<crate::migr
         detail: err.to_string(),
     })?;
 
-    // Asked of the plaintext rather than carried out of `coming_forward`, which
-    // is a `Deserialize` with nowhere to put it.
-    Ok((export, renamed_coming_forward(&plain)))
-}
-
-/// What bringing an Export's Registry forward had to rename, for the Import to
-/// say before it writes.
-///
-/// A fact about reading *this* Export on *this* build, so it belongs to the read
-/// rather than to the document. Empty for every Export this build wrote.
-fn renamed_coming_forward(plain: &[u8]) -> Vec<crate::migration::Renamed> {
-    // The one field, so serde skips the two holding secrets rather than building
-    // a `String` per Credential that nothing wipes. `refuse_a_newer_perch` reads
-    // the versions the same way.
-    #[derive(Deserialize)]
-    struct JustTheRegistry {
-        registry: Option<serde_json::Value>,
+    for bundle in export.profiles.values() {
+        bundle.validate()?;
     }
-
-    let Ok(JustTheRegistry {
-        registry: Some(registry),
-    }) = serde_json::from_slice::<JustTheRegistry>(plain)
-    else {
-        return Vec::new();
-    };
-    crate::migration::renames(&registry.to_string())
+    Ok(export)
 }
 
 /// Why `age` would not open the file, as something the reader can act on: type
@@ -513,7 +327,14 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
     // The floor the Registry inside holds. An Export can be written by hand with
     // `age -a -p`, and a version below the earliest one names no shape.
     if outer.is_some_and(|claimed| claimed < u64::from(EARLIEST_VERSION)) {
-        return Err(no_perch_wrote(outer));
+        return Err(if outer == Some(0) {
+            no_perch_wrote(outer)
+        } else {
+            PerchError::Invalid(format!(
+                "This Export uses export version {}, which this build cannot restore. Open it with the Perch build that wrote that version. Nothing was imported.",
+                outer.unwrap_or_default()
+            ))
+        });
     }
 
     // The Registry travels inside carrying its own version, and it is the half
@@ -527,6 +348,9 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
             inside.unwrap_or_default(),
             crate::registry::CURRENT_VERSION,
         ));
+    }
+    if inside != Some(u64::from(crate::registry::CURRENT_VERSION)) {
+        return Err(PerchError::Invalid("The Registry in this Export uses an unsupported layout. Open it with the Perch build that wrote it; this build requires a fresh installation.".into()));
     }
     Ok(())
 }
@@ -557,6 +381,7 @@ fn secret(passphrase: &str) -> SecretString {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::AccountStoreFixture as _;
     /// Driven past the reserve deliberately: the ordinary Export never grows,
     /// which is why the growing path is the one nothing would otherwise
     /// exercise.
@@ -594,16 +419,10 @@ mod tests {
         let export = Export {
             version: CURRENT_VERSION,
             registry: crate::registry::Registry::default(),
-            credentials: [(
-                "someone@example.com".to_string(),
-                "a credential".to_string(),
-            )]
-            .into(),
-            identity_files: [(
-                "someone@example.com".to_string(),
-                "{\"oauthAccount\":{}}".to_string(),
-            )]
-            .into(),
+            profiles: BTreeMap::from([(
+                "someone@example.com".into(),
+                fixture_bundle(Some("a credential"), Some(r#"{"oauthAccount":{}}"#)),
+            )]),
         };
 
         let buffer = Wiping::with_room_for(&export);
@@ -618,14 +437,18 @@ mod tests {
     }
 
     use super::*;
-    use crate::probe::{Identity, Installed};
+    use crate::domain::Identity;
     use crate::registry::Quarantine;
+    use fixtures::{exported_artifact, fixture_bundle};
 
     const PASSPHRASE: &str = "correct horse battery staple";
 
     fn an_export() -> Export {
         let mut registry = Registry::default();
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "someone@example.com".into(),
                 account_uuid: None,
@@ -646,13 +469,12 @@ mod tests {
         Export {
             version: CURRENT_VERSION,
             registry,
-            credentials: BTreeMap::from([(
-                "someone@example.com".to_string(),
-                r#"{"claudeAiOauth":{"refreshToken":"sk-ant-ort01-test"}}"#.to_string(),
-            )]),
-            identity_files: BTreeMap::from([(
-                "someone@example.com".to_string(),
-                r#"{"oauthAccount":{"emailAddress":"someone@example.com"}}"#.to_string(),
+            profiles: BTreeMap::from([(
+                "someone@example.com".into(),
+                fixture_bundle(
+                    Some(r#"{"claudeAiOauth":{"refreshToken":"sk-ant-ort01-test"}}"#),
+                    Some(r#"{"oauthAccount":{"emailAddress":"someone@example.com"}}"#),
+                ),
             )]),
         }
     }
@@ -683,7 +505,7 @@ mod tests {
             !sealed.contains("sk-ant-ort01-test") && !sealed.contains("someone@example.com"),
             "nothing in the file is readable without the passphrase"
         );
-        assert_eq!(unseal(&sealed, PASSPHRASE).expect("it opens").0, export);
+        assert_eq!(unseal(&sealed, PASSPHRASE).expect("it opens"), export);
     }
 
     /// An address no Profile could be named after has no store, and a Purge is
@@ -695,8 +517,7 @@ mod tests {
         registry.upsert(crate::cycle::tests::account("one@example.com", vec![]));
         registry.upsert(crate::cycle::tests::account("@", vec![]));
 
-        let gathered = gather(&host, &registry, &Installed::unknown("2.1.221"))
-            .expect("`@` names no store to read");
+        let gathered = gather(&host, &registry).expect("`@` names no store to read");
 
         assert_eq!(gathered.accounts(), 2, "both travel in the registry");
         assert!(
@@ -758,7 +579,7 @@ mod tests {
         document
             .as_object_mut()
             .expect("an Export is an object")
-            .remove("credentials");
+            .remove("profiles");
         let sealed =
             age::encrypt_and_armor(&recipient(PASSPHRASE), document.to_string().as_bytes())
                 .expect("it seals");
@@ -766,7 +587,7 @@ mod tests {
         let refused = unseal(&sealed, PASSPHRASE).expect_err("it holds no Credentials");
 
         assert!(
-            refused.to_string().contains("credentials"),
+            refused.to_string().contains("profiles"),
             "and it names what is missing: {refused}"
         );
 
@@ -774,12 +595,10 @@ mod tests {
         // rather than built with `..an_export()`, because a type with a `Drop`
         // cannot have its fields moved out.
         let mut none_kept = an_export();
-        none_kept.credentials = BTreeMap::new();
+        none_kept.profiles = BTreeMap::new();
         let sealed = seal(&none_kept, PASSPHRASE).expect("it seals");
         assert_eq!(
-            unseal(&sealed, PASSPHRASE)
-                .expect("an Export of Quarantined Accounts opens")
-                .0,
+            unseal(&sealed, PASSPHRASE).expect("an Export of Quarantined Accounts opens"),
             none_kept
         );
     }
@@ -865,9 +684,8 @@ mod tests {
     #[test]
     fn everything_the_registry_says_about_an_account_travels_with_it() {
         let export = an_export();
-        let back = unseal(&seal(&export, PASSPHRASE).expect("it seals"), PASSPHRASE)
-            .expect("it opens")
-            .0;
+        let back =
+            unseal(&seal(&export, PASSPHRASE).expect("it seals"), PASSPHRASE).expect("it opens");
 
         let account = back
             .registry
@@ -917,38 +735,6 @@ mod tests {
         );
     }
 
-    /// The case the two above cannot cover: every published Perch wrote an
-    /// envelope at the current version around a Registry at version 1, so
-    /// neither guard fires and nothing is ahead of anything.
-    #[test]
-    fn an_export_holding_a_registry_an_older_perch_wrote_opens() {
-        let older = format!(
-            r#"{{"version":{CURRENT_VERSION},"registry":{{"version":1,"active":"someone@example.com","accounts":[{{"identity":{{"email":"someone@example.com","account_uuid":null,"organization_name":null,"organization_uuid":null}},"enabled":false}}],"groups":{{"work":{{"watcher_may_act":true}}}},"global":{{"cycle_ungrouped":true,"settings":{{"strategy":"soonest-reset","watcher_may_act":false,"watcher_threshold_percent":85,"watcher_cooldown_minutes":15,"watcher_margin_percent":10,"watcher_no_return":true}}}}}},"credentials":{{}}}}"#
-        );
-        let sealed =
-            age::encrypt_and_armor(&recipient(PASSPHRASE), older.as_bytes()).expect("it seals");
-
-        let (opened, _) =
-            unseal(&sealed, PASSPHRASE).expect("an Export of a published Perch opens");
-
-        assert_eq!(opened.registry.version, crate::registry::CURRENT_VERSION);
-        let account = opened
-            .registry
-            .account("someone@example.com")
-            .expect("the Account travels");
-        assert!(
-            account.disabled,
-            "and so does its having been kept out of Cycling"
-        );
-        let work = opened.registry.group("work").expect("the Group travels");
-        assert_eq!(
-            work.strategy,
-            crate::config::Strategy::SoonestReset,
-            "with what it Inherited from Global"
-        );
-        assert!(opened.registry.ungrouped.interchangeable);
-    }
-
     /// The floor, on the half that has one. An Import writes what it read back
     /// out at the current version, so a Registry claiming a version no Perch
     /// stamped would be relabeled rather than refused.
@@ -963,7 +749,7 @@ mod tests {
 
             let refused = unseal(&sealed, PASSPHRASE).expect_err("no Perch wrote that");
             assert!(
-                refused.to_string().contains("no Perch has written"),
+                refused.to_string().contains("unsupported layout"),
                 "{refused}"
             );
         }
@@ -1031,6 +817,9 @@ mod tests {
         let mut registry = Registry::default();
         for email in ["one@example.com", "two@example.com"] {
             registry.upsert(Account {
+                storage_key: None,
+                provider: crate::providers::provider::Id::Claude,
+                provider_identity: None,
                 identity: Identity {
                     email: email.into(),
                     account_uuid: None,
@@ -1051,10 +840,12 @@ mod tests {
             .unwrap();
         host.set_keychain_item(&store.keychain_service, &store.keychain_account, "held");
 
-        let export =
-            gather(&host, &registry, &Installed::unknown("2.1.221")).expect("both stores answer");
+        let export = gather(&host, &registry).expect("both stores answer");
 
-        assert_eq!(export.credentials.get("one@example.com").unwrap(), "held");
+        assert_eq!(
+            exported_artifact(&export, "one@example.com", "oauth").unwrap(),
+            "held"
+        );
         assert_eq!(
             export.without_a_credential(),
             vec!["two@example.com"],
@@ -1071,6 +862,9 @@ mod tests {
         let host = crate::host::FakeHost::new();
         let mut registry = Registry::default();
         let account = Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "one@example.com".into(),
                 account_uuid: None,
@@ -1090,9 +884,36 @@ mod tests {
         host.lock_keychain("User interaction is not allowed");
         registry.upsert(account);
 
-        let refused = gather(&host, &registry, &Installed::unknown("2.1.221"))
-            .expect_err("nothing can be read");
+        let refused = gather(&host, &registry).expect_err("nothing can be read");
         assert!(refused.to_string().contains("one@example.com"), "{refused}");
         assert!(refused.to_string().contains("partial restore"), "{refused}");
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod fixtures {
+    pub fn fixture_bundle(
+        credential: Option<&str>,
+        config: Option<&str>,
+    ) -> crate::providers::provider::ProfileBundle {
+        let mut artifacts = serde_json::Map::new();
+        if let Some(content) = credential {
+            artifacts.insert(
+                "oauth".into(),
+                serde_json::json!({"purpose":"credential", "content":content}),
+            );
+        }
+        if let Some(content) = config {
+            artifacts.insert(
+                ".claude.json".into(),
+                serde_json::json!({"purpose":"configuration", "content":content}),
+            );
+        }
+        serde_json::from_value(serde_json::json!({"artifacts":artifacts})).unwrap()
+    }
+    pub fn exported_artifact(export: &super::Export, key: &str, name: &str) -> Option<String> {
+        serde_json::to_value(export.profile_for(key)?).ok()?["artifacts"][name]["content"]
+            .as_str()
+            .map(str::to_owned)
     }
 }

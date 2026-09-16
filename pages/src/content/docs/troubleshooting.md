@@ -5,15 +5,15 @@ sidebar:
 ---
 
 Two commands for the same moment. `perch probe` gathers everything Perch can see
-of this machine, and `perch triage` hands that to Claude Code and lets it do the
+of this machine, and `perch triage` hands that to your preferred provider and lets it do the
 investigating and the writing. Neither changes anything: no Registry brought
 forward, no line added to the Trail, nothing repaired behind your back.
 
 ## What Perch can see of this machine
 
 `perch probe` gathers what a report needs and would otherwise be typed by hand:
-which Perch and which Claude Code, how Perch was installed, where its files are,
-what the Holdings hold, which of its assumptions about Claude Code still hold,
+which Perch and which provider CLIs, how Perch was installed, where its files are,
+what the Holdings hold, which native assumptions each provider can check,
 and what has been run here lately.
 
 ```
@@ -49,7 +49,7 @@ forward, no line added to the Trail, and it exits `0` whatever it finds.
 
 Every command writes two lines to the **Trail** as it goes, one when it starts
 and one when it ends: what was typed, and what it exited with. Words after `--`
-go to Claude Code and are counted rather than recorded. A start with no end
+go to the launched provider and are counted rather than recorded. A start with no end
 whose process is gone is a command that died without a word, and `perch probe`
 says so — one whose process is still running is not, which is why the Watcher
 sitting in its loop is never reported as a failure. The Watcher adds a line of
@@ -60,10 +60,17 @@ exported, and a Purge takes it with everything else.
 Windows that is `watch.log` beside the Registry; on Linux systemd keeps it, and
 what the Probe prints is the `journalctl` line to run.
 
+Probe JSON groups CLI details and native assumptions under `providers`. Findings
+include a provider identifier when they concern a particular CLI.
+`holdings.active` maps each provider to its Default or Landing state. Codex currently
+reports installation details; Claude also checks its native credential and
+identity assumptions.
+
 ## Letting an agent do it
 
 Writing all of that out by hand is the last thing anybody wants to do at the
-moment they need to. `perch triage` hands the job to the Claude Code you already have.
+moment they need to. `perch triage` hands the job to your configured provider. It uses the Run preference, which
+defaults to Claude and can be set with `perch config set --global run-provider codex`.
 
 ```
 $ perch triage
@@ -89,12 +96,12 @@ never edits the Registry by hand, never patches Perch's source, and never runs
 `perch holdings purge` or `perch holdings import` as a fix. Anything that touches
 the Holdings at all comes after an offer to write an Export first.
 
-`--model` passes a model straight through to Claude Code, for when its default is
+`--model` passes a model straight through to the selected provider, for when its default is
 not the one you want.
 
 ### When nothing gets launched
 
-If Claude Code is not installed, or the Account you are on is Quarantined, the
+If the selected provider is not installed, or the Account you are on is Quarantined, the
 session would open at a login prompt instead of a triage. Perch does not launch
 it, says which of those it found, and tells you where the three files are:
 
@@ -102,7 +109,7 @@ it, says which of those it found, and tells you where the three files are:
 $ perch triage
 Claude Code will not come up as this machine stands, so Perch has not launched
 it. The Probe found:
-  you@example.com is the active Account and it is Quarantined: Anthropic would
+  you@example.com is the active Account and it is Quarantined: the provider would
   not renew its Credential.
 
 What Perch can see of this machine is written down:
@@ -120,4 +127,4 @@ Purge takes the lot with the rest of what Perch holds.
 
 A **security problem** never goes to a public issue.
 [Report it privately](https://github.com/perch-cli/perch/security/advisories/new)
-instead, because Perch holds Claude Code credentials.
+instead, because Perch holds provider credentials.

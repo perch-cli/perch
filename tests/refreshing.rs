@@ -21,7 +21,6 @@ use std::path::PathBuf;
 
 use chrono::{TimeZone, Utc};
 use common::*;
-use perch::anthropic::{self, BETA, PROFILE_URL, TOKEN_URL, USAGE_URL};
 use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::prelude::*;
@@ -56,10 +55,6 @@ const USAGE: &str = r#"{
   "seven_day_opus": {"utilization": 3, "resets_at": "2026-08-09T00:00:00Z"}
 }"#;
 
-fn profile_of(email: &str) -> String {
-    format!(r#"{{"account": {{"email_address": "{email}"}}}}"#)
-}
-
 /// The keychain namespace of the second Account's Profile, derived the way every
 /// command derives it. The spelling of the directory decides the hash, and a Windows
 /// build joins paths with the other separator — so a fixture spelling the path by hand
@@ -89,7 +84,7 @@ fn two_accounts_in_a_group() -> FakeHost {
 
 fn cached_windows(host: &FakeHost, email: &str) -> Vec<perch::registry::WindowUtilization> {
     registry_of(host)
-        .account(email)
+        .account(&fixture_key(host, email))
         .expect("an Account Perch holds")
         .utilization
         .clone()
@@ -178,7 +173,7 @@ fn json_says_a_read_left_to_the_watcher_asked_anthropic_nothing() {
     result.expect("a read left to the Watcher is not a failure");
     let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
     let account = &document["refresh"]["accounts"][0];
-    assert_eq!(account["email"], EMAIL);
+    assert_eq!(account["id"], KEY);
     assert_eq!(
         account["outcome"], "just_read",
         "a script can tell a read nobody made from one that failed: {printed}"
@@ -255,7 +250,7 @@ fn json_carries_an_observation_time_on_every_figure_it_just_read() {
             "{window}"
         );
     }
-    assert_eq!(document["refresh"]["accounts"][0]["email"], EMAIL);
+    assert_eq!(document["refresh"]["accounts"][0]["id"], KEY);
     assert_eq!(document["refresh"]["accounts"][0]["outcome"], "observed");
     assert_eq!(document["refresh"]["kept"], true);
 }
@@ -318,7 +313,7 @@ fn a_credential_that_has_run_out_is_renewed_and_the_rotation_is_written_back() {
     assert_eq!(renewal.len(), 1);
     let asked = renewal[0].body.clone().expect("a renewal is a POST");
     assert!(asked.contains("sk-ant-ort01-spent"), "{asked}");
-    assert!(asked.contains(anthropic::CLIENT_ID), "{asked}");
+    assert!(asked.contains(CLIENT_ID), "{asked}");
 
     let stored = host
         .keychain_item(DEFAULT_SERVICE, LOGIN_NAME)
@@ -388,7 +383,7 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     // And *which* directory the client is in: the active Account is asked about from
     // two, and a refusal naming neither leaves the reader to guess which to quit.
     // Derived rather than spelled, because joining uses the platform's separator.
-    let default_profile = perch::holdings::the_default_profile(&host)
+    let default_profile = common::claude_fixture::default_profile_store(&host)
         .expect("the Default Profile is known")
         .config_dir;
     assert!(
@@ -461,7 +456,13 @@ fn utilization_for_a_live_account_is_read_without_a_renewal() {
     let asked = perch::live::ask(
         &host,
         &[perch::live::Place::at(
-            perch::holdings::profile_dir_for(&host, SECOND_EMAIL).expect("home is known"),
+            perch::providers::provider::Id::Claude,
+            perch::holdings::profile_dir_for(
+                perch::providers::provider::Id::Claude,
+                &host,
+                SECOND_KEY,
+            )
+            .expect("home is known"),
         )],
     );
     assert!(
@@ -561,7 +562,7 @@ fn a_refresh_that_fails_for_one_account_still_reads_the_others() {
     assert!(cached_windows(&host, SECOND_EMAIL).is_empty());
     assert!(
         !registry_of(&host)
-            .account(SECOND_EMAIL)
+            .account(SECOND_KEY)
             .expect("an Account Perch holds")
             .quarantine
             .is_some(),
@@ -650,7 +651,7 @@ fn a_refresh_reads_only_the_accounts_it_is_about_to_show() {
 }
 
 #[test]
-fn the_installed_claude_code_is_asked_once_however_many_accounts_are_read() {
+fn successful_usage_reads_do_not_launch_the_native_cli_for_version_reporting() {
     let host = machine_with_two_accounts();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
@@ -673,8 +674,8 @@ fn the_installed_claude_code_is_asked_once_however_many_accounts_are_read() {
         .count();
     assert_eq!(
         asked,
-        1,
-        "one `claude --version` for the command, whatever it went on to read: \
+        0,
+        "usage reads do not need a native CLI version report: \
          {:?}",
         host.effects()
     );
@@ -730,7 +731,7 @@ fn an_outage_on_the_profile_endpoint_records_nothing_rather_than_guessing() {
 }
 
 #[test]
-fn a_profile_reply_this_build_does_not_recognize_still_lets_the_figures_be_read() {
+fn an_unrecognized_profile_reply_cannot_authorize_a_stable_accounts_figures() {
     let host = machine_with_two_accounts();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     let host = host
@@ -742,14 +743,14 @@ fn a_profile_reply_this_build_does_not_recognize_still_lets_the_figures_be_read(
 
     result.expect("the command answers");
     assert!(
-        printed.contains("42%"),
-        "the figures were read all the same: {printed}"
+        !printed.contains("42%"),
+        "the unverified figures were refused: {printed}"
     );
-    assert!(!cached_windows(&host, EMAIL).is_empty());
+    assert!(cached_windows(&host, EMAIL).is_empty());
 }
 
 #[test]
-fn a_profile_reply_that_names_nobody_files_the_figures_the_identity_vouches_for() {
+fn native_identity_cannot_override_a_remote_profile_without_a_subject() {
     let host = machine_with_two_accounts();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     // Valid JSON, and none of the fields Perch knows to read an address out of.
@@ -762,9 +763,9 @@ fn a_profile_reply_that_names_nobody_files_the_figures_the_identity_vouches_for(
 
     result.expect("the command answers");
     assert!(
-        printed.contains("42%"),
-        "the Identity beside the Credential names this Account, so the figures \
-         are still read: {printed}"
+        !printed.contains("42%"),
+        "the native identity cannot authorize the figures, which \
+         are refused: {printed}"
     );
     let noted = host.notes().join("\n");
     assert!(
@@ -801,9 +802,7 @@ fn a_profile_endpoint_that_names_nobody_leaves_the_check_to_the_identity_file() 
 }
 
 #[test]
-fn an_account_read_out_of_its_own_profile_is_not_stopped_by_a_profile_endpoint_that_drifted() {
-    // Only Perch writes into an Account's own Profile, so a Credential there is
-    // this Account's whatever Anthropic will or will not say about it.
+fn a_stable_account_in_its_own_profile_still_requires_remote_identity() {
     let host = two_accounts_in_a_group();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
@@ -818,8 +817,8 @@ fn an_account_read_out_of_its_own_profile_is_not_stopped_by_a_profile_endpoint_t
 
     result.expect("the command answers");
     assert!(
-        !cached_windows(&host, SECOND_EMAIL).is_empty(),
-        "the figures are filed against the Account whose Profile they came out \
+        cached_windows(&host, SECOND_EMAIL).is_empty(),
+        "the unverified figures are refused regardless \
          of: {printed}"
     );
 }
@@ -947,7 +946,7 @@ fn a_refresh_mid_landing_reads_the_account_named_rather_than_whatever_is_live() 
     // What a Switch leaves when it dies after the Credential moved and before the
     // Identity was patched: the arriving Account's Credential is live, and the Registry
     // still answers "who is active" with the one being left.
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_FRESH);
     host.set_keychain_item(&store_of(&host, EMAIL).keychain_service, LOGIN_NAME, FRESH);
     let host = host
@@ -984,41 +983,6 @@ fn a_refresh_mid_landing_reads_the_account_named_rather_than_whatever_is_live() 
         "and nothing was filed against the Account arriving, which nobody asked \
          about"
     );
-}
-
-#[test]
-fn an_account_that_shares_a_profile_with_another_is_never_renewed() {
-    let host = machine_with_two_accounts();
-    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
-    let host = host.with_reply(TOKEN_URL, 200, RENEWED);
-
-    // The second Account, respelled so that it slugs to the same directory as the
-    // active one: `someone@example.com` and `someone@example-com` are two Accounts to
-    // Perch and one Profile to the filesystem.
-    let mut registry = registry_of(&host);
-    let sharer = "someone@example-com";
-    registry
-        .accounts
-        .iter_mut()
-        .find(|account| account.email() == SECOND_EMAIL)
-        .expect("the second Account")
-        .identity
-        .email = sharer.to_string();
-    save_registry(&host, &registry);
-    host.forget_effects();
-
-    let (result, printed) = run_status_refresh(&host, false);
-
-    result.expect("an Account Perch may not renew is not a failed command");
-    assert!(
-        host.sent_to(TOKEN_URL).is_empty(),
-        "a Rotation here would retire a refresh token belonging to {sharer}"
-    );
-    assert!(
-        printed.contains(sharer),
-        "the refusal names the Account it is protecting: {printed}"
-    );
-    assert!(printed.contains("cached figure"), "{printed}");
 }
 
 #[test]
@@ -1068,7 +1032,7 @@ fn a_renewal_mid_landing_is_refused_for_a_client_running_against_the_default_pro
         ("the Account arriving", SECOND_EMAIL),
     ] {
         let host = machine_with_two_accounts();
-        a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+        a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
         // Spent in its own Profile, so a reading of it wants a Renewal.
         host.set_keychain_item(&store_of(&host, email).keychain_service, LOGIN_NAME, SPENT);
         let host = host.with_reply(TOKEN_URL, 200, RENEWED);

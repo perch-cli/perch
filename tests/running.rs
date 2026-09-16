@@ -16,6 +16,8 @@
 
 mod common;
 
+use common::session_fixture;
+
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -23,7 +25,7 @@ use std::rc::Rc;
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::commands::add::AddArgs;
-use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED};
+use perch::error::{EXIT_INVALID, EXIT_PROFILE_LIVE, EXIT_QUARANTINED};
 use perch::host::PRIVATE_DIR_MODE;
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::prelude::*;
@@ -47,6 +49,7 @@ fn the_client_is_pointed_at_the_directory_the_credential_store_was_derived_from(
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -58,7 +61,7 @@ fn the_client_is_pointed_at_the_directory_the_credential_store_was_derived_from(
     let (outcome, _) = run_run(&host, SECOND_EMAIL);
 
     outcome.expect("the client ran");
-    let store = perch::probe::store_for_profile(&host, &profile_of(&host, SECOND_EMAIL))
+    let store = common::claude_fixture::store_for_profile(&host, &profile_of(&host, SECOND_EMAIL))
         .expect("its Credential Store");
     // As text, which is the whole point: `PathBuf` compares by component, so a
     // `//` and a `/` are one path to it and two keychain service names to
@@ -100,14 +103,19 @@ fn shared(entry: &str) -> String {
 
 /// Where an Account's Profile is, derived the way every command derives it.
 fn profile_of(host: &FakeHost, email: &str) -> PathBuf {
-    perch::holdings::profile_dir_for(host, email).expect("home is known")
+    store_of(host, email).config_dir
 }
 
 /// The same, spelled for the fixtures that take a path as a string.
 fn profile_string(email: &str) -> String {
     format!(
-        "/Users/someone/.config/perch/profiles/{}",
-        perch::holdings::slug(email)
+        "/Users/someone/.config/perch/providers/claude/profiles/{}",
+        perch::holdings::slug(match email {
+            EMAIL => KEY,
+            SECOND_EMAIL => SECOND_KEY,
+            THIRD_EMAIL => THIRD_KEY,
+            other => other,
+        })
     )
 }
 
@@ -161,7 +169,7 @@ fn the_active_account_and_the_default_profile_are_untouched() {
 
     run_run(&host, SECOND_EMAIL).0.expect("the client ran");
 
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(CREDENTIAL),
@@ -324,7 +332,7 @@ fn a_quarantined_account_is_refused_and_nothing_is_launched() {
     let said = refusal.to_string();
     assert!(said.contains("is Quarantined"), "{said}");
     assert!(
-        said.contains(&format!("`perch relogin {SECOND_EMAIL}`")),
+        said.contains(&format!("`perch relogin {SECOND_KEY}`")),
         "{said}"
     );
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
@@ -361,7 +369,7 @@ fn which_kind_of_target_matched_is_said_before_the_client_takes_the_terminal() {
     );
     assert!(
         said.contains(&format!(
-            "Running Claude Code as {SECOND_EMAIL} (as `overflow`)"
+            "Running Claude Code as {SECOND_LABEL} (as `overflow`)"
         )),
         "{said}"
     );
@@ -374,7 +382,7 @@ fn which_kind_of_target_matched_is_said_before_the_client_takes_the_terminal() {
     let _ = run_run(&host, SECOND_EMAIL);
     let said = host.notes().join("\n");
     assert!(
-        said.contains(&format!("`{SECOND_EMAIL}` is an Account.")),
+        said.contains(&format!("{SECOND_EMAIL} is a claude Account.")),
         "{said}"
     );
 }
@@ -408,7 +416,9 @@ fn a_run_says_which_account_stays_active_everywhere_else() {
 
     let said = host.notes().join("\n");
     assert!(
-        said.contains(&format!("{EMAIL} stays the active Account everywhere else")),
+        said.contains(&format!(
+            "{LABEL} stays the active Account for Claude Code everywhere else"
+        )),
         "{said}"
     );
 }
@@ -416,7 +426,7 @@ fn a_run_says_which_account_stays_active_everywhere_else() {
 #[test]
 fn a_run_claims_nothing_about_who_is_active_while_a_switch_is_in_flight() {
     let host = machine();
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
 
     let _ = run_run(&host, SECOND_EMAIL);
 
@@ -517,7 +527,7 @@ fn the_program_being_launched_is_named_when_it_is_not_claude_code() {
     let said = host.notes().join("\n");
     assert!(
         said.contains(&format!(
-            "Running `npm` as {SECOND_EMAIL}, in this terminal alone."
+            "Running `npm` as {SECOND_LABEL}, in this terminal alone."
         )),
         "{said}"
     );
@@ -566,7 +576,7 @@ fn another_program_runs_on_a_machine_with_no_claude_code_to_find() {
     let refusal = run_run(&host, SECOND_EMAIL)
         .0
         .expect_err("Claude Code is what this one asked for");
-    assert_eq!(refusal.exit_code(), EXIT_PROBE_REFUSED);
+    assert_eq!(refusal.exit_code(), perch::error::EXIT_NOT_FOUND);
 }
 
 #[test]
@@ -587,14 +597,20 @@ fn a_quarantined_account_is_refused_whatever_is_being_launched() {
 
 /// The processes Perch would say are running against a Profile right now.
 fn live_against(host: &FakeHost, email: &str) -> Vec<u32> {
-    match perch::live::ask(host, &[perch::live::Place::at(profile_of(host, email))]) {
+    match perch::live::ask(
+        host,
+        &[perch::live::Place::at(
+            perch::providers::provider::Id::Claude,
+            profile_of(host, email),
+        )],
+    ) {
         perch::live::Answer::Idle(_) => Vec::new(),
         perch::live::Answer::NotIdle(perch::live::NotIdle::Live(clients)) => {
             clients.iter().map(|client| client.pid).collect()
         }
         perch::live::Answer::NotIdle(perch::live::NotIdle::Unsure(unsure)) => panic!(
             "every marker here can be corroborated or dismissed: {}",
-            unsure.refusal(&perch::probe::Installed::unknown(CLAUDE_VERSION))
+            unsure.refusal()
         ),
     }
 }
@@ -629,7 +645,7 @@ fn a_runs_marker_arrives_whole_rather_than_being_filled_in_place() {
 
     run_run(&host, SECOND_EMAIL).0.expect("the client ran");
 
-    let marker = perch::probe::session_marker_at(&profile_of(&host, SECOND_EMAIL), THIS_PROCESS);
+    let marker = session_fixture::session_marker_at(&profile_of(&host, SECOND_EMAIL), THIS_PROCESS);
     assert!(
         host.effects().iter().any(|effect| matches!(
             effect,
@@ -660,10 +676,10 @@ fn a_capture_into_the_profile_a_run_is_against_is_refused() {
         .expect("a Switch was attempted while the Run was live")
         .expect_err("the Capture would write under the Run");
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
-    assert!(error.to_string().contains(EMAIL), "{error}");
+    assert!(error.to_string().contains(KEY), "{error}");
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "nothing moved"
     );
 }
@@ -685,7 +701,7 @@ fn switching_onto_the_account_a_run_is_against_succeeds() {
         .take()
         .expect("a Switch was attempted while the Run was live")
         .expect("a Run does not close an Account to a Switch");
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -751,7 +767,7 @@ fn a_run_answers_for_its_own_profile_and_for_nobody_elses() {
 #[test]
 fn a_run_that_cannot_mark_its_profile_live_does_not_launch() {
     let host = machine();
-    let marker = perch::probe::session_marker_at(&profile_of(&host, SECOND_EMAIL), THIS_PROCESS);
+    let marker = session_fixture::session_marker_at(&profile_of(&host, SECOND_EMAIL), THIS_PROCESS);
     let host = host.with_a_path_refusing(&marker, Refusing::Write, "permission denied");
 
     let refusal = run_run(&host, SECOND_EMAIL)
@@ -812,7 +828,10 @@ fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
     let mut registry = registry_of(&host);
     for email in ["some-one@example.com", "some.one@example.com"] {
         registry.upsert(perch::registry::Account {
-            identity: perch::probe::Identity {
+            storage_key: None,
+            provider: perch::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: perch::domain::Identity {
                 email: email.to_string(),
                 account_uuid: None,
                 organization_name: None,
@@ -852,7 +871,9 @@ fn a_run_marks_its_profile_live_before_it_touches_anything_in_it() {
     // With Shared State to link and a `.claude.json` to Carry, so there is
     // something for the claim to come before.
     let host = machine_with_shared_state();
-    let profile = perch::holdings::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
+    let profile =
+        perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, &host, SECOND_KEY)
+            .expect("home is known");
     let sessions = profile.join("sessions");
 
     run_run(&host, SECOND_EMAIL).0.expect("the client ran");
@@ -927,4 +948,35 @@ fn a_profile_a_run_brings_back_is_the_owners_alone() {
         Some(PRIVATE_DIR_MODE),
         "the Profile a Run made is its owner's alone"
     );
+}
+
+#[test]
+fn an_account_replaced_while_waiting_for_the_registry_lock_is_not_launched() {
+    let host = machine();
+    let lock = perch::holdings::lock_spec(&host).unwrap();
+    let now = host.now();
+    let host = host
+        .with_dir_held_since(&lock.dir, now)
+        .once_while_waiting(move |host| {
+            host.remove_dir_all(&lock.dir).unwrap();
+            let mut held = perch::holdings::lock(host).unwrap();
+            let mut registry = perch::registry::load(host).unwrap().unwrap();
+            let mut account = registry.held(SECOND_KEY).unwrap().clone();
+            registry.forget(SECOND_KEY);
+            account.identity.account_uuid = Some("replacement-user".into());
+            account.provider_identity = Some(
+                perch::providers::provider::AccountIdentity::from_subject(
+                    account.provider(),
+                    "replacement-user".into(),
+                    account.identity.organization_uuid.clone(),
+                )
+                .unwrap(),
+            );
+            registry.upsert(account);
+            perch::registry::save(host, &mut held, &mut registry).unwrap();
+        });
+    let (result, _) = run_run(&host, SECOND_EMAIL);
+    let error = result.expect_err("the selected identity is no longer held");
+    assert!(error.to_string().contains("does not hold"), "{error}");
+    assert!(launched(&host).is_empty());
 }

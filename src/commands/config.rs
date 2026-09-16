@@ -11,9 +11,8 @@
 
 use std::io::Write;
 
-use crate::adopt;
 use crate::column::{self, Labeled};
-use crate::commands::{group, only_the_registry};
+use crate::commands::group;
 use crate::config::Scope;
 use crate::config::{NotAScope, SETTINGS, Setting};
 use crate::error::{PerchError, Result};
@@ -53,14 +52,18 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
     // takes the write lock waits out whatever holds it and then fails with
     // "another `perch` holds it".
     match command {
-        // The half that writes changes the Registry and reaches nothing else,
-        // which is the whole of what `only_the_registry` is for
-        // (ADR one-door-to-the-registry).
         ConfigCommand::Set { words } => {
-            only_the_registry(host, out, |registry| set(registry, &words))
+            let mut held = crate::holdings::lock(host)?;
+            let mut registry = crate::registry::load(host)?.unwrap_or_default();
+            let lines = set(&mut registry, &words)?;
+            crate::registry::save(host, &mut held, &mut registry)?;
+            for line in lines {
+                say::line(out, &line)?;
+            }
+            Ok(())
         }
         ConfigCommand::Get { words } => {
-            let registry = adopt::ensure_adopted(host)?;
+            let registry = crate::registry::load(host)?.unwrap_or_default();
             for line in get(&registry, &words)? {
                 say::line(out, &line)?;
             }
@@ -72,10 +75,149 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
 /// Sets one Setting, returning what to tell the user: what it is now, and what
 /// that means for them.
 fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
+    if let [scope, selector, provider, key, value] = words
+        && selector == "--provider"
+    {
+        let scope = addressed(registry, scope)?;
+        let provider = crate::providers::provider::Id::parse(provider)?;
+        let mut changed = registry.clone();
+        let settings = changed
+            .scope_settings_mut(&scope)
+            .ok_or_else(|| PerchError::NotFound("Scope disappeared".into()))?;
+        let local = settings.providers.entry(provider).or_default();
+        match key.as_str() {
+            "strategy" => local.cycle.strategy = inherited(value, crate::config::strategy)?,
+            "watcher-threshold-percent" => {
+                local.watcher.threshold_percent =
+                    inherited(value, |value| crate::config::percentage(key, value))?
+            }
+            "watcher-margin-percent" => {
+                local.watcher.margin_percent =
+                    inherited(value, |value| crate::config::margin(key, value))?
+            }
+            "watcher-may-act" => local.watcher.enabled = crate::config::yes_or_no(key, value)?,
+            key if key.starts_with("option.") => {
+                let key = key.trim_start_matches("option.");
+                if value == "inherit" {
+                    local.options.remove(key);
+                } else {
+                    local.options.insert(
+                        key.into(),
+                        serde_json::from_str(value).unwrap_or_else(|_| value.clone().into()),
+                    );
+                }
+            }
+            _ => return Err(PerchError::Invalid("Unknown provider Scope setting".into())),
+        }
+        crate::registry::validate(&changed)?;
+        *registry = changed;
+        return Ok(vec![format!(
+            "{} {} {key}: {value}",
+            scope.word(),
+            provider.word()
+        )]);
+    }
+    if let [selector, key, value] = words
+        && selector == "--defaults"
+    {
+        let mut changed = registry.clone();
+        match key.as_str() {
+            "strategy" => changed.scope_defaults.cycle.strategy = inherited(value, crate::config::strategy)?,
+            "watcher-threshold-percent" => changed.scope_defaults.watcher.threshold_percent = inherited(value, |value| crate::config::percentage(key, value))?,
+            "watcher-margin-percent" => changed.scope_defaults.watcher.margin_percent = inherited(value, |value| crate::config::margin(key, value))?,
+            _ => return Err(PerchError::Invalid("Scope defaults contain strategy, watcher-threshold-percent, and watcher-margin-percent; permissions are explicit per Scope and provider".into())),
+        }
+        crate::registry::validate(&changed)?;
+        *registry = changed;
+        return Ok(vec![format!("Scope default {key}: {value}")]);
+    }
+    if words.first().is_some_and(|word| word == "--provider") {
+        let [_, provider, key, value] = words else {
+            return Err(PerchError::Invalid(
+                "Use perch config set --provider <name> <enabled|cli-path> <value>".into(),
+            ));
+        };
+        let provider = crate::providers::provider::Id::parse(provider)?;
+        let settings = registry.provider_settings.entry(provider).or_default();
+        match key.as_str() {
+            "enabled" => {
+                settings.enabled = value
+                    .parse()
+                    .map_err(|_| PerchError::Invalid("enabled must be true or false".into()))?
+            }
+            "cli-path" => settings.cli_path = (value != "auto").then(|| value.into()),
+            _ => {
+                return Err(PerchError::Invalid(
+                    "Provider settings are enabled and cli-path".into(),
+                ));
+            }
+        }
+        return Ok(vec![format!("{} {key}: {value}", provider.word())]);
+    }
+
+    if words.first().is_some_and(|word| word == "--global") {
+        return match &words[1..] {
+            [key, value] if key == "run-provider" => {
+                registry.run_provider = crate::providers::provider::Id::parse(value)?;
+                Ok(vec![format!(
+                    "run-provider: {}",
+                    registry.run_provider.word()
+                )])
+            }
+            [key, value] if key == "run-fallback" => {
+                registry.run_fallback = match value.as_str() {
+                    "installed" => true,
+                    "disabled" => false,
+                    _ => {
+                        return Err(PerchError::Invalid(
+                            "run-fallback is installed or disabled".into(),
+                        ));
+                    }
+                };
+                Ok(vec![format!("run-fallback: {value}")])
+            }
+            [key, value] if key == "watcher-paused" => {
+                registry.watcher_paused = crate::config::yes_or_no(key, value)?;
+                Ok(vec![format!("watcher-paused: {value}")])
+            }
+            _ => Err(PerchError::Invalid(
+                "Global settings are run-provider, run-fallback, and watcher-paused".into(),
+            )),
+        };
+    }
+
     match words {
         [scope, key, value] => {
             let scope = addressed(registry, scope)?;
+            if value == "inherit" {
+                let mut changed = registry.clone();
+                let settings = changed.scope_settings_mut(&scope).unwrap();
+                match key.as_str() {
+                    "strategy" => settings.cycle.strategy = None,
+                    "watcher-threshold-percent" => settings.watcher.threshold_percent = None,
+                    "watcher-margin-percent" => settings.watcher.margin_percent = None,
+                    _ => return Err(PerchError::Invalid("Only policy preferences can inherit; watcher permission must be set explicitly".into())),
+                }
+                crate::registry::validate(&changed)?;
+                *registry = changed;
+                return Ok(vec![format!("{} {key}: inherited", scope.word())]);
+            }
             let key = Setting::parse(key, &scope)?;
+            if key == Setting::WatcherMayAct {
+                let providers: std::collections::BTreeSet<_> = registry
+                    .accounts
+                    .iter()
+                    .filter(|account| registry.scope_of(account) == scope)
+                    .map(|account| account.provider())
+                    .collect();
+                if providers.len() > 1 {
+                    return Err(PerchError::Invalid(
+                        "Watcher permission in a mixed-provider Scope requires --provider <name>"
+                            .into(),
+                    ));
+                }
+                registry.select_provider(providers.into_iter().next().unwrap_or_default());
+            }
             let was = key.of(registry, &scope);
 
             key.write(registry, &scope, value)?;
@@ -120,6 +262,147 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
 /// Reads Settings back: pages for a Scope or for all of them, and the bare
 /// value where the words already name the rest of the line.
 fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
+    if let [selector, rest @ ..] = words
+        && selector == "--effective"
+    {
+        let (scope, provider) = match rest {
+            [scope, flag, provider] if flag == "--provider" => (
+                addressed(registry, scope)?,
+                crate::providers::provider::Id::parse(provider)?,
+            ),
+            [scope] => (addressed(registry, scope)?, registry.selected_provider()),
+            _ => {
+                return Err(PerchError::Invalid(
+                    "Use perch config get --effective <scope> [--provider <name>]".into(),
+                ));
+            }
+        };
+        let resolved = registry.resolved_policy(&scope, provider);
+        let values = [
+            ("strategy", resolved.settings.strategy.as_str().to_string()),
+            (
+                "watcher-threshold-percent",
+                resolved.settings.watcher_threshold_percent.to_string(),
+            ),
+            (
+                "watcher-margin-percent",
+                resolved.settings.watcher_margin_percent.to_string(),
+            ),
+            (
+                "watcher-may-act",
+                resolved.settings.watcher_may_act.to_string(),
+            ),
+        ];
+        let mut lines: Vec<_> = values
+            .iter()
+            .map(|(key, value)| format!("{key} {value} ({})", resolved.sources[key]))
+            .collect();
+        lines.push(format!(
+            "watcher-paused {} (global)",
+            registry.watcher_paused
+        ));
+        return Ok(lines);
+    }
+    if let [scope, selector, provider, rest @ ..] = words
+        && selector == "--provider"
+    {
+        let scope = addressed(registry, scope)?;
+        let mut contextual = registry.clone();
+        contextual.select_provider(crate::providers::provider::Id::parse(provider)?);
+        return match rest {
+            [] => Ok(page(&contextual, &scope)),
+            [key] if key.starts_with("option.") => {
+                let provider = contextual.selected_provider();
+                let option = contextual
+                    .scope_settings(&scope)
+                    .and_then(|settings| settings.providers.get(&provider))
+                    .and_then(|settings| settings.options.get(key.trim_start_matches("option.")));
+                Ok(vec![
+                    option
+                        .map(|value| {
+                            value
+                                .as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| value.to_string())
+                        })
+                        .unwrap_or_else(|| "inherit".into()),
+                ])
+            }
+            [key] => Ok(vec![Setting::parse(key, &scope)?.of(&contextual, &scope)]),
+            _ => Err(PerchError::Invalid("Expected at most one Setting".into())),
+        };
+    }
+    if words.first().is_some_and(|word| word == "--defaults") {
+        return Ok(vec![
+            serde_json::to_string_pretty(&registry.scope_defaults)
+                .map_err(|e| PerchError::Other(e.to_string()))?,
+        ]);
+    }
+    if words.first().is_some_and(|word| word == "--provider") {
+        let [_, provider, rest @ ..] = words else {
+            return Err(PerchError::Invalid(
+                "Use perch config get --provider <name> [enabled|cli-path]".into(),
+            ));
+        };
+        let provider = crate::providers::provider::Id::parse(provider)?;
+        let settings = registry
+            .provider_settings
+            .get(&provider)
+            .cloned()
+            .unwrap_or_default();
+        let path = settings
+            .cli_path
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "auto".into());
+        return match rest {
+            [] => Ok(vec![
+                format!("enabled {}", settings.enabled),
+                format!("cli-path {path}"),
+            ]),
+            [key] if key == "enabled" => Ok(vec![settings.enabled.to_string()]),
+            [key] if key == "cli-path" => Ok(vec![path]),
+            _ => Err(PerchError::Invalid(
+                "Provider settings are enabled and cli-path".into(),
+            )),
+        };
+    }
+
+    if words.first().is_some_and(|word| word == "--global") {
+        if let [key] = &words[1..] {
+            if key == "run-fallback" {
+                return Ok(vec![
+                    if registry.run_fallback {
+                        "installed"
+                    } else {
+                        "disabled"
+                    }
+                    .into(),
+                ]);
+            }
+            if key == "watcher-paused" {
+                return Ok(vec![registry.watcher_paused.to_string()]);
+            }
+        }
+        return match &words[1..] {
+            [] => Ok(vec![
+                format!("run-provider: {}", registry.run_provider.word()),
+                format!(
+                    "run-fallback: {}",
+                    if registry.run_fallback {
+                        "installed"
+                    } else {
+                        "disabled"
+                    }
+                ),
+                format!("watcher-paused: {}", registry.watcher_paused),
+            ]),
+            [key] if key == "run-provider" => Ok(vec![registry.run_provider.word().into()]),
+            _ => Err(PerchError::Invalid(
+                "Use perch config get --global [run-provider|run-fallback|watcher-paused]".into(),
+            )),
+        };
+    }
+
     match words {
         [] => Ok(everything(registry)),
         [one] => {
@@ -139,7 +422,19 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
 /// left out here is a row nothing else prints. [`page`] under every Scope's
 /// name rather than a second idea of what a Config is.
 fn everything(registry: &Registry) -> Vec<String> {
-    let mut lines = Vec::new();
+    let mut lines = vec![
+        "--global:".into(),
+        format!("  run-provider {}", registry.run_provider.word()),
+        format!(
+            "  run-fallback {}",
+            if registry.run_fallback {
+                "installed"
+            } else {
+                "disabled"
+            }
+        ),
+        format!("  watcher-paused {}", registry.watcher_paused),
+    ];
     for scope in registry.scopes() {
         if !lines.is_empty() {
             lines.push(String::new());
@@ -198,7 +493,16 @@ fn how_a_setting_is_set() -> String {
          The Strategies:\n\
          {strategies}\n\
          \n\
-         `perch config get` reads every Setting back.",
+         `perch config get` reads every Setting back.\n\n\
+         Application preference: `perch config set --global run-provider <claude|codex>`.\n\
+         It defaults to claude; `perch config get --global run-provider` reads it.\n\n\
+         Global settings also include run-fallback (installed or disabled) and watcher-paused (true or false).\n\
+         `perch config set --defaults <policy> <value>` sets Scope defaults.\n\
+         `perch config set <scope> --provider <name> <key> <value>` sets a provider override.\n\
+         Strategy and numeric policy overrides accept inherit. Watcher permission must be explicit.\n\
+         `perch config get --effective <scope> --provider <name>` shows values and their sources.\n\
+         `perch config set --provider <name> <enabled|cli-path> <value>` configures installation.\n\
+         Native policy options use option.<name>; each provider validates its supported options.",
         interchangeable = Setting::Interchangeable.as_str(),
         rows = rows.join("\n"),
         strategies = crate::config::the_strategies()
@@ -295,6 +599,14 @@ fn how_get_is_addressed(words: &[String]) -> PerchError {
          get` on its own reads every Scope there is.",
         say::words(words.len()),
     ))
+}
+
+fn inherited<T>(value: &str, parse: impl FnOnce(&str) -> Result<T>) -> Result<Option<T>> {
+    if value == "inherit" {
+        Ok(None)
+    } else {
+        parse(value).map(Some)
+    }
 }
 
 #[cfg(test)]
@@ -413,8 +725,13 @@ mod tests {
                 set(&mut restored, &words(&[scope.word(), key, value])).unwrap();
             }
         }
-        assert_eq!(restored.groups, registry.groups);
-        assert_eq!(restored.ungrouped, registry.ungrouped);
+        for scope in registry.scopes() {
+            assert_eq!(restored.settings(&scope), registry.settings(&scope));
+        }
+        assert_eq!(
+            restored.ungrouped.interchangeable,
+            registry.ungrouped.interchangeable
+        );
     }
 
     /// The header is what carries the Scope where the words did not name one,

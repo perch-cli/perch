@@ -60,6 +60,9 @@ opt-level = 3
 age = { version = "0.12.1", default-features = false, features = ["armor"] }
 chrono = { version = "0.4", features = ["serde"] }
 
+# Decodes the identity claims in Codex's stored token without changing its bytes.
+base64 = "0.22"
+
 # Wipes a buffer before it is freed: the passphrase an Export is sealed with,
 # and the serialized bundle either side of the encryption. Freed heap outlives
 # the process in a core dump or a hibernation image, and a compiler may elide a

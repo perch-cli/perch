@@ -11,10 +11,22 @@
 // an unused fixture here is the normal case rather than rot.
 #![allow(dead_code)]
 
+#[path = "../fixtures/sessions.rs"]
+pub mod session_fixture;
+
+use perch as fixture_crate;
 use std::path::Path;
+#[path = "../fixtures/claude.rs"]
+pub mod claude_fixture;
 
 use chrono::{DateTime, Duration, Utc};
-use perch::anthropic::{PROFILE_URL, USAGE_URL};
+pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+pub const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
+pub const TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
+pub const BETA: &str = "oauth-2025-04-20";
+pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+use claude_fixture as credentials;
+use claude_fixture as probe;
 use perch::commands::add::AddArgs;
 use perch::commands::alias::AliasCommand;
 use perch::commands::config::ConfigCommand;
@@ -27,18 +39,24 @@ use perch::commands::run::RunArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
 use perch::commands::watcher::WatcherCommand;
-use perch::credentials;
 use perch::host::fake::THIS_PROCESS;
 use perch::host::prelude::*;
 use perch::host::{Execution, FakeHost, Platform};
-use perch::probe;
 use perch::registry::{CachedUtilization, Quarantine, WindowUtilization};
 
 pub const CLAUDE_VERSION: &str = "2.1.221";
 pub const LOGIN_NAME: &str = "someone";
+pub const KEY: &str = "claude:17a9e82e199f9341793949dfee4b65fa3f875bc724112bdc0218fa39715c529b";
+pub const SECOND_KEY: &str =
+    "claude:47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9";
+pub const THIRD_KEY: &str =
+    "claude:5035aea24050aaedb526edd7a620af02f1b6c6bff699dacd7d50f71388456af9";
+pub const LABEL: &str = "someone@example.com (Claude Code, Workspace organization-uuid-1)";
+pub const SECOND_LABEL: &str = "overflow@example.com (Claude Code, Workspace organization-uuid-2)";
+pub const THIRD_LABEL: &str = "spare@example.com (Claude Code, Workspace organization-uuid-3)";
 pub const EMAIL: &str = "someone@example.com";
 pub const DEFAULT_SERVICE: &str = "Claude Code-credentials";
-pub const REGISTRY_PATH: &str = "/Users/someone/.config/perch/registry.json";
+pub const REGISTRY_PATH: &str = "/Users/someone/.config/perch/config.json";
 pub const IDENTITY_PATH: &str = "/Users/someone/.claude.json";
 
 pub const CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test","refreshToken":"sk-ant-ort01-test","expiresAt":1785000000000,"scopes":["user:inference","user:profile"],"subscriptionType":"pro"}}"#;
@@ -165,18 +183,18 @@ pub fn client_exiting(status: i32) -> impl Fn(&FakeHost, &Path) -> i32 {
 /// is a Run still going; an hour ago, against a process since replaced, is the
 /// marker a killed Run left behind.
 pub fn a_run_against(host: &FakeHost, email: &str, began: DateTime<Utc>) {
-    let profile = perch::holdings::profile_dir_for(host, email).expect("home is known");
+    let profile = store_of(host, email).config_dir;
     host.set_file(
-        probe::session_marker_at(&profile, THIS_PROCESS),
-        &probe::session_marker(THIS_PROCESS, began),
+        session_fixture::session_marker_at(&profile, THIS_PROCESS),
+        &session_fixture::session_marker(THIS_PROCESS, began),
     );
 }
 
 /// The marker a Claude Code *client* writes, deliberately not
-/// [`probe::session_marker`], which is a Run's. The probe reads `startedAt` and
+/// [`session_fixture::session_marker`], which is a Run's. The probe reads `startedAt` and
 /// ignores the rest whoever left it (ADR a-profile-is-live-by-evidence), so a
 /// fixture writing Perch's marker for a client stops testing that. The path is
-/// `probe`'s: where a marker lives is Claude Code's convention, not this file's.
+/// a fixture of Claude's session convention.
 pub fn a_client_marker(pid: u32, began: DateTime<Utc>) -> String {
     format!(
         r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
@@ -189,7 +207,7 @@ pub fn a_client_marker(pid: u32, began: DateTime<Utc>) -> String {
 /// does, so a fixture arranged inside a login or a wait can reach it too.
 pub fn a_client_running_against(host: &FakeHost, config_dir: impl AsRef<Path>, pid: u32) {
     host.set_file(
-        probe::session_marker_at(config_dir.as_ref(), pid),
+        session_fixture::session_marker_at(config_dir.as_ref(), pid),
         &a_client_marker(pid, host.now()),
     );
     host.set_live_process(pid);
@@ -220,6 +238,7 @@ pub fn run_run_with(
     command: &[&str],
 ) -> (perch::Result<i32>, String) {
     let args = RunArgs {
+        provider: Default::default(),
         target: target.to_string(),
         command: command.iter().map(|word| word.to_string()).collect(),
     };
@@ -322,6 +341,7 @@ pub fn machine_with_two_accounts() -> FakeHost {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -339,6 +359,7 @@ pub fn machine_with_three_accounts() -> FakeHost {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -363,10 +384,36 @@ pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
     })
 }
 
-/// Where an Account's Profile keeps its things, derived the way every command
-/// derives it now that nothing records it (ADR claude-code-chooses-the-store).
+/// Known subjects let failure fixtures name a Profile before enrollment creates it.
+pub fn fixture_key(host: &FakeHost, email: &str) -> String {
+    if let Some(registry) = perch::registry::load(host).unwrap() {
+        let matches: Vec<_> = registry
+            .accounts
+            .iter()
+            .filter(|account| {
+                account.provider() == perch::providers::provider::Id::Claude
+                    && (account.key() == email || perch::name::same_name(account.email(), email))
+            })
+            .collect();
+        if matches.len() == 1 {
+            return matches[0].key().into();
+        }
+    }
+    match email {
+        EMAIL => KEY,
+        SECOND_EMAIL => SECOND_KEY,
+        THIRD_EMAIL => THIRD_KEY,
+        other => other,
+    }
+    .into()
+}
+
+/// A Credential Store's namespace derives from its Profile path
+/// (ADR claude-code-chooses-the-store).
 pub fn store_of(host: &FakeHost, email: &str) -> probe::Store {
-    let dir = perch::holdings::profile_dir_for(host, email).expect("home is known");
+    let key = fixture_key(host, email);
+    let dir = perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, host, &key)
+        .expect("home is known");
     probe::store_for_profile(host, &dir).expect("USER is set")
 }
 
@@ -374,7 +421,7 @@ pub fn store_of(host: &FakeHost, email: &str) -> probe::Store {
 /// holds one — which is the only question a test about a stored Credential
 /// should be asking.
 pub fn credential_of(host: &FakeHost, email: &str) -> Option<String> {
-    perch::credentials::read(host, &store_of(host, email))
+    claude_fixture::read(host, &store_of(host, email))
         .expect("the store could be consulted")
         .map(|held| held.credential.to_string())
 }
@@ -404,7 +451,10 @@ pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
 /// that half itself.
 pub fn a_switch_died_mid_flight(host: &FakeHost, leaving: Option<&str>, arriving: &str) {
     let mut registry = registry_of(host);
-    registry.begin_landing(leaving.map(str::to_string), arriving);
+    registry.begin_landing(
+        leaving.map(|key| fixture_key(host, key)),
+        &fixture_key(host, arriving),
+    );
     save_registry(host, &registry);
 }
 
@@ -452,6 +502,7 @@ pub fn run_switch(host: &FakeHost, target: &str) -> (perch::Result<()>, String) 
     run_switch_with(
         host,
         SwitchArgs {
+            provider: Default::default(),
             target: Some(target.to_string()),
             no_refresh: false,
         },
@@ -464,6 +515,7 @@ pub fn run_cycle(host: &FakeHost) -> (perch::Result<()>, String) {
     run_switch_with(
         host,
         SwitchArgs {
+            provider: Default::default(),
             target: None,
             no_refresh: false,
         },
@@ -476,6 +528,7 @@ pub fn run_cycle_on_cache(host: &FakeHost) -> (perch::Result<()>, String) {
     run_switch_with(
         host,
         SwitchArgs {
+            provider: Default::default(),
             target: None,
             no_refresh: true,
         },
@@ -532,6 +585,7 @@ pub fn watched() -> FakeHost {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -559,7 +613,18 @@ pub fn usage(used_percent: f64) -> String {
 }
 
 pub fn profile_of(email: &str) -> String {
-    format!(r#"{{"account": {{"email_address": "{email}"}}}}"#)
+    let n = match email {
+        EMAIL => Some(1),
+        SECOND_EMAIL => Some(2),
+        THIRD_EMAIL => Some(3),
+        _ => None,
+    };
+    match n {
+        Some(n) => format!(
+            r#"{{"account": {{"email_address": "{email}", "uuid": "account-uuid-{n}"}}, "organization": {{"uuid": "organization-uuid-{n}"}}}}"#
+        ),
+        None => format!(r#"{{"account": {{"email_address": "{email}"}}}}"#),
+    }
 }
 
 /// An Account that answers about itself, with its Utilization following a
@@ -628,6 +693,7 @@ pub fn unset_alias(host: &FakeHost, target: &str) -> (perch::Result<()>, String)
 /// `perch add` with a Group named outright, so nothing is asked.
 pub fn add_to_group(group: &str) -> AddArgs {
     AddArgs {
+        provider: Default::default(),
         group: Some(group.to_string()),
         ..AddArgs::default()
     }
@@ -720,6 +786,7 @@ pub fn page_of(printed: &str, scope: &str) -> String {
 /// One Quota Window, as full as the test says and with no reset time recorded.
 pub fn window(name: &str, used_percent: f64) -> WindowUtilization {
     WindowUtilization {
+        group: None,
         window: name.to_string(),
         used_percent,
         resets_at: None,
@@ -730,6 +797,7 @@ pub fn window(name: &str, used_percent: f64) -> WindowUtilization {
 /// built out of, and what the soonest-reset Strategy ranks on.
 pub fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtilization {
     WindowUtilization {
+        group: None,
         resets_at: Some(at),
         ..window(name, used_percent)
     }
@@ -743,7 +811,7 @@ pub fn observed(host: &FakeHost, email: &str, windows: Vec<WindowUtilization>) {
     let observed_at = host.now() - Duration::minutes(4);
     let mut registry = registry_of(host);
     registry
-        .account_mut(email)
+        .account_mut(&fixture_key(host, email))
         .expect("an Account Perch holds")
         .utilization = Some(CachedUtilization {
         observed_at,
@@ -759,7 +827,7 @@ pub fn observed_just_now(host: &FakeHost, email: &str, windows: Vec<WindowUtiliz
     let observed_at = host.now() - Duration::seconds(1);
     let mut registry = registry_of(host);
     registry
-        .account_mut(email)
+        .account_mut(&fixture_key(host, email))
         .expect("an Account Perch holds")
         .utilization = Some(CachedUtilization {
         observed_at,
@@ -780,7 +848,7 @@ pub fn quarantine(host: &FakeHost, email: &str) {
 pub fn quarantine_for(host: &FakeHost, email: &str, why: Quarantine) {
     let mut registry = registry_of(host);
     assert!(
-        registry.quarantine(email, why),
+        registry.quarantine(&fixture_key(host, email), why),
         "{email} is an Account Perch holds and was not already Quarantined"
     );
     save_registry(host, &registry);
@@ -838,7 +906,19 @@ pub fn run_remove_with(host: &FakeHost, args: RemoveArgs) -> (perch::Result<()>,
 /// Why an Account is Quarantined, as the Registry records it.
 pub fn quarantine_of(host: &FakeHost, email: &str) -> Option<Quarantine> {
     registry_of(host)
-        .account(email)
+        .account(&fixture_key(host, email))
         .expect("an Account Perch holds")
         .quarantine
+}
+
+pub fn exported_artifact(export: &perch::export::Export, key: &str, name: &str) -> Option<String> {
+    let key = export
+        .registry
+        .accounts
+        .iter()
+        .find(|account| account.key() == key || account.email() == key)
+        .map_or(key, |account| account.key());
+    serde_json::to_value(export.profile_for(key)?).ok()?["artifacts"][name]["content"]
+        .as_str()
+        .map(str::to_owned)
 }

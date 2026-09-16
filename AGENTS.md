@@ -2,6 +2,11 @@ Always load the `unslop` skill if it is present.
 
 ## The Holdings survive an upgrade
 
+For the current prelaunch provider redesign, the sole user explicitly authorizes
+a fresh installation and removal of historical migrations. Refuse retired layouts
+with reset instructions and preserve their files (ADR a-fresh-provider-layout).
+The versioning and refusal rules below still apply to the new layout.
+
 The CLI surface moves freely: commands, flags, output prose, exit codes and the
 shape of `--json`. Rename it, move it, cut it. Commands, flags, exit codes and
 `--json` mark the entry `[**breaking**]` in `CHANGELOG.md`, because a script

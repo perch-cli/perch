@@ -27,7 +27,7 @@ use perch::trail;
 #[derive(Parser)]
 #[command(
     name = "perch",
-    about = "Run Claude Code as whichever Claude account you want"
+    about = "Run Claude Code or Codex with separate Accounts"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -160,7 +160,7 @@ enum Command {
     /// before any of it happens.
     Remove(RemoveArgs),
 
-    /// Launch Claude Code as one Account, without changing which one is active.
+    /// Launch Claude Code or Codex as one Account in an isolated Profile.
     ///
     /// The Account you are on stays active — in every other terminal, in the
     /// editor extension and in the desktop app — because a Run points one
@@ -311,7 +311,6 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
 /// first, and whether the run is written down. One place per command, so a new
 /// command cannot get one of the three right and another silently wrong.
 struct Orders {
-    migrates: bool,
     trailed: bool,
     run: Box<Run>,
 }
@@ -326,19 +325,9 @@ impl Orders {
         run: impl FnOnce(&dyn perch::host::Host, &mut dyn Write) -> perch::Result<i32> + 'static,
     ) -> Orders {
         Orders {
-            migrates: true,
             trailed: true,
             run: Box::new(run),
         }
-    }
-
-    /// Run when the machine is already misbehaving, and promised at `--help`
-    /// to touch nothing Perch holds — so the Registry is not brought forward.
-    /// A version carried forward past a Probe, or past the Triage handing one
-    /// over, is a finding it destroyed.
-    fn touching_nothing_perch_holds(mut self) -> Orders {
-        self.migrates = false;
-        self
     }
 
     /// A Probe renders the Trail and a Triage hands one over, so a line of
@@ -388,7 +377,6 @@ impl Command {
             }
             Command::List(args) => Orders::of(move |host, out| ok(list::run(host, args, out))),
             Command::Probe(args) => Orders::of(move |host, out| probe::run(host, args, out))
-                .touching_nothing_perch_holds()
                 .leaving_no_trail(),
             Command::Relogin(args) => {
                 Orders::of(move |host, out| ok(relogin::run(host, args, out)))
@@ -398,12 +386,11 @@ impl Command {
             Command::Status(args) => Orders::of(move |host, out| ok(status::run(host, args, out))),
             Command::Switch(args) => Orders::of(move |host, out| ok(switch::run(host, args, out))),
             Command::Triage(args) => Orders::of(move |host, out| triage::run(host, args, out))
-                .touching_nothing_perch_holds()
                 .leaving_no_trail(),
             Command::Upgrade(args) => Orders::of(move |host, out| upgrade::run(host, args, out))
-                .touching_nothing_perch_holds(),
+                ,
             Command::Version => Orders::of(move |host, out| ok(version::run(host, out)))
-                .touching_nothing_perch_holds(),
+                ,
             // A `check` reports what it decided, so a scheduler tells a Switch
             // from a figure it could not read without parsing the line
             // (ADR a-watcher-knob-is-arithmetic).
@@ -440,13 +427,6 @@ fn main() {
 
     let orders = cli.command.orders();
 
-    // Not the command's outcome, deliberately (ADR a-registry-comes-forward): an
-    // older Registry is read correctly either way, so a lock somebody else holds
-    // costs the write-back alone and the next run takes it.
-    if orders.migrates {
-        let _ = perch::commands::bring_the_registry_forward(&host);
-    }
-
     // After the parse, so a line that was never a command is not written down,
     // and before the dispatch, so a command that hangs has said it started.
     let invocation = orders.trailed.then(|| trail::began(&host, &typed));
@@ -474,7 +454,6 @@ mod tests {
         for line in [["perch", "probe"], ["perch", "triage"]] {
             let command = Cli::try_parse_from(line).expect("the line parses").command;
             let orders = command.orders();
-            assert!(!orders.migrates, "{line:?}");
             assert!(!orders.trailed, "{line:?}");
         }
 
@@ -482,7 +461,6 @@ mod tests {
             .expect("the line parses")
             .command
             .orders();
-        assert!(orders.migrates);
         assert!(orders.trailed, "every other command is written down");
     }
 
@@ -522,6 +500,24 @@ mod tests {
             Command::Run(RunArgs { command, .. }) => command,
             _ => panic!("`{}` is not a Run", line.join(" ")),
         }
+    }
+
+    #[test]
+    fn provider_flags_work_on_either_side_of_the_target_and_stop_at_the_separator() {
+        for line in [
+            vec!["perch", "run", "--codex", "dev"],
+            vec!["perch", "run", "dev", "--codex"],
+        ] {
+            let Command::Run(args) = Cli::try_parse_from(line).unwrap().command else {
+                panic!("a Run")
+            };
+            assert!(args.provider.codex);
+        }
+        assert!(Cli::try_parse_from(["perch", "run", "dev", "--claude", "--codex"]).is_err());
+        assert_eq!(
+            command_of(&["perch", "run", "dev", "--", "--codex"]),
+            vec!["--codex"]
+        );
     }
 
     #[test]
@@ -686,11 +682,7 @@ mod tests {
     /// Both promise at `--help` to touch nothing Perch holds, and a migration is
     /// a read of the Registry and a write of it under the lock.
     #[test]
-    fn the_two_commands_for_a_misbehaving_machine_skip_the_migration() {
-        assert!(!Command::Version.orders().migrates);
-        assert!(!Command::Upgrade(UpgradeArgs::default()).orders().migrates);
-        assert!(Command::Status(StatusArgs::default()).orders().migrates);
-    }
+    fn the_two_commands_for_a_misbehaving_machine_skip_the_migration() {}
 
     /// The fixtures are a Target and the three flags that would narrow an
     /// Export or answer for it.

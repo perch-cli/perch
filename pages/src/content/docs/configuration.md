@@ -4,197 +4,146 @@ sidebar:
   order: 8
 ---
 
-`perch config` changes the rules Perch chooses Accounts by, and asks nothing:
-every capability Perch has is reachable from a script, because it has to be
-complete over SSH and in CI.
+`perch config` reads and changes provider installation settings, application
+preferences, and the policy used to choose Accounts. Commands do not prompt.
 
-## The Settings
+## Files
 
-| Key | Said about | Values | Default |
-| --- | ---------- | ------ | ------- |
-| `strategy` | any Scope | `most-headroom`, `soonest-reset` | `most-headroom` |
-| `prefer-fable` | any Scope | `true`, `false` | `false` |
-| `watcher-may-act` | any Scope | `true`, `false` | `false` |
-| `watcher-threshold-percent` | any Scope | 0–100 | `80` |
-| `watcher-margin-percent` | any Scope | 1–100 | `10` |
-| `interchangeable` | `ungrouped` only | `true`, `false` | `false` |
+Perch keeps one `config.json` in its configuration directory. It contains
+`global`, `providers`, `scope_defaults`, `groups`, `ungrouped`, and `accounts`.
+Accounts carry their provider, description, Alias, Group, and enabled state.
+Credentials stay in native provider stores.
 
-`perch config set --help` names the same list and the same values, so the table
-here is somewhere to read more rather than the only place they are written down.
+Each provider has a directory under `providers/`, with its Profiles and pending
+logins. Its `state.json` records its active Account, observations, Quarantines,
+and Watcher pacing. Group identities keep that pacing attached to the same Group
+when its name changes.
 
-## A Setting is said about the Scope it governs
+This prelaunch layout requires a fresh installation. Perch refuses old layouts
+with instructions instead of migrating them. Keep any old configuration aside
+until you have finished setting up the new installation. Open an older Export
+with the Perch build that wrote it.
 
-A **Scope** — each Group, and the Accounts in no Group taken together — holds
-its own full Settings, and there is nothing above it. A Setting nobody has said
-anything about is the compiled-in default rather than somebody else's value, and
-an Account carries nothing at all: every Setting there is describes how Perch
-chooses *between* Accounts, and a rule for choosing has nothing to say to a set
-of one.
+## Application preferences
 
-So every `set` names its subject: `perch config set <scope> <key> <value>`. One
-that names no Scope is refused, because a rule with no subject is a rule about
-nothing — and there is no word for "everywhere" to reach for instead.
-
-```
-$ perch config set work watcher-threshold-percent 70
-`watcher-threshold-percent` on Group `work` is now 70.
-`perch watcher run` Switches within Group `work` once that much of the fullest Quota Window of the Account you are on has been used. [...]
-
-$ perch config set watcher-threshold-percent 70
-`perch config set watcher-threshold-percent 70` names no Scope, and every Setting is said about the Scope it governs — there is nothing above them for a value to be set at. `perch config set <scope> watcher-threshold-percent 70` sets one. `ungrouped` addresses the Accounts in no Group. Groups Perch holds: personal, work.   # exit 14
-
-$ perch config get
-ungrouped:
-interchangeable            true
-strategy                   most-headroom
-prefer-fable               false
-watcher-may-act            false
-watcher-threshold-percent  80
-watcher-margin-percent     10
-
-personal:
-strategy                   most-headroom
-prefer-fable               false
-watcher-may-act            false
-watcher-threshold-percent  80
-watcher-margin-percent     10
-
-work:
-strategy                   soonest-reset
-prefer-fable               false
-watcher-may-act            false
-watcher-threshold-percent  70
-watcher-margin-percent     10
-
-$ perch config get work strategy
-soonest-reset
+```sh
+perch config set --global run-provider codex
+perch config set --global run-fallback installed
+perch config set --global watcher-paused true
+perch config get --global
 ```
 
-**Reading is not writing.** A bare `perch config get` prints every Scope's
-Config in full, and `perch config get <scope>` prints one Scope's: a read has no
-subject to be wrong about, and a write does. A Scope's name and a row under it
-are the `perch config set` that would restore the line, so reading the Config
-and writing it back are the same vocabulary — and naming both words prints the
-value alone, which is what `$(perch config get work strategy)` wants.
+| Key | Values | Default |
+| --- | --- | --- |
+| `run-provider` | `claude`, `codex` | `claude` |
+| `run-fallback` | `installed`, `disabled` | `installed` |
+| `watcher-paused` | `true`, `false` | `false` |
 
-There is no `perch config unset`. With nothing above a Scope there is nothing to
-clear — a value is simply set to what it should be. (`perch alias <target>
---unset` is untouched: freeing a name is a different act.)
+The Run preference applies when no provider flag is supplied. Installed fallback
+allows another enabled CLI when the preferred CLI is unavailable. Explicit
+provider selection does not fall back. Global Watcher pause blocks every
+provider's unattended Switching; clearing it restores the existing permissions.
 
-## Scopes
+## Provider installation
 
-A Scope is a Group by name, or `ungrouped` for the Accounts in no Group — which
-are a Scope so that there is somewhere to say how they are Cycled, and never a
-Group: a Group is a declaration somebody made, and this is the absence of one.
-No Group can be called `ungrouped`, or the Scope would answer to the name first.
+```sh
+perch config set --provider codex enabled true
+perch config set --provider codex cli-path /opt/bin/codex
+perch config get --provider codex
+perch config set --provider codex cli-path auto
+```
 
-`global` is refused as a Group name and as an Alias too, for a different reason:
-it is the word people reach for when they mean *everywhere*, and there is no
-everywhere. The refusal is where you find that out, which is a better place to
-learn it than from a Setting that appeared to take.
+Both providers are enabled by default. `auto` clears the configured CLI path.
+Perch then uses `PERCH_CLAUDE_BIN` or `PERCH_CODEX_BIN` when supplied, followed by
+PATH discovery. Provider support is registered in Perch itself; adding a JSON
+entry does not install a new adapter.
 
-`interchangeable` is carried by `ungrouped` alone and is absent from a Group's
-page. It is the declaration that those Accounts may be Cycled among at all, and
-a Group **is** that declaration — printing the line against a Group and then
-refusing to set it would break the rule the whole command rests on.
+## Scope policy and inheritance
 
-The watcher therefore needs **two independent yeses** among the Accounts in no
-Group: `interchangeable`, saying they are a set worth moving between, and
-`watcher-may-act`, letting something move between them unasked. A Group needs
-only the second. Neither implies the other, which is why they are two things
-rather than one said twice.
+A Scope is a named Group or `ungrouped`, which contains Accounts in no Group.
+`none` also names those Accounts. These two words and `global` are reserved,
+so they cannot become Group names or Aliases.
+Settings resolve in this order:
 
-## Strategy
+1. Compiled defaults.
+2. `scope_defaults`, shared by Scopes.
+3. The Scope's own overrides.
+4. A provider override within that Scope.
 
-The **strategy** is which Account a Cycle prefers when more than one would
-serve. `most-headroom` takes the one with the most room left; `soonest-reset`
-takes the one whose fullest Quota Window comes back soonest, so quota that was
-about to be thrown away is spent rather than wasted. How headroom is *measured*
-is always the worst window, so a strategy reorders the Accounts that have room
-and can never promote an exhausted one. [`prefer-fable`](#spending-fable-first)
-adds a tier on top of that measurement, and a strategy then orders within a
-tier.
+```sh
+perch config set --defaults watcher-threshold-percent 80
+perch config set work watcher-threshold-percent 75
+perch config set work --provider claude watcher-threshold-percent 70
+perch config get --effective work --provider claude
+```
 
-A strategy says which figure to prefer, not which figures to invent. Cached
-figures do not always carry a reset time, and `soonest-reset` ranks an Account
-whose figure does not above nothing at all: an Account that says when it comes
-back is preferred to one that does not, and where none of them says, the Cycle
-falls back to the room it can see and says that is what it did.
+`--effective` shows resolved policy and the source of each value. Set a policy
+override to `inherit` to remove it and use the preceding level again:
 
-## Spending Fable first
+```sh
+perch config set work --provider claude watcher-threshold-percent inherit
+perch config set work strategy inherit
+```
 
-`prefer-fable` makes a Scope spend Fable before anything else. Off — the
-default — nothing changes. On, the ranking becomes two tiers: the Accounts that
-can serve a Fable request right now come first, ordered by how much of their
-weekly Fable window is left, so Fable drains evenly across the Scope before
-anything else is touched. Everything else follows, ordered by its fullest
-window that is not Fable's — so when Fable is spent everywhere, the watcher
-still moves you once onto the best of what remains and then holds. `perch list`
-shows the same order the watcher acts on.
+| Policy | Values | Compiled default |
+| --- | --- | --- |
+| `strategy` | `most-headroom`, `soonest-reset` | `most-headroom` |
+| `watcher-threshold-percent` | 0–100 | `80` |
+| `watcher-margin-percent` | 1–100 | `10` |
 
-The preference keys on the window Anthropic reports for Fable. If it is on and
-no observed Account reports that window — after a model rename, say — the
-listing says so, and Accounts rank on headroom alone rather than the Setting
-silently behaving as if it were off.
+`most-headroom` prefers the Account with the most capacity remaining.
+`soonest-reset` prefers usable capacity that resets sooner. A mixed Group has a
+separate Cycle for each provider; Claude capacity cannot substitute for Codex
+capacity.
 
-Perch supplies Fable *capacity* only: which model a session actually uses stays
-with the session.
+The Watcher considers leaving an Account when its fullest applicable window
+reaches the threshold. A destination must fit below the threshold minus the
+margin. A margin greater than the threshold admits only an empty destination.
 
-## The watcher's three
+## Explicit Watcher permission
 
-The **watcher's** three fields govern [`perch watcher`](watching.md) and nothing
-else. `watcher-may-act` says whether it may Switch within that Scope at all, and
-is off by default because a Scope only ever changes underneath you because you
-said it could. It is said about the Scope it grants and reaches no other, so a
-Group declared afterwards is a Group nobody has said anything about — and there
-is no one command that withdraws the watcher everywhere, which is the price of
-consent that cannot arrive by inheritance. `watcher-threshold-percent` is how
-much of the fullest Quota Window of the Account you are on has to be used before
-it moves you. Neither of them starts a Watcher: they take effect while one is
-running — the loop in a terminal, a Service, or a scheduled Check — and not
-otherwise.
+```sh
+perch config set work --provider claude watcher-may-act true
+perch config set ungrouped interchangeable true
+perch config set ungrouped --provider claude watcher-may-act true
+```
 
-Taking `watcher-may-act` back does not stop a Watcher that is already running.
-It **holds** it: it reads nothing and moves nothing, says what is missing, and
-starts deciding again the moment the grant comes back. The grant is about
-whether it may *act*, and a held Watcher is not acting.
+Watcher permission belongs to a specific Scope and provider. It is off by
+default and is never inherited from Scope defaults. A mixed Group must name the
+provider when granting permission. Permission for Claude grants nothing to
+Codex or a future provider.
 
-`watcher-margin-percent` is the second half of the same question, and a
-different one: how *empty* a candidate has to be before moving to it is worth
-doing, in points under the threshold. At the default 10 and a threshold of 80,
-nothing above 70% is moved to. Two knobs rather than one because the ceiling is
-the threshold less the margin, so a single knob moves both: raising the
-threshold to 90 to reach a ceiling of 80 also delays when you are moved off,
-which is the opposite of what a conservative destination rule wants.
+Ungrouped Accounts additionally require `interchangeable=true` before Cycling
+may choose between them. A Group already declares that its members are
+interchangeable within each provider. Neither permission overrides global pause
+or an unsupported provider capability. Codex live Switching is currently
+unsupported.
 
-`0` is refused. An Account is left at or over the threshold and a candidate is
-set aside above the ceiling, so at a margin of nothing an Account at exactly 80%
-would be both full enough to leave and clear enough to arrive at. A margin wider
-than the threshold is fine, and is a Scope that will only move onto an Account
-with nothing used at all — a coherent thing to ask for, reached from either
-side.
+## Provider policy options
 
-**The two numbers beside them are arithmetic, so they are fixed rather than
-offered:**
+Claude can prefer its Fable workload capacity:
 
-- How often it **reads** — two and a half minutes, derived from Anthropic's
-  allowance of ~28-30 reads an hour rather than from anyone's taste. A Group
-  configured to read every ten seconds would be a Group configured to spend that
-  allowance and be refused.
-- The **cooldown** — 15 minutes — which is the least it leaves between two
-  Switches. A five-hour window moves slowly enough that fifteen minutes never
-  misses a real crossing, which is arithmetic about the window rather than a
-  taste.
+```sh
+perch config set work --provider claude option.preferred_workload fable
+perch config get work --provider claude option.preferred_workload
+perch config set work --provider claude option.preferred_workload inherit
+```
 
-## Reading it back
+The provider validates native options and identifies the quota windows used to
+rank that workload. Unknown options and unsupported values are refused. The
+`preferred-workload` boolean is also available on an ordinary Scope page for
+the selected provider's default workload preference.
 
-`perch config get` lays each Scope's Settings out as a page: the keys in one
-column and the values in another. A bare `perch config get` names each Scope
-above its page, because the words did not; `perch config get <scope>` prints the
-page alone. Naming a Scope and a key prints the value alone, with no field to
-cut out of it.
+## Reading settings
 
-An unknown key or a value that means nothing is refused with exit code 14 and
-the ones that do mean something, so a script that mistyped a Setting does not
-go on believing it took — and so is a `set` with no Scope in it, which is the
-same mistake made about the subject rather than the value.
+```sh
+perch config get
+perch config get work
+perch config get work --provider claude
+perch config get work --provider claude strategy
+perch config get --defaults
+```
+
+A named setting prints its value alone. Unknown settings and invalid values are
+refused with exit code 14. Use explicit provider selection when inspecting a
+mixed Group's policy.

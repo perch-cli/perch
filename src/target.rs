@@ -35,7 +35,7 @@ impl Target {
         }
     }
 
-    fn email(&self) -> Option<&str> {
+    fn key(&self) -> Option<&str> {
         match self {
             Target::Alias { email, .. } | Target::Account { email } => Some(email),
             Target::Group { .. } => None,
@@ -55,7 +55,7 @@ pub struct AccountTarget {
 
 /// The full order, for the commands that accept any kind of Target.
 pub fn resolve(registry: &Registry, target: &str) -> Result<Target> {
-    match matched(registry, target) {
+    match matched(registry, target)? {
         Some(target) => Ok(target),
         None => Err(nothing_called(target, every_name(registry))),
     }
@@ -65,14 +65,23 @@ pub fn resolve(registry: &Registry, target: &str) -> Result<Target> {
 /// A Group is resolved rather than ignored, so naming one gets an answer about
 /// the Group instead of a claim that it does not exist.
 pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarget> {
-    let found = match matched(registry, target) {
+    let found = match matched(registry, target)? {
         Some(found) => found,
         None => return Err(nothing_called(target, account_names(registry))),
     };
-    match found.email() {
+    match found.key() {
         Some(email) => Ok(AccountTarget {
             email: email.to_string(),
-            matched: found.matched(),
+            matched: match &found {
+                Target::Alias { name, .. } => format!(
+                    "`{name}` is an Alias for {}.",
+                    registry.held(email)?.email()
+                ),
+                _ => format!(
+                    "`{target}` is an Account: {}.",
+                    registry.named_for_the_user(email)
+                ),
+            },
         }),
         None => Err(PerchError::Invalid(format!(
             "{} This acts on one Account, so name the Account itself: \
@@ -86,24 +95,43 @@ pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarge
 /// made under: the Registry refuses an Alias or a Group differing from a held
 /// name only in case, so there is never more than one candidate to find. An
 /// exact lookup here would make resolving a Target stricter than setting one.
-fn matched(registry: &Registry, target: &str) -> Option<Target> {
+fn matched(registry: &Registry, target: &str) -> Result<Option<Target>> {
     if let Some((name, email)) = registry.declared_alias(target) {
-        return Some(Target::Alias {
+        return Ok(Some(Target::Alias {
             name: name.to_string(),
             email: email.to_string(),
-        });
+        }));
     }
-    if let Some(account) = registry.account(target) {
-        return Some(Target::Account {
-            email: account.email().to_string(),
-        });
+    let accounts: Vec<_> = registry
+        .accounts
+        .iter()
+        .filter(|account| crate::name::same_name(account.email(), target))
+        .collect();
+    if accounts.len() > 1 {
+        return Err(PerchError::Invalid(format!(
+            "{target} matches multiple Accounts; use an Alias or Account ID: {}",
+            accounts
+                .iter()
+                .map(|account| registry.alias_of(account.key()).unwrap_or(account.key()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    if let Some(account) = accounts
+        .first()
+        .copied()
+        .or_else(|| registry.account(target))
+    {
+        return Ok(Some(Target::Account {
+            email: account.key().to_string(),
+        }));
     }
     if let Some(name) = registry.declared_group(target) {
-        return Some(Target::Group {
+        return Ok(Some(Target::Group {
             name: name.to_string(),
-        });
+        }));
     }
-    None
+    Ok(None)
 }
 
 /// Every name a Target could have been.
@@ -119,6 +147,20 @@ fn account_names(registry: &Registry) -> Vec<String> {
         registry
             .accounts
             .iter()
+            .map(|account| account.key().to_string()),
+    );
+    names.extend(
+        registry
+            .accounts
+            .iter()
+            .filter(|account| {
+                registry
+                    .accounts
+                    .iter()
+                    .filter(|peer| crate::name::same_name(peer.email(), account.email()))
+                    .count()
+                    == 1
+            })
             .map(|account| account.email().to_string()),
     );
     names
@@ -208,6 +250,48 @@ fn edit_distance(left: &str, right: &str) -> usize {
     }
 
     previous[right.len()]
+}
+
+pub fn resolve_for(
+    registry: &Registry,
+    target: &str,
+    provider: Option<crate::providers::provider::Id>,
+) -> Result<AccountTarget> {
+    if let Some((_, key)) = registry.declared_alias(target) {
+        let account = registry.held(key)?;
+        if provider.is_some_and(|selected| selected != account.provider()) {
+            return Err(PerchError::Invalid(format!(
+                "{target} is a {} Account; use --{}",
+                account.provider().word(),
+                account.provider().word()
+            )));
+        }
+        return resolve_account(registry, target);
+    }
+    let matches: Vec<_> = registry
+        .accounts
+        .iter()
+        .filter(|account| {
+            crate::name::same_name(account.email(), target)
+                && provider.is_none_or(|selected| selected == account.provider())
+        })
+        .collect();
+    match matches.as_slice() {
+        [account] if account.provider_identity.is_none() => resolve_account(registry, target),
+        [account] => Ok(AccountTarget {
+            email: account.key().into(),
+            matched: format!("{target} is a {} Account.", account.provider().word()),
+        }),
+        [] => resolve_account(registry, target),
+        _ => Err(PerchError::Invalid(format!(
+            "{target} matches multiple Accounts; use an Alias: {}",
+            matches
+                .iter()
+                .map(|account| registry.alias_of(account.key()).unwrap_or(account.key()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
 }
 
 #[cfg(test)]

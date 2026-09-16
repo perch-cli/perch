@@ -154,7 +154,7 @@ fn the_strategy_a_group_carries_changes_which_account_a_bare_switch_chooses() {
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(THIRD_EMAIL),
+        Some(THIRD_KEY),
         "out of the box a Cycle prefers the Account with the most room: {printed}"
     );
 }
@@ -171,13 +171,13 @@ fn the_soonest_resetting_account_is_chosen_when_the_group_says_to_prefer_it() {
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "quota that resets in 20 minutes is perishable, and spending it costs \
          nothing that would not have been lost anyway: {printed}"
     );
     assert!(
         printed.contains(&format!(
-            "Switched to {SECOND_EMAIL}, the soonest reset in Group `work`."
+            "Switched to {SECOND_LABEL}, the soonest reset in Group `work`."
         )),
         "and the landing line says what it chose on, in the terms it was judged \
          on, beside the Scope it stayed inside: {printed}"
@@ -199,14 +199,14 @@ fn the_soonest_resetting_strategy_falls_back_to_room_when_no_figure_says_when_an
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(THIRD_EMAIL),
+        Some(THIRD_KEY),
         "a Strategy says which figure to prefer, not which figures to invent: \
          with nothing cached saying when anything comes back, the room Perch \
          can see is what is left to choose on: {printed}"
     );
     assert!(
         printed.contains(&format!(
-            "Switched to {THIRD_EMAIL}, the most room in Group `work`."
+            "Switched to {THIRD_LABEL}, the most room in Group `work`."
         )),
         "and the landing line says the room it fell back to rather than \
          passing the choice off as the ranking that was asked for: {printed}"
@@ -245,7 +245,7 @@ fn the_soonest_resetting_strategy_still_measures_headroom_by_the_worst_window() 
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(THIRD_EMAIL),
+        Some(THIRD_KEY),
         "an Account with a full window is blocked whatever its others say, and \
          however soon they reset: {printed}"
     );
@@ -261,7 +261,7 @@ fn turning_on_ungrouped_cycling_changes_what_a_bare_switch_does() {
 
     let error = result.expect_err("nobody has declared these interchangeable");
     assert_eq!(error.exit_code(), EXIT_NOT_INTERCHANGEABLE);
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 
     config_set(&host, &["ungrouped", "interchangeable", "true"])
         .0
@@ -270,7 +270,7 @@ fn turning_on_ungrouped_cycling_changes_what_a_bare_switch_does() {
     let (result, printed) = run_cycle(&host);
 
     result.expect("they have been declared interchangeable now");
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY), "{printed}");
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
     // and nothing has switched, because nothing is running the loop.
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "permission is not a process: configuring a Group switches nothing \
          until `perch watcher run` is running"
     );
@@ -441,23 +441,23 @@ fn a_scope_sets_how_empty_a_candidate_has_to_be_apart_from_when_it_is_moved() {
 fn a_scope_says_it_spends_fable_first_and_reads_it_back() {
     let host = three_accounts_in_one_group();
 
-    let (result, said) = config_set(&host, &["work", "prefer-fable", "true"]);
+    let (result, said) = config_set(&host, &["work", "preferred-workload", "true"]);
 
-    result.expect("`prefer-fable` is a Setting a Group carries");
-    assert!(group_config(&host, "work").prefer_fable);
+    result.expect("`preferred-workload` is a Setting a Group carries");
+    assert!(group_config(&host, "work").prefer_workload);
     assert!(
-        said.contains("Fable"),
+        said.contains("preferred workload"),
         "and the line says what the Scope now does: {said}"
     );
 
     let (result, printed) = config_get(&host, &["work"]);
     result.expect("it reads back");
     assert!(
-        row(&printed, "prefer-fable", "true"),
+        row(&printed, "preferred-workload", "true"),
         "the Group's page carries the row: {printed}"
     );
 
-    let (result, _) = config_set(&host, &["work", "prefer-fable", "sometimes"]);
+    let (result, _) = config_set(&host, &["work", "preferred-workload", "sometimes"]);
     let error = result.expect_err("`sometimes` is not a value it takes");
     assert_eq!(error.exit_code(), EXIT_INVALID, "{error}");
 }
@@ -1063,4 +1063,46 @@ fn the_ungrouped_scope_is_named_mid_sentence_the_way_a_sentence_names_it() {
         why.contains("Setting the Ungrouped Scope carries"),
         "and so does the refusal that names it: {why}"
     );
+}
+
+#[test]
+fn a_provider_option_can_be_read_back_and_cleared_without_changing_other_policy() {
+    let host = three_accounts_in_one_group();
+    config_set(
+        &host,
+        &[
+            "work",
+            "--provider",
+            "claude",
+            "option.preferred_workload",
+            "fable",
+        ],
+    )
+    .0
+    .unwrap();
+    let (result, value) = config_get(
+        &host,
+        &["work", "--provider", "claude", "option.preferred_workload"],
+    );
+    result.unwrap();
+    assert_eq!(value.trim(), "fable");
+    config_set(
+        &host,
+        &[
+            "work",
+            "--provider",
+            "claude",
+            "option.preferred_workload",
+            "inherit",
+        ],
+    )
+    .0
+    .unwrap();
+    let (result, value) = config_get(
+        &host,
+        &["work", "--provider", "claude", "option.preferred_workload"],
+    );
+    result.unwrap();
+    assert_eq!(value.trim(), "inherit");
+    assert!(!group_config(&host, "work").prefer_workload);
 }

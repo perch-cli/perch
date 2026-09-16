@@ -21,7 +21,6 @@ use crate::export::{self, Export};
 use crate::holdings;
 use crate::host::{Host, HostError};
 use crate::import;
-use crate::probe::Installed;
 use crate::registry;
 use crate::say;
 use crate::wait;
@@ -41,13 +40,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
         &mut perch,
         |_| {
             let passphrase = the_passphrase(host, out)?;
-            let (export, renamed) = export::unseal(&sealed, &passphrase)?;
-            // Before anything is written, so a person who stops here has been
-            // told what the Export would arrive as. `bring_forward` says the
-            // same about this machine's own Registry.
-            if let Some(said) = crate::migration::what_was_renamed_said(&renamed) {
-                host.note(&said);
-            }
+            let export = export::unseal(&sealed, &passphrase)?;
             let restored = import::restored(&export, &holdings::registry_path(host)?)?;
             Ok((export, restored))
         },
@@ -55,8 +48,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
         // Account down, and re-taking it *is* the empty-machine re-ask.
         |perch| still_ours(perch, "imported"),
     )?;
-    let installed = Installed::for_a_report(host);
-    import::place(host, &export, &installed, &fresh, || {
+    import::place(host, &export, &fresh, || {
         registry::save(host, &mut perch, &mut restored)
     })?;
 
@@ -141,7 +133,10 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
             &format!(
                 "The Export held no Credential for {}, so the {} restored \
                  without one. {repair}",
-                bare.join(", "),
+                bare.iter()
+                    .map(|key| export.registry.named_for_the_user(key))
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 match bare.len() {
                     1 => "Account was",
                     _ => "Accounts were",

@@ -43,6 +43,28 @@ pub struct Watching {
 /// yes underneath it, and every failure it gives is the same "not arranged yet". The
 /// [`Settled`] is why it cannot be asked too early (ADR an-ordering-is-a-type).
 pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
+    let provider = registry.selected_provider();
+    if registry.watcher_paused {
+        return Err(PerchError::Invalid(
+            "Automatic Switching is paused globally".into(),
+        ));
+    }
+    if !registry
+        .provider_settings
+        .get(&provider)
+        .is_none_or(|settings| settings.enabled)
+    {
+        return Err(PerchError::Invalid(format!(
+            "{} is disabled",
+            provider.word()
+        )));
+    }
+    if !provider.adapter().capabilities().live_switch {
+        return Err(PerchError::Invalid(format!(
+            "{} does not support automatic live Switching",
+            provider.word()
+        )));
+    }
     let account = registry.active_account(settled).cloned().ok_or_else(|| {
         PerchError::NotFound(
             "Perch holds no active Account, so there is nothing to watch. \
@@ -65,8 +87,8 @@ pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
                  the watcher may act. Both are needed.\n\
                  Putting it in a Group with `perch group move {} <group>` is the \
                  narrower way.",
-                registry.named_for_the_user(account.email()),
-                account.email(),
+                registry.named_for_the_user(account.key()),
+                account.key(),
             )));
         }
         cycle::MayAct::Ungranted => {
@@ -350,12 +372,12 @@ impl Candidates {
                 .filter(|account| {
                     // Through the Registry's own answer rather than `!=`, which would be
                     // correct only by two facts that are true two modules away.
-                    !name::same_name(account.email(), watching.account.email())
+                    !name::same_name(account.key(), watching.account.key())
                         && cycle::is_a_candidate(&sharers, account)
                 })
                 .map(|account| Candidate {
-                    email: account.email().to_string(),
-                    named: registry.named_for_the_user(account.email()),
+                    email: account.key().to_string(),
+                    named: registry.named_for_the_user(account.key()),
                 })
                 .collect(),
         )
@@ -411,7 +433,6 @@ mod tests {
     use crate::host::FakeHost;
     use crate::live;
     use crate::observe::Outcome;
-    use crate::probe::Installed;
     use crate::registry::{Quarantine, WindowUtilization};
     use crate::watch::Recently;
 
@@ -428,6 +449,7 @@ mod tests {
         let mut account = cycle::tests::account(
             email,
             vec![WindowUtilization {
+                group: None,
                 window: "5-hour".to_string(),
                 used_percent,
                 resets_at: None,
@@ -703,9 +725,13 @@ mod tests {
 
     fn granted(mut registry: Registry) -> Registry {
         registry
-            .settings_mut(&Scope::Ungrouped)
+            .scope_settings_mut(&Scope::Ungrouped)
             .expect("the Ungrouped Scope carries Settings")
-            .watcher_may_act = true;
+            .providers
+            .entry(crate::providers::provider::Id::Claude)
+            .or_default()
+            .watcher
+            .enabled = true;
         registry
     }
 
@@ -757,7 +783,7 @@ mod tests {
 
         let watching = asking(&registry).expect("declared and granted");
 
-        assert_eq!(watching.account.email(), WATCHED);
+        assert_eq!(watching.account.key(), WATCHED);
         assert_eq!(watching.scope, Scope::Ungrouped);
         assert_eq!(
             watching.policy,
@@ -852,7 +878,7 @@ mod tests {
             .crossed(80)
             .expect("90 is over 80");
         let idle = live::ask(&FakeHost::new(), &[])
-            .idle_or(&Installed::unknown("2.1.221"), &live::NOTHING_WAS_CHANGED)
+            .idle_or(&live::NOTHING_WAS_CHANGED)
             .expect("no Place was asked about, so nothing is live");
         (crossed, idle)
     }

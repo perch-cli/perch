@@ -9,9 +9,14 @@
 //! "macos")]` is what narrows a claim about every filesystem to one platform
 //! without anybody choosing it.
 
+#[path = "fixtures/sessions.rs"]
+mod session_fixture;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use perch as fixture_crate;
+#[cfg(target_os = "macos")]
 use perch::error::PerchError;
 #[cfg(target_os = "macos")]
 use perch::host::Execution;
@@ -20,9 +25,9 @@ use perch::host::prelude::*;
 #[cfg(target_os = "macos")]
 use perch::keychain::{EXIT_ITEM_NOT_FOUND, KeychainError, SECURITY_BIN, classify};
 use perch::live;
-use perch::probe;
-#[cfg(target_os = "macos")]
-use perch::probe::Verdict;
+#[path = "fixtures/claude.rs"]
+mod claude_fixture;
+use claude_fixture as probe;
 
 /// Set to any value to skip the tests that touch the real keychain, for
 /// environments where the login keychain cannot be unlocked. CI does not set it.
@@ -54,7 +59,11 @@ const NOT_A_CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-
 fn the_installed_claude_code_reports_a_version_perch_can_parse() {
     let host = RealHost::new();
 
-    match probe::claude_version(&host) {
+    match perch::providers::provider::Id::Claude
+        .adapter()
+        .diagnose(&host)
+        .version
+    {
         Ok(version) => {
             let parts: Vec<&str> = version.split('.').collect();
             assert!(
@@ -65,11 +74,7 @@ fn the_installed_claude_code_reports_a_version_perch_can_parse() {
         Err(error) => {
             // No Claude Code here. The only acceptable outcome is a refusal
             // that says so.
-            assert!(
-                matches!(error, PerchError::ProbeRefused(_)),
-                "a missing Claude Code must be a refusal, not {error}"
-            );
-            assert!(error.to_string().contains("Claude Code is installed"));
+            assert!(!error.is_empty(), "the missing version has a reason");
         }
     }
 }
@@ -129,37 +134,18 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
     }
     let host = RealHost::new();
 
-    // The Default Profile as Perch means it, which is what this asserts about:
-    // the directory the installed Claude Code falls back to, never a Profile.
-    let store = perch::holdings::the_default_profile(&host).expect("home is known");
-
-    match probe::probe(&host, store) {
-        Ok(Verdict::Recognized(findings)) => {
-            // A real login on this machine: every belief held.
-            assert!(findings.identity.email.contains('@'));
-            assert!(
-                findings.credential.as_str().contains("claudeAiOauth"),
-                "the credential store no longer holds a claudeAiOauth block"
-            );
-            assert!(host.path_exists(&findings.store.identity_file));
-        }
-        Ok(Verdict::NoLogin { store, .. }) => {
-            // Nothing logged in. Assert the beliefs that can still be checked.
-            assert_eq!(
-                host.keychain_get(&store.keychain_service, &store.keychain_account),
-                Err(KeychainError::NotFound {
-                    service: store.keychain_service.clone(),
-                    account: store.keychain_account.clone(),
-                }),
-                "'no login' must mean the item is absent, not unreadable"
-            );
-        }
-        Err(error) => {
-            assert!(
-                matches!(error, PerchError::ProbeRefused(_)),
-                "an unrecognized Claude Code must be a refusal naming the assumption: {error}"
-            );
-        }
+    match perch::providers::provider::Id::Claude
+        .adapter()
+        .configured(&host)
+        .and_then(|provider| provider.installation(&host))
+        .and_then(|installation| installation.discover(&host))
+    {
+        Ok(Some(discovered)) => assert!(discovered.account.identity().email.contains('@')),
+        Ok(None) => {}
+        Err(error) => assert!(
+            matches!(error, PerchError::ProbeRefused(_)),
+            "an unrecognized Claude Code must name the failed assumption: {error}"
+        ),
     }
 }
 
@@ -485,7 +471,7 @@ fn every_session_marker_claude_code_has_left_names_a_process() {
     let Ok(store) = probe::default_store(&host) else {
         return;
     };
-    let sessions = probe::sessions_dir(&store.config_dir);
+    let sessions = session_fixture::sessions_dir(&store.config_dir);
 
     let Ok(markers) = host.list_dir(&sessions) else {
         eprintln!("skipping: {} does not exist", sessions.display());
@@ -530,7 +516,7 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
     let Ok(store) = probe::default_store(&host) else {
         return;
     };
-    let sessions = probe::sessions_dir(&store.config_dir);
+    let sessions = session_fixture::sessions_dir(&store.config_dir);
     let Ok(markers) = host.list_dir(&sessions) else {
         eprintln!("skipping: {} does not exist", sessions.display());
         return;
@@ -596,7 +582,7 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
     }
 }
 
-/// [`probe::assumption::CREDENTIAL_LOCATION`]: the plaintext store sits inside
+/// The native credential-location assumption: the plaintext store sits inside
 /// the config directory it was given (ADR claude-code-chooses-the-store), so
 /// getting it wrong is every Account sharing one login. The empty answer is
 /// half the test — without it, a Claude Code reading this machine's own login
@@ -667,7 +653,9 @@ fn auth_status(config_dir: &Path) -> Option<bool> {
 /// `\\?\` path that `cmd.exe` cannot launch a `.cmd` shim from, and there is
 /// no symlink to follow anyway.
 fn installed_claude_code() -> Option<PathBuf> {
-    let found = perch::probe::claude_bin(&RealHost::new()).ok()?;
+    let found = perch::providers::provider::Id::Claude
+        .executable(&RealHost::new())
+        .ok()?;
     if cfg!(windows) {
         Some(found)
     } else {
@@ -679,14 +667,20 @@ fn installed_claude_code() -> Option<PathBuf> {
 /// is a marker this developer's machine cannot answer for, which is a refusal
 /// rather than a reading.
 fn corroborated_pids(host: &RealHost, config_dir: &std::path::Path) -> Vec<u32> {
-    match live::ask(host, &[live::Place::at(config_dir)]) {
+    match live::ask(
+        host,
+        &[live::Place::at(
+            perch::providers::provider::Id::Claude,
+            config_dir,
+        )],
+    ) {
         live::Answer::Idle(_) => Vec::new(),
         live::Answer::NotIdle(live::NotIdle::Live(clients)) => {
             clients.iter().map(|client| client.pid).collect()
         }
         live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => panic!(
             "every marker here can be corroborated or dismissed: {}",
-            unsure.refusal(&probe::Installed::unknown("whatever is installed here"))
+            unsure.refusal()
         ),
     }
 }

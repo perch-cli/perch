@@ -10,6 +10,8 @@
 
 mod common;
 
+use common::session_fixture;
+
 use std::path::Path;
 
 use common::*;
@@ -232,10 +234,10 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
     outcome.expect("the word was typed");
 
     let sealed = host.file(AT).expect("the Export is still there afterwards");
-    let (exported, _) = export::unseal(&sealed, PASSPHRASE).expect("it opens");
+    let exported = export::unseal(&sealed, PASSPHRASE).expect("it opens");
     assert_eq!(exported.registry.accounts.len(), 3, "{printed}");
     assert_eq!(
-        exported.credentials.get(EMAIL).map(String::as_str),
+        exported_artifact(&exported, EMAIL, "oauth").as_deref(),
         Some(CREDENTIAL),
         "with a working Credential for every Account, which is the whole of what \
          makes the Purge survivable"
@@ -264,23 +266,23 @@ fn the_export_it_offers_settles_a_landing_first() {
         .with_secrets(&[PASSPHRASE, PASSPHRASE]);
     // A Switch that died after the Credential moved and before the Identity was
     // patched: the arriving Account's Credential is what is live.
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_CREDENTIAL);
 
     let (outcome, printed) = run_purge(&host);
     outcome.expect("the word was typed");
 
     let sealed = host.file(AT).expect("the Export was written");
-    let (exported, _) = export::unseal(&sealed, PASSPHRASE).expect("it opens");
+    let exported = export::unseal(&sealed, PASSPHRASE).expect("it opens");
     assert_eq!(
-        exported.credentials.get(SECOND_EMAIL).map(String::as_str),
+        exported_artifact(&exported, SECOND_EMAIL, "oauth").as_deref(),
         Some(SECOND_CREDENTIAL),
         "the Account the Switch was arriving at travels as the live Credential \
          Perch settled on: {printed}"
     );
     assert_eq!(
         exported.registry.active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "and the Landing is settled in the file rather than traveling in it"
     );
 }
@@ -303,7 +305,6 @@ fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() 
     assert_eq!(
         export::unseal(&sealed, PASSPHRASE)
             .expect("it opens")
-            .0
             .accounts(),
         3,
         "and it is the whole Export rather than an empty file at a strange path"
@@ -668,7 +669,7 @@ fn a_client_running_against_a_profile_stops_the_purge() {
 
     let refused = outcome.expect_err("something is holding that Profile");
     assert_eq!(refused.exit_code(), EXIT_PROFILE_LIVE, "{refused}");
-    assert!(refused.to_string().contains(SECOND_EMAIL), "{refused}");
+    assert!(refused.to_string().contains(SECOND_KEY), "{refused}");
     assert!(
         refused.to_string().contains("pid "),
         "and which client to quit, since that is the whole of what the reader \
@@ -695,10 +696,15 @@ fn a_login_in_progress_stops_the_purge_though_no_account_names_it() {
 
     // What another terminal's `perch add` looks like from here: a directory
     // under `pending/`, with a client running against it.
-    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
+    let pending = perch::holdings::pending_login_dir(
+        perch::providers::provider::Id::Claude,
+        &host,
+        host.now(),
+    )
+    .expect("home is known");
     host.set_file(
-        perch::probe::session_marker_at(&pending, 5150),
-        &perch::probe::session_marker(5150, host.now()),
+        session_fixture::session_marker_at(&pending, 5150),
+        &session_fixture::session_marker(5150, host.now()),
     );
     host.set_live_process(5150);
 
@@ -772,7 +778,6 @@ fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
     assert_eq!(
         export::unseal(&host.file(AT).expect("a file was written"), PASSPHRASE)
             .expect("it opens")
-            .0
             .accounts(),
         3,
         "and it is a whole Export rather than a stub"
@@ -874,7 +879,6 @@ fn a_terminal_that_goes_away_after_the_export_lands_does_not_lose_the_file() {
     assert_eq!(
         export::unseal(&host.file(AT).expect("a file was written"), PASSPHRASE)
             .expect("it opens")
-            .0
             .accounts(),
         3,
         "and it is the whole Export, which is what makes it worth saying"
@@ -890,7 +894,9 @@ fn a_terminal_that_goes_away_after_the_export_lands_does_not_lose_the_file() {
 /// already deleted is found already gone rather than lost track of.
 #[test]
 fn a_purge_that_stopped_part_way_finishes_when_it_is_run_again() {
-    let second_profile = format!("{PERCH_HOME}/profiles/overflow-example-com/.credentials.json");
+    let second_profile = format!(
+        "{PERCH_HOME}/providers/claude/profiles/claude-47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9/.credentials.json"
+    );
     let host = a_machine_to_give_back()
         .with_answers(&["n", "purge", "n", "purge"])
         .with_a_path_refusing(&second_profile, Refusing::Delete, "read-only");
@@ -1001,7 +1007,7 @@ fn a_purge_off_macos_explains_the_store_that_machine_actually_has() {
     outcome.expect("the word was typed");
 
     assert!(
-        printed.contains("nothing in either Credential Store"),
+        printed.contains("no Credential to delete"),
         "the sentence this is about is printed at all:\n{printed}"
     );
     assert!(
@@ -1096,8 +1102,13 @@ fn nothing_is_asked_of_anthropic_by_a_purge() {
 fn a_purge_takes_the_credential_an_abandoned_login_left_as_well() {
     let host = machine_with_two_accounts();
 
-    let abandoned = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
-    let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
+    let abandoned = perch::holdings::pending_login_dir(
+        perch::providers::provider::Id::Claude,
+        &host,
+        host.now(),
+    )
+    .expect("home is known");
+    let store = common::claude_fixture::store_for_profile(&host, &abandoned).expect("USER is set");
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
 
@@ -1152,9 +1163,10 @@ fn a_home_holding_a_registry_and_nothing_else_is_taken_and_said_as_that() {
 fn a_readable_registry_naming_nobody_is_not_said_to_be_unreadable() {
     let host = machine_with_claude_code().with_answers(&["purge"]);
     host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
-    let landing = perch::holdings::pending_logins_dir(&host)
-        .expect("home is known")
-        .join("login-1");
+    let landing =
+        perch::holdings::pending_logins_dir(perch::providers::provider::Id::Claude, &host)
+            .expect("home is known")
+            .join("login-1");
     host.create_dir_all(&landing)
         .expect("the directory is made");
 
@@ -1177,7 +1189,7 @@ fn a_readable_registry_naming_nobody_is_not_said_to_be_unreadable() {
 fn a_stray_file_under_the_profiles_is_not_counted_as_one() {
     let host = machine_with_claude_code().with_answers(&["purge"]);
     host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
-    let stray = perch::holdings::profiles_dir(&host)
+    let stray = perch::holdings::profiles_dir(perch::providers::provider::Id::Claude, &host)
         .expect("home is known")
         .join(".DS_Store");
     host.set_file(&stray, "");
@@ -1197,10 +1209,10 @@ fn a_stray_file_under_the_profiles_is_not_counted_as_one() {
 fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
     let host = machine_with_two_accounts();
 
-    let orphan = perch::holdings::profiles_dir(&host)
+    let orphan = perch::holdings::profiles_dir(perch::providers::provider::Id::Claude, &host)
         .expect("home is known")
         .join("nobody-example-com");
-    let store = perch::probe::store_for_profile(&host, &orphan).expect("USER is set");
+    let store = common::claude_fixture::store_for_profile(&host, &orphan).expect("USER is set");
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
 
@@ -1274,10 +1286,10 @@ fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_l
 fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_being_skipped() {
     let host = machine_with_two_accounts();
 
-    let orphan = perch::holdings::profiles_dir(&host)
+    let orphan = perch::holdings::profiles_dir(perch::providers::provider::Id::Claude, &host)
         .expect("home is known")
         .join("nobody-example-com");
-    let store = perch::probe::store_for_profile(&host, &orphan).expect("USER is set");
+    let store = common::claude_fixture::store_for_profile(&host, &orphan).expect("USER is set");
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
 
     let host = host.with_a_path_refusing(&store.credentials_file, Refusing::Delete, "read-only");
@@ -1287,11 +1299,11 @@ fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_b
     let failed = stopped.expect_err("a Credential that will not go is not a Purge that worked");
     let said = failed.to_string();
     assert!(
-        said.contains("Perch's Registry is untouched"),
+        said.contains("Some Credential Stores may already be empty"),
         "so running it again is a whole Purge rather than a partial one: {said}"
     );
     assert!(
-        said.contains("`perch holdings purge` can be run again"),
+        said.contains("run again with `perch holdings purge`"),
         "{said}"
     );
     assert!(
@@ -1321,7 +1333,7 @@ fn a_leftover_directory_that_names_no_store_stops_the_purge_rather_than_being_pa
     assert!(
         refusal
             .to_string()
-            .contains("already deleted is already gone"),
+            .contains("Some Credential Stores may already be empty"),
         "it says what a second run would finish: {refusal}"
     );
     assert!(
@@ -1383,7 +1395,7 @@ fn a_terminal_that_goes_away_at_the_last_question_does_not_lose_the_export() {
 #[test]
 fn a_directory_perch_cannot_list_stops_the_purge_rather_than_reading_as_empty() {
     let host = a_machine_to_give_back();
-    let pending = Path::new(PERCH_HOME).join("pending");
+    let pending = Path::new(PERCH_HOME).join("providers/claude/pending");
     host.create_dir_all(&pending).expect("the parent is there");
     let host =
         host.with_a_path_refusing(&pending, Refusing::List, "Permission denied (os error 13)");
@@ -1451,8 +1463,10 @@ fn a_registry_that_will_not_parse_does_not_stop_the_purge_that_does_not_read_one
 #[test]
 fn a_sessions_directory_that_will_not_be_read_stops_the_purge_and_says_so() {
     let host = a_machine_to_give_back();
-    let profile = perch::holdings::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
-    let sessions = perch::probe::sessions_dir(&profile);
+    let profile =
+        perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, &host, SECOND_KEY)
+            .expect("home is known");
+    let sessions = session_fixture::sessions_dir(&profile);
     host.create_dir_all(&sessions)
         .expect("a client has run here before");
     let host = host.with_a_path_refusing(&sessions, Refusing::List, "permission denied");

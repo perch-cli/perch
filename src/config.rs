@@ -24,7 +24,7 @@ use crate::say;
 pub enum Setting {
     Interchangeable,
     Strategy,
-    PreferFable,
+    PreferredWorkload,
     WatcherMayAct,
     WatcherThresholdPercent,
     WatcherMarginPercent,
@@ -36,7 +36,7 @@ pub enum Setting {
 pub const SETTINGS: [Setting; 6] = [
     Setting::Interchangeable,
     Setting::Strategy,
-    Setting::PreferFable,
+    Setting::PreferredWorkload,
     Setting::WatcherMayAct,
     Setting::WatcherThresholdPercent,
     Setting::WatcherMarginPercent,
@@ -47,7 +47,7 @@ impl Setting {
         match self {
             Setting::Interchangeable => "interchangeable",
             Setting::Strategy => "strategy",
-            Setting::PreferFable => "prefer-fable",
+            Setting::PreferredWorkload => "preferred-workload",
             Setting::WatcherMayAct => "watcher-may-act",
             Setting::WatcherThresholdPercent => "watcher-threshold-percent",
             Setting::WatcherMarginPercent => "watcher-margin-percent",
@@ -108,7 +108,7 @@ impl Setting {
     /// value and the help offering the right ones cannot name different sets.
     pub fn takes(self) -> String {
         match self {
-            Setting::Interchangeable | Setting::PreferFable | Setting::WatcherMayAct => {
+            Setting::Interchangeable | Setting::PreferredWorkload | Setting::WatcherMayAct => {
                 A_YES_OR_NO.to_string()
             }
             Setting::Strategy => one_of_the_strategies(),
@@ -124,7 +124,7 @@ impl Setting {
         match self {
             Setting::Interchangeable => registry.ungrouped.interchangeable.to_string(),
             Setting::Strategy => settings.strategy.as_str().to_string(),
-            Setting::PreferFable => settings.prefer_fable.to_string(),
+            Setting::PreferredWorkload => settings.prefer_workload.to_string(),
             Setting::WatcherMayAct => settings.watcher_may_act.to_string(),
             Setting::WatcherThresholdPercent => settings.watcher_threshold_percent.to_string(),
             Setting::WatcherMarginPercent => settings.watcher_margin_percent.to_string(),
@@ -143,35 +143,54 @@ impl Setting {
             return Err(Self::only_the_ungrouped_scope_carries_it());
         }
 
-        let mut settings = registry.settings(scope);
-        // Beside the Settings rather than in them, because a Group has no such
-        // line.
-        let mut interchangeable = registry.ungrouped.interchangeable;
-        match self {
-            Setting::Interchangeable => interchangeable = yes_or_no(self.as_str(), value)?,
-            Setting::Strategy => settings.strategy = strategy(value)?,
-            Setting::PreferFable => settings.prefer_fable = yes_or_no(self.as_str(), value)?,
-            Setting::WatcherMayAct => settings.watcher_may_act = yes_or_no(self.as_str(), value)?,
-            Setting::WatcherThresholdPercent => {
-                settings.watcher_threshold_percent = percentage(self.as_str(), value)?
-            }
-            Setting::WatcherMarginPercent => {
-                settings.watcher_margin_percent = margin(self.as_str(), value)?
+        let mut changed = registry.clone();
+        let provider = changed.selected_provider();
+        if self == Setting::Interchangeable {
+            changed.ungrouped.interchangeable = yes_or_no(self.as_str(), value)?;
+        } else {
+            let target = changed.scope_settings_mut(scope).ok_or_else(|| {
+                PerchError::NotFound(format!("{} is not a declared Scope", scope.word()))
+            })?;
+            match self {
+                Setting::Strategy => target.cycle.strategy = Some(strategy(value)?),
+                Setting::PreferredWorkload => {
+                    let options = &mut target.providers.entry(provider).or_default().options;
+                    if yes_or_no(self.as_str(), value)? {
+                        options.insert(
+                            "preferred_workload".into(),
+                            provider
+                                .adapter()
+                                .default_workload()
+                                .ok_or_else(|| {
+                                    PerchError::Invalid(
+                                        "This provider has no preferred workload".into(),
+                                    )
+                                })?
+                                .into(),
+                        );
+                    } else {
+                        options.remove("preferred_workload");
+                    }
+                }
+                Setting::WatcherMayAct => {
+                    target
+                        .providers
+                        .entry(provider)
+                        .or_default()
+                        .watcher
+                        .enabled = yes_or_no(self.as_str(), value)?
+                }
+                Setting::WatcherThresholdPercent => {
+                    target.watcher.threshold_percent = Some(percentage(self.as_str(), value)?)
+                }
+                Setting::WatcherMarginPercent => {
+                    target.watcher.margin_percent = Some(margin(self.as_str(), value)?)
+                }
+                Setting::Interchangeable => unreachable!(),
             }
         }
-        settings.validate(scope)?;
-        // A refusal rather than an abort: a signature that says it refuses is
-        // not the thing that panics on the second caller.
-        let Some(held) = registry.settings_mut(scope) else {
-            let Scope::Group(name) = scope else {
-                unreachable!("the Ungrouped Scope is always there to write to")
-            };
-            return Err(PerchError::NotFound(format!(
-                "no Group is called `{name}`, so there is nothing to set on it."
-            )));
-        };
-        *held = settings;
-        registry.ungrouped.interchangeable = interchangeable;
+        changed.settings(scope).validate(scope)?;
+        *registry = changed;
         Ok(())
     }
 
@@ -209,13 +228,12 @@ impl Setting {
                      however soon it comes back."
                 ),
             },
-            Setting::PreferFable if settings.prefer_fable => format!(
-                "A Cycle {within} now puts the Accounts that can serve Fable \
-                 first, ranked by the room in their Fable weekly window, and \
-                 falls through to the rest — ranked without that window — only \
-                 when Fable is spent everywhere."
+            Setting::PreferredWorkload if settings.prefer_workload => format!(
+                "A Cycle {within} first ranks Accounts that can serve the preferred \
+                 workload, using the windows identified by their provider. Once \
+                 that capacity is spent, it ranks the remaining capacity."
             ),
-            Setting::PreferFable => {
+            Setting::PreferredWorkload => {
                 format!("A Cycle {within} ranks on Headroom alone, preferring no model.")
             }
             Setting::WatcherMayAct if settings.watcher_may_act => format!(
@@ -321,7 +339,7 @@ const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running: `perch \
      watcher run`, a Service `perch watcher install` set up, or a `perch watcher \
      check` on a schedule. Nothing here starts one.";
 
-fn strategy(value: &str) -> Result<Strategy> {
+pub(crate) fn strategy(value: &str) -> Result<Strategy> {
     Strategy::ALL
         .into_iter()
         .find(|candidate| value.eq_ignore_ascii_case(candidate.as_str()))
@@ -356,7 +374,7 @@ fn gloss(strategy: Strategy) -> &'static str {
     }
 }
 
-fn yes_or_no(key: &str, value: &str) -> Result<bool> {
+pub(crate) fn yes_or_no(key: &str, value: &str) -> Result<bool> {
     match value.to_ascii_lowercase().as_str() {
         "true" => Ok(true),
         "false" => Ok(false),
@@ -383,7 +401,7 @@ pub fn one_of_the_strategies() -> String {
 /// The range is the Registry's to state (`a_percentage`), so a number too large
 /// for the field and one the field holds but the policy will not are refused in
 /// one sentence: to the script that mistyped, `300` and `101` are one mistake.
-fn percentage(key: &str, value: &str) -> Result<u8> {
+pub(crate) fn percentage(key: &str, value: &str) -> Result<u8> {
     value
         .parse::<u8>()
         .ok()
@@ -394,7 +412,7 @@ fn percentage(key: &str, value: &str) -> Result<u8> {
 /// The same for a margin, whose floor is not zero. Its own so that the person
 /// who typed `0` is told the range that would have been taken, rather than
 /// reaching `validate`'s refusal, which addresses somebody reading a file.
-fn margin(key: &str, value: &str) -> Result<u8> {
+pub(crate) fn margin(key: &str, value: &str) -> Result<u8> {
     value
         .parse::<u8>()
         .ok()
@@ -516,7 +534,7 @@ pub struct Settings {
     /// Whether this Scope spends Fable before anything else: the Accounts that
     /// can serve Fable rank first, by their Fable weekly window. Off unless the
     /// user says otherwise (ADR fable-is-spent-first).
-    pub prefer_fable: bool,
+    pub prefer_workload: bool,
     /// Whether the watcher may Switch within this Scope unattended. Off unless
     /// the user says otherwise: nothing changes underneath somebody because they
     /// did not say it could. Said about the Scope it grants and nowhere else.
@@ -534,7 +552,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             strategy: Strategy::default(),
-            prefer_fable: false,
+            prefer_workload: false,
             watcher_may_act: false,
             watcher_threshold_percent: DEFAULT_WATCHER_THRESHOLD_PERCENT,
             watcher_margin_percent: DEFAULT_WATCHER_MARGIN_PERCENT,
@@ -698,7 +716,7 @@ impl Scope {
 ///
 /// The one Scope whose record is not a bare [`Settings`], because it is the one
 /// that has to say it is a Scope at all. A Group **is** that declaration.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UngroupedConfig {
     /// Whether the Accounts in no Group have been declared interchangeable —
@@ -708,7 +726,7 @@ pub struct UngroupedConfig {
     /// declaration, not a weaker form of one.
     pub interchangeable: bool,
     /// The Settings this Scope holds, like every other Scope.
-    pub settings: Settings,
+    pub settings: ScopeSettings,
 }
 
 #[cfg(test)]
@@ -918,7 +936,10 @@ mod tests {
     /// the question above asks about.
     fn in_group(email: &str, group: Option<&str>) -> crate::registry::Account {
         crate::registry::Account {
-            identity: crate::probe::Identity {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: crate::domain::Identity {
                 email: email.to_string(),
                 organization_name: None,
                 organization_uuid: None,
@@ -949,5 +970,146 @@ mod tests {
             cycling_among_ungrouped(&Registry::default()).contains(key),
             "the clause `perch list` and `perch group list` share names it",
         );
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CycleOverrides {
+    pub strategy: Option<Strategy>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WatcherOverrides {
+    pub threshold_percent: Option<u8>,
+    pub margin_percent: Option<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PolicyDefaults {
+    pub cycle: CycleOverrides,
+    pub watcher: WatcherOverrides,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProviderWatcher {
+    pub enabled: bool,
+    pub threshold_percent: Option<u8>,
+    pub margin_percent: Option<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProviderScope {
+    pub cycle: CycleOverrides,
+    pub watcher: ProviderWatcher,
+    #[serde(deserialize_with = "crate::json::unique_map")]
+    pub options: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScopeSettings {
+    pub id: String,
+    pub cycle: CycleOverrides,
+    pub watcher: WatcherOverrides,
+    #[serde(deserialize_with = "crate::json::unique_map")]
+    pub providers: std::collections::BTreeMap<crate::providers::provider::Id, ProviderScope>,
+}
+
+pub struct ResolvedPolicy {
+    pub settings: Settings,
+    pub sources: std::collections::BTreeMap<&'static str, &'static str>,
+}
+
+impl ScopeSettings {
+    pub fn resolve(
+        &self,
+        defaults: &PolicyDefaults,
+        provider: crate::providers::provider::Id,
+    ) -> ResolvedPolicy {
+        let mut settings = Settings::default();
+        let mut sources = std::collections::BTreeMap::from([
+            ("strategy", "compiled default"),
+            ("watcher-threshold-percent", "compiled default"),
+            ("watcher-margin-percent", "compiled default"),
+            ("watcher-may-act", "not granted"),
+        ]);
+        let local = self.providers.get(&provider);
+        for (cycle, threshold, margin, source) in [
+            (
+                &defaults.cycle,
+                defaults.watcher.threshold_percent,
+                defaults.watcher.margin_percent,
+                "scope defaults",
+            ),
+            (
+                &self.cycle,
+                self.watcher.threshold_percent,
+                self.watcher.margin_percent,
+                "scope",
+            ),
+        ] {
+            if let Some(value) = cycle.strategy {
+                settings.strategy = value;
+                sources.insert("strategy", source);
+            }
+            if let Some(value) = threshold {
+                settings.watcher_threshold_percent = value;
+                sources.insert("watcher-threshold-percent", source);
+            }
+            if let Some(value) = margin {
+                settings.watcher_margin_percent = value;
+                sources.insert("watcher-margin-percent", source);
+            }
+        }
+        if let Some(local) = local {
+            if let Some(value) = local.cycle.strategy {
+                settings.strategy = value;
+                sources.insert("strategy", "scope provider");
+            }
+            if let Some(value) = local.watcher.threshold_percent {
+                settings.watcher_threshold_percent = value;
+                sources.insert("watcher-threshold-percent", "scope provider");
+            }
+            if let Some(value) = local.watcher.margin_percent {
+                settings.watcher_margin_percent = value;
+                sources.insert("watcher-margin-percent", "scope provider");
+            }
+            settings.watcher_may_act = local.watcher.enabled;
+            sources.insert("watcher-may-act", "scope provider grant");
+            settings.prefer_workload = provider
+                .adapter()
+                .configured_workload(&local.options)
+                .is_some();
+        }
+        ResolvedPolicy { settings, sources }
+    }
+}
+
+impl From<Settings> for ScopeSettings {
+    fn from(settings: Settings) -> Self {
+        let mut scope = Self::default();
+        scope.cycle.strategy = Some(settings.strategy);
+        scope.watcher.threshold_percent = Some(settings.watcher_threshold_percent);
+        scope.watcher.margin_percent = Some(settings.watcher_margin_percent);
+        let provider = scope
+            .providers
+            .entry(crate::providers::provider::Id::default())
+            .or_default();
+        provider.watcher.enabled = settings.watcher_may_act;
+        if settings.prefer_workload
+            && let Some(workload) = crate::providers::provider::Id::default()
+                .adapter()
+                .default_workload()
+        {
+            provider
+                .options
+                .insert("preferred_workload".into(), workload.into());
+        }
+        scope
     }
 }

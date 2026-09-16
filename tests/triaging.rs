@@ -95,7 +95,7 @@ fn a_triage_writes_the_playbook_and_both_readings_of_the_probe() {
     let raw = written(&host, RAW);
     let redacted = written(&host, REDACTED);
     assert!(
-        raw.contains(EMAIL),
+        raw.contains(KEY),
         "the agent investigates from names: {raw}"
     );
     assert!(
@@ -127,7 +127,7 @@ fn raw_writes_the_names_into_the_copy_that_would_be_pasted() {
     );
 
     assert_eq!(written(&host, REDACTED), written(&host, RAW));
-    assert!(written(&host, REDACTED).contains(EMAIL));
+    assert!(written(&host, REDACTED).contains(KEY));
 }
 
 #[test]
