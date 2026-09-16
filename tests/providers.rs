@@ -734,8 +734,10 @@ fn an_unreadable_codex_session_is_refused_without_claiming_a_claude_version() {
     use perch::live::{self, Place};
 
     let host = FakeHost::new();
-    let profile = Id::Codex.home(&host).unwrap().join("profiles/one");
-    let marker = profile.join(format!("sessions/{}.json", host.process_id()));
+    let profile = Id::Codex.home(&host).unwrap().join("profiles").join("one");
+    let marker = profile
+        .join("sessions")
+        .join(format!("{}.json", host.process_id()));
     host.set_file(&marker, "unreadable");
     let host = host.with_a_path_refusing(&marker, Refusing::Read, "Permission denied");
     let error = live::ask(&host, &[Place::at(Id::Codex, &profile)])
@@ -1833,7 +1835,11 @@ fn native_restore_cleanup_failures_are_reported_and_preserve_the_original_export
         .unwrap_err();
         let said = error.to_string();
         assert!(said.contains("Rollback incomplete"), "{id:?}: {said}");
-        assert!(said.contains(&path.to_string_lossy().to_string()), "{said}");
+        // The directory's own name: the Host spells the separators above it.
+        assert!(
+            said.contains(path.file_name().unwrap().to_str().unwrap()),
+            "{said}"
+        );
         assert!(
             !said.contains("Profiles have been taken back out"),
             "{said}"
