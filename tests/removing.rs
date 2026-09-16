@@ -905,7 +905,11 @@ fn a_profile_directory_that_will_not_go_is_a_note_rather_than_a_failure() {
     // Derived the way the note derives it rather than spelled by hand: a Windows
     // build joins paths with the other separator, so a fixture holding the
     // forward-slash spelling would assert on a path nothing ever prints.
-    let profile = store_of(&host, SECOND_EMAIL).config_dir;
+    let profile = registry_of(&host)
+        .account(&fixture_key(&host, SECOND_EMAIL))
+        .expect("the fixture holds it")
+        .profile_dir(&host)
+        .expect("home is known");
     let host = host.with_a_path_refusing(&profile, Refusing::Delete, "in use");
 
     let (result, _) = run_remove_with(
