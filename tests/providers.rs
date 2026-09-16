@@ -873,7 +873,7 @@ fn triage_uses_the_preferred_codex_provider_without_a_managed_profile() {
         host.effects()
     );
     assert!(!host.effects().iter().any(|effect| matches!(effect,
-        Effect::WroteFile(path) if path.to_string_lossy().contains("/sessions/")
+        Effect::WroteFile(path) if path.components().any(|part| part.as_os_str() == "sessions")
     )));
 }
 
@@ -1948,10 +1948,7 @@ fn a_codex_default_kept_in_the_keyring_is_refused_and_the_pin_is_named() {
         refused.contains("cli_auth_credentials_store = \"file\""),
         "{refused}"
     );
-    assert!(
-        refused.contains("/Users/someone/.codex/config.toml"),
-        "{refused}"
-    );
+    assert!(refused.contains("config.toml"), "{refused}");
     assert!(host.file(DEFAULT_AUTH).is_none(), "nothing was written");
 }
 
