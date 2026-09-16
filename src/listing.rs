@@ -32,9 +32,14 @@ pub struct Section<'a> {
 
 impl<'a> Section<'a> {
     pub fn of(registry: &'a Registry, scope: config::Scope, now: DateTime<Utc>) -> Section<'a> {
+        // One provider's Accounts, or no ranking: quota windows are not
+        // comparable across providers (ADR each-provider-has-a-default).
+        let held = scope.accounts(registry);
         let ranked = cycle::may_cycle_within(registry, &scope)
-            && scope
-                .accounts(registry)
+            && held
+                .iter()
+                .all(|account| account.provider() == registry.selected_provider())
+            && held
                 .iter()
                 .all(|account| account.provider().adapter().capabilities().live_switch);
         let accounts = match ranked {

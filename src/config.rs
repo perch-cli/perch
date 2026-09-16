@@ -69,9 +69,8 @@ impl Setting {
     /// spelled at two sites is how the two come to name different remedies.
     fn only_the_ungrouped_scope_carries_it() -> PerchError {
         PerchError::Invalid(format!(
-            "`{}` is the declaration that the Accounts in no Group are \
-             interchangeable at all, and only they carry it. `perch config set \
-             {UNGROUPED} {} <value>` says it.",
+            "`{}` is a Setting of `{UNGROUPED}` alone. `perch config set \
+             {UNGROUPED} {} <value>` sets it.",
             Setting::Interchangeable.as_str(),
             Setting::Interchangeable.as_str(),
         ))
@@ -149,7 +148,7 @@ impl Setting {
             changed.ungrouped.interchangeable = yes_or_no(self.as_str(), value)?;
         } else {
             let target = changed.scope_settings_mut(scope).ok_or_else(|| {
-                PerchError::NotFound(format!("{} is not a declared Scope", scope.word()))
+                PerchError::NotFound(format!("No Group is called `{}`.", scope.word()))
             })?;
             match self {
                 Setting::Strategy => target.cycle.strategy = Some(strategy(value)?),
@@ -271,23 +270,10 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
         return None;
     }
 
-    // The declaration before the grant, which is the order it has to be said in
-    // and the order the arms carry.
-    let needed: Vec<Setting> = match crate::cycle::may_act_within(registry, scope) {
-        crate::cycle::MayAct::May => return None,
-        crate::cycle::MayAct::Undeclared { granted: true } => vec![Setting::Interchangeable],
-        crate::cycle::MayAct::Undeclared { granted: false } => {
-            vec![Setting::Interchangeable, Setting::WatcherMayAct]
-        }
-        crate::cycle::MayAct::Ungranted => vec![Setting::WatcherMayAct],
-    };
-
-    // Named from the vocabulary rather than spelled here, for the reason at the
-    // top of this module.
-    let says: Vec<String> = needed
-        .iter()
-        .map(|key| format!("`perch config set {} {} true`", scope.word(), key.as_str()))
-        .collect();
+    let says = grants_still_needed(registry, scope);
+    if says.is_empty() {
+        return None;
+    }
     Some(format!(
         "{} now holds {}, and nothing Cycles between them unasked: {} {} it may.",
         scope.described(),
@@ -295,6 +281,54 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
         says.join(" and "),
         if says.len() == 1 { "says" } else { "say" },
     ))
+}
+
+/// The `perch config set` lines a Scope still needs before the Watcher may act
+/// within it, the declaration before the grant, and none where it already may.
+/// Asked per provider whose Accounts a Cycle may choose, and none for a
+/// provider that never Switches live. The grant names its provider where the
+/// Scope holds more than one.
+pub fn grants_still_needed(registry: &Registry, scope: &Scope) -> Vec<String> {
+    let held: std::collections::BTreeSet<_> = scope
+        .accounts(registry)
+        .iter()
+        .map(|account| account.provider())
+        .collect();
+    let mixed = held.len() > 1;
+    let mut lines: Vec<String> = Vec::new();
+    for provider in held
+        .into_iter()
+        .filter(|provider| provider.adapter().capabilities().live_switch)
+    {
+        // `may_act_within` reads the selected provider's grant, so it is asked
+        // of a copy selecting this one.
+        let mut selected = registry.clone();
+        selected.select_provider(provider);
+        let needed: Vec<Setting> = match crate::cycle::may_act_within(&selected, scope) {
+            crate::cycle::MayAct::May => Vec::new(),
+            crate::cycle::MayAct::Undeclared { granted: true } => vec![Setting::Interchangeable],
+            crate::cycle::MayAct::Undeclared { granted: false } => {
+                vec![Setting::Interchangeable, Setting::WatcherMayAct]
+            }
+            crate::cycle::MayAct::Ungranted => vec![Setting::WatcherMayAct],
+        };
+        for key in needed {
+            let line = if mixed && key == Setting::WatcherMayAct {
+                format!(
+                    "`perch config set {} --provider {} {} true`",
+                    scope.word(),
+                    provider.word(),
+                    key.as_str()
+                )
+            } else {
+                format!("`perch config set {} {} true`", scope.word(), key.as_str())
+            };
+            if !lines.contains(&line) {
+                lines.push(line);
+            }
+        }
+    }
+    lines
 }
 
 /// The keys one Scope carries, in the order they are offered.
@@ -314,19 +348,11 @@ pub fn vocabulary(scope: &Scope) -> Vec<&'static str> {
 fn gated(registry: &Registry, scope: &Scope) -> String {
     match scope {
         Scope::Ungrouped if !registry.ungrouped.interchangeable => format!(
-            " It does not act there yet: `{}` is false, and that is a separate \
-             declaration that those Accounts are interchangeable at all. \
-             `perch config set {UNGROUPED} {} true` makes it.",
-            Setting::Interchangeable.as_str(),
+            " It does not act there until `perch config set {UNGROUPED} {} true` \
+             is set too.",
             Setting::Interchangeable.as_str(),
         ),
-        Scope::Ungrouped => format!(
-            " Those Accounts have also been declared interchangeable, which is \
-             the other half of it: the watcher acts here only where `{}` is on \
-             too.",
-            Setting::Interchangeable.as_str(),
-        ),
-        Scope::Group(_) => String::new(),
+        Scope::Ungrouped | Scope::Group(_) => String::new(),
     }
 }
 
@@ -345,33 +371,14 @@ pub(crate) fn strategy(value: &str) -> Result<Strategy> {
         .find(|candidate| value.eq_ignore_ascii_case(candidate.as_str()))
         .ok_or_else(|| {
             PerchError::Invalid(format!(
-                "`{value}` is not a Strategy Perch implements. The ones it \
-                 implements are:\n  {}",
-                the_strategies().join("\n  "),
+                "`{value}` is not a Strategy. They are {}.",
+                Strategy::ALL
+                    .iter()
+                    .map(|strategy| format!("`{}`", strategy.as_str()))
+                    .collect::<Vec<String>>()
+                    .join(" and "),
             ))
         })
-}
-
-/// Each Strategy and what it prefers, a line apiece. The one list, because the
-/// refusal and `set`'s help both offer it and two would drift.
-pub fn the_strategies() -> Vec<String> {
-    Strategy::ALL
-        .map(|strategy| format!("{} — {}", strategy.as_str(), gloss(strategy)))
-        .to_vec()
-}
-
-/// What each Strategy prefers, in a clause. Built by matching every Strategy
-/// rather than written out once as prose, so a Strategy added to the enum
-/// cannot ship with a refusal that fails to mention it — the match stops
-/// compiling instead.
-fn gloss(strategy: Strategy) -> &'static str {
-    match strategy {
-        Strategy::MostHeadroom => "prefers the Account with the most room left",
-        Strategy::SoonestReset => {
-            "prefers the Account whose quota is about to be thrown away, so it \
-             is spent rather than wasted"
-        }
-    }
 }
 
 pub(crate) fn yes_or_no(key: &str, value: &str) -> Result<bool> {

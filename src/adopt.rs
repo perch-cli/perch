@@ -66,15 +66,13 @@ fn load_or_adopt(host: &dyn Host, held: &mut crate::lock::Held<'_>) -> Result<Re
             registry.select_provider(provider.id());
             registry.settle(Some(account.key().to_string()));
             notices.push(format!(
-                "Adopted the {} login as your first Profile, now active: {}. {} {}.",
+                "Adopted the {} login as {}.",
                 provider.name(),
                 say::described(
                     &account.identity.email,
                     account.identity.organization_name.as_deref(),
                     account.plan.as_deref()
                 ),
-                provider.name(),
-                discovered.version
             ));
             registry.upsert(account);
             profiles.push(applied);
@@ -101,6 +99,10 @@ fn load_or_adopt(host: &dyn Host, held: &mut crate::lock::Held<'_>) -> Result<Re
         for notice in notices {
             host.note(&notice);
         }
+        // Once, here: adoption is the one moment Perch knows the person is new.
+        host.note(
+            "`perch wizard` walks you through adding Accounts, Groups, Settings and the Watcher.",
+        );
     }
     registry.select_provider(Default::default());
     Ok(registry)

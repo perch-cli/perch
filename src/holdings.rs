@@ -36,10 +36,8 @@ pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
         // working directory nobody chose.
         if !names_one_place(host.platform(), &overridden) {
             return Err(PerchError::Invalid(format!(
-                "PERCH_HOME is set to `{}`, which is not an absolute path, so \
-                 where Perch holds the Holdings would depend on the directory \
-                 each command was run from.\n\
-                 Set it to a full path, or unset it for {}.",
+                "PERCH_HOME is `{}`, not an absolute path. Set it to one, or \
+                 unset it for {}.",
                 overridden,
                 home_dir(host)
                     .map(|home| home.join(".config").join("perch").display().to_string())
@@ -98,10 +96,8 @@ pub fn profile_dir_for(provider: Id, host: &dyn Host, key: &str) -> Result<PathB
     // an empty slug, and a path that is not one directory below `profiles/`.
     if slugged.is_empty() || dir.parent() != Some(profiles.as_path()) {
         return Err(PerchError::Invalid(format!(
-            "`{key}` has no character a Profile directory can be named after, \
-             so Perch cannot say where its Credential would be kept.\n\
-             An Account recorded under that address has to be removed from \
-             {} by hand.",
+            "`{key}` has no character a Profile directory can be named after.\n\
+             Remove that Account from {} by hand.",
             registry_path(host)?.display(),
         )));
     }
@@ -224,9 +220,8 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
         dir: perch_home(host)?.join(".registry.lock"),
         stale_millis: REGISTRY_STALE_MILLIS,
         update_millis: REGISTRY_UPDATE_MILLIS,
-        lost_means: "Another `perch` has been changing the Registry since this \
-                     command read it, so what this one holds in memory is behind \
-                     what is on disk. Nothing of it will be written over theirs.",
+        lost_means: "Another `perch` changed the Registry since this command read \
+                     it. Nothing was written over theirs.",
     })
 }
 
@@ -254,9 +249,8 @@ pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
         dir: perch_home(host)?.join(".watch.lock"),
         stale_millis: WATCHER_STALE_MILLIS,
         update_millis: WATCHER_UPDATE_MILLIS,
-        lost_means: "Another Watcher has taken over watching this machine, so \
-                     this one is no longer the only one deciding. It stops \
-                     rather than deciding alongside it.",
+        lost_means: "Another Watcher has taken over this machine, so this one \
+                     stops.",
     })
 }
 

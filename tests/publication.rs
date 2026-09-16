@@ -44,18 +44,24 @@ fn splash() -> PathBuf {
     guide().join("index.mdx")
 }
 
+/// Every line of a markdown document, with whether it is inside a fenced block.
+/// A fence's own line counts as inside: it is not prose either way.
+fn fenced(markdown: &str) -> impl Iterator<Item = (bool, &str)> {
+    let mut inside = false;
+    markdown.lines().map(move |line| {
+        if line.trim_start().starts_with("```") {
+            inside = !inside;
+            return (true, line);
+        }
+        (inside, line)
+    })
+}
+
 /// The lines of a markdown document that are prose rather than fenced code. A
 /// transcript quotes URLs and prints `#`, so reading a link or a heading out of
 /// one reads what Perch said as if the page had said it.
 fn prose(markdown: &str) -> impl Iterator<Item = &str> {
-    let mut fenced = false;
-    markdown.lines().filter(move |line| {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-            return false;
-        }
-        !fenced
-    })
+    fenced(markdown).filter_map(|(inside, line)| (!inside).then_some(line))
 }
 
 /// The `[text](destination)` of every link in a markdown document.
@@ -187,6 +193,53 @@ fn the_readme_links_into_the_guide_land() {
     let readme = repo().join("README.md");
     for link in links(&read(&readme)) {
         resolves(&readme, &link);
+    }
+}
+
+/// The `##` sections of a page: each heading, and whether a fenced block sits
+/// under it before the next `##`. A `###` stays inside the section above it,
+/// which is the section the table of contents leads to.
+fn sections(markdown: &str) -> Vec<(String, bool)> {
+    let mut found: Vec<(String, bool)> = Vec::new();
+    for (inside, line) in fenced(markdown) {
+        if !inside && line.starts_with("## ") {
+            found.push((line.to_string(), false));
+        } else if inside && let Some((_, holds_a_fence)) = found.last_mut() {
+            *holds_a_fence = true;
+        }
+    }
+    found
+}
+
+/// A section with no transcript is a paragraph about a screen the reader
+/// cannot see (ADR the-guide-says-what-to-type). `reference.md` is tables, and
+/// a table is what a flag is looked up in; the Splash is not a guide page.
+#[test]
+fn every_section_of_a_task_page_holds_a_transcript() {
+    for page in guide_pages()
+        .into_iter()
+        .filter(|page| page != "reference.md")
+    {
+        let text = read(&guide().join(&page));
+        for (heading, holds_a_fence) in sections(&text) {
+            assert!(
+                holds_a_fence,
+                "{page}: `{heading}` holds no fenced block, so it explains nothing the reader can see"
+            );
+        }
+    }
+}
+
+/// One `##` renders with a table of contents a reader cannot use.
+#[test]
+fn a_task_page_has_more_than_one_section() {
+    for page in guide_pages() {
+        let text = read(&guide().join(&page));
+        let count = sections(&text).len();
+        assert!(
+            count > 1,
+            "{page} has {count} `##` heading(s), so its table of contents leads nowhere"
+        );
     }
 }
 

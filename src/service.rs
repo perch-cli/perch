@@ -523,20 +523,14 @@ impl Unit {
 
         for (what, value) in values {
             crate::host::inert(&what, &value).map_err(|err| {
-                PerchError::Invalid(format!(
-                    "{err}, so the Service cannot be described.\nNothing was installed."
-                ))
+                PerchError::Invalid(format!("{err}, so the Service cannot be described."))
             })?;
             if manager == Manager::ScheduledTask
                 && let Some(character) = value.chars().find(|c| *c == '"' || *c == '%')
             {
                 return Err(PerchError::Invalid(format!(
-                    "{what} carries `{character}`, which a Scheduled Task's \
-                     command line has no way to hold as part of a value: \
-                     `schtasks` hands it to `cmd.exe`, which reads `\"` as the \
-                     end of one and expands `%…%` when the task runs.\n\
-                     Nothing was installed. `perch watcher run` in a terminal \
-                     works whatever the path is."
+                    "{what} carries `{character}`, which a Scheduled Task cannot \
+                     hold. `perch watcher run` in a terminal works."
                 )));
             }
         }
@@ -737,10 +731,8 @@ fn unescaped(value: &str) -> String {
 /// status. Said rather than refused: refusing would make the order two `perch
 /// config set`s are typed in matter, and a Service with no grant holds harmlessly
 /// and takes over the moment one is given.
-pub const HOLDS_FOR_A_GRANT: &str = "No Scope has told the Watcher it may act, so the Service will hold rather \
-     than decide anything. `perch config set <group> watcher-may-act true` is \
-     what starts it deciding, and it takes effect within a couple of minutes \
-     without anything being restarted.";
+pub const HOLDS_FOR_A_GRANT: &str = "No Scope lets the Watcher act, so the Service holds. `perch config set \
+     <group> watcher-may-act true` starts it.";
 
 /// What the machine answers about the Service, gathered once.
 ///

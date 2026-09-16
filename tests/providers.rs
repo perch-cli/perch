@@ -92,7 +92,7 @@ fn the_same_email_in_two_workspaces_is_two_accounts_with_distinct_profiles() {
         target::resolve_account(&registry, EMAIL)
             .unwrap_err()
             .to_string()
-            .contains("multiple Accounts")
+            .contains("names more than one Account")
     );
     assert!(target::resolve_for(&registry, EMAIL, Some(Id::Codex)).is_err());
     assert_ne!(
@@ -138,7 +138,7 @@ fn run_falls_back_only_when_the_preferred_cli_is_absent() {
     assert_eq!(launch(&host, Selection::default(), &[]).unwrap(), 0);
     let host = host.with_file("/usr/bin/claude", "");
     let error = launch(&host, Selection::default(), &[]).unwrap_err();
-    assert!(error.to_string().contains("use --codex"));
+    assert!(error.to_string().contains("`--codex` selects it"));
     assert!(
         launch(
             &host,
@@ -316,16 +316,28 @@ fn a_claude_cycle_never_selects_a_codex_account_in_the_same_group() {
         0
     });
     add_account(&host, "personal");
-    let registry = registry::load(&host).unwrap().unwrap();
-    let account = registry
-        .accounts
-        .iter()
-        .find(|account| account.provider() == Id::Codex)
-        .unwrap();
-    assert!(!perch::cycle::is_a_candidate(
-        &registry::Sharers::across(&registry),
-        account
-    ));
+    perch::commands::group::run(
+        &host,
+        perch::commands::group::GroupCommand::Move {
+            target: "personal".into(),
+            group: "work".into(),
+        },
+        &mut Vec::new(),
+    )
+    .unwrap();
+    let mut registry = registry::load(&host).unwrap().unwrap();
+    registry.select_provider(Id::Claude);
+    let ranked = perch::cycle::ranked(
+        &registry,
+        &perch::config::Scope::Group("work".into()),
+        host.now(),
+    );
+    assert_eq!(ranked.len(), 3, "the three Claude Accounts");
+    assert!(
+        ranked
+            .iter()
+            .all(|account| account.provider() == Id::Claude)
+    );
 }
 
 #[test]
@@ -378,7 +390,7 @@ fn a_running_codex_profile_is_not_opened_for_refresh_or_relogin() {
                 },
                 &mut Vec::new()
             ),
-            Err(perch::PerchError::Busy(_))
+            Err(perch::PerchError::ProfileLive(_))
         ));
         0
     });
@@ -612,7 +624,11 @@ fn the_provider_handle_refuses_a_foreign_profile_before_native_effects() {
     let context = registry.profile_context(&host, account).unwrap();
     let claude = Id::Claude.adapter();
     host.forget_effects();
-    assert!(claude.check_replacement(&host, &profile, None).is_err());
+    assert!(
+        claude
+            .check_replacement(&host, &profile, None, &perch::live::NOTHING_WAS_CHANGED)
+            .is_err()
+    );
     assert!(claude.forget_credential(&host, &profile).is_err());
     assert!(claude.snapshot(&host, &context).is_err());
     assert!(
@@ -718,8 +734,10 @@ fn an_unreadable_codex_session_is_refused_without_claiming_a_claude_version() {
     use perch::live::{self, Place};
 
     let host = FakeHost::new();
-    let profile = Id::Codex.home(&host).unwrap().join("profiles/one");
-    let marker = profile.join(format!("sessions/{}.json", host.process_id()));
+    let profile = Id::Codex.home(&host).unwrap().join("profiles").join("one");
+    let marker = profile
+        .join("sessions")
+        .join(format!("{}.json", host.process_id()));
     host.set_file(&marker, "unreadable");
     let host = host.with_a_path_refusing(&marker, Refusing::Read, "Permission denied");
     let error = live::ask(&host, &[Place::at(Id::Codex, &profile)])
@@ -729,7 +747,6 @@ fn an_unreadable_codex_session_is_refused_without_claiming_a_claude_version() {
     assert_eq!(error.exit_code(), perch::error::EXIT_PROBE_REFUSED);
     let said = error.to_string();
     assert!(said.contains(&marker.display().to_string()), "{said}");
-    assert!(said.contains("Nothing was changed"), "{said}");
     assert!(!said.contains("Claude"), "{said}");
 }
 
@@ -858,7 +875,7 @@ fn triage_uses_the_preferred_codex_provider_without_a_managed_profile() {
         host.effects()
     );
     assert!(!host.effects().iter().any(|effect| matches!(effect,
-        Effect::WroteFile(path) if path.to_string_lossy().contains("/sessions/")
+        Effect::WroteFile(path) if path.components().any(|part| part.as_os_str() == "sessions")
     )));
 }
 
@@ -1206,9 +1223,7 @@ fn claude_enrollment_and_relogin_keep_storage_stable_when_email_changes() {
     .0
     .unwrap_err();
     assert!(
-        duplicate
-            .to_string()
-            .contains("two Profiles for one Account"),
+        duplicate.to_string().contains("already holds"),
         "{duplicate}"
     );
     assert_eq!(registry::load(&host).unwrap().unwrap().accounts.len(), 1);
@@ -1275,7 +1290,7 @@ fn claude_workspaces_with_the_same_email_enroll_as_separate_accounts() {
         target::resolve_account(&registry, common::EMAIL)
             .unwrap_err()
             .to_string()
-            .contains("multiple Accounts")
+            .contains("names more than one Account")
     );
     let exported = perch::export::gather(&host, &registry).unwrap();
     assert_eq!(
@@ -1820,7 +1835,11 @@ fn native_restore_cleanup_failures_are_reported_and_preserve_the_original_export
         .unwrap_err();
         let said = error.to_string();
         assert!(said.contains("Rollback incomplete"), "{id:?}: {said}");
-        assert!(said.contains(&path.to_string_lossy().to_string()), "{said}");
+        // The directory's own name: the Host spells the separators above it.
+        assert!(
+            said.contains(path.file_name().unwrap().to_str().unwrap()),
+            "{said}"
+        );
         assert!(
             !said.contains("Profiles have been taken back out"),
             "{said}"
@@ -1828,4 +1847,173 @@ fn native_restore_cleanup_failures_are_reported_and_preserve_the_original_export
         assert!(host.path_exists(&path));
         assert_eq!(export, before);
     }
+}
+
+/// Two Codex Workspaces under one email, each its own Account, on a machine
+/// whose Default home Codex has never configured.
+fn two_codex_workspaces() -> FakeHost {
+    let host = machine("personal").with_env("HOME", "/Users/someone");
+    add_account(&host, "personal");
+    let document = credential("work", EMAIL);
+    let host = host.with_login(move |host, at| {
+        host.set_file(at.join("auth.json"), &document);
+        0
+    });
+    add_account(&host, "work");
+    host
+}
+
+const DEFAULT_AUTH: &str = "/Users/someone/.codex/auth.json";
+
+/// The same login Renewed: other tokens, a later `last_refresh`.
+fn rotated(workspace: &str) -> String {
+    let mut value: serde_json::Value = serde_json::from_str(&credential(workspace, EMAIL)).unwrap();
+    value["tokens"]["access_token"] = json!("rotated");
+    value["last_refresh"] = json!("2026-09-16T12:00:00Z");
+    value.to_string()
+}
+
+fn codex_active(host: &FakeHost) -> Option<String> {
+    let mut registry = registry::load(host).unwrap().unwrap();
+    registry.select_provider(Id::Codex);
+    registry.active().whose().map(str::to_string)
+}
+
+#[test]
+fn switching_to_a_codex_account_writes_its_credential_into_the_default_home() {
+    let host = two_codex_workspaces();
+
+    let (result, printed) = common::run_switch(&host, "work");
+
+    result.expect("a Codex Account is switched to");
+    assert_eq!(
+        host.file(DEFAULT_AUTH).as_deref(),
+        Some(credential("work", EMAIL).as_str())
+    );
+    assert!(
+        host.file("/Users/someone/.codex/config.toml")
+            .is_some_and(|config| config.contains("cli_auth_credentials_store = \"file\"")),
+        "a home Codex never configured is pinned to the file store"
+    );
+    assert!(
+        printed.contains("Switched to ") && printed.contains("(as `work`)."),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("Note: a Codex already open keeps its Account until it is restarted."),
+        "{printed}"
+    );
+    let registry = registry::load(&host).unwrap().unwrap();
+    let work = registry
+        .accounts
+        .iter()
+        .find(|a| registry.alias_of(a.key()) == Some("work"))
+        .unwrap();
+    assert_eq!(codex_active(&host).as_deref(), Some(work.key()));
+}
+
+#[test]
+fn a_codex_switch_captures_the_renewed_live_credential_into_the_outgoing_profile() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    host.set_file(DEFAULT_AUTH, &rotated("personal"));
+
+    common::run_switch(&host, "work")
+        .0
+        .expect("the Switch lands");
+
+    let registry = registry::load(&host).unwrap().unwrap();
+    let personal = registry
+        .accounts
+        .iter()
+        .find(|a| registry.alias_of(a.key()) == Some("personal"))
+        .unwrap();
+    assert_eq!(
+        host.file(personal.profile_dir(&host).unwrap().join("auth.json"))
+            .as_deref(),
+        Some(rotated("personal").as_str()),
+        "the Renewed copy went home"
+    );
+    assert_eq!(
+        host.file(DEFAULT_AUTH).as_deref(),
+        Some(credential("work", EMAIL).as_str())
+    );
+}
+
+#[test]
+fn a_codex_default_kept_in_the_keyring_is_refused_and_the_pin_is_named() {
+    let host = two_codex_workspaces().with_file(
+        "/Users/someone/.codex/config.toml",
+        "cli_auth_credentials_store = \"keyring\"\n",
+    );
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    let refused = result.unwrap_err().to_string();
+    assert!(
+        refused.contains("cli_auth_credentials_store = \"file\""),
+        "{refused}"
+    );
+    assert!(refused.contains("config.toml"), "{refused}");
+    assert!(host.file(DEFAULT_AUTH).is_none(), "nothing was written");
+}
+
+#[test]
+fn a_codex_landing_left_in_flight_is_settled_by_the_identity_of_the_live_credential() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    let mut registry = registry::load(&host).unwrap().unwrap();
+    registry.select_provider(Id::Codex);
+    let key_of = |alias: &str| {
+        registry
+            .accounts
+            .iter()
+            .find(|a| registry.alias_of(a.key()) == Some(alias))
+            .unwrap()
+            .key()
+            .to_string()
+    };
+    let (personal, work) = (key_of("personal"), key_of("work"));
+    registry.begin_landing(Some(personal), &work);
+    common::save_registry(&host, &registry);
+    // Renewed since the Credential moved: no held copy is byte-equal.
+    host.set_file(DEFAULT_AUTH, &rotated("work"));
+
+    let mut perch = perch::holdings::lock(&host).unwrap();
+    let mut registry = registry::load(&host).unwrap().unwrap();
+    registry.select_provider(Id::Codex);
+    perch::commands::a_settled_landing(&host, &mut perch, &mut registry).expect("settled");
+
+    assert_eq!(registry.active().whose(), Some(work.as_str()));
+}
+
+#[test]
+fn the_active_codex_account_is_observed_where_its_login_is_live() {
+    let host = with_codex_limits(two_codex_workspaces());
+    common::run_switch(&host, "personal").0.unwrap();
+    let registry = registry::load(&host).unwrap().unwrap();
+    let personal = registry
+        .accounts
+        .iter()
+        .find(|a| registry.alias_of(a.key()) == Some("personal"))
+        .unwrap();
+    // The Profile copy is gone; only the live one can answer.
+    host.remove_file(&personal.profile_dir(&host).unwrap().join("auth.json"))
+        .unwrap();
+
+    let observed = personal
+        .provider()
+        .adapter()
+        .configured(&host)
+        .unwrap()
+        .observe(
+            &host,
+            &mut perch::holdings::lock(&host).unwrap(),
+            &registry.profile_context(&host, personal).unwrap(),
+            &personal.profile(&host).unwrap(),
+            &mut || Ok(()),
+        );
+
+    let windows = observed.expect("read off the Default home");
+    assert_eq!(windows.len(), 1);
 }

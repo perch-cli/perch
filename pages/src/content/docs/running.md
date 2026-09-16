@@ -4,139 +4,112 @@ sidebar:
   order: 6
 ---
 
-`perch run <target>` launches Claude Code or Codex against one Account's
-Profile. Select the provider explicitly with either flag:
+`perch run <target>` launches one Account in one terminal and leaves the
+active Account alone. A Claude Account launches Claude Code; a Codex Account
+launches Codex.
 
-```sh
-perch run --claude work
-perch run personal --codex
-perch config set --global run-provider codex
-```
-
-Without a flag, Perch tries the configured provider (Claude by default), then
-the other CLI if the preferred CLI is absent. An explicit flag never falls back.
-An Account from the other provider is refused with the matching flag suggested.
-A failed login, exhausted quota, or child failure does not trigger fallback.
-
-Codex support is experimental. Add a subscription-backed Account with
-`perch add --codex --alias personal --no-group`. Each user and Workspace pair
-has its own `CODEX_HOME`, file Credential, configuration, and history. Use
-Aliases when the same email names more than one Workspace. An unaliased Account
-can also be reached by its `id` from `perch list --json`. `perch list --refresh`
-asks the Codex app-server for percentage quotas when the Profile is idle;
-otherwise the cached figure keeps its original age. Credit and spend-control
-states that Perch cannot represent remain unknown or retain the prior cache.
-
-Runs stay on their selected Account. Codex live Switching and unattended Codex
-Cycling are not available yet; Claude's Watcher only chooses Claude Accounts.
-Groups may contain both providers, and each Account remains visible.
-
-After `--`, a leading flag goes to the selected coding tool. A program name runs
-that program with the named Account's Profile, without requiring either coding
-CLI. The client's exit code becomes Perch's exit code.
-
-## Claude shared state
-
-`perch run <target>` launches Claude Code as an Account without changing which
-one is active. It is the other half of `switch`: a Switch is about the whole
-machine, and a Run is about one process.
+## Running as an Account
 
 ```
 $ perch run overflow
-`overflow` is an Alias for overflow@example.com.
-Running Claude Code as overflow@example.com (as `overflow`), in this terminal alone. you@example.com stays the active Account everywhere else.
+Running Claude Code as overflow@example.com (as `overflow`), in this terminal alone.
 ```
 
-It works by setting `CLAUDE_CONFIG_DIR` for that one process. Nothing is
-Captured, nothing is written to the Default Profile, and no Identity is patched
-— so every other terminal, the editor extension and the desktop app go on as the
+Every other terminal, the editor extension and the desktop app go on as the
 Account they were on. Two terminals running two Accounts is what the command is
-for, not an edge case.
+for. Your memory, settings, plugins, past work and plans are linked into the
+Account's Profile before the launch, so Claude Code opens with your Shared
+State. Where a link cannot be made, the Run is refused and names the entry.
 
-Because a Run uses a Profile as a live configuration directory rather than as
-storage, it is the one path that has to **Reconcile** first, every time: your
-memory, settings, plugins, past work and plans are linked into the Profile it is
-about to launch, and links that have broken or gone stale are repaired. What
-crosses is everything the Default Profile holds except the Credential, the file
-naming the Account, the directory of Markers and the refresh lock, read at Run
-time — so a directory a new Claude Code release invents follows you without
-waiting for a Perch release. Never by copying, because a copy diverges the
-moment it is edited: where no link can be made, the Run is refused rather than
-served one, naming the entry and what to do about it.
+Trust and tool approvals for the repository you are standing in are carried
+over from the most recently used Profile in the same Group, so the first Run of
+a new Account does not ask for trust again mid-task.
 
-One file cannot be linked. `.claude.json` holds the Account itself, so every
-Profile keeps its own — and it also holds a good deal that is yours: whether you
-have been through onboarding, which tips you have seen, and the trust and tool
-approvals of the repository you are standing in. So that one file is **Carried**
-key by key instead, from the most recently used Profile in the same Group, and
-only into a Profile nothing is running against. What crosses is a named list
-rather than everything-but, because this file also holds figures Anthropic gave
-for one Account — carrying those would show you one Account's Utilization under
-another Account's name. Without it, the first Run of a new Account lands you in
-a Claude Code that believes it has never been used, asking for trust in the
-middle of your task.
+The client's exit code is Perch's, so `perch run` stands in a script wherever
+`claude` would.
 
-A Group is not a Target here — it names a set of Accounts rather than one, and
-there is no single Profile to point a process at — and an Account that is
-Quarantined is refused with exit code 19 rather than launching a client that
-would ask you to log in. The client's own exit code is Perch's, so `perch run`
-can stand in a script wherever `claude` would.
+```
+$ perch run work
+`work` is a Group. Name one Account: its Alias, or its email address.   # exit 14
+```
+
+A Quarantined Account is refused rather than launched into a login prompt.
+
+## Running a Codex Account
+
+```
+$ perch run personal
+Running Codex as person@example.com (as `personal`), in this terminal alone.
+```
+
+A Codex Account runs with its own `CODEX_HOME`, so its login, configuration and
+history stay apart from every other Account's. Codex support is experimental.
+
+```
+$ perch run --claude personal
+personal is a Codex Account. `perch run --codex personal` launches it.   # exit 14
+```
+
+`--claude`, `--codex` and `--provider <name>` name the provider outright. An
+Account of the other provider is refused, never launched with the wrong
+client.
+
+## Choosing the provider for a bare `perch run`
+
+```
+$ perch config set --global run-provider codex
+run-provider: codex
+```
+
+Without a flag, `perch run` uses the `run-provider` CLI, and the other one
+only if that CLI is not installed. An explicit flag never falls back, and
+neither does a failed login, an exhausted quota or a client that exits with an
+error: the exit code is the client's.
 
 ## What a Run protects while it lasts
 
-For as long as a Run is running, the Profile it launched is a **Live Profile**,
-and Perch will not write into one. Another terminal cannot Capture into it,
-cannot Renew the Credential that client is holding — which would retire the
-refresh token and log it out mid-task — and cannot copy `.claude.json` keys over
-it.
+```
+$ perch switch overflow
+A client is running against you@example.com's Profile (pid 4242).
+Quit it, or `perch switch` to another Account.   # exit 16
+```
 
-Each of those refuses in the register its own command has. A Switch that cannot
-Capture stops, exits 16, and names the process holding the Profile. A
-`--refresh` shows you the cached figure instead and still succeeds, because a
-refresh reports what it could not read rather than failing. A `.claude.json` key
-simply does not cross, because nothing on that path may refuse a Run — the cost
-is one onboarding question, not a session.
+While a Run is going, its Profile is Live, and Perch writes nothing into it.
+A Switch away from the Account you are running is refused as above. A
+`--refresh` on that Account shows the cached figure and says why:
 
-Reading is untouched, which is the difference that matters. `perch switch` onto
-the Account you are running lands normally: it copies that Credential into the
-Default Profile and leaves the Profile itself alone. Its Utilization is read
-without renewing anything, because an Account with a client running has a fresh
-access token already. A Run and a Switch do not lock each other out.
+```
+$ perch status --refresh
+you@example.com: its access token has expired and a client is running against it (pid 4242 in /Users/you/.config/perch/profiles/you-example-com), so it was not Renewed.
+Account       you@example.com
+Organization  Acme
+Plan          pro
+Utilization   never observed
+```
 
-It works by the **Marker** Claude Code already uses to record a running client,
-so a Run that was killed rather than closed leaves nothing behind that matters:
-a Marker naming a process that is gone, or a pid since taken by something
-younger, makes no Profile Live.
+Reading is untouched. `perch switch` onto the Account you are running lands
+normally, and a Run and a Switch do not lock each other out. A Run that was
+killed rather than closed leaves nothing behind that matters.
 
 ## Running with arguments, and running something else
 
-Everything after `--` belongs to the program rather than to Perch, and reaches
-it exactly as you typed it — including flags Perch has of its own.
-
 ```
 $ perch run overflow -- --resume --model opus
+Running Claude Code as overflow@example.com (as `overflow`), in this terminal alone.
+
 $ perch run overflow -- npm test
+Running `npm` as overflow@example.com (as `overflow`), in this terminal alone.
 ```
 
-The first word after `--` decides which program runs. A flag is Claude Code's,
-so the first line resumes a session; anything else is the program to launch, so
-the second runs `npm` with your Shared State reachable and `CLAUDE_CONFIG_DIR`
-pointed at the Account's Profile. Nothing is guessed either way: a program you
-could invoke by name never begins with a `-`.
-
-`--` is required, and a flag typed without it is refused rather than claimed:
+Everything after `--` reaches the program exactly as typed. A first word that
+is a flag goes to Claude Code. Any other first word is the program to launch,
+with `CLAUDE_CONFIG_DIR` pointed at the Account's Profile.
 
 ```
 $ perch run dev --resume
 `--resume` could be Perch's flag or the program's, and Perch will not guess which. Everything meant for the program you are running goes after `--`:
 
-    perch run dev -- --resume
-
-$ echo $?
-2
+        perch run dev -- --resume
 ```
 
-Both readings of that line are real — Perch has a `--json` and so does Claude
-Code — so Perch takes neither and hands you back the line that would have
-worked. A program typed without the separator (`perch run dev npm test`) is told
-the same thing: program arguments follow `--`; provider flags belong to Perch.
+A program typed without the separator is refused the same way.

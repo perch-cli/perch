@@ -20,13 +20,15 @@ impl Selection {
     pub fn explicit(self) -> Result<Option<Id>> {
         if let Some(provider) = self.provider {
             if self.claude || self.codex {
-                return Err(PerchError::Invalid("Choose one provider selector".into()));
+                return Err(PerchError::Invalid(
+                    "Name one provider: `--provider <name>`, `--claude` or `--codex`.".into(),
+                ));
             }
             return Ok(Some(provider));
         }
         match (self.claude, self.codex) {
             (true, true) => Err(PerchError::Invalid(
-                "choose only one of --claude and --codex".into(),
+                "Name one provider: `--provider <name>`, `--claude` or `--codex`.".into(),
             )),
             (true, false) => Ok(Some(Id::Claude)),
             (false, true) => Ok(Some(Id::Codex)),
@@ -54,6 +56,6 @@ impl Selection {
                 Err(other) => return Err(other),
             }
         }
-        Err(PerchError::NotFound("No enabled provider CLI is installed; configure a CLI path or enable a provider in config.json".into()))
+        Err(PerchError::NotFound("No enabled provider CLI was found. `perch config set --provider <name> cli-path <path>` names one.".into()))
     }
 }

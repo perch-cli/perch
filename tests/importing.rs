@@ -123,7 +123,7 @@ fn a_terminal_that_goes_away_after_the_import_lands_says_it_landed() {
     let refused = outcome.expect_err("the report could not be written");
     let said = refused.to_string();
     assert!(
-        said.contains("nothing to run again"),
+        said.contains("Only the report could not be printed"),
         "a machine that is restored is not told to import again: {said}"
     );
     assert_eq!(
@@ -436,7 +436,6 @@ fn without_a_terminal_the_import_is_refused_and_says_what_is_needed() {
     let refused = outcome.expect_err("there is nobody to type a passphrase");
     assert_eq!(refused.exit_code(), EXIT_INVALID, "{refused}");
     assert!(refused.to_string().contains("no terminal"), "{refused}");
-    assert!(refused.to_string().contains("process table"), "{refused}");
     assert_eq!(registry_on(&host), None);
 }
 
@@ -569,13 +568,6 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
         "and so did the `.claude.json`, which came out of the same Export and \
          routinely carries an API key in an MCP server's `env` block"
     );
-    assert!(
-        host.notes()
-            .iter()
-            .any(|note| note.contains("already on this machine")),
-        "and the one that stayed is said rather than left to be found: {:?}",
-        host.notes()
-    );
 }
 
 /// `store_credential` refuses when the store read first will not give up the
@@ -707,7 +699,10 @@ fn a_registry_that_cannot_be_written_takes_every_profile_back_out_with_it() {
     let (outcome, _printed) = run_import(&host, AT);
 
     let refused = outcome.expect_err("the registry cannot be written");
-    assert!(refused.to_string().contains("taken back out"), "{refused}");
+    assert!(
+        refused.to_string().contains("Nothing was imported"),
+        "{refused}"
+    );
     assert_eq!(registry_on(&host), None, "no half-populated registry");
     for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
         assert_eq!(credential_of(&host, email), None, "{email} left nothing");
@@ -826,7 +821,7 @@ fn nothing_the_export_holds_reaches_standard_output() {
     // Import, so the guide establishes them rather than this line.
     assert_eq!(
         printed.trim_end().lines().last(),
-        Some(format!("Imported 3 Accounts from {AT}.").as_str()),
+        Some("Imported 3 Accounts."),
         "{printed}"
     );
 }

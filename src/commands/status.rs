@@ -25,18 +25,11 @@ use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy, clap::Args)]
 pub struct StatusArgs {
-    /// Read current Utilization from Anthropic first.
-    ///
-    /// The one Account this command is about, and no others. Asking for a
-    /// refresh is the only thing in Perch that touches the network, here or
-    /// on a listing. Roughly 28-30 reads an hour are allowed per Account
-    /// and the allowance does not refill early, so a figure that cannot be
-    /// read falls back to the cached one rather than failing.
+    /// Read Utilization from Anthropic first
     #[arg(long)]
     pub refresh: bool,
 
-    /// Emit machine-readable output, with an observation time on every
-    /// Utilization figure.
+    /// Print JSON
     #[arg(long)]
     pub json: bool,
 }

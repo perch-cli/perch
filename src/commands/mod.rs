@@ -25,6 +25,7 @@ pub mod upgrade;
 pub mod version;
 pub mod watch;
 pub mod watcher;
+pub mod wizard;
 
 use std::io::Write;
 
@@ -45,9 +46,7 @@ pub fn still_ours(perch: &mut crate::lock::Held<'_>, did: &str) -> Result<()> {
     // `Busy` rather than `Other`: the sentence below is "run this again", which
     // is what `EXIT_HELD` promises and what `EXIT_GENERAL` denies.
     Err(PerchError::Busy(format!(
-        "Another `perch` changed the Registry while that question was waiting \
-         for an answer, so this one is working from a copy that is out of \
-         date.\n\
+        "Another `perch` changed the Registry while that question waited.\n\
          Nothing was {did}. Run this again."
     )))
 }
@@ -160,14 +159,5 @@ pub fn a_settled_landing(
     )? {
         crate::switch::Resolved::Settled(settled) => Ok(settled),
         crate::switch::Resolved::Stopped(never) => match never {},
-    }
-}
-
-/// What every login says about the Account it is leaving alone, when there is
-/// one to leave alone.
-pub(crate) fn leaving_the_active_account_alone(active: Option<&str>) -> String {
-    match active {
-        Some(active) => format!(" {active} stays active and its session is untouched."),
-        None => String::new(),
     }
 }

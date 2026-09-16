@@ -347,7 +347,7 @@ fn a_registry_from_a_newer_perch_is_refused_rather_than_misread() {
     let (result, _) = run_status(&host, false);
 
     let error = result.expect_err("a registry from the future cannot be trusted");
-    assert!(error.to_string().contains("newer Perch"), "{error}");
+    assert!(error.to_string().contains("Upgrade Perch"), "{error}");
 }
 
 /// The version has to be read *before* the document is, or the guard only fires
@@ -367,7 +367,7 @@ fn a_registry_from_a_newer_perch_says_so_even_when_it_spells_things_this_build_c
 
     let error = result.expect_err("a registry from the future cannot be trusted");
     assert!(
-        error.to_string().contains("newer Perch"),
+        error.to_string().contains("registry version 99"),
         "not a complaint about the JSON, which is valid: {error}"
     );
     assert!(error.to_string().contains("Upgrade Perch"), "{error}");

@@ -80,22 +80,17 @@ pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
     match cycle::may_act_within(registry, &scope) {
         cycle::MayAct::Undeclared { .. } => {
             return Err(PerchError::NotInterchangeable(format!(
-                "{} is in no Group, and nothing has said the Accounts in no Group \
-                 are interchangeable at all, so nothing is being watched.\n\
-                 `perch config set {UNGROUPED} interchangeable true` says they are, \
-                 and `perch config set {UNGROUPED} watcher-may-act true` then says \
-                 the watcher may act. Both are needed.\n\
-                 Putting it in a Group with `perch group move {} <group>` is the \
-                 narrower way.",
+                "{} is in no Group, and the ungrouped Accounts are not declared \
+                 interchangeable, so nothing is watched.\n\
+                 `perch config set {UNGROUPED} interchangeable true` and `perch \
+                 config set {UNGROUPED} watcher-may-act true` start it.",
                 registry.named_for_the_user(account.key()),
-                account.key(),
             )));
         }
         cycle::MayAct::Ungranted => {
             return Err(PerchError::Invalid(format!(
-                "{} has not been told the watcher may act on it, so nothing is \
-                 being watched.\n\
-                 `perch config set {} watcher-may-act true` says it may.",
+                "{} does not let the watcher act, so nothing is watched.\n\
+                 `perch config set {} watcher-may-act true` does.",
                 scope.described(),
                 scope.word(),
             )));

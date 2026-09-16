@@ -45,10 +45,8 @@ pub struct Unnamed {
 /// What a Purge that will not run leaves behind: everything, a Purge being all
 /// or nothing.
 const NOTHING_WAS_PURGED: live::Consequence = live::Consequence {
-    nothing_happened: "Nothing was purged.",
-    quit_it: "A Purge deletes those directories, and what is in them belongs to \
-              whatever is holding them until it exits. Quit it and run this \
-              again.",
+    nothing_happened: Some("Nothing was purged."),
+    quit_it: "Quit it and run this again.",
 };
 
 /// Refuses while a client is running against a Profile a Purge would delete.
@@ -126,12 +124,7 @@ fn everything_perch_holds(host: &dyn Host) -> Result<Vec<ManagedProfile>> {
                 Err(crate::host::HostError::NotFound { .. }) => {}
                 Err(err) => {
                     return Err(
-                        PerchError::file_read(parent.clone(), err).with_note(&format!(
-                            "Nothing was purged. Until Perch can list {}, it cannot say \
-                     which Profiles are under it, and one that goes unlisted is \
-                     a Credential left behind with nothing to name it by.",
-                            parent.display(),
-                        )),
+                        PerchError::file_read(parent.clone(), err).with_note("Nothing was purged.")
                     );
                 }
             }
@@ -181,20 +174,16 @@ pub fn erase(
     perch.renew();
     if !perch.still_held() {
         return Err(PerchError::Other(format!(
-            "Another `perch` changed the Registry while this Purge was working. \
-             Every Credential Perch held is deleted; {} was left where it is, \
-             rather than taken with whatever the other `perch` put in it.\n\
-             Run `perch holdings purge` again and it will finish.",
+            "Every Credential is deleted, but another `perch` changed the Registry \
+             meanwhile, so {} was left. Run `perch holdings purge` again.",
             home.display(),
         )));
     }
 
     host.remove_dir_all(&home).map_err(|err| {
         PerchError::Other(format!(
-            "Every Credential Perch held is deleted, but {} could not be removed: \
-             {err}\n\
-             Run `perch holdings purge` again once it can be, and it will \
-             finish.",
+            "Every Credential is deleted, but {} could not be removed: {err}\n\
+             Run `perch holdings purge` again.",
             home.display(),
         ))
     })?;
@@ -277,7 +266,7 @@ fn forget_the_credential(
 }
 
 fn incomplete_purge(error: PerchError) -> PerchError {
-    error.with_note("The Purge did not finish. Some Credential Stores may already be empty; run again with `perch holdings purge` to finish.")
+    error.with_note("The Registry is untouched. Run `perch holdings purge` again.")
 }
 
 #[cfg(test)]
@@ -410,7 +399,7 @@ mod tests {
         )
         .expect_err("the keychain will not answer");
 
-        assert!(refused.to_string().contains("run again"), "{refused}");
+        assert!(refused.to_string().contains("purge` again"), "{refused}");
         assert!(
             !host
                 .effects()

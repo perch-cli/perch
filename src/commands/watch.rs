@@ -248,22 +248,16 @@ fn opening(host: &dyn Host) -> Result<String> {
         ))
     });
     let Some((named, watching)) = watching else {
-        return Ok(
-            "Started. Nothing is being decided yet; the next line says what is \
-             holding it. Ctrl-C stops."
-                .to_string(),
-        );
+        return Ok("Started. The next line says what is holding it. Ctrl-C stops.".to_string());
     };
     Ok(format!(
-        "Watching {} {}. Reading how full it is every {}, and Switching within \
-         that Scope when its fullest Quota Window reaches {}%, to an Account at \
-         {}% or under, and never twice inside {} minutes. Ctrl-C stops.",
+        "Watching {} {}, every {}. Switching at {}% to an Account at {}% or \
+         under. Ctrl-C stops.",
         named,
         watching.scope.within(),
         watch::how_often(),
         watching.policy.threshold,
         watching.policy.ceiling(),
-        watch::COOLDOWN_MINUTES,
     ))
 }
 

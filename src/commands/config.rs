@@ -21,27 +21,23 @@ use crate::name::UNGROUPED;
 use crate::registry::Registry;
 use crate::say;
 
-/// What was asked of `perch config`, as the words that were typed — carried
+/// What was asked of `perch config`, as the words that were typed. Carried
 /// rather than resolved, because telling somebody which form they seem to have
 /// meant is part of what this command does, and a parser that had thrown the
 /// words away could not.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum ConfigCommand {
-    /// Set one Setting on one Scope, and say what it now means.
+    /// Set one Setting on one Scope.
     #[command(long_about = how_a_setting_is_set())]
     Set {
-        /// `<scope> <key> <value>`.
+        /// `<scope> <key> <value>`
         #[arg(value_name = "WORDS", num_args = 1.., required = true, allow_hyphen_values = true)]
         words: Vec<String>,
     },
 
     /// Read Settings back.
-    ///
-    /// With nothing named it prints every Scope's Config in full, each Scope's
-    /// page under its name. A Scope prints its own page, and a Scope and a key
-    /// print the value alone.
     Get {
-        /// Nothing, `<scope>`, or `<scope> <key>`.
+        /// Nothing, `<scope>`, or `<scope> <key>`
         #[arg(value_name = "WORDS", num_args = 0.., allow_hyphen_values = true)]
         words: Vec<String>,
     },
@@ -107,7 +103,7 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                     );
                 }
             }
-            _ => return Err(PerchError::Invalid("Unknown provider Scope setting".into())),
+            _ => return Err(PerchError::Invalid("A provider's Scope Settings are `strategy`, `watcher-threshold-percent`, `watcher-margin-percent`, `watcher-may-act` and `option.<name>`.".into())),
         }
         crate::registry::validate(&changed)?;
         *registry = changed;
@@ -125,7 +121,7 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             "strategy" => changed.scope_defaults.cycle.strategy = inherited(value, crate::config::strategy)?,
             "watcher-threshold-percent" => changed.scope_defaults.watcher.threshold_percent = inherited(value, |value| crate::config::percentage(key, value))?,
             "watcher-margin-percent" => changed.scope_defaults.watcher.margin_percent = inherited(value, |value| crate::config::margin(key, value))?,
-            _ => return Err(PerchError::Invalid("Scope defaults contain strategy, watcher-threshold-percent, and watcher-margin-percent; permissions are explicit per Scope and provider".into())),
+            _ => return Err(PerchError::Invalid("`--defaults` takes `strategy`, `watcher-threshold-percent` or `watcher-margin-percent`. `perch config set <scope> watcher-may-act <value>` grants per Scope.".into())),
         }
         crate::registry::validate(&changed)?;
         *registry = changed;
@@ -134,7 +130,7 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
     if words.first().is_some_and(|word| word == "--provider") {
         let [_, provider, key, value] = words else {
             return Err(PerchError::Invalid(
-                "Use perch config set --provider <name> <enabled|cli-path> <value>".into(),
+                "`perch config set --provider <name> <enabled|cli-path> <value>` sets a provider's Installation.".into(),
             ));
         };
         let provider = crate::providers::provider::Id::parse(provider)?;
@@ -143,12 +139,12 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             "enabled" => {
                 settings.enabled = value
                     .parse()
-                    .map_err(|_| PerchError::Invalid("enabled must be true or false".into()))?
+                    .map_err(|_| PerchError::Invalid("`enabled` takes `true` or `false`.".into()))?
             }
             "cli-path" => settings.cli_path = (value != "auto").then(|| value.into()),
             _ => {
                 return Err(PerchError::Invalid(
-                    "Provider settings are enabled and cli-path".into(),
+                    "A provider's Installation Settings are `enabled` and `cli-path`.".into(),
                 ));
             }
         }
@@ -170,7 +166,7 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                     "disabled" => false,
                     _ => {
                         return Err(PerchError::Invalid(
-                            "run-fallback is installed or disabled".into(),
+                            "`run-fallback` takes `installed` or `disabled`.".into(),
                         ));
                     }
                 };
@@ -181,7 +177,8 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                 Ok(vec![format!("watcher-paused: {value}")])
             }
             _ => Err(PerchError::Invalid(
-                "Global settings are run-provider, run-fallback, and watcher-paused".into(),
+                "The global Settings are `run-provider`, `run-fallback` and `watcher-paused`."
+                    .into(),
             )),
         };
     }
@@ -196,7 +193,12 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                     "strategy" => settings.cycle.strategy = None,
                     "watcher-threshold-percent" => settings.watcher.threshold_percent = None,
                     "watcher-margin-percent" => settings.watcher.margin_percent = None,
-                    _ => return Err(PerchError::Invalid("Only policy preferences can inherit; watcher permission must be set explicitly".into())),
+                    _ => {
+                        return Err(PerchError::Invalid(format!(
+                            "`{key}` takes no `inherit`. `perch config set {} {key} <value>` sets it.",
+                            scope.word()
+                        )));
+                    }
                 }
                 crate::registry::validate(&changed)?;
                 *registry = changed;
@@ -211,10 +213,12 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                     .map(|account| account.provider())
                     .collect();
                 if providers.len() > 1 {
-                    return Err(PerchError::Invalid(
-                        "Watcher permission in a mixed-provider Scope requires --provider <name>"
-                            .into(),
-                    ));
+                    return Err(PerchError::Invalid(format!(
+                        "{} holds both providers' Accounts, so the grant names one: `perch \
+                         config set {} --provider <claude|codex> watcher-may-act <value>`.",
+                        scope.described(),
+                        scope.word()
+                    )));
                 }
                 registry.select_provider(providers.into_iter().next().unwrap_or_default());
             }
@@ -239,10 +243,8 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             Ok(scope) => {
                 Setting::parse(second, &scope)?;
                 Err(PerchError::Invalid(format!(
-                    "`perch config set {first} {second}` names {} and a key, but \
-                     nothing to set it to. `perch config set <scope> <key> \
-                     <value>` sets one.",
-                    scope.mentioned(),
+                    "`perch config set {first} {second}` names no value. `perch \
+                     config set {first} {second} <value>` sets one.",
                 )))
             }
             // A key where the Scope goes is a Setting with no subject, and
@@ -273,7 +275,7 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
             [scope] => (addressed(registry, scope)?, registry.selected_provider()),
             _ => {
                 return Err(PerchError::Invalid(
-                    "Use perch config get --effective <scope> [--provider <name>]".into(),
+                    "`perch config get --effective <scope> [--provider <name>]` shows where each value comes from.".into(),
                 ));
             }
         };
@@ -329,7 +331,9 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
                 ])
             }
             [key] => Ok(vec![Setting::parse(key, &scope)?.of(&contextual, &scope)]),
-            _ => Err(PerchError::Invalid("Expected at most one Setting".into())),
+            _ => Err(PerchError::Invalid(
+                "`perch config get <scope> [<key>]` takes one Setting at most.".into(),
+            )),
         };
     }
     if words.first().is_some_and(|word| word == "--defaults") {
@@ -341,7 +345,7 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
     if words.first().is_some_and(|word| word == "--provider") {
         let [_, provider, rest @ ..] = words else {
             return Err(PerchError::Invalid(
-                "Use perch config get --provider <name> [enabled|cli-path]".into(),
+                "`perch config get --provider <name> [enabled|cli-path]` reads a provider's Installation.".into(),
             ));
         };
         let provider = crate::providers::provider::Id::parse(provider)?;
@@ -362,7 +366,7 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
             [key] if key == "enabled" => Ok(vec![settings.enabled.to_string()]),
             [key] if key == "cli-path" => Ok(vec![path]),
             _ => Err(PerchError::Invalid(
-                "Provider settings are enabled and cli-path".into(),
+                "A provider's Installation Settings are `enabled` and `cli-path`.".into(),
             )),
         };
     }
@@ -398,7 +402,7 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
             ]),
             [key] if key == "run-provider" => Ok(vec![registry.run_provider.word().into()]),
             _ => Err(PerchError::Invalid(
-                "Use perch config get --global [run-provider|run-fallback|watcher-paused]".into(),
+                "`perch config get --global [run-provider|run-fallback|watcher-paused]` reads a global Setting.".into(),
             )),
         };
     }
@@ -478,38 +482,17 @@ fn how_a_setting_is_set() -> String {
         .map(|key| column.row(key.as_str(), &Shown::of(&key.takes())))
         .collect();
     format!(
-        "Set one Setting on one Scope, and say what it now means.\n\
+        "Set one Setting on one Scope.\n\
          \n\
-         A Scope is a Group by name, or `{UNGROUPED}` for the Accounts in no \
-         Group.\n\
-         \n\
-         The Settings, and the values each takes:\n\
+         `<scope>` is a Group by name, or `{UNGROUPED}`. `<key>` and `<value>`:\n\
          {rows}\n\
          \n\
-         Every Scope carries all of them but `{interchangeable}`, which the \
-         Accounts in no Group alone carry: the declaration that they may be \
-         Cycled among at all.\n\
-         \n\
-         The Strategies:\n\
-         {strategies}\n\
-         \n\
-         `perch config get` reads every Setting back.\n\n\
-         Application preference: `perch config set --global run-provider <claude|codex>`.\n\
-         It defaults to claude; `perch config get --global run-provider` reads it.\n\n\
-         Global settings also include run-fallback (installed or disabled) and watcher-paused (true or false).\n\
-         `perch config set --defaults <policy> <value>` sets Scope defaults.\n\
-         `perch config set <scope> --provider <name> <key> <value>` sets a provider override.\n\
-         Strategy and numeric policy overrides accept inherit. Watcher permission must be explicit.\n\
-         `perch config get --effective <scope> --provider <name>` shows values and their sources.\n\
-         `perch config set --provider <name> <enabled|cli-path> <value>` configures installation.\n\
-         Native policy options use option.<name>; each provider validates its supported options.",
-        interchangeable = Setting::Interchangeable.as_str(),
+         The other forms:\n\
+         \x20 perch config set --global <run-provider|run-fallback|watcher-paused> <value>\n\
+         \x20 perch config set --defaults <key> <value>\n\
+         \x20 perch config set <scope> --provider <name> <key> <value>\n\
+         \x20 perch config set --provider <name> <enabled|cli-path> <value>",
         rows = rows.join("\n"),
-        strategies = crate::config::the_strategies()
-            .iter()
-            .map(|line| format!("  {line}"))
-            .collect::<Vec<_>>()
-            .join("\n"),
     )
 }
 
@@ -532,10 +515,8 @@ fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
     match Scope::named(registry, name) {
         Ok(scope) => Ok(scope),
         Err(NotAScope::MeansEveryScope) => Err(PerchError::NotFound(format!(
-            "There is no Scope every other one falls back to, so there is no \
-             `{name}` to name: every Setting is said about the Scope it governs. \
-             A Scope is a Group by name, or `{UNGROUPED}` for the Accounts in no \
-             Group, and `perch config get` prints every one of them."
+            "There is no Scope called `{name}`. `perch config get` reads every \
+             Scope there is."
         ))),
         Err(NotAScope::NoSuchGroup) => {
             Err(a_setting_is_not_a_scope(name)
@@ -551,18 +532,16 @@ fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
 fn a_setting_is_not_a_scope(word: &str) -> Option<PerchError> {
     let key = Setting::parse_quietly(word)?.as_str();
     Some(PerchError::NotFound(format!(
-        "`{key}` is a Setting rather than a Scope, and a Setting is said about \
-         the Scope it governs: `perch config set <scope> {key} <value>` sets one \
-         and `perch config get <scope> {key}` reads it."
+        "`{key}` is a Setting, not a Scope. `perch config set <scope> {key} \
+         <value>` sets it."
     )))
 }
 
 /// Two words with no Scope among them: a Setting with no subject.
 fn no_scope_was_named(registry: &Registry, key: &str, value: &str) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config set {key} {value}` names no Scope, and every Setting is \
-         said about the Scope it governs. `perch config set <scope> {key} \
-         {value}` sets one. {}",
+        "`perch config set {key} {value}` names no Scope. `perch config set \
+         <scope> {key} {value}` does. {}",
         the_scopes(registry),
     ))
 }
@@ -571,19 +550,16 @@ fn no_scope_was_named(registry: &Registry, key: &str, value: &str) -> PerchError
 /// missing Scope ends with it, because "name a Scope" is no use to somebody who
 /// does not know what theirs are called.
 fn the_scopes(registry: &Registry) -> String {
-    let groups: Vec<&str> = registry.groups.keys().map(String::as_str).collect();
-    let held = match groups.is_empty() {
-        true => "No Groups have been declared yet.".to_string(),
-        false => format!("Groups Perch holds: {}.", groups.join(", ")),
-    };
-    format!("`{UNGROUPED}` addresses the Accounts in no Group. {held}")
+    let mut scopes = vec![format!("`{UNGROUPED}`")];
+    scopes.extend(registry.groups.keys().map(|group| format!("`{group}`")));
+    format!("The Scopes are {}.", scopes.join(", "))
 }
 
 /// The form `set` takes, said whenever the words said were not it.
 fn how_set_is_addressed(registry: &Registry, words: &[String]) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config set` was given {}. It takes `perch config set <scope> \
-         <key> <value>`, where a Scope is a Group or `{UNGROUPED}`. {}",
+        "`perch config set` takes `perch config set <scope> <key> <value>`, \
+         not {}. {}",
         say::words(words.len()),
         the_scopes(registry),
     ))
@@ -594,9 +570,7 @@ fn how_set_is_addressed(registry: &Registry, words: &[String]) -> PerchError {
 /// serving both would name a form that does not exist.
 fn how_get_is_addressed(words: &[String]) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config get` was given {}. It takes `perch config get <scope> \
-         <key>`, or a Scope alone to read every Setting it holds. `perch config \
-         get` on its own reads every Scope there is.",
+        "`perch config get` takes `perch config get [<scope> [<key>]]`, not {}.",
         say::words(words.len()),
     ))
 }
@@ -642,7 +616,10 @@ mod tests {
             "the form with a subject in it is named, with the words they typed \
              already in it: {said}"
         );
-        assert!(said.contains("Groups Perch holds: work."), "{said}");
+        assert!(
+            said.contains("The Scopes are `ungrouped`, `work`."),
+            "{said}"
+        );
         assert_eq!(
             registry.settings(&work()).strategy,
             Strategy::MostHeadroom,
@@ -778,7 +755,7 @@ mod tests {
         let refused = set(&mut registry, &words(&["work", "interchangeable", "true"]))
             .expect_err("a Group is that declaration rather than holding one");
         let said = refused.to_string();
-        assert!(said.contains("only they carry it"), "{said}");
+        assert!(said.contains("of `ungrouped` alone"), "{said}");
         assert!(
             said.contains("perch config set ungrouped interchangeable"),
             "{said}"
@@ -838,7 +815,7 @@ mod tests {
             .expect_err("a Setting on its own is about nothing");
 
         let said = refused.to_string();
-        assert!(said.contains("rather than a Scope"), "{said}");
+        assert!(said.contains("is a Setting, not a Scope"), "{said}");
         assert!(!said.contains("No Group called"), "{said}");
     }
 
@@ -850,7 +827,9 @@ mod tests {
             .expect_err("that is a Scope and a key, with no value");
 
         let said = refused.to_string();
-        assert!(said.contains("Group `work`"), "{said}");
-        assert!(said.contains("<scope> <key> <value>"), "{said}");
+        assert!(
+            said.contains("perch config set work strategy <value>"),
+            "{said}"
+        );
     }
 }

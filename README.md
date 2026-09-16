@@ -6,7 +6,7 @@
 [![npm](https://img.shields.io/npm/v/perch-cli?label=npm)](https://www.npmjs.com/package/perch-cli)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](pages/src/content/docs/installing.md)
 [![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fperch-cli%2Fperch%2Fmain%2Frust-toolchain.toml&query=%24.toolchain.channel&label=rust&prefix=v)](rust-toolchain.toml)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](#license)
 
 Run Claude Code as whichever Claude account you want, without going through the
 login flow again.
@@ -25,11 +25,9 @@ Utilization   5-hour    12%  (as of 4m ago)
               7-day     40%  (as of 4m ago)
 ```
 
-Experimental Codex support adds separate subscription-backed Accounts and isolated
-Runs: `perch add --codex --alias personal --no-group`, then
-`perch run --codex personal`. Set the Run preference with
-`perch config set --global run-provider codex`. Codex live Switching and
-unattended Cycling are not available yet.
+Codex Accounts are experimental: `perch add --codex --alias personal --no-group`
+holds one, `perch run personal` launches it, and `perch switch personal` makes
+it the login the next `codex` starts with.
 
 ## Install
 
@@ -59,7 +57,7 @@ the machine, so nothing has to be logged into again.
 
 ```
 $ perch status
-Adopted the Claude Code login as your first Profile, now active: you@example.com (Acme, pro). Claude Code 2.1.221.
+Adopted the Claude Code login as you@example.com (Acme, pro).
 
 Account       you@example.com
 Organization  Acme
@@ -106,6 +104,9 @@ $ perch watcher run
 when you log in — a LaunchAgent, a `systemd --user` unit, or a Scheduled Task,
 whichever your machine has. Perch never backgrounds itself: it writes the unit
 and hands the job over, and `perch watcher uninstall` takes it back.
+
+`perch wizard` asks you steps 2 to 5 one question at a time. Enter keeps
+whatever is already set, and each answer prints the command it stood for.
 
 One more worth knowing early: `perch run <target>` launches Claude Code as one
 Account in one terminal without changing which is active.
@@ -190,23 +191,27 @@ decisions.
 
 ## License
 
-Two of them, at your option, which is the Rust ecosystem's convention and not an
-accident. MIT is the shorter and better-known of the pair but says nothing at all
-about patents; Apache-2.0 grants them expressly, and cannot be combined with
-GPLv2. Offering both leaves that choice where it belongs, with whoever is
-downstream.
+Perch holds your Credentials and decides, on your behalf, which Account gets
+spent. What makes that tolerable is that anyone running it can read what it
+does. A changed Perch shipped closed asks for the same trust and takes the
+reading away, so the license is the GNU General Public License, version 3 or
+any later version: use it, sell it, change it, and whoever receives the changed
+one receives its source too. The text is in [`LICENSE`](LICENSE).
 
-Licensed under either of
+One additional term, under sections 7(c) and 7(e) of that license, stated in
+full in [`ADDITIONAL-TERMS`](ADDITIONAL-TERMS) and shipped in every archive:
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
-  <http://www.apache.org/licenses/LICENSE-2.0>)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or
-  <http://opensource.org/licenses/MIT>)
+> The names "Perch" and "perch-cli", and any logo of the Perch project, may
+> not be used to identify a modified version of Perch, or a work based on
+> Perch, without the written permission of the Perch maintainers. A modified
+> version must be marked as modified, in a way that a person running it can
+> see, so that it is not mistaken for the version the Perch project published.
 
-at your option.
+The cost is that a permissive project cannot lift a module out of Perch; it
+goes only to a project that makes the same promise.
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
+A contribution you send is licensed under the same terms, and sending it is
+the statement that you may license it so. [`CONTRIBUTING.md`](CONTRIBUTING.md)
+says the rest.

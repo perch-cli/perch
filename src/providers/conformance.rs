@@ -83,6 +83,7 @@ impl Adapter for Fixture {
         _host: &dyn Host,
         _profile: &ProfileRef,
         _reason: Option<&'static str>,
+        _consequence: &crate::live::Consequence,
     ) -> Result<()> {
         Ok(())
     }
@@ -418,12 +419,16 @@ fn a_third_provider_uses_shared_commands_configuration_and_observation() {
         let account = registry.accounts[0].clone();
         assert_eq!(account.provider(), Id::Fixture);
         assert_eq!(registry.run_provider, Id::Fixture);
+        let profile_dir = account.profile_dir(&host).unwrap();
         assert!(
-            account
-                .profile_dir(&host)
-                .unwrap()
-                .to_string_lossy()
-                .contains("providers/fixture/")
+            profile_dir
+                .components()
+                .any(|part| part.as_os_str() == "fixture")
+                && profile_dir
+                    .components()
+                    .any(|part| part.as_os_str() == "providers"),
+            "{}",
+            profile_dir.display()
         );
         assert_eq!(
             run::run(

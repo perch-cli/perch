@@ -497,10 +497,11 @@ and no sentence holds room for both.
 _Avoid_: platform, arch, triple, variant
 
 **Artifact**:
-One file belonging to a Release: an archive holding a binary and both licenses,
-or the checksums, or the signed provenance for either. What an Artifact claims
-about itself is checkable — the checksums say which bytes, and the provenance
-says which workflow, in which repository, at which commit, produced them.
+One file belonging to a Release: an archive holding a binary, the license and
+its additional terms, or the checksums, or the signed provenance for either.
+What an Artifact claims about itself is checkable — the checksums say which
+bytes, and the provenance says which workflow, in which repository, at which
+commit, produced them.
 _Avoid_: asset, file, package, download
 
 **Channel**:
@@ -536,6 +537,30 @@ Installation the installer script left is one Perch replaces itself. Goes
 backwards when asked, which is still an Upgrade — the direction is the user's
 and the route is not.
 _Avoid_: update, self-update, bump, install
+
+**Guide**:
+The pages https://perch-cli.github.io/perch/ renders from
+`pages/src/content/docs/`, read by somebody with Perch installed and a
+terminal open. Every sentence says what to type, what they will see, what to
+do next, or what Perch will not do; why Perch does it is the ADRs' to say
+(ADR the-guide-says-what-to-type). Distinct from the README, which npm and an
+offline clone read, and from the Splash.
+_Avoid_: docs, documentation, manual, wiki
+
+**Splash**:
+The site's front page, and the one page of it that faces a reader deciding
+whether to install. It may say what Perch is for; a Guide page may not. Its
+card grid is the Guide's index, so the two cannot disagree about which pages
+exist.
+_Avoid_: landing page, home page, index
+
+**Wizard**:
+A walk through organizing the Holdings, one question per step at the terminal,
+each step being a command that exists on its own and lands when it is answered.
+Every step shows what is there now, so a run that keeps every default changes
+nothing, and every step says the command it stood for. Refused where there is no
+terminal, naming those commands instead (ADR perch-does-not-draw).
+_Avoid_: setup, onboarding, tour, init, TUI
 
 ## Proving it works
 

@@ -167,7 +167,7 @@ fn manifest(host: &dyn Host) -> Result<Option<Manifest>> {
     {
         return Err(crate::error::written_by_a_newer_perch(
             "This configuration",
-            "Registry",
+            "registry",
             version,
             registry::CURRENT_VERSION,
         ));

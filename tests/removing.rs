@@ -74,7 +74,7 @@ fn a_remove_that_landed_says_so_when_only_the_report_could_not_be_written() {
     .expect_err("the report could not be written");
 
     assert!(
-        refused.to_string().contains("Remove itself finished"),
+        refused.to_string().contains("The Remove finished"),
         "the failure says which half of the command it was: {refused}"
     );
     assert!(
@@ -130,10 +130,9 @@ fn the_alias_a_removed_account_answered_to_is_free_to_use_again() {
     let host = machine_with_two_accounts();
     set_alias(&host, "spare", SECOND_EMAIL).0.expect("named");
 
-    let (result, printed) = run_remove(&host, "spare");
+    let (result, _) = run_remove(&host, "spare");
 
     result.expect("an Alias reaches the Account it names");
-    assert!(printed.contains("`spare` is an Alias for"), "{printed}");
     assert_eq!(registry_of(&host).declared_alias("spare"), None);
 
     set_alias(&host, "spare", EMAIL)
@@ -264,7 +263,7 @@ fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happe
         "one of the two stores is already empty: {said}"
     );
     assert!(
-        said.contains("Some stores may already be empty") && said.contains("perch remove"),
+        said.contains("did not finish") && said.contains("perch remove"),
         "so the user is told what state the Account is in and how to finish: \
          {said}"
     );
@@ -676,7 +675,7 @@ fn the_last_account_is_confirmed_without_claiming_it_is_the_one_running() {
         !printed.contains("goes on running as"),
         "it does not describe a live state it cannot know:\n{printed}"
     );
-    assert!(printed.contains("on no Account"), "{printed}");
+    assert!(printed.contains("hold no Accounts afterwards"), "{printed}");
 }
 
 #[test]
@@ -815,13 +814,13 @@ fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
         .to_string();
     assert!(
         said.contains(&format!(
-            "The Credential Perch held for {SECOND_KEY} is already deleted"
+            "The Credential is deleted, and {SECOND_EMAIL} is still recorded"
         )),
         "{said}"
     );
     assert!(
-        said.contains("can no longer switch to"),
-        "it says what the record it still holds is worth: {said}"
+        said.contains(&format!("perch remove {SECOND_EMAIL}")),
+        "and names the command that finishes it: {said}"
     );
 }
 
@@ -844,10 +843,7 @@ fn a_landing_perch_cannot_write_down_removes_nothing_and_moves_nothing() {
     let said = result
         .expect_err("the Landing could not be written")
         .to_string();
-    assert!(
-        said.contains("has written down that it is about to"),
-        "it says why nothing moved: {said}"
-    );
+    assert!(said.contains("Nothing was switched."), "{said}");
     assert!(said.contains("Nothing was removed"), "{said}");
     assert!(holds(&host, EMAIL), "and the Account is still held");
     assert_eq!(
@@ -858,7 +854,7 @@ fn a_landing_perch_cannot_write_down_removes_nothing_and_moves_nothing() {
 }
 
 #[test]
-fn removing_the_active_account_with_several_left_counts_them_rather_than_naming_one() {
+fn removing_the_active_account_with_several_left_says_none_is_active() {
     let host = machine_with_three_accounts();
     for email in [SECOND_EMAIL, THIRD_EMAIL] {
         disable_account(&host, email)
@@ -876,17 +872,13 @@ fn removing_the_active_account_with_several_left_counts_them_rather_than_naming_
 
     result.expect("it is removed");
     assert!(
-        printed.contains("Perch holds no active Account now"),
+        printed.contains("Perch holds no active Account."),
         "{printed}"
-    );
-    assert!(
-        printed.contains("one of the 2 it still holds"),
-        "with two left there is no single one to name: {printed}"
     );
 }
 
 #[test]
-fn removing_the_active_account_with_one_left_names_it_as_the_one() {
+fn removing_the_active_account_with_one_left_says_none_is_active() {
     let host = machine_with_two_accounts();
     disable_account(&host, SECOND_EMAIL)
         .0
@@ -901,8 +893,10 @@ fn removing_the_active_account_with_one_left_names_it_as_the_one() {
     );
 
     result.expect("it is removed");
-    assert!(printed.contains("the one it still holds"), "{printed}");
-    assert!(!printed.contains("one of the 1"), "{printed}");
+    assert!(
+        printed.contains("Perch holds no active Account."),
+        "{printed}"
+    );
 }
 
 #[test]
@@ -911,7 +905,11 @@ fn a_profile_directory_that_will_not_go_is_a_note_rather_than_a_failure() {
     // Derived the way the note derives it rather than spelled by hand: a Windows
     // build joins paths with the other separator, so a fixture holding the
     // forward-slash spelling would assert on a path nothing ever prints.
-    let profile = store_of(&host, SECOND_EMAIL).config_dir;
+    let profile = registry_of(&host)
+        .account(&fixture_key(&host, SECOND_EMAIL))
+        .expect("the fixture holds it")
+        .profile_dir(&host)
+        .expect("home is known");
     let host = host.with_a_path_refusing(&profile, Refusing::Delete, "in use");
 
     let (result, _) = run_remove_with(
@@ -926,8 +924,7 @@ fn a_profile_directory_that_will_not_go_is_a_note_rather_than_a_failure() {
     assert!(!holds(&host, SECOND_EMAIL), "the Account is forgotten");
     let notes = host.notes().join("\n");
     assert!(
-        notes.contains(&profile.display().to_string())
-            && notes.contains("deleting it by hand is safe"),
+        notes.contains(&profile.display().to_string()) && notes.contains("delete it by hand"),
         "{notes}"
     );
 }

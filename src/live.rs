@@ -161,32 +161,36 @@ impl NotIdle {
         } = consequence;
         match self {
             NotIdle::Live(clients) => PerchError::ProfileLive(format!(
-                "A client is running against {}.\n{nothing_happened} {quit_it}",
-                clause(&clients)
+                "A client is running against {}.\n{}{quit_it}",
+                clause(&clients),
+                nothing_happened
+                    .map(|said| format!("{said} "))
+                    .unwrap_or_default(),
             )),
-            NotIdle::Unsure(unsure) => unsure.refusal().with_note(nothing_happened),
+            NotIdle::Unsure(unsure) => match nothing_happened {
+                Some(said) => unsure.refusal().with_note(said),
+                None => unsure.refusal(),
+            },
         }
     }
 }
 
-/// What a caller says about itself when the ask does not come back Idle.
-///
-/// Two sentences rather than one, because only the first is true either way: a
-/// doubt has no client to name and no session to quit, and a refusal that leaves
-/// out what did not happen is not one (ADR a-refusal-is-a-promise).
+/// What a caller says about itself when the ask does not come back Idle. Two
+/// fields, because a doubt has no client to name and no session to quit, and
+/// what did not happen is owed only after an agreed deletion
+/// (ADR a-refusal-is-a-promise).
 pub struct Consequence {
-    /// What did not happen. Said whichever way the ask failed.
-    pub nothing_happened: &'static str,
+    /// What did not happen, said whichever way the ask failed, where it is owed.
+    pub nothing_happened: Option<&'static str>,
     /// What to do about the client, for the refusal that has one to point at.
     pub quit_it: &'static str,
 }
 
-/// What a Switch, a repair, a removal and a watched round all say: they leave
-/// exactly nothing behind, and they offer the same two ways out.
+/// What a Switch, a repair, a removal and a watched round all say: the same
+/// two ways out, and nothing about what did not happen, since nothing could have.
 pub const NOTHING_WAS_CHANGED: Consequence = Consequence {
-    nothing_happened: "Nothing was changed.",
-    quit_it: "That Credential belongs to it until it exits. Quit it, or switch \
-              to a different Account.",
+    nothing_happened: None,
+    quit_it: "Quit it, or `perch switch` to another Account.",
 };
 
 /// Which clients, and where — the opening every refusal about a Live Profile

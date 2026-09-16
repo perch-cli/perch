@@ -1,10 +1,10 @@
 //! Codex usage implementation.
 
-use super::refused;
-use super::{process::environment, profiles::credential};
+use super::auth::identity;
+use super::{layout, process::environment, refused};
 use crate::domain::WindowUtilization;
 use crate::providers::provider::ProfileRef as Account;
-use crate::providers::provider::{ConfiguredProvider, Observation};
+use crate::providers::provider::{ConfiguredProvider, DefaultRelation, Observation};
 use crate::{Host, PerchError, Result};
 use serde_json::{Value, json};
 
@@ -37,13 +37,23 @@ pub(super) fn read_limits(
         Ok(())
     };
     let mut spent = false;
-    let result = read(
-        host,
-        request.configured,
-        request.profile,
-        &mut checkpoint,
-        &mut spent,
-    );
+    // The active Account is read where its login is live: the Default home,
+    // whose copy is the one Codex Renews. Its Profile copy is refreshed by the
+    // Capture of the next Switch.
+    let home = match request.context.default {
+        DefaultRelation::Active => layout::default_home(host),
+        _ => request.profile.profile_dir(host),
+    };
+    let result = home.and_then(|home| {
+        read(
+            host,
+            request.configured,
+            request.profile,
+            &home,
+            &mut checkpoint,
+            &mut spent,
+        )
+    });
     match stopped {
         Some(lost) => Err(crate::observe::Outcome::Stopped(lost)),
         None => result.map_err(|error| crate::observe::Outcome::Failed {
@@ -57,11 +67,12 @@ fn read(
     host: &dyn Host,
     configured: &ConfiguredProvider,
     account: &Account,
+    home: &std::path::Path,
     checkpoint: &mut dyn FnMut() -> Result<()>,
     spent: &mut bool,
 ) -> Result<Vec<WindowUtilization>> {
     checkpoint()?;
-    let home = account.profile_dir(host)?;
+    let home = home.to_path_buf();
     if matches!(
         crate::live::ask(
             host,
@@ -78,8 +89,7 @@ fn read(
                 .into(),
         ));
     }
-    credential(host, account)?
-        .ok_or_else(|| refused("Credential is missing; use perch relogin"))?;
+    credential_at(host, account, &home)?;
     let installation = configured.installation(host)?;
     let executable = installation.executable();
     let _claim = crate::providers::sessions::claim(host, &home)?;
@@ -120,8 +130,7 @@ fn read(
         })
     })?;
     checkpoint()?;
-    credential(host, account)?
-        .ok_or_else(|| refused("Credential disappeared during observation"))?;
+    credential_at(host, account, &home)?;
     let mut initialized = false;
     let mut identified = false;
     let mut limits = None;
@@ -151,6 +160,30 @@ fn read(
         return Err(refused("did not identify a subscription-backed Account"));
     }
     parse_limits(&limits.ok_or_else(|| refused("did not return Utilization"))?)
+}
+
+/// The Credential at `home` is this Account's, or the reading is not made:
+/// a figure is recorded against the Account whose login produced it.
+fn credential_at(host: &dyn Host, account: &Account, home: &std::path::Path) -> Result<()> {
+    let path = home.join(super::AUTH_FILE);
+    let document = match host.read_file(&path) {
+        Ok(document) => zeroize::Zeroizing::new(document),
+        Err(crate::host::HostError::NotFound { .. }) => {
+            return Err(PerchError::NotFound(format!(
+                "No Codex Credential is held for {}. `perch relogin {}` logs it in again.",
+                account.key(),
+                account.key()
+            )));
+        }
+        Err(error) => return Err(PerchError::file_read(path, error)),
+    };
+    let (found, _, _) = identity(&document)?;
+    if account.provider_identity.as_ref() != Some(&found) {
+        return Err(refused(
+            "Credential belongs to another Account or Workspace",
+        ));
+    }
+    Ok(())
 }
 
 pub fn parse_limits(result: &Value) -> Result<Vec<WindowUtilization>> {

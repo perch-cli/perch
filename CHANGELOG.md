@@ -9,10 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Codex Accounts Switch and Cycle. `perch switch <codex account>` writes the
+  login the next `codex` starts with into Codex's file store, Capturing the
+  Renewed copy of the Account it leaves; the Watcher Cycles Codex Accounts
+  among themselves under their own `watcher-may-act` grant, and a Landing left
+  in flight is settled by the identity in the live file. A Codex already open
+  keeps its Account until it is restarted, and the Switch says so. A Default
+  kept in the keyring is refused, naming the `cli_auth_credentials_store`
+  line to set; a home Codex has never configured is pinned to the file store
+  by the Switch.
+- `perch wizard` organizes what Perch holds one question at a time: what you
+  hold, more Accounts, each Account's Group, each Scope's Settings, and the
+  Watcher as a Service. Enter keeps what is there, so a run that keeps every
+  default changes nothing, and a step that changed something prints the
+  command that does the same on its own. Steps land as they are answered, so
+  Ctrl-C keeps what was done. Without a terminal it refuses and lists the five
+  commands. The first `perch status` on a fresh machine now points at it
+  ([#441](https://github.com/perch-cli/perch/issues/441)). With both CLIs
+  installed it asks which provider a login is for, asks `run-provider` once
+  Accounts of both are held, and in a Group holding both writes the Watcher's
+  grant per provider. An Account whose email another Account shares is asked
+  for by its Alias or id.
 - [**breaking**] Experimental Codex Accounts: `perch add --codex`, isolated
   `perch run --codex`, relogin, removal, and on-demand Utilization through the
   Codex app-server. Personal and company Workspaces can share an email and use
-  separate Aliases. Codex live Switching and unattended Cycling remain unavailable.
+  separate Aliases.
 - [**breaking**] Run accepts `--claude` and `--codex`. Its global `run-provider`
   preference defaults to `claude`, with fallback to the other installed CLI.
   Explicit selection, Account mismatch, authentication, and child failure never
@@ -22,6 +43,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Every sentence the provider redesign added says the verdict and the next
+  command: provider refusals name the `perch config set --provider` or
+  `perch run --codex` form to type, `perch config set --help` is its Setting
+  table and the four other forms, and a Scope's grant hint names `--provider`
+  where the Scope holds both providers. An Account is named by its email alone
+  unless another Account shares it, when the provider and Workspace follow.
+  `perch add` and `perch relogin` say again to quit Claude Code when the login
+  is done.
+- Perch says the verdict and the next command, and nothing else. Every
+  refusal is at most two lines: what Perch declined, then the command that
+  gets you past it. What a Switch did with the Credential it was leaving is no
+  longer narrated unless you have to act on it, a success line names no file
+  path, and `--help` describes each command in one line and leaves what
+  happens when you run it to the Guide. Exit codes, `--json` documents and
+  every command and flag are unchanged
+  ([#440](https://github.com/perch-cli/perch/issues/440))
+- The Guide says what to type. Every section of the nine task pages now opens
+  with a transcript taken from this build, and the prose beneath it says what
+  is on the screen, what to do next, and what Perch will not do. Why Perch
+  behaves as it does has left the Guide for the decision records that already
+  argued it. `watching.md` went from 220 lines before its first heading to
+  four sections, and the Guide as a whole from roughly 19,000 words to under
+  11,000. The pages, their URLs and the commands they describe are unchanged
+  ([#439](https://github.com/perch-cli/perch/issues/439))
+- Perch is licensed under the GNU General Public License, version 3 or any
+  later version, where it was `MIT OR Apache-2.0`. Whoever receives a changed
+  Perch receives its source too, and one additional term reserves the Perch
+  name for the version this project published. Every archive now carries
+  `LICENSE` and `ADDITIONAL-TERMS` in place of `LICENSE-MIT` and
+  `LICENSE-APACHE`; the binary, the commands and the JSON are unchanged
+  ([#438](https://github.com/perch-cli/perch/issues/438))
 - Failed Add, adoption, and Import operations report rollback failures instead of
   claiming every Profile was removed. Cleanup attempts every owned resource and
   preserves the original failure; repaired Credentials remain in place.
@@ -103,10 +155,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] Watcher checks visit every configured provider independently.
   Mixed-provider output identifies the provider. A failed check is returned after
   the other providers are checked; otherwise the greatest round exit code is
-  returned. Unsupported Codex live Switching does not prevent Claude rounds.
+  returned. One provider's failed round does not prevent the other's.
 - Listings identify Codex Workspaces. Mixed Groups are listed without a joint
   quota ranking, and Claude Cycling and Watcher candidates exclude Codex.
-
 
 ## [0.3.8](https://github.com/perch-cli/perch/compare/v0.3.7...v0.3.8) - 2026-09-02
 ### Fixed

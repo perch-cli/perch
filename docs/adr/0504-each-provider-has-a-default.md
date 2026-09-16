@@ -1,6 +1,7 @@
 # Each provider has a default
 
-Accepted for the multiple-provider design; implementation is pending.
+Accepted for the multiple-provider design. Implemented for both providers:
+Codex Switches its file store, and says what it cannot see.
 
 Claude and Codex have independent active Accounts and Default Profiles. A Switch
 changes one provider's default. An isolated Run remains pinned to the Account it
@@ -41,17 +42,37 @@ either coding CLI. An explicit provider flag checks that the Account matches;
 the Run preference does not apply. A Group remains invalid as a Run Target,
 because the invocation names one Account and remains pinned to it.
 
+## How Codex switches
+
+Codex's Default is `auth.json` under `CODEX_HOME` or `~/.codex`, and the file
+carries the login's identity, so a Switch is Claude's first two steps and no
+third: the outgoing copy is Captured into its Profile where the live one is the
+same identity Renewed, then the incoming Profile's copy is written. A Landing
+left in flight is settled by the identity in the live file, since a Renewal
+moves the bytes but not whose they are. The active Codex Account is observed
+against the Default home, the copy Codex Renews; its Profile copy is refreshed
+by the next Capture.
+
+Perch writes Codex's file store and nothing else. A Default whose
+`config.toml` chooses another store is refused, naming the line that pins the
+file store; a home Codex has never configured is pinned by the Switch itself.
+
+Perch has no evidence of a Codex started outside it, and the Codex research
+finds cached authentication and guarded account reloads. So the Switch does
+not refuse under a running Codex, and instead says that one already open keeps
+its Account until it is restarted. That is the note's whole job: the one fact
+about the Switch the person cannot see and may have to act on.
+
 ## What is not chosen
 
 Cycling each running session independently requires session-specific routing
 and a proven way to change the Account a live client uses. It changes what an
 isolated Run promises and is outside the selected first milestone.
 
-Changing a default does not promise that an existing client adopts it. The Codex
-research finds cached authentication and guarded account reloads; unattended
-Codex Switching remains conditional on live-client and refresh-coordination
-experiments. The first milestone is explicit Account selection, isolated Run,
-and Utilization display.
+Detecting a Codex started outside Perch, by process or by the files it writes,
+would let the Switch refuse as Claude's does. It stays an alternative until a
+pinned Codex release gives a record a Switch can corroborate; until then the
+note carries what a refusal would.
 
 ## Consequences
 

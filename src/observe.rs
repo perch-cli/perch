@@ -155,12 +155,9 @@ impl Attempt {
     fn note(&self) -> Option<String> {
         match &self.outcome {
             Outcome::Observed => None,
-            Outcome::Throttled | Outcome::Failed { .. } => self
-                .why_unread()
-                .map(|why| format!("{why} {THE_CACHE_ANSWERS}")),
+            Outcome::Throttled | Outcome::Failed { .. } => self.why_unread(),
             Outcome::JustRead => Some(format!(
-                "{}: a Watcher is reading this Account every {}, and read it \
-                 less than that ago. The figure it read is what you see.",
+                "{}: the Watcher read it less than {} ago.",
                 self.named,
                 crate::watch::how_often(),
             )),
@@ -416,8 +413,6 @@ fn observe(
         still_ours,
     )
 }
-
-const THE_CACHE_ANSWERS: &str = "The cached figure is what you see.";
 
 /// A reason as a sentence a second one can follow: a failure wrapped from elsewhere
 /// does not always end in a stop.
@@ -691,11 +686,7 @@ mod tests {
         let notes = report.notes();
         assert_eq!(notes.len(), 2);
         assert!(notes[0].starts_with("someone@example.com: "), "{notes:?}");
-        assert!(notes[0].contains("cached figure"), "{notes:?}");
-        assert_eq!(
-            notes[1], "overflow@example.com: no token. The cached figure is what you see.",
-            "every read that failed leaves the cache answering, and the note says so"
-        );
+        assert_eq!(notes[1], "overflow@example.com: no token.");
         assert_eq!(
             report.unread(),
             vec![

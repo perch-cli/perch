@@ -216,7 +216,7 @@ impl Drop for Restore<'_> {
 /// What an Import leaves behind when it will not write: nothing at all, an
 /// Import being whole or not having happened.
 const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
-    nothing_happened: "Nothing was imported.",
+    nothing_happened: Some("Nothing was imported."),
     quit_it: "That Credential would be replaced underneath the session holding \
               it. Close it and run this again.",
 };

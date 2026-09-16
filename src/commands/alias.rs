@@ -34,16 +34,13 @@ pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Resul
             // asked ahead of the Target it answers about the wrong argument.
             let account = target::resolve_account(registry, &target)?;
             let named = set(registry, &name, &account)?;
-            Ok(vec![account.matched, named])
+            Ok(vec![named])
         }
         AliasCommand::Unset { target } => {
             let account = target::resolve_account(registry, &target)?;
             let held = unset(registry, &account)?;
             let email = registry.held(&account.email)?.email();
-            Ok(vec![
-                account.matched.clone(),
-                format!("`{held}` no longer names {email}."),
-            ])
+            Ok(vec![format!("`{held}` no longer names {email}.")])
         }
     })
 }

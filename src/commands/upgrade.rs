@@ -19,31 +19,23 @@ use crate::upgrade::{self, Channel, Replacement, Wanted};
 
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct UpgradeArgs {
-    /// The Release to install, with or without its leading `v`. Without
-    /// this, the newest.
-    ///
-    /// Not with `--check`, which asks what the newest Release is and has no
-    /// use for a named one. Refused rather than ignored, because a named
-    /// Release that is quietly thrown away is one nobody is told about.
+    /// The Release to install, with or without its `v`
     #[arg(long, value_name = "TAG", conflicts_with = "check")]
     pub release: Option<String>,
 
-    /// Say what is installed and what is newest, and install nothing.
+    /// Say what is installed and what is newest, and install nothing
     #[arg(long)]
     pub check: bool,
 
-    /// That answer as a document.
+    /// Print JSON
     #[arg(long, requires = "check")]
     pub json: bool,
 
-    /// Which Channel installed this Perch, for when its path does not say.
+    /// The Channel that installed this Perch
     #[arg(long, value_name = "NAME")]
     pub channel: Option<String>,
 
-    /// Agree ahead of time to a Release older than the one installed.
-    ///
-    /// Nothing is installed by a check, so there is nothing for it to agree
-    /// to.
+    /// Agree to a Release older than the one installed
     #[arg(long, conflicts_with = "check")]
     pub yes: bool,
 }
@@ -81,9 +73,8 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
         match upgrade::compare(wanted, installed) {
             std::cmp::Ordering::Equal => {
                 return Err(PerchError::NothingToDo(format!(
-                    "{installed} is already what is installed, and it came from \
-                     {}.\n\
-                     `perch upgrade --check` says what the newest Release is.",
+                    "{installed} is already installed, from {}. `perch upgrade \
+                     --check` says what is newest.",
                     channel.name()
                 )));
             }
@@ -122,9 +113,7 @@ fn newest_or_let_the_channel_say(host: &dyn Host, channel: &Channel) -> Result<O
         Ok(newest) => Ok(Some(newest)),
         Err(unreachable) if channel.resolves_its_own() => {
             host.note(&format!(
-                "{unreachable}\n\nSo Perch cannot say whether there is anything \
-                 newer. Handing the work to {} regardless, which works it out \
-                 for itself.",
+                "{unreachable}\nHanding the work to {} anyway.",
                 channel.name(),
             ));
             Ok(None)
@@ -167,12 +156,10 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
             .unwrap_or_else(|_| "its own directory".to_string());
 
         PerchError::Invalid(format!(
-            "Perch is installed at {}, which names no Channel, and Perch will \
-             not write over a binary it did not put there. The installer script \
-             puts one in {expected}.\n\
-             Re-run the installer from https://github.com/{} to move to a \
-             managed Installation, or say which Channel this is with \
-             `--channel homebrew|npm|installer`.",
+            "Perch is installed at {}, where no Channel put it, and Perch will \
+             not write over it.\n\
+             `--channel homebrew|npm|installer` says which installed it, or the \
+             installer at https://github.com/{} puts one in {expected}.",
             exe.display(),
             upgrade::REPO
         ))
@@ -212,10 +199,7 @@ fn check(
         out,
         &format!(
             "channel    {}",
-            channel.map_or(
-                "unknown (nothing about this binary's path says)",
-                |channel| { channel.name() }
-            )
+            channel.map_or("unknown", |channel| { channel.name() })
         ),
     )?;
     say::line(
@@ -225,9 +209,8 @@ fn check(
             // upgrade` refuses, and pointing at it sends somebody to a refusal.
             (true, true) => "\nA newer Release is available. `perch upgrade` takes it.",
             (true, false) => {
-                "\nA newer Release is available. This Perch was placed by hand, so \
-                 `perch upgrade` needs `--channel homebrew|npm|installer` to say \
-                 which Channel should replace it."
+                "\nA newer Release is available. `perch upgrade --channel \
+                 homebrew|npm|installer` takes it."
             }
             (false, _) => "\nNothing newer has been published.",
         },
@@ -251,20 +234,16 @@ fn agree_to_going_back(
     }
     if !host.is_interactive() {
         return Err(PerchError::Invalid(format!(
-            "{wanted} is older than the {installed} that is installed, and \
-             there is no terminal to agree to that on.\n\
-             A Perch older than the one that last wrote your Registry refuses \
-             to read it. `--yes` says you have accounted for that."
+            "{wanted} is older than the installed {installed}, and there is no \
+             terminal to agree on. `--yes` agrees."
         )));
     }
 
     say::line(
         out,
         &format!(
-            "{wanted} is older than the {installed} that is installed.\n\
-             Perch refuses a Registry written by a newer Perch, so if {installed} \
-             has written yours, {wanted} will not read it. `perch upgrade` back \
-             to {installed} is the repair."
+            "{wanted} is older than the installed {installed}, and may refuse \
+             the Registry {installed} wrote."
         ),
     )?;
     ask::said_yes(
@@ -361,8 +340,8 @@ fn powershell(host: &dyn Host) -> Result<String> {
         .filter(|root| !root.is_empty())
         .ok_or_else(|| {
             PerchError::Other(
-                "SystemRoot is unset, so PowerShell cannot be located and the \
-                 installer was not run. Nothing was changed."
+                "SystemRoot is unset, so PowerShell cannot be found and the \
+                 installer was not run."
                     .to_string(),
             )
         })?;

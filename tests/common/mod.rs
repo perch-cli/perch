@@ -51,9 +51,9 @@ pub const SECOND_KEY: &str =
     "claude:47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9";
 pub const THIRD_KEY: &str =
     "claude:5035aea24050aaedb526edd7a620af02f1b6c6bff699dacd7d50f71388456af9";
-pub const LABEL: &str = "someone@example.com (Claude Code, Workspace organization-uuid-1)";
-pub const SECOND_LABEL: &str = "overflow@example.com (Claude Code, Workspace organization-uuid-2)";
-pub const THIRD_LABEL: &str = "spare@example.com (Claude Code, Workspace organization-uuid-3)";
+pub const LABEL: &str = "someone@example.com";
+pub const SECOND_LABEL: &str = "overflow@example.com";
+pub const THIRD_LABEL: &str = "spare@example.com";
 pub const EMAIL: &str = "someone@example.com";
 pub const DEFAULT_SERVICE: &str = "Claude Code-credentials";
 pub const REGISTRY_PATH: &str = "/Users/someone/.config/perch/config.json";

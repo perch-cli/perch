@@ -94,7 +94,9 @@ describing, the axis is reach (ADR one-door-to-the-registry).
 
 `perch config` is the only way to write a Setting, and `perch alias`,
 `perch disable`, `perch enable` and `perch group` the only ways to write what else a
-panel would reach. Nothing loses a form.
+panel would reach. Nothing loses a form. `perch wizard` is the onboarding moment
+named and answered without drawing: a line of questions, each of them one of
+those commands, landing as it is answered.
 
 The `Host` port stays narrow. It is the only way out of the process, and a `Host`
 that knew about frames would be one every test carried and every fake had to answer

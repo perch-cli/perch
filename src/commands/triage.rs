@@ -42,18 +42,11 @@ const WITHHOLDS_THE_LAUNCH: [&str; 4] = [
 
 #[derive(Debug, clap::Args)]
 pub struct TriageArgs {
-    /// The model to hand the selected provider, where its own default will not do.
-    ///
-    /// Passed through untouched, and nothing by default: a model named in a
-    /// released binary goes out of date on somebody else's schedule.
+    /// The model to hand the selected provider
     #[arg(long)]
     pub model: Option<String>,
 
-    /// Write the pasteable evidence with the email addresses, names and paths
-    /// as they are.
-    ///
-    /// The copy the agent investigates from always has them. This is the copy
-    /// meant for an issue, so it is placeholders unless you ask otherwise.
+    /// Write email addresses, names and paths as they are
     #[arg(long)]
     pub raw: bool,
 }
@@ -199,10 +192,9 @@ fn launch(
         prompt: &prompt,
     })?;
     host.note(&format!(
-        "What Perch can see of this machine is at {}. Starting {}, \
-         which will ask what went wrong.",
-        at.display(),
-        provider.adapter().name()
+        "Starting {} on what Perch sees of this machine, at {}.",
+        provider.adapter().name(),
+        at.display()
     ));
     out.flush().map_err(say::failed)?;
     prepared.execute(host)

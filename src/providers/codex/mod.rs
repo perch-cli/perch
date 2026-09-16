@@ -1,7 +1,9 @@
 //! Codex implementation of the shared provider contract.
 
 mod auth;
+mod defaults;
 mod diagnostics;
+mod layout;
 mod process;
 mod profiles;
 mod usage;
@@ -18,6 +20,8 @@ use usage::read_limits;
 use zeroize::Zeroizing;
 
 const CONFIG: &str = "cli_auth_credentials_store = \"file\"\nforced_login_method = \"chatgpt\"\n";
+/// The one file Codex's file store is: Credential and identity in one document.
+pub(super) const AUTH_FILE: &str = "auth.json";
 fn refused(what: &str) -> PerchError {
     PerchError::Invalid(format!("Codex {what}"))
 }
@@ -61,9 +65,44 @@ impl super::provider::Adapter for Codex {
         &self,
         host: &dyn Host,
         account: &Account,
-        _default_reason: Option<&'static str>,
+        default_reason: Option<&'static str>,
+        consequence: &crate::live::Consequence,
     ) -> Result<()> {
-        refuse_live(host, &account.profile_dir(host)?)
+        let mut places = vec![crate::live::Place::new(
+            Id::Codex,
+            format!("{}'s Profile", account.key()),
+            account.directory(),
+        )];
+        if let Some(reason) = default_reason {
+            places.push(crate::live::Place::new(
+                Id::Codex,
+                reason,
+                layout::default_home(host)?,
+            ));
+        }
+        crate::live::ask(host, &places).idle_or(consequence)?;
+        Ok(())
+    }
+
+    fn inspect_default<'a>(
+        &self,
+        host: &'a dyn Host,
+    ) -> Result<Box<dyn super::provider::DefaultInspection + 'a>> {
+        defaults::inspect(host)
+    }
+    fn default_matches(&self, host: &dyn Host, profile: &Account) -> Result<bool> {
+        defaults::already_landed(host, profile)
+    }
+    fn prepare_default<'a>(
+        &self,
+        host: &'a dyn Host,
+        _held: &mut crate::lock::Held<'_>,
+        request: super::provider::DefaultRequest,
+    ) -> Result<Box<dyn super::provider::DefaultChange + 'a>> {
+        defaults::begin(host, request)
+    }
+    fn switched_note(&self) -> Option<&'static str> {
+        Some("Note: a Codex already open keeps its Account until it is restarted.")
     }
 
     fn authenticate(
@@ -199,7 +238,7 @@ impl super::provider::Adapter for Codex {
     }
     fn capabilities(&self) -> super::provider::Capabilities {
         super::provider::Capabilities {
-            live_switch: false,
+            live_switch: true,
             shared_state: false,
         }
     }

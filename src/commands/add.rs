@@ -25,16 +25,15 @@ use crate::say;
 pub struct AddArgs {
     #[command(flatten)]
     pub provider: super::selection::Selection,
-    /// The Group to put the new Account in. Without it, the Account's
-    /// organization is offered as a default for you to confirm.
+    /// The Group for the new Account
     #[arg(long, value_name = "NAME")]
     pub group: Option<String>,
 
-    /// Put the new Account in no Group, and ask nothing.
+    /// Put the new Account in no Group
     #[arg(long, conflicts_with = "group")]
     pub no_group: bool,
 
-    /// A short name to reach the Account by, instead of its email address.
+    /// A short name for the Account
     #[arg(long, value_name = "NAME")]
     pub alias: Option<String>,
 }
@@ -61,9 +60,12 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         ));
     }
 
-    say::line(out, &announcement(&registry))?;
+    say::line(out, &announcement())?;
+    if let Some(quit) = installation.provider().adapter().login_instruction() {
+        say::line(out, quit)?;
+    }
     let pending = installation.authenticate(host)?;
-    refuse_an_account_perch_already_holds(host, &registry, provider, &pending)?;
+    refuse_an_account_perch_already_holds(&registry, provider, &pending)?;
     let group = resolve_group(host, out, &registry, &args, pending.identity())?;
     drop(registry);
 
@@ -72,7 +74,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // revert whatever ran meanwhile (ADR a-switch-is-written-down-first).
     let mut perch = holdings::lock(host)?;
     let mut registry = registry::load(host)?.unwrap_or_default();
-    refuse_an_account_perch_already_holds(host, &registry, provider, &pending)?;
+    refuse_an_account_perch_already_holds(&registry, provider, &pending)?;
     registry.refuse(registry::Claim::Adding {
         alias: args.alias.as_deref(),
         group: group.as_deref(),
@@ -121,10 +123,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
             return Err(error.with_note(&format!("Rollback incomplete: {cleanup}")));
         }
         return Err(error.with_note(&format!(
-            "Nothing was added, and the Profile this had made for {email} has \
-             been taken back out again: a Credential Perch holds and does not \
-             record is one nothing would ever look at or delete.\n\
-             The login itself worked, so `perch add` will need running again."
+            "Nothing was added. The login as {email} worked, so run `perch add` again."
         )));
     }
 
@@ -141,8 +140,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     )
     .map_err(|error| {
         error.with_note(&format!(
-            "The Account was added: {email} has a Profile of its own and Perch \
-             holds its Credential. Only the report could not be printed.",
+            "{email} was added. Only the report could not be printed."
         ))
     })
 }
@@ -153,7 +151,6 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 /// The question is which *Profile*, not which address: two addresses that
 /// flatten to one slug are one Profile (ADR claude-code-chooses-the-store).
 fn refuse_an_account_perch_already_holds(
-    host: &dyn Host,
     registry: &Registry,
     provider: crate::providers::provider::Id,
     pending: &Authenticated,
@@ -174,37 +171,20 @@ fn refuse_an_account_perch_already_holds(
     // comparison would make one Profile look like two Accounts.
     let same_account =
         pending.subject().is_some() || name::same_name(existing.key(), &identity.email);
-    let why = if same_account {
-        "two Profiles for one Account would fight over it".to_string()
+    let named = registry.named_for_the_user(existing.key());
+    Err(PerchError::Conflict(if same_account {
+        format!(
+            "Perch already holds {named}. `perch relogin {}` repairs it.",
+            registry.target_of(existing.key())
+        )
     } else {
         format!(
-            "{} and {} share the Profile they would be kept in, so holding both \
-             would mean each one's Credential replacing the other's",
-            existing.key(),
+            "Perch already holds {named}, and {} would share its Profile. \
+             `perch remove {}` first.",
             identity.email,
+            registry.target_of(existing.key()),
         )
-    };
-    let way_out = if same_account {
-        format!(
-            "To repair that Account instead, run `perch relogin {}`.",
-            existing.key()
-        )
-    } else {
-        format!(
-            "Nothing about {} is changed. To hold this login instead, remove \
-             that Account first, or log in under an address that does not \
-             flatten to the same name.",
-            existing.key(),
-        )
-    };
-
-    Err(PerchError::Conflict(format!(
-        "Perch already holds {}, in {}.\n\
-         Nothing was added: {why}.\n\
-         {way_out}",
-        registry.named_for_the_user(existing.key()),
-        existing.profile_dir(host)?.display(),
-    )))
+    }))
 }
 
 /// Which Group the new Account joins.
@@ -282,22 +262,9 @@ fn resolve_group(
     }
 }
 
-/// What the login is for, and the one thing somebody mid-session needs to hear
-/// before a browser opens: their Account is not the one being logged out.
-///
-/// Said here rather than again in the report, because this is the moment it is
-/// load-bearing (ADR perch-says-what-it-did).
-fn announcement(registry: &Registry) -> String {
-    format!(
-        "Logging in to a new Profile.{}",
-        super::leaving_the_active_account_alone(
-            registry
-                .active()
-                .whose()
-                .map(|key| registry.named_for_the_user(key))
-                .as_deref()
-        )
-    )
+/// What the login is for.
+fn announcement() -> String {
+    "Logging in to a new Profile.".to_string()
 }
 
 fn report(

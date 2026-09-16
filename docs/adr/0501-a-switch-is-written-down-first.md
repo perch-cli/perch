@@ -12,7 +12,10 @@ the live store, and patches `oauthAccount` to match. Skipping the Capture means
 every Switch quietly poisons the Account being left behind, with the damage
 surfacing only when you switch back to it. All three steps run under Claude
 Code's own OAuth refresh locks, which is what stops a Refresh landing between
-the Capture and the write.
+the Capture and the write. They are taken in Claude Code's order — the refresh
+lock, the legacy config-home lock, then the config file lock — so the two never
+deadlock each other. A lock somebody is holding is waited on and then given up
+on; one whose holder has died is taken over.
 
 One precondition stands over the three: **Perch does not move the live
 Credential until it has written down that it is about to.** What it writes is a

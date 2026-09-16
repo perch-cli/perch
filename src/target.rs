@@ -84,8 +84,7 @@ pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarge
             },
         }),
         None => Err(PerchError::Invalid(format!(
-            "{} This acts on one Account, so name the Account itself: \
-             its Alias, or its email address.",
+            "{} Name one Account: its Alias, or its email address.",
             found.matched()
         ))),
     }
@@ -109,7 +108,7 @@ fn matched(registry: &Registry, target: &str) -> Result<Option<Target>> {
         .collect();
     if accounts.len() > 1 {
         return Err(PerchError::Invalid(format!(
-            "{target} matches multiple Accounts; use an Alias or Account ID: {}",
+            "{target} names more than one Account. Name one by its Alias: {}.",
             accounts
                 .iter()
                 .map(|account| registry.alias_of(account.key()).unwrap_or(account.key()))
@@ -261,8 +260,8 @@ pub fn resolve_for(
         let account = registry.held(key)?;
         if provider.is_some_and(|selected| selected != account.provider()) {
             return Err(PerchError::Invalid(format!(
-                "{target} is a {} Account; use --{}",
-                account.provider().word(),
+                "{target} is a {} Account. `--{}` selects it.",
+                account.provider().adapter().name(),
                 account.provider().word()
             )));
         }
@@ -284,7 +283,7 @@ pub fn resolve_for(
         }),
         [] => resolve_account(registry, target),
         _ => Err(PerchError::Invalid(format!(
-            "{target} matches multiple Accounts; use an Alias: {}",
+            "{target} names more than one Account. Name one by its Alias: {}.",
             matches
                 .iter()
                 .map(|account| registry.alias_of(account.key()).unwrap_or(account.key()))

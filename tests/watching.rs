@@ -206,7 +206,7 @@ fn the_threshold_is_said_once_for_the_whole_run_and_that_once_is_the_opening() {
     );
     let opening = printed.lines().next().expect("the opening line");
     assert!(
-        opening.contains("reaches 80%"),
+        opening.contains("at 80%"),
         "and the opening is where: {opening}"
     );
     for decision in decisions(&printed) {
@@ -1488,7 +1488,7 @@ fn a_switch_onto_an_ungrouped_account_holds_the_loop_that_was_already_running() 
     let (result, printed) = run_watch(&host);
 
     result.expect("the grant is gone, so the loop holds rather than failing");
-    assert!(printed.contains("perch group move"), "{printed}");
+    assert!(printed.contains("interchangeable true"), "{printed}");
     assert!(printed.contains("watcher-may-act"), "{printed}");
     assert_eq!(
         decisions(&printed).len(),
@@ -1863,7 +1863,7 @@ fn a_loop_whose_watch_was_taken_over_stops_rather_than_deciding_beside_it() {
 
     result.expect("a watch taken over is not this Watcher's failure");
     assert!(
-        printed.contains("another Watcher has taken the watch over"),
+        printed.contains("another Watcher took the watch over"),
         "it says why it is leaving rather than reporting an ordinary stop: {printed}"
     );
     assert!(
@@ -2254,7 +2254,7 @@ fn a_watch_handed_over_between_two_reads_of_the_walk_settles_nothing() {
 
     result.expect("a watch taken over is not this Watcher's failure");
     assert!(
-        printed.contains("taken the watch over"),
+        printed.contains("took the watch over"),
         "the loop leaves saying the watch is somebody else's: {printed}"
     );
     let read: Vec<Effect> = host
