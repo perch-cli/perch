@@ -319,6 +319,11 @@ pub(super) trait Adapter: Sync {
     ) -> Result<()>;
 
     fn authenticate(&self, host: &dyn Host, installation: &Installation) -> Result<Authenticated>;
+    /// What the person has to do for the login to come back, where the client
+    /// waits for them; `None` for a login that returns on its own.
+    fn login_instruction(&self) -> Option<&'static str> {
+        None
+    }
     fn install<'a>(
         &self,
         host: &'a dyn Host,
@@ -423,22 +428,30 @@ impl ConfiguredProvider {
         let id = self.provider.id();
         if !self.enabled() {
             return Err(PerchError::Invalid(format!(
-                "{} is disabled in config.json",
+                "{} is disabled. `perch config set --provider {} enabled true` turns it on.",
+                id.adapter().name(),
                 id.word()
             )));
         }
         let executable = if let Some(path) = &self.override_path {
             if !host.is_file(path) {
                 return Err(PerchError::NotFound(format!(
-                    "The configured {} CLI does not exist at {}",
-                    id.word(),
-                    path.display()
+                    "No {} CLI is at {}. `perch config set --provider {} cli-path <path>` names \
+                     where it is.",
+                    id.adapter().name(),
+                    path.display(),
+                    id.word()
                 )));
             }
             path.clone()
         } else {
             host::programs::on_path(host, self.provider.executable_name()).ok_or_else(|| {
-                PerchError::NotFound(format!("{} CLI was not found on PATH", id.word()))
+                PerchError::NotFound(format!(
+                    "No {} CLI is on PATH. `perch config set --provider {} cli-path <path>` names \
+                     where it is.",
+                    id.adapter().name(),
+                    id.word()
+                ))
             })?
         };
         Ok(Installation {
@@ -509,6 +522,9 @@ impl Provider {
     }
     pub fn name(&self) -> &'static str {
         self.adapter.name()
+    }
+    pub fn login_instruction(&self) -> Option<&'static str> {
+        self.adapter.login_instruction()
     }
     pub fn executable_name(&self) -> &'static str {
         self.adapter.executable_name()

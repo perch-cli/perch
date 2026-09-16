@@ -61,8 +61,11 @@ pub(super) fn prepare_launch<'a>(
     let account = request.account;
     let command = request.arguments;
     let home = account.profile_dir(host)?;
-    credential(host, account)?
-        .ok_or_else(|| PerchError::NotFound("Codex Credential is missing; log in again".into()))?;
+    credential(host, account)?.ok_or_else(|| {
+        PerchError::NotFound(
+            "No Codex Credential is held for it. `perch relogin <target>` logs it in again.".into(),
+        )
+    })?;
     refuse_live(host, &home)?;
     let claim = crate::providers::sessions::claim(host, &home)?;
     let (program, arguments, environment) = match request.kind {

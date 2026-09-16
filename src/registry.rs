@@ -942,6 +942,29 @@ impl Registry {
             .map(|(alias, _)| alias.as_str())
     }
 
+    /// The shortest Target that names this Account alone: its Alias, else its
+    /// email where no other Account shares it, else its key. Two Accounts may
+    /// share an email across providers, and then the email is no Target.
+    pub fn target_of<'a>(&'a self, key: &'a str) -> &'a str {
+        if let Some(alias) = self.alias_of(key) {
+            return alias;
+        }
+        let Some(account) = self.account(key) else {
+            return key;
+        };
+        let shared = self
+            .accounts
+            .iter()
+            .filter(|other| same_name(other.email(), account.email()))
+            .count()
+            > 1;
+        if shared {
+            account.key()
+        } else {
+            account.email()
+        }
+    }
+
     /// Every Account's Alias at once, for a caller asking about more than one.
     ///
     /// [`Registry::alias_of`] scans, the map being keyed by Alias rather than by
@@ -957,23 +980,33 @@ impl Registry {
     }
 
     /// An Account as the user names it: by its Alias when it has one, so a
-    /// message about it reads the way they would say it.
+    /// message about it reads the way they would say it. The provider and
+    /// Workspace are added only where another Account shares the email, since
+    /// two Accounts may hold one address across providers.
     pub fn named_for_the_user(&self, email: &str) -> String {
         let display = self.account(email).map_or_else(
             || email.to_string(),
-            |account| match &account.provider_identity {
-                Some(identity) if identity.workspace_id.is_some() => format!(
-                    "{} ({}, Workspace {})",
-                    account.email(),
-                    account.provider().adapter().name(),
-                    identity.workspace_id.as_deref().unwrap()
-                ),
-                Some(_) => format!(
-                    "{} ({})",
-                    account.email(),
-                    account.provider().adapter().name()
-                ),
-                None => account.email().to_string(),
+            |account| {
+                let shared = self
+                    .accounts
+                    .iter()
+                    .filter(|other| same_name(other.email(), account.email()))
+                    .count()
+                    > 1;
+                match &account.provider_identity {
+                    Some(identity) if shared && identity.workspace_id.is_some() => format!(
+                        "{} ({}, Workspace {})",
+                        account.email(),
+                        account.provider().adapter().name(),
+                        identity.workspace_id.as_deref().unwrap()
+                    ),
+                    Some(_) if shared => format!(
+                        "{} ({})",
+                        account.email(),
+                        account.provider().adapter().name()
+                    ),
+                    _ => account.email().to_string(),
+                }
             },
         );
         match self.alias_of(email) {

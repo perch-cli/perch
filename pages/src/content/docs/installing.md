@@ -228,7 +228,7 @@ Moved overflow@example.com into `work`.
   perch group move overflow@example.com work
 
 `strategy` within Group `work` [most-headroom] (Enter keeps; `most-headroom` or `soonest-reset`):
-`prefer-fable` within Group `work` [false] (Enter keeps; `true` or `false`):
+`preferred-workload` within Group `work` [false] (Enter keeps; `true` or `false`):
 The Watcher only observes within Group `work` until `watcher-may-act` is true. Most people turn it on.
 `watcher-may-act` within Group `work` [false] (Enter keeps; `true` or `false`): true
 `watcher-may-act` on Group `work` is now true.
@@ -244,6 +244,13 @@ Account's Group, each Scope's Settings, and the Watcher as a Service. Enter
 keeps what is there, so answering Enter to everything changes nothing. A step
 that changed something prints the command that does the same thing on its
 own, indented under it.
+
+With both Claude Code and Codex installed, the add step first asks which
+provider the login is for, and Enter keeps `claude`. Once Accounts of both
+providers are held, the Settings step opens by asking `run-provider`, the CLI
+a bare `perch run` uses. In a Group holding both, `watcher-may-act` is asked
+for Claude Code alone and written as `perch config set work --provider claude
+watcher-may-act true`, since the Watcher does not Cycle Codex Accounts.
 
 Run it again whenever you want to reorganize. Ctrl-C keeps every step you
 answered. Without a terminal it refuses and lists the five commands instead.

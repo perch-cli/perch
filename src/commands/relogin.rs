@@ -58,6 +58,9 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
             &mut (),
             |_| {
                 say::line(out, &announcement(&account))?;
+                if let Some(quit) = installation.provider().adapter().login_instruction() {
+                    say::line(out, quit)?;
+                }
                 let produced = installation.authenticate(host)?;
                 refuse_a_different_account(&registry, &account, &produced)?;
                 Ok(produced)

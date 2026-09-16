@@ -305,3 +305,240 @@ fn nobody_at_the_terminal_is_refused_with_the_steps_listed() {
     }
     assert_eq!(host.file(REGISTRY_PATH).unwrap(), before);
 }
+
+/// A Codex login for the fixtures below; synthetic claims, no usable token.
+fn codex_credential(workspace: &str, email: &str) -> String {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    let payload = URL_SAFE_NO_PAD.encode(
+        serde_json::json!({
+            "email": email,
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "user-one",
+                "chatgpt_account_id": workspace,
+                "chatgpt_plan_type": "plus"
+            }
+        })
+        .to_string(),
+    );
+    serde_json::json!({
+        "auth_mode": "chatgpt",
+        "tokens": {"id_token": format!("fake.{payload}.fake"), "account_id": workspace}
+    })
+    .to_string()
+}
+
+/// Both CLIs on the machine, and every login from here on a Codex one.
+fn with_codex_installed(host: FakeHost, workspace: &str, email: &str) -> FakeHost {
+    let document = codex_credential(workspace, email);
+    host.with_file("/usr/bin/codex", "")
+        .with_login(move |host, at| {
+            host.set_file(at.join("auth.json"), &document);
+            0
+        })
+}
+
+/// Two Claude Accounts, one in `work`, and a Codex Account beside it in `work`.
+fn one_group_holding_both_providers() -> FakeHost {
+    let host = with_codex_installed(one_grouped_one_not(), "workspace-1", "person@example.com");
+    perch::commands::add::run(
+        &host,
+        perch::commands::add::AddArgs {
+            provider: perch::commands::selection::Selection {
+                codex: true,
+                ..Default::default()
+            },
+            alias: Some("personal".into()),
+            group: Some("work".into()),
+            ..Default::default()
+        },
+        &mut Vec::new(),
+    )
+    .expect("the Codex Account is added into `work`");
+    host
+}
+
+#[test]
+fn with_both_clis_installed_the_add_step_asks_which_provider_and_types_the_flag() {
+    let mut answers = enter_throughout();
+    // Yes to adding, Codex, Enter for the new Account's Group, then no more.
+    answers[0] = "y";
+    answers[1] = "codex";
+    let host = with_codex_installed(
+        machine_with_two_accounts(),
+        "workspace-1",
+        "person@example.com",
+    )
+    .with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed
+            .contains("Provider for the new Account [claude] (Enter keeps; `claude` or `codex`): "),
+        "{printed}"
+    );
+    assert!(
+        typed_forms(&printed).contains(&"  perch add --codex"),
+        "{printed}"
+    );
+    assert!(
+        registry_of(&host)
+            .accounts
+            .iter()
+            .any(|account| account.provider() == perch::providers::provider::Id::Codex),
+        "{printed}"
+    );
+}
+
+#[test]
+fn with_one_cli_installed_no_provider_is_asked() {
+    let host = logged_in_machine()
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
+        .with_answers(&["y", "none"]);
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(
+        !printed.contains("Provider for the new Account"),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_scope_holding_both_providers_asks_the_grant_for_the_one_a_cycle_can_choose() {
+    let mut answers = enter_throughout();
+    // Add, three Groups, `run-provider`, the Ungrouped Scope's four Settings,
+    // then `work`'s Strategy and workload; the grant is the twelfth question.
+    answers[11] = "true";
+    let host = one_group_holding_both_providers().with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains("`watcher-may-act` for Claude Code within Group `work` [false]"),
+        "{printed}"
+    );
+    assert!(
+        !printed.contains("`watcher-may-act` for Codex"),
+        "no grant makes the Watcher Cycle Codex Accounts:\n{printed}"
+    );
+    assert_eq!(
+        typed_forms(&printed),
+        vec!["  perch config set work --provider claude watcher-may-act true"],
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_mixed_scope_names_its_grant_with_the_provider_before_the_service_is_offered() {
+    let host = one_group_holding_both_providers().with_answers(&enter_throughout());
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(
+        printed.contains(
+            "Group `work` does not let the Watcher act: `perch config set work \
+             --provider claude watcher-may-act true` first."
+        ),
+        "{printed}"
+    );
+}
+
+#[test]
+fn run_provider_is_asked_once_both_providers_hold_accounts_and_written_globally() {
+    let mut answers = enter_throughout();
+    // Add and three Groups come before it.
+    answers[4] = "codex";
+    let host = one_group_holding_both_providers().with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains(
+            "`run-provider` for a bare `perch run` [claude] (Enter keeps; `claude` or `codex`): "
+        ),
+        "{printed}"
+    );
+    assert!(
+        typed_forms(&printed).contains(&"  perch config set --global run-provider codex"),
+        "{printed}"
+    );
+    assert_eq!(
+        registry_of(&host).run_provider,
+        perch::providers::provider::Id::Codex
+    );
+}
+
+#[test]
+fn run_provider_is_not_asked_while_only_one_provider_holds_accounts() {
+    let host = one_grouped_one_not().with_answers(&enter_throughout());
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(!printed.contains("`run-provider`"), "{printed}");
+}
+
+#[test]
+fn a_scope_of_codex_accounts_alone_is_asked_no_setting() {
+    let host = with_codex_installed(one_grouped_one_not(), "workspace-1", "person@example.com");
+    perch::commands::add::run(
+        &host,
+        perch::commands::add::AddArgs {
+            provider: perch::commands::selection::Selection {
+                codex: true,
+                ..Default::default()
+            },
+            alias: Some("personal".into()),
+            group: Some("codex".into()),
+            ..Default::default()
+        },
+        &mut Vec::new(),
+    )
+    .expect("the Codex Account is added into `codex`");
+    let host = host.with_answers(&enter_throughout());
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("within Group `work`"), "{printed}");
+    assert!(
+        !printed.contains("within Group `codex`"),
+        "nothing Cycles a Codex Account, so no Setting there is asked:\n{printed}"
+    );
+}
+
+#[test]
+fn an_account_sharing_its_email_across_providers_is_asked_for_by_alias_or_key() {
+    // The Codex login carries the first Claude Account's email.
+    let host = with_codex_installed(one_grouped_one_not(), "workspace-1", EMAIL);
+    perch::commands::add::run(
+        &host,
+        perch::commands::add::AddArgs {
+            provider: perch::commands::selection::Selection {
+                codex: true,
+                ..Default::default()
+            },
+            alias: Some("personal".into()),
+            no_group: true,
+            ..Default::default()
+        },
+        &mut Vec::new(),
+    )
+    .expect("the Codex Account is added");
+    let host = host.with_answers(&enter_throughout());
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(printed.contains("Group for personal ["), "{printed}");
+    assert!(
+        printed.contains(&format!("Group for {} [", fixture_key(&host, EMAIL))),
+        "the unaliased sharer is asked for by key:\n{printed}"
+    );
+    assert!(
+        !printed.contains(&format!("Group for {EMAIL} [")),
+        "a shared email names no Account:\n{printed}"
+    );
+}

@@ -61,6 +61,9 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     }
 
     say::line(out, &announcement())?;
+    if let Some(quit) = installation.provider().adapter().login_instruction() {
+        say::line(out, quit)?;
+    }
     let pending = installation.authenticate(host)?;
     refuse_an_account_perch_already_holds(&registry, provider, &pending)?;
     let group = resolve_group(host, out, &registry, &args, pending.identity())?;

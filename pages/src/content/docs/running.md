@@ -4,36 +4,9 @@ sidebar:
   order: 6
 ---
 
-`perch run <target>` launches Claude Code or Codex against one Account's
-Profile. Select the provider explicitly with either flag:
-
-```sh
-perch run --claude work
-perch run personal --codex
-perch config set --global run-provider codex
-```
-
-Without a flag, Perch tries the configured provider (Claude by default), then
-the other CLI if the preferred CLI is absent. An explicit flag never falls back.
-An Account from the other provider is refused with the matching flag suggested.
-A failed login, exhausted quota, or child failure does not trigger fallback.
-
-Codex support is experimental. Add a subscription-backed Account with
-`perch add --codex --alias personal --no-group`. Each user and Workspace pair
-has its own `CODEX_HOME`, file Credential, configuration, and history. Use
-Aliases when the same email names more than one Workspace. An unaliased Account
-can also be reached by its `id` from `perch list --json`. `perch list --refresh`
-asks the Codex app-server for percentage quotas when the Profile is idle;
-otherwise the cached figure keeps its original age. Credit and spend-control
-states that Perch cannot represent remain unknown or retain the prior cache.
-
-Runs stay on their selected Account. Codex live Switching and unattended Codex
-Cycling are not available yet; Claude's Watcher only chooses Claude Accounts.
-Groups may contain both providers, and each Account remains visible.
-
-After `--`, a leading flag goes to the selected coding tool. A program name runs
-that program with the named Account's Profile, without requiring either coding
-CLI. The client's exit code becomes Perch's exit code.
+`perch run <target>` launches one Account in one terminal and leaves the
+active Account alone. A Claude Account launches Claude Code; a Codex Account
+launches Codex.
 
 ## Running as an Account
 
@@ -61,6 +34,39 @@ $ perch run work
 ```
 
 A Quarantined Account is refused rather than launched into a login prompt.
+
+## Running a Codex Account
+
+```
+$ perch run personal
+Running Codex as person@example.com (as `personal`), in this terminal alone.
+```
+
+A Codex Account runs with its own `CODEX_HOME`, so its login, configuration and
+history stay apart from every other Account's. Codex support is experimental:
+`perch switch` and the Watcher do not choose Codex Accounts, so a Codex Account
+is reached by `perch run` alone.
+
+```
+$ perch run --claude personal
+personal is a Codex Account. `perch run --codex personal` launches it.   # exit 14
+```
+
+`--claude`, `--codex` and `--provider <name>` name the provider outright. An
+Account of the other provider is refused, never launched with the wrong
+client.
+
+## Choosing the provider for a bare `perch run`
+
+```
+$ perch config set --global run-provider codex
+run-provider: codex
+```
+
+Without a flag, `perch run` uses the `run-provider` CLI, and the other one
+only if that CLI is not installed. An explicit flag never falls back, and
+neither does a failed login, an exhausted quota or a client that exits with an
+error: the exit code is the client's.
 
 ## What a Run protects while it lasts
 

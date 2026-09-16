@@ -96,7 +96,7 @@ enum Command {
     /// Forget an Account and delete its Credential.
     Remove(RemoveArgs),
 
-    /// Launch Claude Code or Codex as one Account, leaving the active one alone.
+    /// Launch a client as one Account, leaving the active one alone.
     Run(RunArgs),
 
     /// Show the active Account and its Utilization.

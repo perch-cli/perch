@@ -10,7 +10,7 @@ sidebar:
 | ------- | ------------ |
 | `perch status [--refresh] [--json]` | the active Account and how full it is |
 | `perch list [<scope>] [--refresh] [--json]` | every Account, its Alias, Group, state, Headroom and Utilization, in the order a Cycle ranks them, or one Scope's with its Reserve |
-| `perch add [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
+| `perch add [--claude\|--codex] [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
 | `perch alias <target> <name>` / `perch alias <target> --unset` | name an Account, or free the name |
 | `perch switch <target>` | make an Account active everywhere |
 | `perch switch [<group>] [--no-refresh]` | Cycle to the best Account in a Group |
@@ -18,9 +18,9 @@ sidebar:
 | `perch watcher check` | take one round for cron or a systemd timer, saying what it decided in the exit code |
 | `perch watcher install\|uninstall` | have the machine run the watcher for you, starting at login, or take that unit back |
 | `perch watcher status [--json]` | whether a Service is installed, whether it is running, and whether a Watcher holds the lock right now |
-| `perch run <target> [-- <command>]` | launch Claude Code as an Account, in this terminal alone |
+| `perch run [--claude\|--codex] <target> [-- <command>]` | launch Claude Code or Codex as an Account, in this terminal alone |
 | `perch group add\|move\|rename\|remove\|list` | declare Groups and move Accounts between them |
-| `perch config set\|get` | the rules Perch chooses Accounts by, one Scope at a time |
+| `perch config set\|get [--global\|--defaults\|--provider <name>]` | the rules Perch chooses Accounts by, one Scope at a time, and the globals |
 | `perch disable <target>` / `perch enable <target>` | keep an Account out of Cycling, or put it back |
 | `perch relogin <target>` | repair an Account whose Credential stopped working |
 | `perch remove <target> [--yes]` | give up an Account |
@@ -28,7 +28,7 @@ sidebar:
 | `perch holdings purge [--yes]` | give the machine back the state it had before Perch |
 | `perch upgrade [--release <tag>] [--check] [--json] [--channel <name>] [--yes]` | replace this Perch with a newer Release, through the Channel that installed it |
 | `perch version` | which Perch is installed, and a line more when a newer Release exists |
-| `perch wizard` | organize what Perch holds one question at a time: Accounts, Groups, Settings and the Watcher |
+| `perch wizard` | organize what Perch holds one question at a time: Accounts, Groups, Settings, the provider a bare `perch run` uses, and the Watcher |
 | `perch probe [--json] [--raw]` | everything Perch can see of this machine, for pasting into a bug report |
 | `perch triage [--model <name>] [--raw]` | hand that to Claude Code, and let it investigate this machine and help you file the issue |
 

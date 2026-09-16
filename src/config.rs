@@ -285,21 +285,50 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
 
 /// The `perch config set` lines a Scope still needs before the Watcher may act
 /// within it, the declaration before the grant, and none where it already may.
-/// Named from the vocabulary rather than spelled at each surface, for the
-/// reason at the top of this module.
+/// Asked per provider whose Accounts a Cycle may choose: a Scope of Codex
+/// Accounts alone needs nothing, since no grant makes the Watcher Cycle them.
+/// The grant names its provider where the Scope holds more than one.
 pub fn grants_still_needed(registry: &Registry, scope: &Scope) -> Vec<String> {
-    let needed: Vec<Setting> = match crate::cycle::may_act_within(registry, scope) {
-        crate::cycle::MayAct::May => Vec::new(),
-        crate::cycle::MayAct::Undeclared { granted: true } => vec![Setting::Interchangeable],
-        crate::cycle::MayAct::Undeclared { granted: false } => {
-            vec![Setting::Interchangeable, Setting::WatcherMayAct]
-        }
-        crate::cycle::MayAct::Ungranted => vec![Setting::WatcherMayAct],
-    };
-    needed
+    let held: std::collections::BTreeSet<_> = scope
+        .accounts(registry)
         .iter()
-        .map(|key| format!("`perch config set {} {} true`", scope.word(), key.as_str()))
-        .collect()
+        .map(|account| account.provider())
+        .collect();
+    let mixed = held.len() > 1;
+    let mut lines: Vec<String> = Vec::new();
+    for provider in held
+        .into_iter()
+        .filter(|provider| provider.adapter().capabilities().live_switch)
+    {
+        // `may_act_within` reads the selected provider's grant, so it is asked
+        // of a copy selecting this one.
+        let mut selected = registry.clone();
+        selected.select_provider(provider);
+        let needed: Vec<Setting> = match crate::cycle::may_act_within(&selected, scope) {
+            crate::cycle::MayAct::May => Vec::new(),
+            crate::cycle::MayAct::Undeclared { granted: true } => vec![Setting::Interchangeable],
+            crate::cycle::MayAct::Undeclared { granted: false } => {
+                vec![Setting::Interchangeable, Setting::WatcherMayAct]
+            }
+            crate::cycle::MayAct::Ungranted => vec![Setting::WatcherMayAct],
+        };
+        for key in needed {
+            let line = if mixed && key == Setting::WatcherMayAct {
+                format!(
+                    "`perch config set {} --provider {} {} true`",
+                    scope.word(),
+                    provider.word(),
+                    key.as_str()
+                )
+            } else {
+                format!("`perch config set {} {} true`", scope.word(), key.as_str())
+            };
+            if !lines.contains(&line) {
+                lines.push(line);
+            }
+        }
+    }
+    lines
 }
 
 /// The keys one Scope carries, in the order they are offered.

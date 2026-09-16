@@ -54,6 +54,23 @@ Group:  none
 
 In a script, pass one of the two flags, or the Add is refused.
 
+## Adding a Codex Account
+
+```
+$ perch add --codex --alias personal --no-group
+Logging in to a new Profile.
+
+Added person@example.com (workspace-1, plus).
+Alias:  personal
+Group:  none
+```
+
+`--codex` logs in with the Codex CLI instead, and the login returns on its own.
+Each Codex Workspace is its own Account, so one email can be held twice, once
+per Workspace: give each an Alias, since the shared email then names neither.
+Codex support is experimental. `perch switch` and the Watcher leave Codex
+Accounts alone; `perch run` is how one is used.
+
 ## Naming an Account
 
 ```

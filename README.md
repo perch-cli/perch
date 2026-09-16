@@ -25,11 +25,9 @@ Utilization   5-hour    12%  (as of 4m ago)
               7-day     40%  (as of 4m ago)
 ```
 
-Experimental Codex support adds separate subscription-backed Accounts and isolated
-Runs: `perch add --codex --alias personal --no-group`, then
-`perch run --codex personal`. Set the Run preference with
-`perch config set --global run-provider codex`. Codex live Switching and
-unattended Cycling are not available yet.
+Codex Accounts are experimental: `perch add --codex --alias personal --no-group`
+holds one, and `perch run personal` launches it. Switching and the Watcher stay
+with Claude Code for now.
 
 ## Install
 

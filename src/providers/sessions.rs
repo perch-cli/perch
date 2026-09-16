@@ -133,10 +133,8 @@ pub(super) fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'
     // uses the target, so the Marker would land in the Default Profile.
     if matches!(host.link_target(&sessions), Ok(Some(_))) {
         return Err(PerchError::Other(format!(
-            "{} is a link rather than a directory of its own, so recording that \
-             a client is running here would write the marker into whatever it \
-             points at, and that directory would report this Run as its own. \
-             Nothing was launched.",
+            "{} is a link, and Perch will not record a running client through \
+             one. Replace it with a directory.",
             sessions.display()
         )));
     }
@@ -151,9 +149,7 @@ pub(super) fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'
         .map_err(|err| {
             PerchError::Other(format!(
                 "{} could not be written ({err}), so Perch cannot record that a \
-                 client is running against this Profile, and another Perch would \
-                 be free to Capture or Renew the Credential that client is \
-                 holding. Nothing was launched.",
+                 client is running against this Profile.",
                 marker.display()
             ))
         })?;

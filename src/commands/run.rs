@@ -64,10 +64,11 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     let account = registry.held(&found.email)?;
     if selected.is_some_and(|provider| provider != account.provider()) {
         return Err(PerchError::Invalid(format!(
-            "{} is a {} Account; use --{}",
+            "{} is a {} Account. `perch run --{} {}` launches it.",
             args.target,
+            account.provider().adapter().name(),
             account.provider().word(),
-            account.provider().word()
+            args.target
         )));
     }
     refuse_a_quarantined_account(&registry, account.key())?;

@@ -265,6 +265,10 @@ impl Adapter for Claude {
     fn id(&self) -> Id {
         Id::Claude
     }
+    fn login_instruction(&self) -> Option<&'static str> {
+        Some("Quit Claude Code when the login is done.")
+    }
+
     fn name(&self) -> &'static str {
         "Claude Code"
     }

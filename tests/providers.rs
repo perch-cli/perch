@@ -92,7 +92,7 @@ fn the_same_email_in_two_workspaces_is_two_accounts_with_distinct_profiles() {
         target::resolve_account(&registry, EMAIL)
             .unwrap_err()
             .to_string()
-            .contains("multiple Accounts")
+            .contains("names more than one Account")
     );
     assert!(target::resolve_for(&registry, EMAIL, Some(Id::Codex)).is_err());
     assert_ne!(
@@ -138,7 +138,7 @@ fn run_falls_back_only_when_the_preferred_cli_is_absent() {
     assert_eq!(launch(&host, Selection::default(), &[]).unwrap(), 0);
     let host = host.with_file("/usr/bin/claude", "");
     let error = launch(&host, Selection::default(), &[]).unwrap_err();
-    assert!(error.to_string().contains("use --codex"));
+    assert!(error.to_string().contains("`--codex` selects it"));
     assert!(
         launch(
             &host,
@@ -1272,7 +1272,7 @@ fn claude_workspaces_with_the_same_email_enroll_as_separate_accounts() {
         target::resolve_account(&registry, common::EMAIL)
             .unwrap_err()
             .to_string()
-            .contains("multiple Accounts")
+            .contains("names more than one Account")
     );
     let exported = perch::export::gather(&host, &registry).unwrap();
     assert_eq!(

@@ -663,7 +663,7 @@ fn a_machine_without_claude_code_says_what_it_looked_for_and_where() {
     let said = probed(&host);
     let document = probed_json(&host);
 
-    assert!(said.contains("CLI was not found on PATH"), "{said}");
+    assert!(said.contains("CLI is on PATH"), "{said}");
     assert_eq!(
         document["providers"][0]["version"],
         serde_json::Value::Null,
@@ -672,7 +672,7 @@ fn a_machine_without_claude_code_says_what_it_looked_for_and_where() {
     assert!(
         document["providers"][0]["said"]
             .as_str()
-            .is_some_and(|said| said.contains("CLI was not found on PATH")),
+            .is_some_and(|said| said.contains("CLI is on PATH")),
         "{document:#}"
     );
     assert!(
