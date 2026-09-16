@@ -250,7 +250,7 @@ fn report(out: &mut dyn Write, export: &Export) -> Result<()> {
                     .collect::<Vec<_>>()
                     .join(", "),
                 match bare.len() {
-                    1 => bare[0],
+                    1 => export.registry.target_of(bare[0]),
                     _ => "<target>",
                 },
             ),

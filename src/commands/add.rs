@@ -175,14 +175,14 @@ fn refuse_an_account_perch_already_holds(
     Err(PerchError::Conflict(if same_account {
         format!(
             "Perch already holds {named}. `perch relogin {}` repairs it.",
-            existing.key()
+            registry.target_of(existing.key())
         )
     } else {
         format!(
             "Perch already holds {named}, and {} would share its Profile. \
              `perch remove {}` first.",
             identity.email,
-            existing.key(),
+            registry.target_of(existing.key()),
         )
     }))
 }

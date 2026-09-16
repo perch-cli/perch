@@ -316,6 +316,7 @@ pub(super) trait Adapter: Sync {
         host: &dyn Host,
         account: &ProfileRef,
         default_reason: Option<&'static str>,
+        consequence: &crate::live::Consequence,
     ) -> Result<()>;
 
     fn authenticate(&self, host: &dyn Host, installation: &Installation) -> Result<Authenticated>;
@@ -643,10 +644,11 @@ impl Provider {
         host: &dyn Host,
         profile: &ProfileRef,
         default_reason: Option<&'static str>,
+        consequence: &crate::live::Consequence,
     ) -> Result<()> {
         self.accepts(profile)?;
         self.adapter
-            .check_replacement(host, profile, default_reason)
+            .check_replacement(host, profile, default_reason, consequence)
     }
     pub fn diagnose(&self, host: &dyn Host) -> DiagnosticReport {
         match self.configured(host) {

@@ -612,7 +612,11 @@ fn the_provider_handle_refuses_a_foreign_profile_before_native_effects() {
     let context = registry.profile_context(&host, account).unwrap();
     let claude = Id::Claude.adapter();
     host.forget_effects();
-    assert!(claude.check_replacement(&host, &profile, None).is_err());
+    assert!(
+        claude
+            .check_replacement(&host, &profile, None, &perch::live::NOTHING_WAS_CHANGED)
+            .is_err()
+    );
     assert!(claude.forget_credential(&host, &profile).is_err());
     assert!(claude.snapshot(&host, &context).is_err());
     assert!(

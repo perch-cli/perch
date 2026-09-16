@@ -17,6 +17,7 @@ use crate::commands::still_ours;
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::live;
 use crate::lock::Held;
 use crate::name;
 use crate::registry::{self, Account, Registry, Settled};
@@ -32,6 +33,13 @@ use crate::wait;
 /// one thing when Perch asks and another when it acts.
 const WHY_THE_DEFAULT_PROFILE: &str = "the Default Profile, which is where the Account Perch would land on has to \
      be written";
+
+/// Owed on both asks, because the second comes after the person agreed to a
+/// deletion and cannot see whether it began (ADR a-refusal-is-a-promise).
+const NOTHING_WAS_REMOVED: live::Consequence = live::Consequence {
+    nothing_happened: Some("Nothing was removed."),
+    quit_it: live::NOTHING_WAS_CHANGED.quit_it,
+};
 
 /// Whether the Default Profile joins the Profiles this removal writes into: it
 /// does where an Account is landed on in place of the one being given up.
@@ -94,6 +102,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
                 host,
                 &account.profile(host)?,
                 why_the_default_profile(&consequence),
+                &NOTHING_WAS_REMOVED,
             )
         })
         .and(|perch| still_ours(perch, "removed"));
@@ -125,13 +134,13 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
 
     let named = registry.named_for_the_user(account.key());
     let alias = registry.alias_of(account.key()).map(str::to_string);
+    // Spelled before the Registry forgets it, or a failed save would name the key.
+    let target = registry.target_of(account.key()).to_string();
     registry.forget(account.key());
     registry::save(host, &mut perch, &mut registry).map_err(|error| {
         error.with_note(&format!(
-            "The Credential is deleted, and {} is still recorded. Run `perch \
-             remove {}` again.",
-            account.key(),
-            account.key()
+            "The Credential is deleted, and {named} is still recorded. Run `perch \
+             remove {target}` again."
         ))
     })?;
 
@@ -266,7 +275,7 @@ fn land_on(
         registry::save(host, perch, registry).map_err(|error| {
             error.with_note(&format!(
                 "Nothing was removed. `perch switch {}` puts the record right.",
-                successor.key(),
+                registry.target_of(successor.key()),
             ))
         })?;
     }
@@ -276,7 +285,7 @@ fn land_on(
             true => format!(
                 "Nothing was removed. `perch switch {}` finishes landing there; \
                  then `perch remove` again.",
-                successor.key(),
+                registry.target_of(successor.key()),
             ),
             false => "Nothing was removed.".to_string(),
         })
@@ -337,8 +346,8 @@ fn delete_the_credential_and_its_profile(
         .map_err(|error| {
             error.with_note(&format!(
                 "Removing {}'s Credential did not finish. Run `perch remove {}` again.",
-                account.key(),
-                account.key()
+                registry.named_for_the_user(account.key()),
+                registry.target_of(account.key())
             ))
         })?;
     let dir = account.profile_dir(host)?;

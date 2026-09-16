@@ -83,6 +83,7 @@ impl Adapter for Fixture {
         _host: &dyn Host,
         _profile: &ProfileRef,
         _reason: Option<&'static str>,
+        _consequence: &crate::live::Consequence,
     ) -> Result<()> {
         Ok(())
     }

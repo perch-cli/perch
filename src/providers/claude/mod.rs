@@ -136,6 +136,7 @@ impl Adapter for Claude {
         host: &dyn Host,
         account: &crate::providers::provider::ProfileRef,
         default_reason: Option<&'static str>,
+        consequence: &crate::live::Consequence,
     ) -> Result<()> {
         let mut places = vec![crate::live::Place::new(
             crate::providers::provider::Id::Claude,
@@ -149,7 +150,7 @@ impl Adapter for Claude {
                 crate::providers::claude::layout::default_profile(host)?.config_dir,
             ));
         }
-        crate::live::ask(host, &places).idle_or(&crate::live::NOTHING_WAS_CHANGED)?;
+        crate::live::ask(host, &places).idle_or(consequence)?;
         Ok(())
     }
 

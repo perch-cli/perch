@@ -814,12 +814,12 @@ fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
         .to_string();
     assert!(
         said.contains(&format!(
-            "The Credential is deleted, and {SECOND_KEY} is still recorded"
+            "The Credential is deleted, and {SECOND_EMAIL} is still recorded"
         )),
         "{said}"
     );
     assert!(
-        said.contains(&format!("perch remove {SECOND_KEY}")),
+        said.contains(&format!("perch remove {SECOND_EMAIL}")),
         "and names the command that finishes it: {said}"
     );
 }

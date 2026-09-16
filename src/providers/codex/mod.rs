@@ -62,6 +62,7 @@ impl super::provider::Adapter for Codex {
         host: &dyn Host,
         account: &Account,
         _default_reason: Option<&'static str>,
+        _consequence: &crate::live::Consequence,
     ) -> Result<()> {
         refuse_live(host, &account.profile_dir(host)?)
     }

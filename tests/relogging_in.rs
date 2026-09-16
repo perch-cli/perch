@@ -934,7 +934,7 @@ fn an_account_removed_while_its_login_was_open_says_the_login_still_worked() {
     assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
     let said = refusal.to_string();
     assert!(
-        said.contains(&format!("{SECOND_KEY} was removed during that login")),
+        said.contains(&format!("{SECOND_EMAIL} was removed during that login")),
         "{said}"
     );
     assert!(

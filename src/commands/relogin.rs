@@ -48,6 +48,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         host,
         &account.profile(host)?,
         landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
+        &crate::live::NOTHING_WAS_CHANGED,
     )?;
 
     // Not `still_ours`, alone among the waits: no hold is taken before the
@@ -74,7 +75,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
                     return Err(PerchError::NotFound(format!(
                         "{} was removed during that login. `perch add` holds the \
                          login as a new Account.",
-                        account.key()
+                        account.email()
                     )));
                 }
 
@@ -87,8 +88,8 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
                     return Err(PerchError::Conflict(format!(
                         "{} changed identity during that login. `perch relogin {}` \
                          again repairs the current Account.",
-                        account.key(),
-                        account.key(),
+                        registry.named_for_the_user(account.key()),
+                        registry.target_of(account.key()),
                     )));
                 }
 
@@ -113,6 +114,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
                     host,
                     &account.profile(host)?,
                     landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
+                    &crate::live::NOTHING_WAS_CHANGED,
                 )?;
                 Ok((perch, registry, landing_in_the_default_profile))
             },
@@ -127,7 +129,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // own Profile, which is the whole of what a Quarantine said it did not have.
     let was_quarantined = record(&mut registry, &account, produced)?;
     registry::save(host, &mut perch, &mut registry)
-        .map_err(|error| unrecorded(&account, landing_in_the_default_profile, error))?;
+        .map_err(|error| unrecorded(&registry, &account, landing_in_the_default_profile, error))?;
 
     // Announced before the landing line, but its failure is *held*: a closed
     // stdout must not return before `make_live` and `no_longer_on_anybody`,
@@ -156,7 +158,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         Ok(()) => said.map_err(the_repair_stands),
         Err(stopped) if stopped.moved => Err(stopped.error.with_note(&format!(
             "The repair stands. `perch relogin {}` again finishes the job.",
-            account.key(),
+            registry.target_of(account.key()),
         ))),
         Err(stopped) => Err(no_longer_on_anybody(
             host,
@@ -266,21 +268,23 @@ fn not_made_live(account: &Account, error: PerchError) -> PerchError {
 /// is still live and `active` still names it, so the next Switch would Capture it
 /// over the fresh one. The defense is a Registry write, which is what failed.
 fn unrecorded(
+    registry: &Registry,
     account: &Account,
     landing_in_the_default_profile: bool,
     error: PerchError,
 ) -> PerchError {
-    let email = account.key();
+    let target = registry.target_of(account.key());
     if !landing_in_the_default_profile {
         return error.with_note(&format!(
             "The repair stands. Only the record is behind; `perch relogin \
-             {email}` again finishes the job."
+             {target}` again finishes the job."
         ));
     }
     error.with_note(&format!(
-        "The repair stands, and Perch still records {email} as Quarantined.\n\
-         `perch relogin {email}` again finishes the job. A `perch switch` \
-         before then would Capture the broken Credential over the fresh one."
+        "The repair stands, and Perch still records {} as Quarantined.\n\
+         `perch relogin {target}` again finishes the job. A `perch switch` \
+         before then would Capture the broken Credential over the fresh one.",
+        registry.named_for_the_user(account.key())
     ))
 }
 
@@ -302,15 +306,15 @@ fn no_longer_on_anybody(
             "Perch holds no active Account now, so nothing will Capture the \
              Credential that stopped working over the fresh one. \
              `perch switch {}` puts you back on it.",
-            account.key(),
+            registry.target_of(account.key()),
         ),
         Err(unsaved) => format!(
             "Perch could not stop recording {} as active ({unsaved}), so do not \
              run `perch switch` until `perch relogin {}` has worked: a Switch \
              would Capture the Credential that stopped working over the fresh \
              one.",
-            account.key(),
-            account.key(),
+            registry.named_for_the_user(account.key()),
+            registry.target_of(account.key()),
         ),
     };
     error.with_note(&recorded)
@@ -367,7 +371,7 @@ fn report(
             &format!(
                 "Note: it is disabled, so Cycling will not choose it. `perch enable {}` \
                  undoes that.",
-                account.key()
+                registry.target_of(account.key())
             ),
         )?;
     }
