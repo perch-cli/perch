@@ -193,7 +193,7 @@ impl Attempt {
         match &self.outcome {
             Outcome::Observed | Outcome::JustRead | Outcome::Stopped(_) => None,
             Outcome::Throttled => Some(
-                "The provider is rate-limiting reads of this Account’s utilization.".to_string(),
+                "The provider is rate-limiting reads of this Account's utilization.".to_string(),
             ),
             Outcome::Failed { why, .. } => Some(with_a_stop(why)),
             Outcome::Quarantined { why, detail } => {
@@ -228,7 +228,7 @@ impl Attempt {
                 "throttled",
                 None,
                 Some(
-                    "The provider is rate-limiting reads of this Account’s utilization".to_string(),
+                    "The provider is rate-limiting reads of this Account's utilization".to_string(),
                 ),
             ),
             Outcome::Failed { why, .. } => ("failed", None, Some(why.clone())),
@@ -690,7 +690,7 @@ mod tests {
         assert_eq!(
             report.unread(),
             vec![
-                "someone@example.com: The provider is rate-limiting reads of this Account’s utilization.".to_string(),
+                "someone@example.com: The provider is rate-limiting reads of this Account's utilization.".to_string(),
                 "overflow@example.com: no token.".to_string(),
             ],
             "and a Watcher, which uses no cached figure, gets the reasons alone"

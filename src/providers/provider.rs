@@ -224,7 +224,7 @@ pub struct CredentialRemoval {
     pub note: Option<String>,
 }
 
-/// Provider evidence is corroborated against the Host’s process lifetime.
+/// Provider evidence is corroborated against the Host's process lifetime.
 pub struct SessionEvidence {
     pub pid: u32,
     pub marker: PathBuf,

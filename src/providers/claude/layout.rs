@@ -1,4 +1,4 @@
-//! Claude’s native Default is outside Perch’s managed Profiles.
+//! Claude's native Default is outside Perch's managed Profiles.
 
 use crate::{Host, Result};
 
