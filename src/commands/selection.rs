@@ -50,3 +50,24 @@ impl Selection {
         Err(PerchError::NotFound("No enabled provider CLI was found. `perch config set --provider <name> cli-path <path>` names one.".into()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_names_the_flag_or_the_provider_or_nothing() {
+        let named = |provider, claude, codex| {
+            Selection {
+                provider,
+                claude,
+                codex,
+            }
+            .explicit()
+        };
+        assert_eq!(named(None, false, false), None);
+        assert_eq!(named(None, true, false), Some(Id::Claude));
+        assert_eq!(named(None, false, true), Some(Id::Codex));
+        assert_eq!(named(Some(Id::Codex), false, false), Some(Id::Codex));
+    }
+}
