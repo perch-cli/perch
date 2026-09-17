@@ -117,33 +117,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] Registry layout 9 and Export version 5 allow provider identities
   without a Workspace. Codex still requires an authenticated Workspace. Older
   layouts are refused with their files preserved.
-
 - Claude credential storage, native format recognition, and native lock assumptions
   are private provider implementation details, accessed through the shared contract.
-
 - Managed Profile and pending-login paths explicitly identify their provider.
   Claude's native Default selection and fallback identity serialization live
   inside its private adapter; shared Accounts expose provider-neutral Profiles.
-
 - Watcher installation and upgrade refresh resolve every enabled provider,
   honoring configured CLI paths and carrying provider-declared config directories.
   An unusable CLI does not remove another provider's executable from the service.
-
 - [**breaking**] Probe JSON reports native versions and assumptions under
   `providers` instead of `claude_code` and the top-level `assumptions`. Native
   findings carry their provider, and `holdings.active` is a provider-keyed map.
-  `provider-unreadable` replaces
-  `claude-code-unreadable`.
+  `provider-unreadable` replaces `claude-code-unreadable`.
 - Triage uses the configured Run provider preference and prepares its session
   through that provider. Probe includes installed providers and providers with
   held Accounts, alongside the preferred provider.
-
 - Liveness checks use each Profile's provider. Unreadable session evidence keeps
   its refusal status without attributing another provider's CLI version.
-
 - Purge reports credential-removal details from each provider, including Claude's
   platform-specific empty-store explanation.
-
 - [**breaking**] The prelaunch reset requires a fresh configuration. Registry
   layout version 9 uses one `config.json` for Accounts, Groups, Aliases, provider
   installation settings, and global/Scope policies. Provider runtime and native
