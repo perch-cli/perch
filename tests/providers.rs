@@ -2184,6 +2184,10 @@ fn status_and_list_speak_for_the_one_provider_whose_accounts_are_held() {
     let (status, said) = common::run_status(&host, false);
     status.expect("the Codex Account just switched to is the one you are on");
     assert!(said.contains(EMAIL), "{said}");
+    assert!(
+        !said.contains("Organization"),
+        "a Workspace id is not an Organization name: {said}"
+    );
 
     let (list, listed) = common::run_list(&host, true);
     list.unwrap();
@@ -2286,4 +2290,49 @@ fn a_codex_relogin_names_the_account_as_a_person_reads_it_and_never_by_its_key()
         "{printed}"
     );
     assert!(!printed.contains("codex:"), "{printed}");
+}
+
+#[test]
+fn a_codex_credential_naming_no_email_is_refused_rather_than_held_nameless() {
+    let payload = URL_SAFE_NO_PAD.encode(
+        json!({
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "user-one",
+                "chatgpt_account_id": "personal",
+                "chatgpt_plan_type": "plus"
+            }
+        })
+        .to_string(),
+    );
+    let document = json!({"auth_mode":"chatgpt","tokens":{"id_token":format!("fake.{payload}.fake"),"account_id":"personal"}}).to_string();
+    let host = FakeHost::new()
+        .with_env("PATH", "/usr/bin")
+        .with_file(CODEX, "")
+        .with_login(move |host, at| {
+            host.set_file(at.join("auth.json"), &document);
+            0
+        });
+    let refused = add::run(
+        &host,
+        add::AddArgs {
+            provider: Selection {
+                provider: None,
+                codex: true,
+                claude: false,
+            },
+            alias: Some("personal".into()),
+            no_group: true,
+            group: None,
+        },
+        &mut Vec::new(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("email"), "{refused}");
+    assert!(
+        registry::load(&host)
+            .unwrap()
+            .is_none_or(|registry| registry.accounts.is_empty()),
+        "nothing nameless is held"
+    );
 }

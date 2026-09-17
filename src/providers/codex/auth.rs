@@ -60,16 +60,19 @@ pub fn identity(document: &str) -> Result<(AccountIdentity, Identity, Option<Str
     if auth.tokens.account_id != Some(workspace) {
         return Err(refused("Workspace identity disagrees with its Credential"));
     }
+    let email = claims
+        .get("email")
+        .and_then(Value::as_str)
+        .filter(|email| !email.trim().is_empty())
+        .ok_or_else(|| refused("identity names no email address"))?;
     let identity = AccountIdentity::new(Id::Codex, user.into(), workspace.into())?;
+    // No Organization name: the Workspace is a UUID, and the token's
+    // `organizations` are API organizations rather than it.
     let description = Identity {
-        email: claims
-            .get("email")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .into(),
+        email: email.into(),
         account_uuid: Some(user.into()),
         organization_uuid: Some(workspace.into()),
-        organization_name: Some(workspace.into()),
+        organization_name: None,
     };
     let plan = account
         .get("chatgpt_plan_type")
