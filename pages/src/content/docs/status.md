@@ -149,7 +149,7 @@ $ perch status --json
     },
     "organization": "Acme",
     "plan": "pro",
-    "profile_dir": "/Users/you/.config/perch/profiles/you-example-com",
+    "profile_dir": "/Users/you/.config/perch/providers/claude/profiles/claude-4206ebf7d1d5bb1f78b812321decc32809cac5786ade33037181bbdd08da2e94",
     "quarantined": null,
     "utilization": {
       "never_observed": false,
