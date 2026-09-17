@@ -45,7 +45,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
         .is_some_and(|word| !word.is_empty() && !word.starts_with('-'));
     let installation = if custom {
         None
-    } else if !registry.run_fallback && args.provider.explicit()?.is_none() {
+    } else if !registry.run_fallback && args.provider.explicit().is_none() {
         Some(
             registry
                 .run_provider
@@ -59,7 +59,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     let selected = installation
         .as_ref()
         .map(|installed| installed.provider())
-        .or(args.provider.explicit()?);
+        .or(args.provider.explicit());
     let found = target::resolve_for(&registry, &args.target, selected)?;
     let account = registry.held(&found.email)?;
     if selected.is_some_and(|provider| provider != account.provider()) {

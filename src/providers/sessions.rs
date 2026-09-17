@@ -1,4 +1,5 @@
-//! Claude session evidence and Perch's compatible session markers.
+//! Session markers under a Profile: the `<pid>.json` Claude Code writes and
+//! the compatible one Perch writes for any provider's Profile it drives.
 
 use crate::{PerchError, Result};
 use chrono::{DateTime, Utc};
@@ -73,8 +74,9 @@ pub(super) fn read(
 
 pub(super) const SESSIONS: &str = "sessions";
 
-/// Where Claude Code records the sessions it is running: one `<pid>.json` per
-/// client, in the config directory it was launched against.
+/// Where a Profile's running clients are recorded: one `<pid>.json` per
+/// client, in the config directory it was launched against. Claude Code writes
+/// its own there; Perch writes one for every provider.
 pub(super) fn sessions_dir(config_dir: &Path) -> PathBuf {
     config_dir.join(SESSIONS)
 }

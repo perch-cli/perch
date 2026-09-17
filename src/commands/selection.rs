@@ -17,27 +17,18 @@ pub struct Selection {
 }
 
 impl Selection {
-    pub fn explicit(self) -> Result<Option<Id>> {
-        if let Some(provider) = self.provider {
-            if self.claude || self.codex {
-                return Err(PerchError::Invalid(
-                    "Name one provider: `--provider <name>`, `--claude` or `--codex`.".into(),
-                ));
-            }
-            return Ok(Some(provider));
-        }
-        match (self.claude, self.codex) {
-            (true, true) => Err(PerchError::Invalid(
-                "Name one provider: `--provider <name>`, `--claude` or `--codex`.".into(),
-            )),
-            (true, false) => Ok(Some(Id::Claude)),
-            (false, true) => Ok(Some(Id::Codex)),
-            _ => Ok(None),
-        }
+    /// The provider named on the command line, or none. clap refuses two at
+    /// once, so a flag and `--provider` never both arrive.
+    pub fn explicit(self) -> Option<Id> {
+        self.provider.or(match (self.claude, self.codex) {
+            (true, false) => Some(Id::Claude),
+            (false, true) => Some(Id::Codex),
+            _ => None,
+        })
     }
 
     pub fn installed(self, host: &dyn Host, preferred: Id) -> Result<Installation> {
-        if let Some(provider) = self.explicit()? {
+        if let Some(provider) = self.explicit() {
             return provider.adapter().configured(host)?.installation(host);
         }
         for provider in std::iter::once(preferred).chain(
@@ -57,5 +48,26 @@ impl Selection {
             }
         }
         Err(PerchError::NotFound("No enabled provider CLI was found. `perch config set --provider <name> cli-path <path>` names one.".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_names_the_flag_or_the_provider_or_nothing() {
+        let named = |provider, claude, codex| {
+            Selection {
+                provider,
+                claude,
+                codex,
+            }
+            .explicit()
+        };
+        assert_eq!(named(None, false, false), None);
+        assert_eq!(named(None, true, false), Some(Id::Claude));
+        assert_eq!(named(None, false, true), Some(Id::Codex));
+        assert_eq!(named(Some(Id::Codex), false, false), Some(Id::Codex));
     }
 }

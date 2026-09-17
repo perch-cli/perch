@@ -195,9 +195,6 @@ impl ProfileRef {
     pub fn directory(&self) -> &std::path::Path {
         &self.directory
     }
-    pub(crate) fn profile_dir(&self, _host: &dyn Host) -> Result<PathBuf> {
-        Ok(self.directory.clone())
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -224,7 +221,7 @@ pub struct CredentialRemoval {
     pub note: Option<String>,
 }
 
-/// Provider evidence is corroborated against the Host’s process lifetime.
+/// Provider evidence is corroborated against the Host's process lifetime.
 pub struct SessionEvidence {
     pub pid: u32,
     pub marker: PathBuf,

@@ -179,7 +179,7 @@ impl Adapter for Claude {
         use super::provider::{AppliedProfile, InstallMode};
         let placed = profile::place(
             host,
-            &account.profile_dir(host)?,
+            account.directory(),
             Some(&authenticated.credential),
             authenticated.configuration.as_deref().map(String::as_str),
             if mode == InstallMode::New {

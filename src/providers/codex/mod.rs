@@ -129,7 +129,7 @@ impl super::provider::Adapter for Codex {
         mode: super::provider::InstallMode,
     ) -> Result<super::provider::AppliedProfile<'a>> {
         use super::provider::{AppliedProfile, InstallMode};
-        let home = account.profile_dir(host)?;
+        let home = account.directory().to_path_buf();
         refuse_live(host, &home)?;
         if mode == InstallMode::New {
             host.create_private_dir_all(home.parent().unwrap())
@@ -163,7 +163,7 @@ impl super::provider::Adapter for Codex {
         host: &dyn Host,
         profile: &std::path::Path,
     ) -> Result<super::provider::CredentialRemoval> {
-        let path = profile.join("auth.json");
+        let path = profile.join(AUTH_FILE);
         if !host.path_exists(&path) {
             return Ok(super::provider::CredentialRemoval::default());
         }
@@ -185,7 +185,7 @@ impl super::provider::Adapter for Codex {
         let mut bundle = ProfileBundle::default();
         if let Some(credential) = credential(host, account)? {
             bundle.insert(
-                "auth.json",
+                AUTH_FILE,
                 ArtifactPurpose::Credential,
                 credential.to_string(),
             );

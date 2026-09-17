@@ -86,7 +86,7 @@ pub fn profiles_dir(provider: Id, host: &dyn Host) -> Result<PathBuf> {
         .join("profiles"))
 }
 
-/// Storage keys produce one stable child directory inside their provider’s Profiles.
+/// Storage keys produce one stable child directory inside their provider's Profiles.
 pub fn profile_dir_for(provider: Id, host: &dyn Host, key: &str) -> Result<PathBuf> {
     let profiles = profiles_dir(provider, host)?;
     let slugged = slug(key);

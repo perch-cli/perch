@@ -581,10 +581,10 @@ impl Fullest {
         Self::read(crate::cycle::fullest_window_of(account))
     }
 
-    /// The same for a *candidate*, judged by the Scope's Measure: under Fable
-    /// First a fall-through candidate is measured on the windows its tier ranks
-    /// on, so a full Fable weekly does not set aside the one place a
-    /// Fable-spent Scope can still go (ADR fable-is-spent-first).
+    /// The same for a *candidate*, judged by the Scope's Measure: under
+    /// Preferred First a fall-through candidate is measured on the windows its
+    /// tier ranks on, so a full Ranking window does not set aside the one place
+    /// a spent Scope can still go (ADR fable-is-spent-first).
     pub fn measured(account: &Account, measure: crate::cycle::Measure) -> Option<Fullest> {
         Self::read(crate::cycle::measured_fullest_of(account, measure))
     }

@@ -1774,6 +1774,86 @@ fn oversized_bundles_are_refused_before_restore_effects_or_export_encryption() {
 }
 
 #[test]
+fn a_bundle_whose_configuration_leaves_the_file_store_is_refused_before_any_write() {
+    use perch::providers::provider::{ProfileBundle, RestoreRequest};
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let registry = registry::load(&host).unwrap().unwrap();
+    let account = &registry.accounts[0];
+    let profile = account.profile(&host).unwrap();
+    host.remove_dir_all(profile.directory()).unwrap();
+    let bundle: ProfileBundle = serde_json::from_value(json!({"artifacts":{
+        "auth.json":{"purpose":"credential","content":credential("personal", EMAIL)},
+        "config.toml":{"purpose":"configuration","content":"cli_auth_credentials_store = \"keyring\"\n"}
+    }}))
+    .unwrap();
+    host.forget_effects();
+    let error = match account.provider().adapter().prepare_restore(
+        &host,
+        RestoreRequest {
+            profile,
+            bundle: Some(&bundle),
+        },
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("a keyring configuration was accepted"),
+    };
+    assert!(error.to_string().contains("file store"), "{error}");
+    assert!(host.effects().is_empty(), "{:?}", host.effects());
+}
+
+#[test]
+fn a_restore_onto_a_profile_that_exists_is_refused_before_any_write() {
+    use perch::providers::provider::RestoreRequest;
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let registry = registry::load(&host).unwrap().unwrap();
+    let account = &registry.accounts[0];
+    let profile = account.profile(&host).unwrap();
+    host.forget_effects();
+    let error = match account.provider().adapter().prepare_restore(
+        &host,
+        RestoreRequest {
+            profile,
+            bundle: None,
+        },
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("a Profile that exists was restored over"),
+    };
+    assert!(error.to_string().contains("already exists"), "{error}");
+    assert!(host.effects().is_empty(), "{:?}", host.effects());
+}
+
+#[test]
+fn a_bundle_credential_for_another_workspace_is_refused_before_any_write() {
+    use perch::providers::provider::{ProfileBundle, RestoreRequest};
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let registry = registry::load(&host).unwrap().unwrap();
+    let account = &registry.accounts[0];
+    let profile = account.profile(&host).unwrap();
+    host.remove_dir_all(profile.directory()).unwrap();
+    let bundle: ProfileBundle = serde_json::from_value(json!({"artifacts":{
+        "auth.json":{"purpose":"credential","content":credential("work", EMAIL)}
+    }}))
+    .unwrap();
+    host.forget_effects();
+    let error = match account.provider().adapter().prepare_restore(
+        &host,
+        RestoreRequest {
+            profile,
+            bundle: Some(&bundle),
+        },
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("another Workspace's Credential was accepted"),
+    };
+    assert!(error.to_string().contains("another Account"), "{error}");
+    assert!(host.effects().is_empty(), "{:?}", host.effects());
+}
+
+#[test]
 fn unsupported_shared_state_is_refused_before_native_launch_effects() {
     use perch::providers::provider::{LaunchKind, LaunchRequest, SharedProfile};
     let host = machine("personal");

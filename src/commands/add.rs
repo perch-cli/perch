@@ -41,7 +41,7 @@ pub struct AddArgs {
 pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // Read rather than held: holding the Registry lock across a browser round
     // trip would block every other Perch for as long as the login takes.
-    let provider = args.provider.explicit()?.unwrap_or_default();
+    let provider = args.provider.explicit().unwrap_or_default();
     let installation = provider.adapter().configured(host)?.installation(host)?;
     let mut registry = crate::adopt::ensure_adopted(host)?;
     registry.select_provider(provider);

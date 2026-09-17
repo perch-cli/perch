@@ -105,6 +105,8 @@ impl DefaultChange for Edit<'_> {
                 },
             });
         }
+        // A held copy Perch cannot read is overwritten rather than refused: the
+        // live one is verified as this Account's and is what Codex is using.
         let held = credential(self.host, outgoing).ok().flatten();
         if held.as_deref() == Some(&*live) {
             return Ok(Captured::NothingToSave);
@@ -226,37 +228,13 @@ impl DefaultInspection for Inspection<'_> {
         let Some(live) = live else {
             return Ok(DefaultObservation::Settled(leaving.map(str::to_string)));
         };
-        let named = [Some(arriving), leaving]
-            .into_iter()
-            .flatten()
-            .filter_map(|key| {
-                profiles
-                    .iter()
-                    .find(|profile| name::same_name(profile.key(), key))
-            });
-        let rest = profiles.iter().filter(|profile| {
-            !name::same_name(profile.key(), arriving)
-                && !leaving.is_some_and(|key| name::same_name(profile.key(), key))
-        });
-        let ordered: Vec<&Account> = named.chain(rest).collect();
-        for profile in &ordered {
-            if !may_continue() {
-                return Ok(DefaultObservation::Stopped);
-            }
-            if credential(self.host, profile)
-                .ok()
-                .flatten()
-                .is_some_and(|held| *held == *live)
-            {
-                return Ok(DefaultObservation::Settled(Some(profile.key().to_string())));
-            }
-        }
-        // No copy is byte-equal, so the live one Rotated since; the identity it
-        // carries still says whose it is.
+        // Whose it is comes off the identity the file carries, whichever
+        // Rotation of it: a held copy that is byte-equal has the same identity,
+        // and no two Accounts share one.
         let Ok((found, _, _)) = identity(&live) else {
             return Ok(DefaultObservation::Unknown);
         };
-        Ok(ordered
+        Ok(profiles
             .iter()
             .find(|profile| profile.provider_identity.as_ref() == Some(&found))
             .map_or(DefaultObservation::Unknown, |profile| {

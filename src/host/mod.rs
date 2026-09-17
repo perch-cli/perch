@@ -107,7 +107,7 @@ pub struct HttpRequest<'a> {
 impl std::fmt::Debug for HttpRequest<'_> {
     /// The url and the header *names*, never a header value and never the body.
     /// An access token travels as a header and the renewal's body is a refresh
-    /// token outright (the provider’s renewal operation).
+    /// token outright (the provider's renewal operation).
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let names: Vec<&str> = self.headers.iter().map(|(name, _)| *name).collect();
         write!(
@@ -171,7 +171,7 @@ pub struct HttpResponse {
 impl std::fmt::Debug for HttpResponse {
     /// The status and the size, never the body. The token endpoint answers a
     /// renewal with the new access token and the rotated refresh token in that
-    /// body (the provider’s renewal operation), so this is the shape a Credential
+    /// body (the provider's renewal operation), so this is the shape a Credential
     /// arrives in — redacted for the same reason the request that asked for it
     /// is.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

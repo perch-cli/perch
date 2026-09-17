@@ -128,7 +128,7 @@ pub(super) fn login(host: &dyn Host, executable: &std::path::Path) -> Result<Zer
         return Err(refused("login did not complete"));
     }
     let document = Zeroizing::new(
-        host.read_file(&temporary.path.join("auth.json"))
+        host.read_file(&temporary.path.join(super::AUTH_FILE))
             .map_err(|_| refused("login did not write a file Credential"))?,
     );
     Ok(document)

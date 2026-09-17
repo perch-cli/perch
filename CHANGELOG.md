@@ -92,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Claude defers its version check without resolving a different executable;
   Codex checks its installation before claiming a Profile for observation.
 - Add and Relogin keep one selected provider installation through authentication,
-  including Claude’s version check, when provider configuration changes.
+  including Claude's version check, when provider configuration changes.
 - Run keeps the provider installation selected at the start of the operation,
   even if its configured CLI path or enabled setting changes during the lock
   wait. Client and custom-command launches share a typed provider contract.
@@ -107,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Default matching, capture, and backup attribution recognize stable
   subjects and Workspaces independently of email. A stable Account with no
   readable live identity cannot capture or export the live Credential as its own.
-- Run refuses to launch when the selected Account’s provider or identity changes
+- Run refuses to launch when the selected Account's provider or identity changes
   while it waits for the Registry lock.
 - [**breaking**] Registry layout 9 and Export version 5 allow provider identities
   without a Workspace. Codex still requires an authenticated Workspace. Older
@@ -117,7 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are private provider implementation details, accessed through the shared contract.
 
 - Managed Profile and pending-login paths explicitly identify their provider.
-  Claude’s native Default selection and fallback identity serialization live
+  Claude's native Default selection and fallback identity serialization live
   inside its private adapter; shared Accounts expose provider-neutral Profiles.
 
 - Watcher installation and upgrade refresh resolve every enabled provider,
@@ -133,10 +133,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through that provider. Probe includes installed providers and providers with
   held Accounts, alongside the preferred provider.
 
-- Liveness checks use each Profile’s provider. Unreadable session evidence keeps
-  its refusal status without attributing another provider’s CLI version.
+- Liveness checks use each Profile's provider. Unreadable session evidence keeps
+  its refusal status without attributing another provider's CLI version.
 
-- Purge reports credential-removal details from each provider, including Claude’s
+- Purge reports credential-removal details from each provider, including Claude's
   platform-specific empty-store explanation.
 
 - [**breaking**] The prelaunch reset requires a fresh configuration. Registry

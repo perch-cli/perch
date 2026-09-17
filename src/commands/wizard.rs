@@ -298,11 +298,7 @@ fn one_setting(
     let (subject, current) = match provider {
         Some(provider) => (
             format!("for {} {}", provider.adapter().name(), scope.within()),
-            registry
-                .resolved_policy(scope, provider)
-                .settings
-                .watcher_may_act
-                .to_string(),
+            key.of_provider(registry, scope, provider),
         ),
         None => (scope.within(), key.of(registry, scope)),
     };
