@@ -52,7 +52,7 @@ struct Decision {
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    let explicit = args.provider.explicit()?;
+    let explicit = args.provider.explicit();
     let selected = match args.target.as_deref() {
         Some(target) if registry.declared_group(target).is_none() => {
             let found = target::resolve_for(&registry, target, explicit)?;
@@ -134,7 +134,7 @@ fn decide(
             if let Some(name) = registry.declared_group(target) {
                 Scope::Group(name.into())
             } else {
-                let found = target::resolve_for(registry, target, args.provider.explicit()?)?;
+                let found = target::resolve_for(registry, target, args.provider.explicit())?;
                 let incoming = registry.held(&found.email)?.clone();
                 refuse_a_quarantined_account(registry, &incoming)?;
                 return Ok(Decision {
