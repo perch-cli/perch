@@ -48,7 +48,7 @@ Account it opened with, so restart it. Perch switches Codex's file store only:
 
 ```
 $ perch switch work
-Codex keeps its login in the keyring, which Perch does not switch. Put `cli_auth_credentials_store = "file"` in /Users/you/.codex/config.toml first.   # exit 14
+Codex keeps its login in its `keyring` store, which Perch does not switch. Put `cli_auth_credentials_store = "file"` in /Users/you/.codex/config.toml first.   # exit 14
 ```
 
 A Group holding Accounts of both providers needs the provider named for a
