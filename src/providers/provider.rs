@@ -300,7 +300,9 @@ pub(super) trait Adapter: Sync {
         )))
     }
 
-    fn maintain(&self, _host: &dyn Host) {}
+    /// Deletes what one abandoned login left in `dir`, the directory included;
+    /// a note where it cannot, never a refusal.
+    fn discard_login(&self, host: &dyn Host, dir: &std::path::Path);
     fn discover(
         &self,
         _host: &dyn Host,
@@ -369,6 +371,11 @@ pub(super) trait Adapter: Sync {
         request: &LaunchRequest<'_>,
     ) -> Result<PreparedLaunch<'a>>;
 }
+
+/// How long a pending login is left alone before it is taken to have been
+/// abandoned. Generous, because what is on the other side of it is a person
+/// finding their password.
+const ABANDONED_AFTER_MINUTES: i64 = 30;
 
 /// Explicit paths pass through unchanged; discovered candidates need a service rehearsal.
 pub struct ServiceSetup {
@@ -618,8 +625,34 @@ impl Provider {
         }
         Ok(())
     }
+    /// Deletes what abandoned logins left behind. Silent and best-effort: this
+    /// is tidying on the way to what was asked for.
     pub fn maintain(&self, host: &dyn Host) {
-        self.adapter.maintain(host);
+        let Ok(pending) = crate::holdings::pending_logins_dir(self.id(), host) else {
+            return;
+        };
+        // Absent is the ordinary case: no login has ever been run here.
+        let Ok(entries) = host.list_dir(&pending) else {
+            return;
+        };
+        let too_old = host.now() - chrono::Duration::minutes(ABANDONED_AFTER_MINUTES);
+        for dir in entries {
+            // A directory whose age cannot be established is left alone: wrong
+            // this way costs a stale directory, wrong the other way costs
+            // somebody the login they are in the middle of.
+            let Some(started_at) = crate::holdings::pending_login_started_at(&dir) else {
+                continue;
+            };
+            if started_at > too_old {
+                continue;
+            }
+            // Age is evidence and not proof (ADR a-profile-is-live-by-evidence):
+            // a login somebody is in the middle of is a Live Profile.
+            if crate::live::ask(host, &[crate::live::Place::at(self.id(), &dir)]).counts_as_live() {
+                continue;
+            }
+            self.adapter.discard_login(host, &dir);
+        }
     }
     pub fn install<'a>(
         &self,

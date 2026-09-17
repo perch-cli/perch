@@ -615,7 +615,7 @@ fn a_profile_whose_credential_would_not_go_down_is_not_left_behind() {
 
 /// The same one step later: the Profile is complete and the Registry will not
 /// take it. A Profile nothing records holds a live refresh token that
-/// `reap_abandoned` never walks, since that only walks `pending/`.
+/// no reaper walks, since the reaper only walks `pending/`.
 #[test]
 fn a_profile_the_registry_would_not_record_is_taken_back_out_again() {
     let host = logged_in_machine();

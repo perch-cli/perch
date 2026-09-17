@@ -121,11 +121,7 @@ impl Drop for Temporary<'_> {
 
 pub(super) fn login(host: &dyn Host, executable: &std::path::Path) -> Result<Zeroizing<String>> {
     let held = holdings::lock(host)?;
-    let path = holdings::pending_logins_dir(Id::Codex, host)?.join(format!(
-        "{}-{}",
-        host.process_id(),
-        host.now().timestamp_millis()
-    ));
+    let path = holdings::pending_login_dir(Id::Codex, host, host.now())?;
     host.create_dir_exclusive(&path)
         .or_else(|_| {
             host.create_private_dir_all(path.parent().unwrap())?;

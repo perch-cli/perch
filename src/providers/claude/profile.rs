@@ -38,7 +38,7 @@ pub enum IfItFails {
 /// One Profile a placement has written into, and exactly what it made there:
 /// the ledger bounds the undo — take back only what this write made, and only
 /// if it made it. A Profile nothing records holds a live refresh token that
-/// `reap_abandoned` never walks, so a caller whose record fails owes this a
+/// no reaper walks, so a caller whose record fails owes this a
 /// [`Placed::take_back`].
 #[derive(Debug)]
 pub struct Placed {

@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A refusal for no active Account counts the selected provider's Accounts
   alone and names `perch add --claude` or `perch add --codex`, where it
   counted every provider's and told a Codex user to run `claude`.
+- A Codex login Perch was killed in the middle of is reaped after thirty
+  minutes, as a Claude Code one is, and its directory is named after the
+  moment it started.
 
 ### Changed
 

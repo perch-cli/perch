@@ -2455,3 +2455,50 @@ fn a_provider_flag_counts_only_that_providers_accounts_when_none_is_active() {
         "the Claude Account held is not one `--codex` would switch to: {said}"
     );
 }
+
+/// Ctrl-C during a login kills Perch without unwinding, and the Codex login
+/// directory holds a refresh token, as the Claude one does.
+#[test]
+fn an_abandoned_codex_login_is_reaped_by_the_next_command() {
+    let host = two_codex_workspaces();
+    let abandoned =
+        perch::holdings::pending_login_dir(Id::Codex, &host, host.now()).expect("home is known");
+    host.set_file(abandoned.join("auth.json"), &credential("third", EMAIL));
+
+    common::run_list(&host, false).0.expect("a listing");
+    assert!(
+        host.path_exists(&abandoned),
+        "a login half an hour old is one somebody may still be driving"
+    );
+
+    host.set_now(host.now() + chrono::Duration::hours(2));
+    common::run_list(&host, false).0.expect("a listing");
+
+    assert!(
+        !host.path_exists(&abandoned),
+        "the token is gone with its directory"
+    );
+}
+
+#[test]
+fn an_abandoned_codex_login_that_will_not_delete_is_noted_and_refuses_nothing() {
+    let host = two_codex_workspaces();
+    let abandoned =
+        perch::holdings::pending_login_dir(Id::Codex, &host, host.now()).expect("home is known");
+    host.set_file(abandoned.join("auth.json"), &credential("third", EMAIL));
+    host.set_now(host.now() + chrono::Duration::hours(2));
+    host.now_refusing(&abandoned, Refusing::Delete, "Operation not permitted");
+
+    common::run_list(&host, false)
+        .0
+        .expect("tidying is on the way to what was asked for, never in its way");
+
+    assert!(host.path_exists(&abandoned));
+    assert!(
+        host.notes()
+            .iter()
+            .any(|note| note.contains("Operation not permitted")),
+        "{:?}",
+        host.notes()
+    );
+}

@@ -110,6 +110,11 @@ impl super::provider::Adapter for Codex {
     ) -> Result<Option<super::provider::Authenticated>> {
         auth::discover(host)
     }
+    fn discard_login(&self, host: &dyn Host, dir: &std::path::Path) {
+        if let Err(error) = host.remove_dir_all(dir) {
+            host.note(&PerchError::file_write(dir, error).to_string());
+        }
+    }
 
     fn authenticate(
         &self,
