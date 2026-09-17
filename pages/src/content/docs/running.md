@@ -47,7 +47,7 @@ history stay apart from every other Account's. Codex support is experimental.
 
 ```
 $ perch run --claude personal
-personal is a Codex Account. `perch run --codex personal` launches it.   # exit 14
+personal is a Codex Account. `--codex` selects it.   # exit 14
 ```
 
 `--claude`, `--codex` and `--provider <name>` name the provider outright. An
@@ -80,7 +80,7 @@ A Switch away from the Account you are running is refused as above. A
 
 ```
 $ perch status --refresh
-you@example.com: its access token has expired and a client is running against it (pid 4242 in /Users/you/.config/perch/profiles/you-example-com), so it was not Renewed.
+you@example.com: its access token has expired and a client is running against it (pid 4242 in /Users/you/.config/perch/providers/claude/profiles/claude-4206ebf7d1d5bb1f78b812321decc32809cac5786ade33037181bbdd08da2e94), so it was not Renewed.
 Account       you@example.com
 Organization  Acme
 Plan          pro

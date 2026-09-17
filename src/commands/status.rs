@@ -25,6 +25,9 @@ use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy, clap::Args)]
 pub struct StatusArgs {
+    #[command(flatten)]
+    pub provider: crate::commands::selection::Selection,
+
     /// Read Utilization from Anthropic first
     #[arg(long)]
     pub refresh: bool,
@@ -35,7 +38,7 @@ pub struct StatusArgs {
 }
 
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
-    let mut viewing = crate::commands::Viewing::opened(host, args.refresh)?;
+    let mut viewing = crate::commands::Viewing::opened(host, args.refresh, args.provider)?;
     // Perch on nobody *because* a Switch was in flight is the answer to why the
     // absence is there rather than an absence to report, so it exits 0
     // (ADR a-switch-is-written-down-first).

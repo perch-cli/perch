@@ -450,6 +450,7 @@ fn a_third_provider_uses_shared_commands_configuration_and_observation() {
                 scope: Some("shared".into()),
                 refresh: true,
                 json: true,
+                ..Default::default()
             },
             &mut output,
         )

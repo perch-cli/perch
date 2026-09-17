@@ -33,6 +33,9 @@ use crate::utilization;
 /// under is answered with what *was* declared.
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct ListArgs {
+    #[command(flatten)]
+    pub provider: crate::commands::selection::Selection,
+
     /// A Group by name, or `ungrouped`
     #[arg(value_name = "SCOPE")]
     pub scope: Option<String>,
@@ -130,7 +133,7 @@ fn group_heading(name: &str) -> String {
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
-    let mut viewing = crate::commands::Viewing::opened(host, args.refresh)?;
+    let mut viewing = crate::commands::Viewing::opened(host, args.refresh, args.provider)?;
 
     let scope = match &args.scope {
         Some(name) => narrowed(viewing.registry(), name)?,

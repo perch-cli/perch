@@ -68,7 +68,9 @@ so, and exits 0.
 
 ## Where things are
 
-- `~/.config/perch/registry.json` is Perch's own state, versioned.
+- `~/.config/perch/config.json` is Perch's own state, versioned. Each
+  provider's active Account and cached figures are in
+  `~/.config/perch/providers/<provider>/state.json`.
 - `~/.config/perch/.watch.lock` is held for as long as a Watcher runs. A second
   Watcher says who holds it and waits.
 - `~/.config/perch/trail.log`, and `trail.log.1` once the first has grown past
@@ -81,8 +83,9 @@ so, and exits 0.
   `~/.config/systemd/user/perch-watch.service` on Linux, and a Scheduled Task
   named `Perch\Watch` on Windows. `perch watcher uninstall` removes it, and so
   does `perch holdings purge`.
-- `~/.config/perch/profiles/<account>/` is one directory per Account, and
-  gives that Account its private Credential Store.
+- `~/.config/perch/providers/<provider>/profiles/<key>/` is one directory per
+  Account, named by the Account's stable key rather than its email, and gives
+  that Account its private Credential Store.
 - `$PERCH_HOME` overrides `~/.config/perch`, on every platform. Home is
   `$USERPROFILE` on Windows and `$HOME` elsewhere.
 - `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it Perch walks

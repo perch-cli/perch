@@ -106,7 +106,7 @@ pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
              `perch group move {} <group>` puts it in one, or `perch config set \
              ungrouped interchangeable true` declares them.",
             registry.named_for_the_user(leaving.key()),
-            leaving.key(),
+            registry.target_of(leaving.key()),
         ))),
     }
 }

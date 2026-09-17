@@ -8,6 +8,11 @@ sidebar:
 them: everything Perch holds, or one Scope of it. Neither touches the network
 unless you pass `--refresh`.
 
+Each provider has its own active Account. `perch status` reports one, and
+`perch list` marks it: the provider whose Accounts you hold, or with both held
+the Run preference, unless `--claude`, `--codex` or `--provider <name>` names
+the other.
+
 ## The Account you are on
 
 ```
@@ -144,7 +149,7 @@ $ perch status --json
     },
     "organization": "Acme",
     "plan": "pro",
-    "profile_dir": "/Users/you/.config/perch/profiles/you-example-com",
+    "profile_dir": "/Users/you/.config/perch/providers/claude/profiles/claude-4206ebf7d1d5bb1f78b812321decc32809cac5786ade33037181bbdd08da2e94",
     "quarantined": null,
     "utilization": {
       "never_observed": false,

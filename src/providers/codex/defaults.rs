@@ -99,10 +99,7 @@ impl DefaultChange for Edit<'_> {
         if outgoing.provider_identity.as_ref() != Some(&found) {
             return Ok(Captured::NotTheirs {
                 outgoing: outgoing.key().to_string(),
-                live: match described.email.is_empty() {
-                    true => found.key.clone(),
-                    false => described.email,
-                },
+                live: described.email,
             });
         }
         // A held copy Perch cannot read is overwritten rather than refused: the

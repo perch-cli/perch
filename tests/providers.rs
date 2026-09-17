@@ -2097,3 +2097,242 @@ fn the_active_codex_account_is_observed_where_its_login_is_live() {
     let windows = observed.expect("read off the Default home");
     assert_eq!(windows.len(), 1);
 }
+
+#[test]
+fn an_email_a_claude_and_a_codex_account_share_resolves_under_either_provider_flag() {
+    let host = common::logged_in_machine();
+    let document = credential("company", common::EMAIL);
+    let host = host.with_file(CODEX, "").with_login(move |host, at| {
+        host.set_file(at.join("auth.json"), &document);
+        0
+    });
+    add_account(&host, "company");
+    let registry = registry::load(&host).unwrap().unwrap();
+    assert_eq!(registry.accounts.len(), 2);
+
+    let claude = target::resolve_for(&registry, common::EMAIL, Some(Id::Claude))
+        .expect("`--claude` names the Claude Account alone");
+    assert_eq!(registry.held(&claude.email).unwrap().provider(), Id::Claude);
+    let codex = target::resolve_for(&registry, common::EMAIL, Some(Id::Codex))
+        .expect("`--codex` names the Codex Account alone");
+    assert_eq!(registry.held(&codex.email).unwrap().provider(), Id::Codex);
+    assert!(
+        target::resolve_for(&registry, common::EMAIL, None)
+            .unwrap_err()
+            .to_string()
+            .contains("names more than one Account"),
+        "with no provider named, the email is ambiguous"
+    );
+}
+
+#[test]
+fn a_provider_flag_refuses_an_account_of_the_other_provider_by_email_as_by_alias() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let host = host.with_file("/usr/bin/claude", "");
+    let claude = Selection {
+        provider: None,
+        codex: false,
+        claude: true,
+    };
+    for target in [EMAIL, "personal"] {
+        let mut printed = Vec::new();
+        let switched = perch::commands::switch::run(
+            &host,
+            perch::commands::switch::SwitchArgs {
+                provider: claude,
+                target: Some(target.into()),
+                no_refresh: true,
+            },
+            &mut printed,
+        );
+        assert!(
+            switched
+                .unwrap_err()
+                .to_string()
+                .contains("is a Codex Account. `--codex` selects it."),
+            "`perch switch --claude {target}` refuses rather than switching Codex"
+        );
+        assert!(
+            printed.is_empty(),
+            "{}",
+            String::from_utf8(printed).unwrap()
+        );
+        let ran = run::run(
+            &host,
+            run::RunArgs {
+                provider: claude,
+                target: target.into(),
+                command: vec![],
+            },
+            &mut Vec::new(),
+        );
+        assert!(
+            ran.unwrap_err()
+                .to_string()
+                .contains("is a Codex Account. `--codex` selects it."),
+            "`perch run --claude {target}` says the same sentence"
+        );
+    }
+}
+
+#[test]
+fn status_and_list_speak_for_the_one_provider_whose_accounts_are_held() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "work").0.unwrap();
+
+    let (status, said) = common::run_status(&host, false);
+    status.expect("the Codex Account just switched to is the one you are on");
+    assert!(said.contains(EMAIL), "{said}");
+    assert!(
+        !said.contains("Organization"),
+        "a Workspace id is not an Organization name: {said}"
+    );
+
+    let (list, listed) = common::run_list(&host, true);
+    list.unwrap();
+    let listed: serde_json::Value = serde_json::from_str(&listed).unwrap();
+    assert!(
+        listed["active_account"]
+            .as_str()
+            .is_some_and(|key| key.starts_with("codex:")),
+        "{listed}"
+    );
+}
+
+#[test]
+fn status_speaks_for_the_run_preference_where_both_providers_are_held_unless_a_flag_names_one() {
+    let host = common::logged_in_machine();
+    let document = credential("company", EMAIL);
+    let host = host.with_file(CODEX, "").with_login(move |host, at| {
+        host.set_file(at.join("auth.json"), &document);
+        0
+    });
+    add_account(&host, "company");
+    let codex = Selection {
+        provider: None,
+        codex: true,
+        claude: false,
+    };
+    perch::commands::switch::run(
+        &host,
+        perch::commands::switch::SwitchArgs {
+            provider: codex,
+            target: Some("company".into()),
+            no_refresh: true,
+        },
+        &mut Vec::new(),
+    )
+    .unwrap();
+
+    let (unnamed, said) = common::run_status(&host, false);
+    unnamed.unwrap();
+    assert!(
+        said.contains(common::EMAIL) && !said.contains(EMAIL),
+        "the Run preference is Claude: {said}"
+    );
+    let (named, said) = common::run_status_with(
+        &host,
+        perch::commands::status::StatusArgs {
+            provider: codex,
+            ..Default::default()
+        },
+    );
+    named.unwrap();
+    assert!(
+        said.contains(EMAIL) && !said.contains(common::EMAIL),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_first_config_set_on_a_logged_in_machine_still_adopts_the_native_login() {
+    let host = common::logged_in_machine();
+    config::run(
+        &host,
+        config::ConfigCommand::Set {
+            words: ["--global", "run-provider", "claude"]
+                .map(String::from)
+                .into(),
+        },
+        &mut Vec::new(),
+    )
+    .unwrap();
+    let registry = registry::load(&host).unwrap().unwrap();
+    assert_eq!(
+        registry.accounts.len(),
+        1,
+        "the native login is adopted by the first command that saves, whichever it is"
+    );
+    let (status, said) = common::run_status(&host, false);
+    status.expect("and it is the Account you are on");
+    assert!(said.contains(common::EMAIL), "{said}");
+}
+
+#[test]
+fn a_codex_relogin_names_the_account_as_a_person_reads_it_and_never_by_its_key() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let mut printed = Vec::new();
+    relogin::run(
+        &host,
+        relogin::ReloginArgs {
+            target: "personal".into(),
+        },
+        &mut printed,
+    )
+    .unwrap();
+    let printed = String::from_utf8(printed).unwrap();
+    assert!(
+        printed.contains(&format!(
+            "Logging in again to repair {EMAIL} (as `personal`)."
+        )),
+        "{printed}"
+    );
+    assert!(!printed.contains("codex:"), "{printed}");
+}
+
+#[test]
+fn a_codex_credential_naming_no_email_is_refused_rather_than_held_nameless() {
+    let payload = URL_SAFE_NO_PAD.encode(
+        json!({
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "user-one",
+                "chatgpt_account_id": "personal",
+                "chatgpt_plan_type": "plus"
+            }
+        })
+        .to_string(),
+    );
+    let document = json!({"auth_mode":"chatgpt","tokens":{"id_token":format!("fake.{payload}.fake"),"account_id":"personal"}}).to_string();
+    let host = FakeHost::new()
+        .with_env("PATH", "/usr/bin")
+        .with_file(CODEX, "")
+        .with_login(move |host, at| {
+            host.set_file(at.join("auth.json"), &document);
+            0
+        });
+    let refused = add::run(
+        &host,
+        add::AddArgs {
+            provider: Selection {
+                provider: None,
+                codex: true,
+                claude: false,
+            },
+            alias: Some("personal".into()),
+            no_group: true,
+            group: None,
+        },
+        &mut Vec::new(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("email"), "{refused}");
+    assert!(
+        registry::load(&host)
+            .unwrap()
+            .is_none_or(|registry| registry.accounts.is_empty()),
+        "nothing nameless is held"
+    );
+}

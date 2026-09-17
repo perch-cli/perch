@@ -40,11 +40,11 @@ const WORK_FACTOR: u8 = 19;
 /// there is no run in which it is worth discovering.
 const _: () = assert!(WORK_FACTOR < MAX_WORK_FACTOR);
 
-/// The oldest envelope shape any Perch has stamped; below it names no shape.
+/// The oldest envelope shape this Perch opens; below it names no shape.
 ///
-/// The Export's own rather than the Registry's, which it equals by coincidence:
-/// the day that floor moves, every Export ever written claims a version the
-/// Registry's number says nothing wrote.
+/// The Export's own rather than the Registry's: the two numbers move apart,
+/// and an Export is refused rather than brought forward
+/// (ADR the-holdings-outlive-a-perch).
 const EARLIEST_VERSION: u32 = CURRENT_VERSION;
 
 const _: () = assert!(EARLIEST_VERSION <= CURRENT_VERSION);

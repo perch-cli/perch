@@ -62,15 +62,6 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
         .or(args.provider.explicit());
     let found = target::resolve_for(&registry, &args.target, selected)?;
     let account = registry.held(&found.email)?;
-    if selected.is_some_and(|provider| provider != account.provider()) {
-        return Err(PerchError::Invalid(format!(
-            "{} is a {} Account. `perch run --{} {}` launches it.",
-            args.target,
-            account.provider().adapter().name(),
-            account.provider().word(),
-            args.target
-        )));
-    }
     refuse_a_quarantined_account(&registry, account.key())?;
     let held = crate::holdings::lock(host)?;
     let latest = registry::load(host)?.ok_or_else(|| {

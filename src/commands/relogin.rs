@@ -58,7 +58,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         wait::across(
             &mut (),
             |_| {
-                say::line(out, &announcement(&account))?;
+                say::line(out, &announcement(&registry, &account))?;
                 if let Some(quit) = installation.provider().adapter().login_instruction() {
                     say::line(out, quit)?;
                 }
@@ -160,13 +160,16 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
             "The repair stands. `perch relogin {}` again finishes the job.",
             registry.target_of(account.key()),
         ))),
-        Err(stopped) => Err(no_longer_on_anybody(
-            host,
-            &mut perch,
-            &mut registry,
-            &account,
-            not_made_live(&account, stopped.error),
-        )),
+        Err(stopped) => {
+            let error = not_made_live(&registry, &account, stopped.error);
+            Err(no_longer_on_anybody(
+                host,
+                &mut perch,
+                &mut registry,
+                &account,
+                error,
+            ))
+        }
     }
 }
 
@@ -254,11 +257,11 @@ fn record(registry: &mut Registry, account: &Account, fresh: Authenticated) -> R
 ///
 /// Only for that side of [`switch::NotSwitched::moved`]: the live store still
 /// holds the Credential that stopped working.
-fn not_made_live(account: &Account, error: PerchError) -> PerchError {
+fn not_made_live(registry: &Registry, account: &Account, error: PerchError) -> PerchError {
     error.with_note(&format!(
         "The repair stands, and the live Credential was not replaced. `perch \
          relogin {}` again finishes the job.",
-        account.key(),
+        registry.target_of(account.key()),
     ))
 }
 
@@ -331,8 +334,11 @@ fn will_land_in_the_default_profile(registry: &Registry, account: &Account) -> b
 }
 
 /// What the login is for.
-fn announcement(account: &Account) -> String {
-    format!("Logging in again to repair {}.", account.key())
+fn announcement(registry: &Registry, account: &Account) -> String {
+    format!(
+        "Logging in again to repair {}.",
+        registry.named_for_the_user(account.key())
+    )
 }
 
 fn report(

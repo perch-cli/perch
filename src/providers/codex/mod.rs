@@ -17,7 +17,6 @@ use process::prepare_launch;
 use profiles::{Restore, refuse_live};
 use profiles::{credential, write_credential};
 use usage::read_limits;
-use zeroize::Zeroizing;
 
 const CONFIG: &str = "cli_auth_credentials_store = \"file\"\nforced_login_method = \"chatgpt\"\n";
 /// The one file Codex's file store is: Credential and identity in one document.
@@ -118,7 +117,7 @@ impl super::provider::Adapter for Codex {
             subject: Some(subject),
             plan,
             credential,
-            configuration: Some(Zeroizing::new(CONFIG.to_string())),
+            configuration: None,
         })
     }
     fn install<'a>(

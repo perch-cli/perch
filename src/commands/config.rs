@@ -12,7 +12,7 @@
 use std::io::Write;
 
 use crate::column::{self, Labeled};
-use crate::commands::group;
+use crate::commands::{group, only_the_registry};
 use crate::config::Scope;
 use crate::config::{NotAScope, SETTINGS, Setting};
 use crate::error::{PerchError, Result};
@@ -48,18 +48,14 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
     // takes the write lock waits out whatever holds it and then fails with
     // "another `perch` holds it".
     match command {
+        // The half that writes changes the Registry and reaches nothing else,
+        // which is the whole of what `only_the_registry` is for
+        // (ADR one-door-to-the-registry).
         ConfigCommand::Set { words } => {
-            let mut held = crate::holdings::lock(host)?;
-            let mut registry = crate::registry::load(host)?.unwrap_or_default();
-            let lines = set(&mut registry, &words)?;
-            crate::registry::save(host, &mut held, &mut registry)?;
-            for line in lines {
-                say::line(out, &line)?;
-            }
-            Ok(())
+            only_the_registry(host, out, |registry| set(registry, &words))
         }
         ConfigCommand::Get { words } => {
-            let registry = crate::registry::load(host)?.unwrap_or_default();
+            let registry = crate::adopt::ensure_adopted(host)?;
             for line in get(&registry, &words)? {
                 say::line(out, &line)?;
             }

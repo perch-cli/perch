@@ -21,27 +21,21 @@ pub(super) fn default_home(host: &dyn Host) -> Result<PathBuf> {
         .map_err(|error| PerchError::Other(error.to_string()))
 }
 
-/// The one Credential Store this Switch writes. Codex keeps its login in a
-/// file or in the OS keyring by `cli_auth_credentials_store`, and a file Perch
-/// writes changes nothing a keyring-backed Codex reads, so a Default that is not
-/// file-backed is refused rather than written under. The pin outranks an
-/// `auth.json` left behind: a home that moved to the keyring keeps its old file.
+/// The one Credential Store this Switch writes. `cli_auth_credentials_store`
+/// names Codex's, and a file Perch writes changes nothing a Codex reading
+/// another store sees, so a Default whose `config.toml` chooses one is refused
+/// rather than written under. Unset is the file: that is Codex's own default,
+/// and it outranks nothing on disk either way.
 pub(super) fn refuse_unless_file_backed(host: &dyn Host, home: &Path) -> Result<()> {
-    let file_backed = match store_setting(host, home) {
-        Some(store) => store == "file",
-        None => {
-            host.path_exists(&home.join(super::AUTH_FILE))
-                || !host.path_exists(&home.join(CONFIG_FILE))
-        }
-    };
-    if file_backed {
-        return Ok(());
+    match store_setting(host, home) {
+        None => Ok(()),
+        Some(store) if store == "file" => Ok(()),
+        Some(store) => Err(PerchError::Invalid(format!(
+            "Codex keeps its login in its `{store}` store, which Perch does not switch. \
+             Put `{PIN}` in {} first.",
+            home.join(CONFIG_FILE).display()
+        ))),
     }
-    Err(PerchError::Invalid(format!(
-        "Codex keeps its login in the keyring, which Perch does not switch. Put \
-         `{PIN}` in {} first.",
-        home.join(CONFIG_FILE).display()
-    )))
 }
 
 pub(super) const CONFIG_FILE: &str = "config.toml";
@@ -101,14 +95,28 @@ mod tests {
     }
 
     #[test]
-    fn a_default_is_file_backed_by_an_auth_file_or_a_pinned_store() {
+    fn a_default_is_file_backed_unless_its_config_chooses_another_store() {
         let home = Path::new("/Users/someone/.codex");
         assert!(
             refuse_unless_file_backed(&a_home(), home).is_ok(),
             "a home Codex never configured is Perch's to pin"
         );
         let unpinned = a_home().with_file(home.join("config.toml"), "model = \"gpt-5\"\n");
-        assert!(refuse_unless_file_backed(&unpinned, home).is_err());
+        assert!(
+            refuse_unless_file_backed(&unpinned, home).is_ok(),
+            "a config that names no store leaves Codex on its default, which is the file"
+        );
+        let auto = a_home().with_file(
+            home.join("config.toml"),
+            "cli_auth_credentials_store = \"auto\"\n",
+        );
+        assert!(
+            refuse_unless_file_backed(&auto, home)
+                .unwrap_err()
+                .to_string()
+                .contains("its `auto` store"),
+            "a store Perch does not write is named as the config spells it"
+        );
         let pinned = a_home().with_file(
             home.join("config.toml"),
             "model = \"gpt-5\"\ncli_auth_credentials_store = \"file\" # kept\n",
@@ -131,11 +139,11 @@ mod tests {
         );
         let in_a_profile = a_home().with_file(
             home.join("config.toml"),
-            "model = \"gpt-5\"\n[profiles.work]\ncli_auth_credentials_store = \"file\"\n",
+            "model = \"gpt-5\"\n[profiles.work]\ncli_auth_credentials_store = \"keyring\"\n",
         );
         assert!(
-            refuse_unless_file_backed(&in_a_profile, home).is_err(),
-            "a profile's pin is not the Default's"
+            refuse_unless_file_backed(&in_a_profile, home).is_ok(),
+            "a profile's store is not the Default's"
         );
     }
 }
