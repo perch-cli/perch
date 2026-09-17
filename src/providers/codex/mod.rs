@@ -129,7 +129,7 @@ impl super::provider::Adapter for Codex {
         mode: super::provider::InstallMode,
     ) -> Result<super::provider::AppliedProfile<'a>> {
         use super::provider::{AppliedProfile, InstallMode};
-        let home = account.profile_dir(host)?;
+        let home = account.directory().to_path_buf();
         refuse_live(host, &home)?;
         if mode == InstallMode::New {
             host.create_private_dir_all(home.parent().unwrap())

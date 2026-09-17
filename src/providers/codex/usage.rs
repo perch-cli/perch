@@ -42,7 +42,7 @@ pub(super) fn read_limits(
     // Capture of the next Switch.
     let home = match request.context.default {
         DefaultRelation::Active => layout::default_home(host),
-        _ => request.profile.profile_dir(host),
+        _ => Ok(request.profile.directory().to_path_buf()),
     };
     let result = home.and_then(|home| {
         read(

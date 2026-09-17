@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
 pub fn credential(host: &dyn Host, account: &Account) -> Result<Option<Zeroizing<String>>> {
-    let path = account.profile_dir(host)?.join(super::AUTH_FILE);
+    let path = account.directory().join(super::AUTH_FILE);
     if !host.path_exists(&path) {
         return Ok(None);
     }
@@ -33,7 +33,7 @@ pub fn write_credential(host: &dyn Host, account: &Account, document: &str) -> R
             "Credential belongs to another Account or Workspace",
         ));
     }
-    let home = account.profile_dir(host)?;
+    let home = account.directory().to_path_buf();
     host.create_private_dir_all(&home)
         .map_err(|_| refused("Profile could not be created"))?;
     if !host.path_exists(&home.join("config.toml")) {
@@ -76,7 +76,7 @@ impl<'a> Restore<'a> {
         }
 
         let account = request.profile;
-        let home = account.profile_dir(host)?;
+        let home = account.directory().to_path_buf();
         if host.path_exists(&home) {
             return Err(PerchError::Conflict(format!(
                 "{} already exists; nothing was imported",
@@ -115,7 +115,7 @@ impl<'a> Restore<'a> {
     }
 
     pub(crate) fn write(&mut self) -> Result<()> {
-        let home = self.account.profile_dir(self.host)?;
+        let home = self.account.directory().to_path_buf();
         self.host
             .create_private_dir_all(home.parent().unwrap())
             .map_err(|_| refused("Profile parent could not be created"))?;

@@ -195,9 +195,6 @@ impl ProfileRef {
     pub fn directory(&self) -> &std::path::Path {
         &self.directory
     }
-    pub(crate) fn profile_dir(&self, _host: &dyn Host) -> Result<PathBuf> {
-        Ok(self.directory.clone())
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

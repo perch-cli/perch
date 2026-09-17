@@ -228,7 +228,7 @@ struct Asked {
 /// A *settled* Registry rather than [`Registry::is_active`], which answers a Landing
 /// with the Account being **left** — off which figures land under the wrong address.
 fn holding(host: &dyn Host, context: &ProfileContext, account: &Account) -> Result<Asked> {
-    let its_own_profile = account.profile_dir(host)?;
+    let its_own_profile = account.directory().to_path_buf();
     let shares_its_profile_with = context.shared_with.clone();
     let settled_on_it = context.default == DefaultRelation::Active;
     if settled_on_it {

@@ -60,7 +60,7 @@ pub(super) fn prepare_launch<'a>(
     use provider::{LaunchEnvironment, PreparedLaunch};
     let account = request.account;
     let command = request.arguments;
-    let home = account.profile_dir(host)?;
+    let home = account.directory().to_path_buf();
     credential(host, account)?.ok_or_else(|| {
         PerchError::NotFound(
             "No Codex Credential is held for it. `perch relogin <target>` logs it in again.".into(),

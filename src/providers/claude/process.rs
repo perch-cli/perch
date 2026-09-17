@@ -13,7 +13,7 @@ pub(super) fn prepare<'a>(
         LaunchKind::Client(installed) => installed.executable().to_string_lossy().into_owned(),
         LaunchKind::Custom(program) => program.to_string(),
     };
-    let profile = request.account.profile_dir(host)?;
+    let profile = request.account.directory().to_path_buf();
     let default_profile = crate::providers::claude::layout::default_profile(host)?;
     let claim = crate::providers::sessions::claim(host, &profile)?;
     reconcile::reconcile(host, &default_profile.config_dir, &profile)?;
