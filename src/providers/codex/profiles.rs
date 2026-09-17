@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
 pub fn credential(host: &dyn Host, account: &Account) -> Result<Option<Zeroizing<String>>> {
-    let path = account.profile_dir(host)?.join("auth.json");
+    let path = account.profile_dir(host)?.join(super::AUTH_FILE);
     if !host.path_exists(&path) {
         return Ok(None);
     }
@@ -40,7 +40,7 @@ pub fn write_credential(host: &dyn Host, account: &Account, document: &str) -> R
         crate::host::write_atomically(host, &home.join("config.toml"), CONFIG)
             .map_err(|_| refused("Profile config could not be written"))?;
     }
-    crate::host::write_atomically(host, &home.join("auth.json"), document)
+    crate::host::write_atomically(host, &home.join(super::AUTH_FILE), document)
         .map_err(|_| refused("Credential could not be written"))?;
     if credential(host, account)?.as_deref().map(String::as_str) != Some(document) {
         return Err(refused("Credential read-back failed"));
@@ -62,7 +62,7 @@ impl<'a> Restore<'a> {
         if let Some(bundle) = request.bundle {
             bundle.expect(&[
                 (
-                    "auth.json",
+                    super::AUTH_FILE,
                     crate::providers::provider::ArtifactPurpose::Credential,
                 ),
                 (
@@ -93,7 +93,9 @@ impl<'a> Restore<'a> {
                     "Export configuration keeps the login outside the file store; nothing was imported",
                 ));
             }
-            let document = request.bundle.and_then(|bundle| bundle.get("auth.json"));
+            let document = request
+                .bundle
+                .and_then(|bundle| bundle.get(super::AUTH_FILE));
             if let Some(document) = document {
                 let (found, _, _) = identity(document)?;
                 if account.provider_identity.as_ref() != Some(&found) {
