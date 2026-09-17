@@ -26,16 +26,18 @@ fn strategy(registry: &Registry, scope: &Scope) -> Strategy {
     registry.settings(scope).strategy
 }
 
-/// How a Scope measures its Accounts: Headroom alone, or Fable First — the
-/// Accounts that can serve Fable now ahead of every one that cannot.
+/// How a Scope measures its Accounts: Headroom alone, or Preferred First — the
+/// Accounts that can serve the preferred workload now ahead of every one that
+/// cannot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Measure {
     /// The worst Quota Window, whatever it meters.
     Worst,
-    /// Two tiers. First the Accounts none of whose Fable-metering windows is
-    /// full, ordered by the Fable weekly; then the rest, ordered by their
-    /// fullest window that is not Fable's. A Strategy orders within a tier and
-    /// never across one.
+    /// Two tiers. First the Accounts none of whose windows metering the
+    /// workload is full, ordered by its Ranking window; then the rest, ordered
+    /// by their fullest window that is not the Ranking one. A Strategy orders
+    /// within a tier and never across one. Which window plays which role is
+    /// the provider's to say.
     Preferred(&'static str),
 }
 
@@ -79,8 +81,8 @@ fn unmatched(registry: &Registry, scope: &Scope, workload: &str) -> bool {
         })
 }
 
-/// The sentence a Scope preferring Fable is owed when the preference matches
-/// nothing, or `None` where it matches. Loud rather than quiet, because a
+/// The sentence a Scope with a preferred workload is owed when the preference
+/// matches nothing, or `None` where it matches. Loud rather than quiet, because a
 /// Setting that silently stops meaning anything is the failure no refusal is
 /// left to catch.
 pub fn preference_unmatched(registry: &Registry, scope: &Scope) -> Option<String> {
@@ -239,8 +241,8 @@ pub fn worth_reading(
     now: DateTime<Utc>,
 ) -> Vec<String> {
     // Under `soonest-reset` the order is a reset time rather than room, and
-    // under Fable First it is the Fable weekly — either way a bound on room
-    // excludes nothing and every stale candidate is read.
+    // under Preferred First it is the Ranking window — either way a bound on
+    // room excludes nothing and every stale candidate is read.
     let on_room = !matches!(strategy(registry, scope), Strategy::SoonestReset)
         && matches!(measure_of(registry, scope), Measure::Worst);
     let sharers = registry::Sharers::across(registry);
@@ -268,9 +270,9 @@ pub fn fullest_window_of(account: &Account) -> Option<&WindowUtilization> {
         .and_then(|cached| fullest_of(&cached.windows, |_| true))
 }
 
-/// The Quota Window a Measure judges a *candidate's* fullness by — under Fable
-/// First, the windows its tier ranks on, so a fall-through candidate is not
-/// set aside for a Fable weekly its tier never reads.
+/// The Quota Window a Measure judges a *candidate's* fullness by — under
+/// Preferred First, the windows its tier ranks on, so a fall-through candidate
+/// is not set aside for a Ranking window its tier never reads.
 pub fn measured_fullest_of(account: &Account, measure: Measure) -> Option<&WindowUtilization> {
     match measure {
         Measure::Worst => fullest_window_of(account),
@@ -393,9 +395,9 @@ pub fn measured_of(account: &Account, measure: Measure) -> Measured<'_> {
     }
 }
 
-/// "No figure" and "no Fable window" rank alike: in the first tier, below every
-/// Account with known Fable room and above every full one — either read as good
-/// or bad news would be a fact Perch invented.
+/// "No figure" and "no Ranking window" rank alike: in the first tier, below
+/// every Account with known room for the workload and above every full one —
+/// either read as good or bad news would be a fact Perch invented.
 fn preferred_first_of<'a>(account: &'a Account, workload: &str) -> Measured<'a> {
     let unobserved = Measured {
         tier: 1,
@@ -412,9 +414,9 @@ fn preferred_first_of<'a>(account: &'a Account, workload: &str) -> Measured<'a> 
         return unobserved;
     };
     match serves_preferred(account, cached, workload) {
-        // The Fable weekly orders the tier, not the worst of the three: while
-        // Fable's is the only per-model window those coincide, and a Setting
-        // whose only effect is its endgame reads as broken.
+        // The Ranking window orders the tier, not the worst of the three: while
+        // it is the only per-model window those coincide, and a Setting whose
+        // only effect is its last resort reads as broken.
         true => Measured {
             tier: 1,
             headroom: Headroom::Room {
@@ -501,8 +503,9 @@ pub enum Basis {
     /// Of the Accounts with room, the one whose fullest window comes back
     /// soonest, so perishable quota is spent rather than wasted.
     SoonestReset,
-    /// Of the Accounts that can serve Fable, the one with the most of its Fable
-    /// weekly left — what a Scope preferring Fable ranks its first tier on.
+    /// Of the Accounts that can serve the preferred workload, the one with the
+    /// most of its Ranking window left — what such a Scope ranks its first tier
+    /// on.
     MostPreferred,
     /// Nothing has ever been observed of this Account, so it was compared with
     /// nothing.
@@ -871,8 +874,8 @@ fn chosen_basis(best: &Ranked, strategy: Strategy, now: DateTime<Utc>) -> Basis 
     let headroom = &best.measured.headroom;
     match (headroom, headroom.ranked_on_reset(strategy, now)) {
         (Headroom::Room { .. }, Some(_)) => Basis::SoonestReset,
-        // Room in the first tier exists only under Fable First, where its
-        // figure is the Fable weekly's.
+        // Room in the first tier exists only under Preferred First, where its
+        // figure is the Ranking window's.
         (Headroom::Room { .. }, None) if best.measured.tier == 1 => Basis::MostPreferred,
         (Headroom::Room { .. }, None) => Basis::MostRoom,
         // Never observed. An exhausted Account cannot get here: everything
