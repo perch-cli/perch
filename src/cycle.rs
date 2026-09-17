@@ -363,6 +363,9 @@ fn frees_at(
 }
 
 use crate::providers::provider::WindowRole;
+/// By the Account's own provider, so a Measure only holds within one provider's
+/// Accounts: another's never reports a Ranking window and would rank Unobserved
+/// however fresh its figure. Every caller filters to one provider before ranking.
 fn role(account: &Account, workload: &str, window: &WindowUtilization) -> WindowRole {
     account.provider().adapter().window_role(workload, window)
 }
