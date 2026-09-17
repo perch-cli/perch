@@ -2240,3 +2240,27 @@ fn status_speaks_for_the_run_preference_where_both_providers_are_held_unless_a_f
         "{said}"
     );
 }
+
+#[test]
+fn a_first_config_set_on_a_logged_in_machine_still_adopts_the_native_login() {
+    let host = common::logged_in_machine();
+    config::run(
+        &host,
+        config::ConfigCommand::Set {
+            words: ["--global", "run-provider", "claude"]
+                .map(String::from)
+                .into(),
+        },
+        &mut Vec::new(),
+    )
+    .unwrap();
+    let registry = registry::load(&host).unwrap().unwrap();
+    assert_eq!(
+        registry.accounts.len(),
+        1,
+        "the native login is adopted by the first command that saves, whichever it is"
+    );
+    let (status, said) = common::run_status(&host, false);
+    status.expect("and it is the Account you are on");
+    assert!(said.contains(common::EMAIL), "{said}");
+}
