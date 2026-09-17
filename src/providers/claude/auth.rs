@@ -167,7 +167,7 @@ pub fn reap_abandoned(host: &dyn Host) {
 pub(super) fn discover(
     host: &dyn Host,
     executable: &std::path::Path,
-) -> Result<Option<super::super::provider::Discovered>> {
+) -> Result<Option<super::super::provider::Authenticated>> {
     let findings = match probe::probe_at(
         host,
         crate::providers::claude::layout::default_profile(host)?,
@@ -182,15 +182,12 @@ pub(super) fn discover(
         .map(Zeroizing::new)
         .and_then(|contents| probe::oauth_account_block(&contents).map(probe::fresh_identity_file))
         .map(Zeroizing::new);
-    Ok(Some(super::super::provider::Discovered {
-        version: findings.version,
-        account: super::super::provider::Authenticated {
-            provider: super::super::provider::Id::Claude,
-            subject: Some(super::identity::subject(&findings.identity)?),
-            identity: findings.identity,
-            plan: findings.credential.subscription_type.clone(),
-            credential: Zeroizing::new(findings.credential.as_str().to_string()),
-            configuration,
-        },
+    Ok(Some(super::super::provider::Authenticated {
+        provider: super::super::provider::Id::Claude,
+        subject: Some(super::identity::subject(&findings.identity)?),
+        identity: findings.identity,
+        plan: findings.credential.subscription_type.clone(),
+        credential: Zeroizing::new(findings.credential.as_str().to_string()),
+        configuration,
     }))
 }

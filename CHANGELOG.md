@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The first command adopts a Codex login already on the machine, as it has
+  adopted a Claude Code one. Before, a `codex login` Perch had not seen was
+  overwritten by the first Codex Switch with no copy held anywhere.
 - `perch status` and `perch list` take `--claude`, `--codex` and
   `--provider <name>`. Without one they speak for the provider whose Accounts
   are held, or the Run preference where both are. Before, both read Claude's

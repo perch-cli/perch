@@ -103,6 +103,13 @@ impl super::provider::Adapter for Codex {
     fn switched_note(&self) -> Option<&'static str> {
         Some("Note: a Codex already open keeps its Account until it is restarted.")
     }
+    fn discover(
+        &self,
+        host: &dyn Host,
+        _installation: &super::provider::Installation,
+    ) -> Result<Option<super::provider::Authenticated>> {
+        auth::discover(host)
+    }
 
     fn authenticate(
         &self,

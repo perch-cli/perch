@@ -6,6 +6,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use perch::commands::selection::Selection;
 use perch::commands::{add, config, relogin, remove, run};
 use perch::host::FakeHost;
+use perch::host::Refusing;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
 use perch::providers::provider::Id;
@@ -730,7 +731,6 @@ fn liveness_uses_each_providers_session_evidence_in_a_mixed_query() {
 
 #[test]
 fn an_unreadable_codex_session_is_refused_without_claiming_a_claude_version() {
-    use perch::host::Refusing;
     use perch::live::{self, Place};
 
     let host = FakeHost::new();
@@ -1454,7 +1454,7 @@ fn discovery_uses_the_selected_installation_when_provider_settings_change() {
     settings.cli_path = Some("/missing/replacement".into());
     common::save_registry(&host, &registry);
     let discovered = installation.discover(&host).unwrap().unwrap();
-    assert_eq!(discovered.account.identity().email, common::EMAIL);
+    assert_eq!(discovered.identity().email, common::EMAIL);
     assert!(
         provider
             .configured(&host)
@@ -2334,5 +2334,98 @@ fn a_codex_credential_naming_no_email_is_refused_rather_than_held_nameless() {
             .unwrap()
             .is_none_or(|registry| registry.accounts.is_empty()),
         "nothing nameless is held"
+    );
+}
+
+/// The first command takes the login already on the machine, as it does for
+/// Claude Code, so the first Switch has an Account to Capture it into.
+#[test]
+fn a_native_codex_login_is_adopted_and_captured_by_the_first_switch() {
+    let native = credential("native", "native@example.com");
+    let host = machine("work")
+        .with_env("HOME", "/Users/someone")
+        .with_file(DEFAULT_AUTH, &native);
+
+    let (result, printed) = common::run_status(&host, false);
+
+    result.expect("the native login is the first Account");
+    assert!(printed.contains("native@example.com"), "{printed}");
+    assert!(
+        host.notes()
+            .iter()
+            .any(|note| note.contains("Adopted the Codex login as native@example.com")),
+        "{:?}",
+        host.notes()
+    );
+    let registry = registry::load(&host).unwrap().unwrap();
+    let adopted = registry.accounts[0].clone();
+    assert_eq!(adopted.provider(), Id::Codex);
+    assert_eq!(codex_active(&host).as_deref(), Some(adopted.key()));
+
+    add_account(&host, "work");
+    common::run_switch(&host, "work")
+        .0
+        .expect("the Switch lands");
+
+    assert_eq!(
+        host.file(adopted.profile_dir(&host).unwrap().join("auth.json"))
+            .as_deref(),
+        Some(native.as_str()),
+        "the login that was live is held, not overwritten"
+    );
+    assert_eq!(
+        host.file(DEFAULT_AUTH).as_deref(),
+        Some(credential("work", EMAIL).as_str())
+    );
+}
+
+#[test]
+fn a_codex_default_in_another_store_or_without_a_chatgpt_login_is_not_adopted() {
+    let in_the_keyring = machine("work")
+        .with_env("HOME", "/Users/someone")
+        .with_file(DEFAULT_AUTH, &credential("native", "native@example.com"))
+        .with_file(
+            "/Users/someone/.codex/config.toml",
+            "cli_auth_credentials_store = \"keyring\"\n",
+        );
+    let api_key = machine("work")
+        .with_env("HOME", "/Users/someone")
+        .with_file(
+            DEFAULT_AUTH,
+            r#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-test"}"#,
+        );
+
+    for host in [in_the_keyring, api_key] {
+        let (result, _) = common::run_status(&host, false);
+        let said = result.expect_err("nothing to adopt").to_string();
+        assert!(said.contains("Perch holds no Accounts"), "{said}");
+        assert!(
+            registry::load(&host).unwrap().is_none(),
+            "no Registry is written for a login Perch cannot hold"
+        );
+    }
+}
+
+#[test]
+fn a_codex_login_perch_cannot_read_refuses_adoption_naming_the_file() {
+    let host = machine("work")
+        .with_env("HOME", "/Users/someone")
+        .with_file(DEFAULT_AUTH, &credential("native", "native@example.com"));
+    host.now_refusing(DEFAULT_AUTH, Refusing::Read, "Permission denied");
+
+    let (result, _) = common::run_status(&host, false);
+
+    let said = result
+        .expect_err("a file that exists and will not open is not nothing")
+        .to_string();
+    // The file name rather than the path: the fake joins it as the platform
+    // under test does, and Windows spells the separator the other way.
+    assert!(
+        said.contains("auth.json") && said.contains("Permission denied"),
+        "{said}"
+    );
+    assert!(
+        registry::load(&host).unwrap().is_none(),
+        "no Registry is written"
     );
 }

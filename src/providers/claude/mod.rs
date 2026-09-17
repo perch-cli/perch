@@ -128,7 +128,7 @@ impl Adapter for Claude {
         &self,
         host: &dyn Host,
         installation: &super::provider::Installation,
-    ) -> Result<Option<super::provider::Discovered>> {
+    ) -> Result<Option<super::provider::Authenticated>> {
         auth::discover(host, installation.executable())
     }
     fn check_replacement(

@@ -3,8 +3,8 @@
 use super::process::environment;
 use super::refused;
 use crate::domain::Identity;
-use crate::providers::provider::{AccountIdentity, Id};
-use crate::{Host, Result, holdings};
+use crate::providers::provider::{AccountIdentity, Authenticated, Id};
+use crate::{Host, PerchError, Result, holdings};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 use serde_json::Value;
@@ -79,6 +79,34 @@ pub fn identity(document: &str) -> Result<(AccountIdentity, Identity, Option<Str
         .and_then(Value::as_str)
         .map(str::to_owned);
     Ok((identity, description, plan))
+}
+
+/// The login the Default home holds, for adoption. `None` wherever there is no
+/// file login to take: no `auth.json`, a Default kept in another store, or a
+/// Credential that is not a ChatGPT Account's. Not a refusal, because adoption
+/// runs ahead of every command and a refusal here would stop all of them.
+pub(super) fn discover(host: &dyn Host) -> Result<Option<Authenticated>> {
+    let home = super::layout::default_home(host)?;
+    if super::layout::refuse_unless_file_backed(host, &home).is_err() {
+        return Ok(None);
+    }
+    let path = home.join(super::AUTH_FILE);
+    let document = match host.read_file(&path) {
+        Ok(document) => Zeroizing::new(document),
+        Err(crate::host::HostError::NotFound { .. }) => return Ok(None),
+        Err(error) => return Err(PerchError::file_read(path, error)),
+    };
+    let Ok((subject, identity, plan)) = identity(&document) else {
+        return Ok(None);
+    };
+    Ok(Some(Authenticated {
+        provider: Id::Codex,
+        identity,
+        subject: Some(subject),
+        plan,
+        credential: document,
+        configuration: None,
+    }))
 }
 
 struct Temporary<'a> {

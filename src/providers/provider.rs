@@ -305,7 +305,7 @@ pub(super) trait Adapter: Sync {
         &self,
         _host: &dyn Host,
         _installation: &Installation,
-    ) -> Result<Option<Discovered>> {
+    ) -> Result<Option<Authenticated>> {
         Ok(None)
     }
     fn check_replacement(
@@ -477,11 +477,11 @@ impl Installation {
     pub fn executable(&self) -> &std::path::Path {
         &self.executable
     }
-    pub fn discover(&self, host: &dyn Host) -> Result<Option<Discovered>> {
+    pub fn discover(&self, host: &dyn Host) -> Result<Option<Authenticated>> {
         let provider = self.provider.adapter();
         let discovered = provider.adapter.discover(host, self)?;
         if let Some(found) = &discovered {
-            provider.authenticated(&found.account)?;
+            provider.authenticated(found)?;
         }
         Ok(discovered)
     }
@@ -930,11 +930,6 @@ impl PreparedLaunch<'_> {
 }
 
 /// Discovery reports a native Default without deciding whether Perch should hold it.
-pub struct Discovered {
-    pub account: Authenticated,
-    pub version: String,
-}
-
 /// What the Capture found — the part of a Switch worth saying out loud, because
 /// it is what protects the Account being left behind.
 #[derive(Debug, Clone, PartialEq, Eq)]

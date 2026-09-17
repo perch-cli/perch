@@ -42,10 +42,9 @@ fn load_or_adopt(host: &dyn Host, held: &mut crate::lock::Held<'_>) -> Result<Re
                 Err(PerchError::NotFound(_)) => continue,
                 Err(error) => return Err(error),
             };
-            let Some(discovered) = installation.discover(host)? else {
+            let Some(authenticated) = installation.discover(host)? else {
                 continue;
             };
-            let authenticated = discovered.account;
             let account = Account {
                 storage_key: None,
                 provider: provider.id(),
