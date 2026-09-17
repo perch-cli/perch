@@ -10,7 +10,6 @@ use super::profile;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
-use crate::live;
 use crate::providers::claude::probe::{self, Credential, Identity, Installed};
 use zeroize::Zeroizing;
 
@@ -46,7 +45,7 @@ pub(crate) fn authenticate(host: &dyn Host, claude: &std::path::Path) -> Result<
 
     // Every way out from here takes the directory back out again, which a `?`
     // in the middle would quietly stop doing: one left by a failure is one
-    // `reap_abandoned` will not tidy for thirty minutes.
+    // the reaper will not tidy for thirty minutes.
     let produced = live.and_then(|_live| run_the_login(host, claude, &store, &installed));
     profile::discard(host, &store);
     produced
@@ -113,61 +112,10 @@ fn what_the_login_left(
     })
 }
 
-/// How long a pending login is left alone before it is taken to have been
-/// abandoned. Generous, because what is on the other side of it is a person
-/// finding their password.
-const ABANDONED_AFTER_MINUTES: i64 = 30;
-
-/// Deletes what abandoned logins left behind.
-///
-/// Two things have to be true before one is reaped: it is older than any login
-/// somebody could plausibly still be in, and nothing is running against it.
-/// Silent and best-effort — this is tidying on the way to what was asked for.
-pub fn reap_abandoned(host: &dyn Host) {
-    let Ok(pending) = holdings::pending_logins_dir(crate::providers::provider::Id::Claude, host)
-    else {
-        return;
-    };
-    // Absent is the ordinary case: no login has ever been run here.
-    let Ok(entries) = host.list_dir(&pending) else {
-        return;
-    };
-
-    let too_old = host.now() - chrono::Duration::minutes(ABANDONED_AFTER_MINUTES);
-    for dir in entries {
-        // A directory whose age cannot be established is left alone. Being
-        // wrong in this direction costs a stale directory; being wrong in the
-        // other costs somebody the login they are in the middle of.
-        let Some(started_at) = holdings::pending_login_started_at(&dir) else {
-            continue;
-        };
-        if started_at > too_old {
-            continue;
-        }
-        // Age is evidence and not proof, so the same evidence every other write
-        // asks for (ADR a-profile-is-live-by-evidence): a login somebody is in
-        // the middle of is a Live Profile, and nothing reaps one however old.
-        if live::ask(
-            host,
-            &[live::Place::at(
-                crate::providers::provider::Id::Claude,
-                &dir,
-            )],
-        )
-        .counts_as_live()
-        {
-            continue;
-        }
-        if let Ok(store) = probe::store_for_profile(host, &dir) {
-            profile::discard(host, &store);
-        }
-    }
-}
-
 pub(super) fn discover(
     host: &dyn Host,
     executable: &std::path::Path,
-) -> Result<Option<super::super::provider::Discovered>> {
+) -> Result<Option<super::super::provider::Authenticated>> {
     let findings = match probe::probe_at(
         host,
         crate::providers::claude::layout::default_profile(host)?,
@@ -182,15 +130,12 @@ pub(super) fn discover(
         .map(Zeroizing::new)
         .and_then(|contents| probe::oauth_account_block(&contents).map(probe::fresh_identity_file))
         .map(Zeroizing::new);
-    Ok(Some(super::super::provider::Discovered {
-        version: findings.version,
-        account: super::super::provider::Authenticated {
-            provider: super::super::provider::Id::Claude,
-            subject: Some(super::identity::subject(&findings.identity)?),
-            identity: findings.identity,
-            plan: findings.credential.subscription_type.clone(),
-            credential: Zeroizing::new(findings.credential.as_str().to_string()),
-            configuration,
-        },
+    Ok(Some(super::super::provider::Authenticated {
+        provider: super::super::provider::Id::Claude,
+        subject: Some(super::identity::subject(&findings.identity)?),
+        identity: findings.identity,
+        plan: findings.credential.subscription_type.clone(),
+        credential: Zeroizing::new(findings.credential.as_str().to_string()),
+        configuration,
     }))
 }

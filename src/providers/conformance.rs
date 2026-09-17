@@ -44,6 +44,9 @@ impl Adapter for Fixture {
     fn executable_name(&self) -> &'static str {
         "fixture"
     }
+    fn discard_login(&self, host: &dyn Host, dir: &std::path::Path) {
+        let _ = host.remove_dir_all(dir);
+    }
     fn service_environment(&self) -> &'static [&'static str] {
         &[]
     }

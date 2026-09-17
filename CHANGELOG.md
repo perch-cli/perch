@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The first command adopts a Codex login already on the machine, as it has
+  adopted a Claude Code one. Before, a `codex login` Perch had not seen was
+  overwritten by the first Codex Switch with no copy held anywhere.
 - `perch status` and `perch list` take `--claude`, `--codex` and
   `--provider <name>`. Without one they speak for the provider whose Accounts
   are held, or the Run preference where both are. Before, both read Claude's
@@ -45,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trigger fallback. Custom commands keep the named Account's Profile.
 - [**breaking**] Account JSON includes `id`, `provider`, and `workspace`. Switch accepts
   provider flags and refuses an ambiguous Cycle when Codex Accounts are held.
+
+### Fixed
+
+- A refusal for no active Account counts the selected provider's Accounts
+  alone and names `perch add --claude` or `perch add --codex`, where it
+  counted every provider's and told a Codex user to run `claude`.
+- A Codex login Perch was killed in the middle of is reaped after thirty
+  minutes, as a Claude Code one is, and its directory is named after the
+  moment it started.
 
 ### Changed
 

@@ -140,7 +140,7 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
         .and_then(|provider| provider.installation(&host))
         .and_then(|installation| installation.discover(&host))
     {
-        Ok(Some(discovered)) => assert!(discovered.account.identity().email.contains('@')),
+        Ok(Some(discovered)) => assert!(discovered.identity().email.contains('@')),
         Ok(None) => {}
         Err(error) => assert!(
             matches!(error, PerchError::ProbeRefused(_)),

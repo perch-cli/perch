@@ -106,7 +106,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     let email = account.key().to_string();
 
     // A Profile nothing records is worse than none: it holds a live refresh
-    // token that `reap_abandoned` never walks, since that only walks `pending/`.
+    // token no reaper walks, since the reaper only walks `pending/`.
     // Every step from here to the save is inside the undo, not the save alone.
     let recorded = (|registry: &mut Registry| {
         registry.upsert(account);

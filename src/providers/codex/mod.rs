@@ -103,6 +103,18 @@ impl super::provider::Adapter for Codex {
     fn switched_note(&self) -> Option<&'static str> {
         Some("Note: a Codex already open keeps its Account until it is restarted.")
     }
+    fn discover(
+        &self,
+        host: &dyn Host,
+        _installation: &super::provider::Installation,
+    ) -> Result<Option<super::provider::Authenticated>> {
+        auth::discover(host)
+    }
+    fn discard_login(&self, host: &dyn Host, dir: &std::path::Path) {
+        if let Err(error) = host.remove_dir_all(dir) {
+            host.note(&PerchError::file_write(dir, error).to_string());
+        }
+    }
 
     fn authenticate(
         &self,

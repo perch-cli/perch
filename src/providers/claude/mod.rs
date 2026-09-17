@@ -121,14 +121,16 @@ impl Adapter for Claude {
         )
     }
 
-    fn maintain(&self, host: &dyn Host) {
-        auth::reap_abandoned(host);
+    fn discard_login(&self, host: &dyn Host, dir: &std::path::Path) {
+        if let Ok(store) = crate::providers::claude::probe::store_for_profile(host, dir) {
+            profile::discard(host, &store);
+        }
     }
     fn discover(
         &self,
         host: &dyn Host,
         installation: &super::provider::Installation,
-    ) -> Result<Option<super::provider::Discovered>> {
+    ) -> Result<Option<super::provider::Authenticated>> {
         auth::discover(host, installation.executable())
     }
     fn check_replacement(

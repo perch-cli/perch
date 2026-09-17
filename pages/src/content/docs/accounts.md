@@ -19,9 +19,11 @@ Utilization   never observed
 ```
 
 The first command you run takes the Claude Code login already on the machine as
-your first Account. Nothing is logged into again. That Account is in no Group,
-so a bare `perch switch` has nothing to Cycle to until you put it in one, or
-declare the ungrouped Accounts interchangeable.
+your first Account, and a Codex login the same way: `Adopted the Codex login as
+you@example.com (plus).` Nothing is logged into again. That Account is in no
+Group, so a bare `perch switch` has nothing to Cycle to until you put it in
+one, or declare the ungrouped Accounts interchangeable. A Codex login kept in
+the keyring, or made with an API key, is left where it is and not adopted.
 
 ## Adding an Account
 
