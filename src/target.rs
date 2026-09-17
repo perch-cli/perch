@@ -251,21 +251,41 @@ fn edit_distance(left: &str, right: &str) -> usize {
     previous[right.len()]
 }
 
+/// A Target under a provider flag. An email can name one Account per provider
+/// (ADR an-account-has-a-workspace), so the flag picks among them; an Alias
+/// names one Account whatever the flag says, and a flag it disagrees with is a
+/// refusal on both paths rather than a Switch to the other provider.
 pub fn resolve_for(
     registry: &Registry,
     target: &str,
     provider: Option<crate::providers::provider::Id>,
 ) -> Result<AccountTarget> {
-    if let Some((_, key)) = registry.declared_alias(target) {
-        let account = registry.held(key)?;
-        if provider.is_some_and(|selected| selected != account.provider()) {
-            return Err(PerchError::Invalid(format!(
-                "{target} is a {} Account. `--{}` selects it.",
-                account.provider().adapter().name(),
-                account.provider().word()
-            )));
-        }
-        return resolve_account(registry, target);
+    let found = match within_provider(registry, target, provider)? {
+        Some(found) => found,
+        None => resolve_account(registry, target)?,
+    };
+    let account = registry.held(&found.email)?;
+    if let Some(selected) = provider
+        && selected != account.provider()
+    {
+        return Err(PerchError::Invalid(format!(
+            "{target} is a {} Account. `--{}` selects it.",
+            account.provider().adapter().name(),
+            account.provider().word()
+        )));
+    }
+    Ok(found)
+}
+
+/// The one Account this email names among the provider's, or nothing where the
+/// Target is an Alias or no Account of that provider has the address.
+fn within_provider(
+    registry: &Registry,
+    target: &str,
+    provider: Option<crate::providers::provider::Id>,
+) -> Result<Option<AccountTarget>> {
+    if registry.declared_alias(target).is_some() {
+        return Ok(None);
     }
     let matches: Vec<_> = registry
         .accounts
@@ -276,12 +296,14 @@ pub fn resolve_for(
         })
         .collect();
     match matches.as_slice() {
-        [account] if account.provider_identity.is_none() => resolve_account(registry, target),
-        [account] => Ok(AccountTarget {
+        [] => Ok(None),
+        [account] => Ok(Some(AccountTarget {
             email: account.key().into(),
-            matched: format!("{target} is a {} Account.", account.provider().word()),
-        }),
-        [] => resolve_account(registry, target),
+            matched: format!(
+                "`{target}` is an Account: {}.",
+                registry.named_for_the_user(account.key())
+            ),
+        })),
         _ => Err(PerchError::Invalid(format!(
             "{target} names more than one Account. Name one by its Alias: {}.",
             matches

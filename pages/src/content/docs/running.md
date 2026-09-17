@@ -47,7 +47,7 @@ history stay apart from every other Account's. Codex support is experimental.
 
 ```
 $ perch run --claude personal
-personal is a Codex Account. `perch run --codex personal` launches it.   # exit 14
+personal is a Codex Account. `--codex` selects it.   # exit 14
 ```
 
 `--claude`, `--codex` and `--provider <name>` name the provider outright. An

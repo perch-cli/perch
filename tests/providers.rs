@@ -2097,3 +2097,81 @@ fn the_active_codex_account_is_observed_where_its_login_is_live() {
     let windows = observed.expect("read off the Default home");
     assert_eq!(windows.len(), 1);
 }
+
+#[test]
+fn an_email_a_claude_and_a_codex_account_share_resolves_under_either_provider_flag() {
+    let host = common::logged_in_machine();
+    let document = credential("company", common::EMAIL);
+    let host = host.with_file(CODEX, "").with_login(move |host, at| {
+        host.set_file(at.join("auth.json"), &document);
+        0
+    });
+    add_account(&host, "company");
+    let registry = registry::load(&host).unwrap().unwrap();
+    assert_eq!(registry.accounts.len(), 2);
+
+    let claude = target::resolve_for(&registry, common::EMAIL, Some(Id::Claude))
+        .expect("`--claude` names the Claude Account alone");
+    assert_eq!(registry.held(&claude.email).unwrap().provider(), Id::Claude);
+    let codex = target::resolve_for(&registry, common::EMAIL, Some(Id::Codex))
+        .expect("`--codex` names the Codex Account alone");
+    assert_eq!(registry.held(&codex.email).unwrap().provider(), Id::Codex);
+    assert!(
+        target::resolve_for(&registry, common::EMAIL, None)
+            .unwrap_err()
+            .to_string()
+            .contains("names more than one Account"),
+        "with no provider named, the email is ambiguous"
+    );
+}
+
+#[test]
+fn a_provider_flag_refuses_an_account_of_the_other_provider_by_email_as_by_alias() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let host = host.with_file("/usr/bin/claude", "");
+    let claude = Selection {
+        provider: None,
+        codex: false,
+        claude: true,
+    };
+    for target in [EMAIL, "personal"] {
+        let mut printed = Vec::new();
+        let switched = perch::commands::switch::run(
+            &host,
+            perch::commands::switch::SwitchArgs {
+                provider: claude,
+                target: Some(target.into()),
+                no_refresh: true,
+            },
+            &mut printed,
+        );
+        assert!(
+            switched
+                .unwrap_err()
+                .to_string()
+                .contains("is a Codex Account. `--codex` selects it."),
+            "`perch switch --claude {target}` refuses rather than switching Codex"
+        );
+        assert!(
+            printed.is_empty(),
+            "{}",
+            String::from_utf8(printed).unwrap()
+        );
+        let ran = run::run(
+            &host,
+            run::RunArgs {
+                provider: claude,
+                target: target.into(),
+                command: vec![],
+            },
+            &mut Vec::new(),
+        );
+        assert!(
+            ran.unwrap_err()
+                .to_string()
+                .contains("is a Codex Account. `--codex` selects it."),
+            "`perch run --claude {target}` says the same sentence"
+        );
+    }
+}
