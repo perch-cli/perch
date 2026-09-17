@@ -82,6 +82,17 @@ impl<'a> Restore<'a> {
                     home.display()
                 )));
             }
+            let config = request.bundle.and_then(|bundle| bundle.get("config.toml"));
+            // A Profile's login is the auth.json Perch writes, so a configuration
+            // naming another store restores a Profile Codex would never read.
+            if config
+                .and_then(super::layout::store_named)
+                .is_some_and(|store| store != "file")
+            {
+                return Err(refused(
+                    "Export configuration keeps the login outside the file store; nothing was imported",
+                ));
+            }
             let document = request.bundle.and_then(|bundle| bundle.get("auth.json"));
             if let Some(document) = document {
                 let (found, _, _) = identity(document)?;
@@ -91,11 +102,7 @@ impl<'a> Restore<'a> {
                     ));
                 }
             }
-            accounts.push((
-                account,
-                document,
-                request.bundle.and_then(|bundle| bundle.get("config.toml")),
-            ));
+            accounts.push((account, document, config));
         }
         Ok(Self {
             host,

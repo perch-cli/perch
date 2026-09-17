@@ -48,11 +48,14 @@ pub(super) const CONFIG_FILE: &str = "config.toml";
 /// The line that makes a Default file-backed, as Codex spells it.
 pub(super) const PIN: &str = "cli_auth_credentials_store = \"file\"";
 
-/// The top-level `cli_auth_credentials_store`, where `config.toml` sets one.
+fn store_setting(host: &dyn Host, home: &Path) -> Option<String> {
+    store_named(&host.read_file(&home.join(CONFIG_FILE)).ok()?)
+}
+
+/// The top-level `cli_auth_credentials_store` a `config.toml` sets, if any.
 /// Only the lines before the first table header: the same key under
 /// `[profiles.x]` is that profile's, not the Default's.
-fn store_setting(host: &dyn Host, home: &Path) -> Option<String> {
-    let config = host.read_file(&home.join(CONFIG_FILE)).ok()?;
+pub(super) fn store_named(config: &str) -> Option<String> {
     config
         .lines()
         .map(str::trim)
