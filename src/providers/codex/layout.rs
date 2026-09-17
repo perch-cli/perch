@@ -24,13 +24,17 @@ pub(super) fn default_home(host: &dyn Host) -> Result<PathBuf> {
 /// The one Credential Store this Switch writes. Codex keeps its login in a
 /// file or in the OS keyring by `cli_auth_credentials_store`, and a file Perch
 /// writes changes nothing a keyring-backed Codex reads, so a Default that is not
-/// file-backed is refused rather than written under. A home Codex has never
-/// configured is file-backed once `apply` pins it.
+/// file-backed is refused rather than written under. The pin outranks an
+/// `auth.json` left behind: a home that moved to the keyring keeps its old file.
 pub(super) fn refuse_unless_file_backed(host: &dyn Host, home: &Path) -> Result<()> {
-    if host.path_exists(&home.join(super::AUTH_FILE))
-        || !host.path_exists(&home.join(CONFIG_FILE))
-        || pins_the_file_store(host, home)
-    {
+    let file_backed = match store_setting(host, home) {
+        Some(store) => store == "file",
+        None => {
+            host.path_exists(&home.join(super::AUTH_FILE))
+                || !host.path_exists(&home.join(CONFIG_FILE))
+        }
+    };
+    if file_backed {
         return Ok(());
     }
     Err(PerchError::Invalid(format!(
@@ -44,17 +48,19 @@ pub(super) const CONFIG_FILE: &str = "config.toml";
 /// The line that makes a Default file-backed, as Codex spells it.
 pub(super) const PIN: &str = "cli_auth_credentials_store = \"file\"";
 
-fn pins_the_file_store(host: &dyn Host, home: &Path) -> bool {
-    host.read_file(&home.join(CONFIG_FILE)).is_ok_and(|config| {
-        config.lines().any(|line| {
-            let mut words = line.split('=').map(str::trim);
-            words.next() == Some("cli_auth_credentials_store")
-                && words.next().is_some_and(|value| {
-                    value
-                        .split('#')
-                        .next()
-                        .is_some_and(|value| value.trim() == "\"file\"")
-                })
+/// The `cli_auth_credentials_store` line, where `config.toml` has one.
+fn store_setting(host: &dyn Host, home: &Path) -> Option<String> {
+    let config = host.read_file(&home.join(CONFIG_FILE)).ok()?;
+    config.lines().map(str::trim).find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "cli_auth_credentials_store").then(|| {
+            value
+                .split('#')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .trim_matches(|c| c == '"' || c == '\'')
+                .to_string()
         })
     })
 }
@@ -106,5 +112,13 @@ mod tests {
         assert!(refuse_unless_file_backed(&keyring, home).is_err());
         let logged_in = a_home().with_file(home.join("auth.json"), "{}");
         assert!(refuse_unless_file_backed(&logged_in, home).is_ok());
+        let moved_to_the_keyring = a_home().with_file(home.join("auth.json"), "{}").with_file(
+            home.join("config.toml"),
+            "cli_auth_credentials_store = \"keyring\"\n",
+        );
+        assert!(
+            refuse_unless_file_backed(&moved_to_the_keyring, home).is_err(),
+            "the pin outranks a file left behind"
+        );
     }
 }
