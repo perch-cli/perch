@@ -119,7 +119,17 @@ impl Setting {
     /// The value this Scope holds, as `get` prints it and `set` would take it
     /// back.
     pub fn of(self, registry: &Registry, scope: &Scope) -> String {
-        let settings = registry.settings(scope);
+        self.of_provider(registry, scope, registry.selected_provider())
+    }
+
+    /// The same, resolved for one named provider rather than the selected one.
+    pub fn of_provider(
+        self,
+        registry: &Registry,
+        scope: &Scope,
+        provider: crate::providers::provider::Id,
+    ) -> String {
+        let settings = registry.resolved_policy(scope, provider).settings;
         match self {
             Setting::Interchangeable => registry.ungrouped.interchangeable.to_string(),
             Setting::Strategy => settings.strategy.as_str().to_string(),
