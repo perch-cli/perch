@@ -48,21 +48,27 @@ pub(super) const CONFIG_FILE: &str = "config.toml";
 /// The line that makes a Default file-backed, as Codex spells it.
 pub(super) const PIN: &str = "cli_auth_credentials_store = \"file\"";
 
-/// The `cli_auth_credentials_store` line, where `config.toml` has one.
+/// The top-level `cli_auth_credentials_store`, where `config.toml` sets one.
+/// Only the lines before the first table header: the same key under
+/// `[profiles.x]` is that profile's, not the Default's.
 fn store_setting(host: &dyn Host, home: &Path) -> Option<String> {
     let config = host.read_file(&home.join(CONFIG_FILE)).ok()?;
-    config.lines().map(str::trim).find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        (key.trim() == "cli_auth_credentials_store").then(|| {
-            value
-                .split('#')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .trim_matches(|c| c == '"' || c == '\'')
-                .to_string()
+    config
+        .lines()
+        .map(str::trim)
+        .take_while(|line| !line.starts_with('['))
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == "cli_auth_credentials_store").then(|| {
+                value
+                    .split('#')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .trim_matches(|c| c == '"' || c == '\'')
+                    .to_string()
+            })
         })
-    })
 }
 
 #[cfg(test)]
@@ -119,6 +125,14 @@ mod tests {
         assert!(
             refuse_unless_file_backed(&moved_to_the_keyring, home).is_err(),
             "the pin outranks a file left behind"
+        );
+        let in_a_profile = a_home().with_file(
+            home.join("config.toml"),
+            "model = \"gpt-5\"\n[profiles.work]\ncli_auth_credentials_store = \"file\"\n",
+        );
+        assert!(
+            refuse_unless_file_backed(&in_a_profile, home).is_err(),
+            "a profile's pin is not the Default's"
         );
     }
 }
