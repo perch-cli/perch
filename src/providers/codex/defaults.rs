@@ -105,6 +105,8 @@ impl DefaultChange for Edit<'_> {
                 },
             });
         }
+        // A held copy Perch cannot read is overwritten rather than refused: the
+        // live one is verified as this Account's and is what Codex is using.
         let held = credential(self.host, outgoing).ok().flatten();
         if held.as_deref() == Some(&*live) {
             return Ok(Captured::NothingToSave);
