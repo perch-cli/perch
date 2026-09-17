@@ -1624,16 +1624,31 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
 /// command wanted an active Account for. One function, because two commands meet
 /// this state and only one of them told the difference.
 pub fn no_active_account(registry: &Registry, because: &str) -> PerchError {
+    // Of the selected provider alone: the Accounts of the other are the ones a
+    // Switch under this selection refuses.
+    let provider = registry.selected_provider();
+    let held = registry
+        .accounts
+        .iter()
+        .filter(|account| account.provider() == provider)
+        .count();
     if registry.accounts.is_empty() {
         return PerchError::NotFound(format!(
-            "Perch holds no Accounts{because}. Run `claude` and log in, then run \
-             Perch again."
+            "Perch holds no Accounts{because}. To log in, run `perch add --claude` or \
+             `perch add --codex`."
+        ));
+    }
+    if held == 0 {
+        return PerchError::NotFound(format!(
+            "Perch holds no {} Accounts{because}. To log in, run `perch add --{}`.",
+            provider.adapter().name(),
+            provider.word(),
         ));
     }
     PerchError::NotFound(format!(
         "Perch holds no active Account{because}. `perch switch <target>` makes \
          {} active.",
-        match registry.accounts.len() {
+        match held {
             1 => "the one it holds".to_string(),
             held => format!("one of the {held} it holds"),
         }
@@ -1673,7 +1688,17 @@ mod tests {
         let empty = Registry::default();
         let said = no_active_account(&empty, "").to_string();
         assert!(said.contains("no Accounts"), "{said}");
-        assert!(said.contains("`claude`"), "{said}");
+        assert!(
+            said.contains("`perch add --claude`") && said.contains("`perch add --codex`"),
+            "{said}"
+        );
+
+        let mut other = Registry::default();
+        other.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
+        other.select_provider(crate::providers::provider::Id::Codex);
+        let said = no_active_account(&other, "").to_string();
+        assert!(said.contains("no Codex Accounts"), "{said}");
+        assert!(said.contains("`perch add --codex`"), "{said}");
 
         let mut held = Registry::default();
         held.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
@@ -1681,7 +1706,7 @@ mod tests {
         assert!(said.contains("no Group to Cycle within"), "{said}");
         assert!(said.contains("the one it holds"), "{said}");
         assert!(
-            !said.contains("`claude`"),
+            !said.contains("`perch add"),
             "a login repairs nothing here: {said}"
         );
     }

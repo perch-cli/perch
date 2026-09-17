@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] Account JSON includes `id`, `provider`, and `workspace`. Switch accepts
   provider flags and refuses an ambiguous Cycle when Codex Accounts are held.
 
+### Fixed
+
+- A refusal for no active Account counts the selected provider's Accounts
+  alone and names `perch add --claude` or `perch add --codex`, where it
+  counted every provider's and told a Codex user to run `claude`.
+
 ### Changed
 
 - Every sentence the provider redesign added says the verdict and the next

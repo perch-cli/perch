@@ -2429,3 +2429,29 @@ fn a_codex_login_perch_cannot_read_refuses_adoption_naming_the_file() {
         "no Registry is written"
     );
 }
+
+#[test]
+fn a_provider_flag_counts_only_that_providers_accounts_when_none_is_active() {
+    let host = common::logged_in_machine().with_file(CODEX, "");
+    let codex = Selection {
+        provider: None,
+        codex: true,
+        claude: false,
+    };
+
+    let (result, _) = common::run_status_with(
+        &host,
+        perch::commands::status::StatusArgs {
+            provider: codex,
+            ..Default::default()
+        },
+    );
+
+    let said = result.expect_err("no Codex Account is held").to_string();
+    assert!(said.contains("no Codex Accounts"), "{said}");
+    assert!(said.contains("`perch add --codex`"), "{said}");
+    assert!(
+        !said.contains("perch switch"),
+        "the Claude Account held is not one `--codex` would switch to: {said}"
+    );
+}
