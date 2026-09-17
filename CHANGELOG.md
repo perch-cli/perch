@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `perch status` and `perch list` take `--claude`, `--codex` and
+  `--provider <name>`. Without one they speak for the provider whose Accounts
+  are held, or the Run preference where both are. Before, both read Claude's
+  active Account whatever was held, so a Codex-only machine reported no active
+  Account after a Switch and `perch list --json` gave `"active_account": null`.
 - Codex Accounts Switch and Cycle. `perch switch <codex account>` writes the
   login the next `codex` starts with into Codex's file store, Capturing the
   Renewed copy of the Account it leaves; the Watcher Cycles Codex Accounts

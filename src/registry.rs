@@ -5,7 +5,7 @@
 //! (ADR the-holdings-outlive-a-perch): a Registry claiming more than this build
 //! understands is refused rather than silently misread.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -471,6 +471,24 @@ impl Registry {
         self.accounts
             .iter()
             .find(|account| same_name(account.key(), email))
+    }
+
+    /// The provider a reading command speaks for: the one named, else the one
+    /// whose Accounts are held, else the Run preference. A default rather than
+    /// a refusal because nothing is changed by reading, and `perch status` sits
+    /// in shell prompts (ADR each-provider-has-a-default).
+    pub fn provider_spoken_for(
+        &self,
+        named: Option<crate::providers::provider::Id>,
+    ) -> crate::providers::provider::Id {
+        if let Some(named) = named {
+            return named;
+        }
+        let mut held: BTreeSet<_> = self.accounts.iter().map(Account::provider).collect();
+        match (held.pop_first(), held.is_empty()) {
+            (Some(only), true) => only,
+            _ => self.run_provider,
+        }
     }
 
     pub fn selected_provider(&self) -> crate::providers::provider::Id {

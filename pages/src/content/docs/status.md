@@ -8,6 +8,11 @@ sidebar:
 them: everything Perch holds, or one Scope of it. Neither touches the network
 unless you pass `--refresh`.
 
+Each provider has its own active Account. `perch status` reports one, and
+`perch list` marks it: the provider whose Accounts you hold, or with both held
+the Run preference, unless `--claude`, `--codex` or `--provider <name>` names
+the other.
+
 ## The Account you are on
 
 ```

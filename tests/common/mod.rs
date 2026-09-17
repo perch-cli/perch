@@ -265,6 +265,7 @@ pub fn run_status_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, St
         StatusArgs {
             json,
             refresh: true,
+            ..StatusArgs::default()
         },
     )
 }
@@ -322,6 +323,7 @@ pub fn run_list_in_refresh(
             json,
             scope: Some(scope.to_string()),
             refresh: true,
+            ..ListArgs::default()
         },
     )
 }

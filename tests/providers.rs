@@ -2175,3 +2175,68 @@ fn a_provider_flag_refuses_an_account_of_the_other_provider_by_email_as_by_alias
         );
     }
 }
+
+#[test]
+fn status_and_list_speak_for_the_one_provider_whose_accounts_are_held() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "work").0.unwrap();
+
+    let (status, said) = common::run_status(&host, false);
+    status.expect("the Codex Account just switched to is the one you are on");
+    assert!(said.contains(EMAIL), "{said}");
+
+    let (list, listed) = common::run_list(&host, true);
+    list.unwrap();
+    let listed: serde_json::Value = serde_json::from_str(&listed).unwrap();
+    assert!(
+        listed["active_account"]
+            .as_str()
+            .is_some_and(|key| key.starts_with("codex:")),
+        "{listed}"
+    );
+}
+
+#[test]
+fn status_speaks_for_the_run_preference_where_both_providers_are_held_unless_a_flag_names_one() {
+    let host = common::logged_in_machine();
+    let document = credential("company", EMAIL);
+    let host = host.with_file(CODEX, "").with_login(move |host, at| {
+        host.set_file(at.join("auth.json"), &document);
+        0
+    });
+    add_account(&host, "company");
+    let codex = Selection {
+        provider: None,
+        codex: true,
+        claude: false,
+    };
+    perch::commands::switch::run(
+        &host,
+        perch::commands::switch::SwitchArgs {
+            provider: codex,
+            target: Some("company".into()),
+            no_refresh: true,
+        },
+        &mut Vec::new(),
+    )
+    .unwrap();
+
+    let (unnamed, said) = common::run_status(&host, false);
+    unnamed.unwrap();
+    assert!(
+        said.contains(common::EMAIL) && !said.contains(EMAIL),
+        "the Run preference is Claude: {said}"
+    );
+    let (named, said) = common::run_status_with(
+        &host,
+        perch::commands::status::StatusArgs {
+            provider: codex,
+            ..Default::default()
+        },
+    );
+    named.unwrap();
+    assert!(
+        said.contains(EMAIL) && !said.contains(common::EMAIL),
+        "{said}"
+    );
+}

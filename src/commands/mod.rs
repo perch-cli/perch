@@ -89,14 +89,19 @@ impl<'a> Viewing<'a> {
     /// Exclusively only where something will be written, which is `--refresh`
     /// and nothing else: two listings drawn at once are ordinary, and a read
     /// that took the write lock would fail on one of them.
-    pub fn opened(host: &'a dyn Host, refresh: bool) -> Result<Self> {
-        let (perch, registry) = match refresh {
+    pub fn opened(
+        host: &'a dyn Host,
+        refresh: bool,
+        provider: selection::Selection,
+    ) -> Result<Self> {
+        let (perch, mut registry) = match refresh {
             true => {
                 let (perch, registry) = crate::adopt::ensure_adopted_exclusively(host)?;
                 (Some(perch), registry)
             }
             false => (None, crate::adopt::ensure_adopted(host)?),
         };
+        registry.select_provider(registry.provider_spoken_for(provider.explicit()));
         Ok(Self {
             host,
             perch,
