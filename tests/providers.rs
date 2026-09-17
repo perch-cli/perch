@@ -2264,3 +2264,26 @@ fn a_first_config_set_on_a_logged_in_machine_still_adopts_the_native_login() {
     status.expect("and it is the Account you are on");
     assert!(said.contains(common::EMAIL), "{said}");
 }
+
+#[test]
+fn a_codex_relogin_names_the_account_as_a_person_reads_it_and_never_by_its_key() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let mut printed = Vec::new();
+    relogin::run(
+        &host,
+        relogin::ReloginArgs {
+            target: "personal".into(),
+        },
+        &mut printed,
+    )
+    .unwrap();
+    let printed = String::from_utf8(printed).unwrap();
+    assert!(
+        printed.contains(&format!(
+            "Logging in again to repair {EMAIL} (as `personal`)."
+        )),
+        "{printed}"
+    );
+    assert!(!printed.contains("codex:"), "{printed}");
+}
