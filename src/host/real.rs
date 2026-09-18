@@ -3267,9 +3267,12 @@ mod tests {
         host.create_file_with_mode(&file, "x", PRIVATE_FILE_MODE)
             .expect("a file where a directory would have to go");
 
+        // Windows answers a file standing in the middle of the path with
+        // `ERROR_PATH_NOT_FOUND` where Unix answers `ENOTDIR`, so which refusal
+        // it is belongs to the platform rather than to this port.
         assert!(matches!(
             host.create_dir_exclusive(&file.join("under")),
-            Err(HostError::Io(_))
+            Err(HostError::Io(_) | HostError::NotFound { .. })
         ));
 
         let _ = std::fs::remove_dir_all(&root);
