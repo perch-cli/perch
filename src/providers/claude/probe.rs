@@ -680,8 +680,8 @@ pub fn read_identity(
     }
 
     // Refused here and not in `registry::validate`, which `load` meets over a
-    // value Perch wrote down (ADR a-registry-comes-forward). The address on the
-    // whole set, the organization on `Cc` (ADR nothing-drawn-is-obeyed).
+    // value Perch wrote down. The address on the whole set, the organization on
+    // `Cc` (ADR nothing-drawn-is-obeyed).
     let asked = [
         (
             "the account",

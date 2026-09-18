@@ -559,10 +559,10 @@ mod tests {
         }
     }
 
-    /// Both promise at `--help` to touch nothing Perch holds, and a migration is
-    /// a read of the Registry and a write of it under the lock.
+    /// Both promise at `--help` to touch nothing Perch holds, and reading the
+    /// Registry to bring it forward is a write of it under the lock.
     #[test]
-    fn the_two_commands_for_a_misbehaving_machine_skip_the_migration() {}
+    fn the_two_commands_for_a_misbehaving_machine_skip_the_registry() {}
 
     /// The fixtures are a Target and the three flags that would narrow an
     /// Export or answer for it.
