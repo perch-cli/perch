@@ -1240,6 +1240,26 @@ mod tests {
         );
     }
 
+    /// The other question about two paths, where the undecided answer turns
+    /// over: a caller told two paths are one place goes on to act on them as
+    /// one, so a walk that gave up is nowhere rather than everywhere.
+    #[test]
+    fn a_loop_of_links_is_not_the_same_place_as_anything_it_is_compared_with() {
+        let host = FakeHost::new()
+            .with_link(Link::Symbolic, "/b", "/a")
+            .with_link(Link::Symbolic, "/a", "/b");
+
+        let looping = settled(&host, Path::new("/a"));
+
+        assert!(!looping.is_the_same_place_as(&settled(&host, Path::new("/a"))));
+        assert!(!is_the_same_place(&host, Path::new("/a"), Path::new("/b")));
+        assert!(is_the_same_place(
+            &host,
+            Path::new("/somewhere"),
+            Path::new("/somewhere")
+        ));
+    }
+
     /// The tags block is the standard carrier for invisible text: `U+E0020`
     /// upward mirror ASCII, draw as nothing, and are `Cf` rather than `Cc`, so
     /// `is_control` passes over every one. An address is read out of a file

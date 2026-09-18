@@ -2789,4 +2789,667 @@ mod tests {
             .is_ok()
         );
     }
+
+    /// What a request that reaches nothing becomes: `curl`'s own account of it,
+    /// rather than a status nobody sent.
+    // The port's own method is what this asserts on, so it is the one call the
+    // way through would defeat.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the claim is about the adapter's own method rather than about a request Perch makes"
+    )]
+    #[test]
+    fn a_request_that_reaches_nothing_is_a_refusal_in_curls_own_words() {
+        let host = RealHost::new();
+        // Loopback at a port nothing listens on, so the connection is refused
+        // without anything leaving the machine.
+        let request = HttpRequest::get("http://127.0.0.1:1/usage", &[]).within(5_000);
+
+        let refused = host.http(&request).expect_err("nothing answers there");
+
+        assert!(
+            matches!(&refused, HostError::Other(said) if said.contains("curl")),
+            "{refused}"
+        );
+    }
+
+    /// Three ends an exchange has to refuse rather than wait out: a child that
+    /// stops talking, one answering with a line no reply could be, and one
+    /// answering with more than Perch will hold.
+    #[cfg(unix)]
+    #[test]
+    fn an_rpc_child_that_says_nothing_or_too_much_is_refused_rather_than_waited_on() {
+        // Doubled by the shell rather than filled by a program: the child is
+        // spawned with no environment, so `PATH` names nowhere to find one.
+        let padded = "p=xxxxxxxxxxxxxx; i=0; while [ $i -lt 16 ]; do p=$p$p; i=$((i+1)); done";
+        let asked = |script: &str| {
+            let mut checkpoint = || Ok(());
+            let control = crate::host::RpcControl {
+                timeout: std::time::Duration::from_secs(60),
+                checkpoint: &mut checkpoint,
+            };
+            RealHost::new()
+                .rpc(
+                    "/bin/sh",
+                    &["-c", script],
+                    &[],
+                    &[r#"{"id":1,"method":"ping"}"#.to_string()],
+                    control,
+                )
+                .expect_err("none of these is an answer")
+                .to_string()
+        };
+
+        let silent = asked("read x");
+        assert!(silent.contains("RPC child closed"), "{silent}");
+
+        let oversized = asked(&format!("read x; {padded}; echo \"$p$p\""));
+        assert!(oversized.contains("oversized"), "{oversized}");
+
+        let too_much = asked(&format!(
+            "read x; {padded}; j=0; while [ $j -lt 3 ]; do \
+             printf '{{\"id\":99,\"pad\":\"%s\"}}\\n' \"$p\"; j=$((j+1)); done"
+        ));
+        assert!(too_much.contains("response limit"), "{too_much}");
+    }
+
+    /// A directory of this test's own under `temp_dir`, emptied first so a run
+    /// that died before its cleanup does not decide the next one.
+    fn scratch(named: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("perch-{named}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        root
+    }
+
+    /// The caller the three-way test above is split out of, and the one arm only
+    /// the machine this runs on can answer.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_curl_this_machine_carries_is_an_absolute_path_to_a_file() {
+        match super::curl_bin() {
+            Ok(found) => {
+                assert!(found.is_file(), "{}", found.display());
+                assert!(found.is_absolute(), "{}", found.display());
+                assert_eq!(found.file_name(), Some(std::ffi::OsStr::new("curl")));
+            }
+            Err(refused) => assert!(refused.to_string().contains("PATH"), "{refused}"),
+        }
+    }
+
+    /// Stdin is where every secret travels, so what the child reads has to be
+    /// what it was handed, whole.
+    #[cfg(unix)]
+    #[test]
+    fn what_a_child_is_handed_on_stdin_is_what_it_reads() {
+        // Under what a pipe holds: `run` writes the whole of stdin before it
+        // reads a byte of stdout, so a child answering with more would wedge.
+        let handed = "sk-ant-ort01-".repeat(100);
+
+        let said = super::run(Path::new("/bin/cat"), &[], Some(&handed)).expect("cat runs");
+
+        assert_eq!(said.stdout, handed);
+        assert!(said.stderr.is_empty());
+        assert!(said.succeeded());
+    }
+
+    /// The likeliest failure on that path is a child that has already exited,
+    /// and what it said on the way out is the only thing that explains it.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_never_read_its_stdin_is_reaped_and_reported_in_its_own_words() {
+        // More than a pipe holds, so the write is still going when it exits.
+        let more_than_a_pipe_holds = "x".repeat(1024 * 1024);
+        let ran = |script: &str| {
+            super::run(
+                Path::new("/bin/sh"),
+                &["-c", script],
+                Some(&more_than_a_pipe_holds),
+            )
+            .expect_err("a child that has gone takes no more input")
+        };
+
+        let complained = ran("echo it went away >&2");
+        assert_eq!(complained.kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(
+            complained.to_string().contains("it went away"),
+            "{complained}"
+        );
+        assert!(complained.to_string().contains("/bin/sh"), "{complained}");
+
+        let silent = ran("exit 1");
+        assert_eq!(silent.kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(
+            !silent.to_string().contains("/bin/sh"),
+            "a child with nothing to say is reported as the write failed: {silent}"
+        );
+    }
+
+    /// The three answers a program gives, all of which Perch reads: what it
+    /// printed, what it complained, and the code it ended with.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_answers_with_what_it_printed_what_it_complained_and_its_code() {
+        let host = RealHost::new();
+
+        let ran = host
+            .exec("/bin/sh", &["-c", "printf out; printf trouble >&2; exit 3"])
+            .expect("sh runs");
+
+        assert_eq!(
+            (ran.status, ran.stdout.as_str(), ran.stderr.as_str()),
+            (3, "out", "trouble")
+        );
+        assert!(!ran.succeeded());
+
+        let missing = host
+            .exec("/nowhere/perch-has-no-such-program", &[])
+            .expect_err("nothing is there to run");
+        assert!(
+            missing
+                .to_string()
+                .contains("/nowhere/perch-has-no-such-program"),
+            "a spawn that failed says what it could not run: {missing}"
+        );
+    }
+
+    /// A rehearsal runs under exactly the environment it was handed: what this
+    /// process carries is not what a Login is judged by.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_run_under_an_environment_is_given_that_one_and_no_other() {
+        // Whatever this process happens to carry, less the names a shell sets
+        // for itself however it was started.
+        let its_own = ["PATH", "HOME", "PWD", "IFS", "SHLVL", "OPTIND", "PS1", "_"];
+        let (carried, value) = std::env::vars()
+            .find(|(name, value)| {
+                !value.is_empty()
+                    && !its_own.contains(&name.as_str())
+                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+            .expect("this process was started with an environment");
+        let host = RealHost::new();
+        let script = format!("printf '[%s][%s]' \"$CLAUDE_CONFIG_DIR\" \"${carried}\"");
+
+        let ran = host
+            .exec_under(
+                "/bin/sh",
+                &["-c", &script],
+                &[("CLAUDE_CONFIG_DIR", "/tmp/given")],
+            )
+            .expect("sh runs");
+
+        assert_eq!(ran.stdout, "[/tmp/given][]", "{carried} is {value} here");
+    }
+
+    /// What a caller passes on as its own exit code, for both ways a process
+    /// ends: a death by signal is the 128 plus it that `$?` reports.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_killed_by_a_signal_ends_as_a_shell_would_report_it() {
+        let ended = |script: &str| {
+            let status = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .status()
+                .expect("sh runs");
+            super::ended_as(status)
+        };
+
+        assert_eq!(ended("exit 7"), 7);
+        assert_eq!(ended("kill -TERM $$"), 128 + libc::SIGTERM);
+    }
+
+    /// The identity the filesystem judges every write by, which is the one
+    /// `user_id` answers with: a file this process creates is owned by it.
+    #[cfg(unix)]
+    #[test]
+    fn the_user_perch_reports_is_the_one_its_writes_are_owned_by() {
+        use std::os::unix::fs::MetadataExt;
+
+        let host = RealHost::new();
+        let root = scratch("uid");
+        let at = root.join("written");
+        host.create_file_with_mode(&at, "x", PRIVATE_FILE_MODE)
+            .expect("a file this process owns");
+
+        assert_eq!(
+            host.user_id(),
+            Some(std::fs::metadata(&at).expect("it is there").uid())
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Asked of the machine rather than of `cfg!`, which is all a test could
+    /// restate: the platform is the one this build was made for.
+    #[test]
+    fn the_platform_is_the_one_this_build_was_made_for() {
+        let platform = RealHost::new().platform();
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            platform,
+            Platform::MacOs,
+            "the one platform with a keychain"
+        );
+        #[cfg(windows)]
+        assert_eq!(platform, Platform::Windows);
+        #[cfg(not(any(target_os = "macos", windows)))]
+        assert_eq!(platform, Platform::Other);
+    }
+
+    /// Canonicalized, so a Homebrew `<prefix>/bin/perch` is read as the Cellar
+    /// it points into rather than as the prefix.
+    #[test]
+    fn the_running_program_is_named_by_a_path_that_resolves() {
+        let found = RealHost::new()
+            .current_exe()
+            .expect("this process has a path");
+
+        assert!(found.is_file(), "{}", found.display());
+        assert_eq!(found, std::fs::canonicalize(&found).expect("it resolves"));
+    }
+
+    /// Everything Perch reads and writes hangs off these two, so neither may be
+    /// a name that means one directory here and another somewhere else.
+    #[test]
+    fn home_and_the_working_directory_are_absolute() {
+        let host = RealHost::new();
+        let home = host.home_dir().expect("this suite runs with a home");
+
+        assert!(home.is_absolute(), "{}", home.display());
+        assert!(host.current_dir().expect("somewhere").is_absolute());
+        assert_eq!(host.env_var(HOME_VARIABLE).map(PathBuf::from), Some(home));
+        assert_eq!(host.env_var("PERCH_NOTHING_SETS_THIS"), None);
+    }
+
+    /// A Marker is dismissed by a boot that was read, so a boot reported after
+    /// the clock it is compared against would dismiss every session there is.
+    #[test]
+    fn the_clock_is_this_machines_and_the_boot_it_reports_is_behind_it() {
+        let host = RealHost::new();
+        let before = Utc::now();
+
+        let now = host.now();
+
+        assert!(before <= now && now <= Utc::now(), "{now}");
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+        {
+            let booted = host
+                .booted_at()
+                .expect("this platform says when it started");
+            assert!(booted < now, "booted {booted}, now {now}");
+        }
+    }
+
+    /// What corroborates a session marker: this process is running, and it
+    /// began after the machine it runs on did.
+    #[test]
+    fn this_process_is_alive_and_began_after_the_machine_did() {
+        let host = RealHost::new();
+
+        assert_eq!(host.process_id(), std::process::id());
+        assert!(host.process_alive(host.process_id()));
+        assert!(!host.process_alive(0), "0 is the caller's own group");
+
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+        {
+            let started = host
+                .process_started_at(host.process_id())
+                .expect("this platform says when a process began");
+            assert!(started <= host.now(), "{started}");
+            assert!(host.booted_at().expect("a boot") <= started, "{started}");
+            assert_eq!(host.process_started_at(0), None, "0 is not a process");
+        }
+    }
+
+    /// A pid above anything a machine hands out, so `kill` answers `ESRCH` —
+    /// the one answer that means dead, where `EPERM` is alive and somebody
+    /// else's.
+    #[cfg(unix)]
+    #[test]
+    fn a_process_that_was_never_there_is_dead_rather_than_somebody_elses() {
+        assert!(!process_alive(i32::MAX as u32 - 1));
+    }
+
+    /// However many Accounts provoke a remark about the machine, it is made
+    /// once.
+    #[test]
+    fn a_remark_about_the_machine_is_made_once_however_often_it_is_provoked() {
+        let host = RealHost::default();
+
+        host.note("CLAUDE_CONFIG_DIR is not text, so Perch reads it as unset.");
+        host.note("CLAUDE_CONFIG_DIR is not text, so Perch reads it as unset.");
+        host.note("A Credential was too large for `security`'s stdin.");
+
+        assert_eq!(host.noted.borrow().len(), 2);
+    }
+
+    /// The three ends of the wait a Service spends its life in: no pipe open
+    /// yet, one woken while it waits, and a loop already asked to stop.
+    #[cfg(unix)]
+    #[test]
+    fn a_wait_ends_when_it_is_woken_and_at_once_once_the_loop_is_asked_to_stop() {
+        use std::sync::atomic::Ordering::Relaxed;
+
+        let host = RealHost::new();
+        assert!(!host.asked_to_stop(), "nothing has asked yet");
+        assert_eq!(host.wait(20), Waited::Fully, "before there is a pipe");
+
+        host.listen_for_interrupts();
+        let ran_out = std::time::Instant::now();
+        assert_eq!(host.wait(20), Waited::Fully);
+        assert!(ran_out.elapsed() >= std::time::Duration::from_millis(20));
+
+        // What the handler does, rather than a signal: this suite is one
+        // process, and a real Ctrl-C would reach every test in it.
+        let stopping = std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            INTERRUPTED.store(true, Relaxed);
+            // SAFETY: a one-byte buffer this frame owns, and the write end of a
+            // pipe this process opened and never closes.
+            unsafe { libc::write(WOKEN[1].load(Relaxed), [0u8].as_ptr().cast(), 1) };
+        });
+        let woken = std::time::Instant::now();
+
+        assert_eq!(host.wait(600_000), Waited::Interrupted);
+
+        stopping.join().expect("the stop is delivered");
+        assert!(
+            woken.elapsed() < std::time::Duration::from_secs(60),
+            "cut short rather than waited out"
+        );
+        assert!(host.asked_to_stop());
+        assert_eq!(
+            host.wait(600_000),
+            Waited::Interrupted,
+            "and every wait after it"
+        );
+        INTERRUPTED.store(false, Relaxed);
+    }
+
+    /// The file that ends up at the path is created at the mode asked for
+    /// rather than tightened afterwards, whatever was at the name before.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_is_created_at_the_mode_asked_for_and_never_written_into_one_already_there() {
+        let host = RealHost::new();
+        let root = scratch("create");
+        let at = root.join("under").join("a").join("credentials.json");
+
+        host.create_file_with_mode(&at, "{\"first\":true}", 0o644)
+            .expect("the directories above it are made too");
+
+        assert_eq!(
+            host.read_file(&at).expect("it is there"),
+            "{\"first\":true}"
+        );
+        assert_eq!(host.file_mode(&at).expect("it has a mode"), Some(0o644));
+        assert!(host.is_file(&at) && host.path_exists(&at));
+
+        host.create_file_with_mode(&at, "{\"second\":true}", PRIVATE_FILE_MODE)
+            .expect("a second write");
+
+        assert_eq!(
+            host.read_file(&at).expect("it is there"),
+            "{\"second\":true}"
+        );
+        assert_eq!(
+            host.file_mode(&at).expect("it has a mode"),
+            Some(PRIVATE_FILE_MODE),
+            "a file left looser is replaced rather than written into"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A path that is not there is `NotFound` where something was to be read,
+    /// and no failure at all where something was to go.
+    #[test]
+    fn a_path_that_is_not_there_is_not_found_to_read_and_no_failure_to_remove() {
+        let host = RealHost::new();
+        let root = scratch("absent");
+        let gone = root.join("gone");
+
+        assert!(matches!(
+            host.read_file(&gone),
+            Err(HostError::NotFound { path }) if path == gone
+        ));
+        assert!(matches!(
+            host.file_mode(&gone),
+            Err(HostError::NotFound { .. })
+        ));
+        assert!(matches!(
+            host.modified_at(&gone),
+            Err(HostError::NotFound { .. })
+        ));
+        assert!(matches!(
+            host.list_dir(&gone),
+            Err(HostError::NotFound { .. })
+        ));
+        assert!(matches!(
+            host.link_target(&gone),
+            Err(HostError::NotFound { .. })
+        ));
+        assert!(matches!(host.touch(&gone), Err(HostError::NotFound { .. })));
+        assert!(!host.path_exists(&gone) && !host.is_file(&gone));
+
+        host.remove_file(&gone).expect("a file already gone");
+        host.remove_dir_all(&gone)
+            .expect("a directory already gone");
+        host.remove_link(&gone).expect("a link already gone");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// What makes a lock a lock: whoever creates the directory holds it, and
+    /// the filesystem refusing is told apart from somebody else having it.
+    #[test]
+    fn a_directory_goes_to_whoever_creates_it_first_and_the_rest_are_told_why_not() {
+        let host = RealHost::new();
+        let root = scratch("exclusive");
+        let lock = root.join("held");
+
+        host.create_dir_exclusive(&lock).expect("nobody holds it");
+
+        assert!(matches!(
+            host.create_dir_exclusive(&lock),
+            Err(HostError::AlreadyExists { path }) if path == lock
+        ));
+        // Named for the parent: that the path itself is absent is no news.
+        assert!(matches!(
+            host.create_dir_exclusive(&root.join("nowhere").join("held")),
+            Err(HostError::NotFound { path }) if path == root.join("nowhere")
+        ));
+
+        let file = root.join("file");
+        host.create_file_with_mode(&file, "x", PRIVATE_FILE_MODE)
+            .expect("a file where a directory would have to go");
+
+        assert!(matches!(
+            host.create_dir_exclusive(&file.join("under")),
+            Err(HostError::Io(_))
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A listing is every name under the directory, in an order the caller can
+    /// rely on rather than the one the filesystem happens to hand back.
+    #[test]
+    fn a_listing_is_every_entry_in_an_order_the_filesystem_does_not_decide() {
+        let host = RealHost::new();
+        let root = scratch("listing");
+        for name in ["c", "a", "b"] {
+            host.create_file_with_mode(&root.join(name), name, PRIVATE_FILE_MODE)
+                .expect("a file to find");
+        }
+        host.create_dir_all(&root.join("d"))
+            .expect("a directory too");
+
+        assert_eq!(
+            host.list_dir(&root).expect("it lists"),
+            ["a", "b", "c", "d"].map(|name| root.join(name))
+        );
+        assert!(
+            host.list_dir(&root.join("d")).expect("it lists").is_empty(),
+            "a directory with nothing in it lists nothing"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Credential lands through a directory nobody else may enter, created
+    /// that way rather than tightened once the file is in it.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_write_creates_the_directory_above_it_no_wider_than_the_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let host = RealHost::new();
+        let root = scratch("private");
+        let at = root.join("profiles").join("a").join(".credentials.json");
+
+        host.write_private_file(&at, "a refresh token")
+            .expect("the write lands");
+
+        assert_eq!(host.read_file(&at).expect("it is there"), "a refresh token");
+        assert_eq!(
+            host.file_mode(&at).expect("it has a mode"),
+            Some(PRIVATE_FILE_MODE)
+        );
+        let above = std::fs::metadata(at.parent().expect("a directory above it"))
+            .expect("it is there")
+            .permissions()
+            .mode();
+        assert_eq!(above & 0o777, PRIVATE_DIR_MODE);
+
+        // Loose to begin with, which is what an older Claude Code left behind.
+        let loose = root.join("loose.json");
+        host.create_file_with_mode(&loose, "{}", 0o666)
+            .expect("a file somebody else could read");
+        host.make_private(&loose)
+            .expect("the one chmod Perch makes");
+        assert_eq!(
+            host.file_mode(&loose).expect("it has a mode"),
+            Some(PRIVATE_FILE_MODE)
+        );
+
+        // Through a handle rather than a name, so a link planted at the name is
+        // refused rather than followed to whatever it points at.
+        let planted = root.join("planted.json");
+        std::os::unix::fs::symlink(&loose, &planted).expect("a link to plant");
+        assert!(host.make_private(&planted).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The three answers a path gives about being a link, and the removal that
+    /// takes the link and leaves what it points at.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_made_read_back_and_removed_without_its_target() {
+        let host = RealHost::new();
+        let root = scratch("links");
+        let target = root.join("target");
+        host.create_file_with_mode(&target, "the shared state", PRIVATE_FILE_MODE)
+            .expect("something to point at");
+        let at = root.join("link");
+
+        host.link(Link::Symbolic, &target, &at).expect("a link");
+
+        assert_eq!(
+            host.link_target(&at).expect("it answers"),
+            Some(target.clone())
+        );
+        assert_eq!(
+            host.link_target(&target).expect("it answers"),
+            None,
+            "a file is not a link"
+        );
+        assert!(matches!(
+            host.link(Link::Symbolic, &target, &at),
+            Err(HostError::AlreadyExists { .. })
+        ));
+
+        let refused = host
+            .remove_link(&target)
+            .expect_err("a file at the name is not Perch's to remove");
+        assert!(refused.to_string().contains("is not a link"), "{refused}");
+
+        host.remove_link(&at).expect("the link goes");
+        assert!(!host.path_exists(&at));
+        assert_eq!(
+            host.read_file(&target).expect("it is there"),
+            "the shared state",
+            "and what it pointed at stays"
+        );
+
+        let second = root.join("second");
+        host.link(Link::Hard, &target, &second)
+            .expect("a second name for the same file");
+        assert_eq!(
+            host.read_file(&second).expect("it is there"),
+            "the shared state"
+        );
+        let refused = host
+            .link(Link::Junction, &target, &root.join("junction"))
+            .expect_err("a junction is a Windows link");
+        assert!(refused.to_string().contains("Windows"), "{refused}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A regular file where a directory would have to go, which is `ENOTDIR`:
+    /// all three writes refuse rather than making a path that cannot exist.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_under_something_that_is_not_a_directory_is_refused() {
+        let host = RealHost::new();
+        let root = scratch("not-a-directory");
+        let file = root.join("claude.json");
+        host.create_file_with_mode(&file, "{}", PRIVATE_FILE_MODE)
+            .expect("a file in the way");
+        let under = file.join("credentials.json");
+
+        assert!(host.create_file_with_mode(&under, "x", 0o600).is_err());
+        assert!(host.write_private_file(&under, "x").is_err());
+        assert!(host.append_private_line(&under, "x").is_err());
+        assert!(!host.path_exists(&under));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A directory nobody may write, which is what a Credential Store on a
+    /// volume remounted read-only amounts to. A uid the mode does not bind has
+    /// nothing to prove here, so it is passed over.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_that_will_not_take_a_file_is_reported_rather_than_swallowed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let host = RealHost::new();
+        if host.user_id() == Some(0) {
+            return;
+        }
+        let root = scratch("read-only");
+        let closed = root.join("closed");
+        host.create_dir_all(&closed).expect("a directory to close");
+        let shut = std::fs::Permissions::from_mode(0o500);
+        std::fs::set_permissions(&closed, shut).expect("nobody may write there");
+        let at = closed.join("credentials.json");
+
+        let refused = host
+            .create_file_with_mode(&at, "x", PRIVATE_FILE_MODE)
+            .expect_err("nothing may be written there");
+
+        assert!(matches!(refused, HostError::Io(_)), "{refused:?}");
+        assert!(host.write_private_file(&at, "x").is_err());
+        assert!(host.append_private_line(&at, "x").is_err());
+
+        let open_again = std::fs::Permissions::from_mode(0o700);
+        std::fs::set_permissions(&closed, open_again).expect("so the cleanup can run");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
