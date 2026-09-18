@@ -2454,6 +2454,70 @@ pub(crate) mod tests {
         assert!(error.to_string().contains("2 disabled"), "{error}");
         assert!(error.to_string().contains("1 Quarantined"), "{error}");
     }
+
+    /// Two of the three answers are not numbers, and neither of them is nought:
+    /// a script reading `percent` alone would take an exhausted Account and one
+    /// never observed for an Account with everything left.
+    #[test]
+    fn the_headroom_a_document_carries_says_which_of_the_three_answers_it_is() {
+        assert_eq!(
+            headroom_document(&account("room@example.com", vec![window("5-hour", 30.0)])),
+            serde_json::json!({"state": "room", "percent": 70.0})
+        );
+        assert_eq!(
+            headroom_document(&account("full@example.com", vec![window("5-hour", 100.0)])),
+            serde_json::json!({"state": "exhausted", "percent": null})
+        );
+        assert_eq!(
+            headroom_document(&account("new@example.com", vec![])),
+            serde_json::json!({"state": "never-observed", "percent": null})
+        );
+    }
+
+    #[test]
+    fn every_basis_says_what_was_won_on_and_where_it_was_won() {
+        let scope = Scope::Group("work".to_string());
+        for (basis, won_on) in [
+            (Basis::MostRoom, "the most room"),
+            (Basis::SoonestReset, "the soonest reset"),
+            (Basis::MostPreferred, "the most preferred workload left"),
+            (Basis::Unranked, "nothing observed to rank on"),
+        ] {
+            let clause = basis.in_the(&scope);
+            assert!(clause.starts_with(won_on), "{clause}");
+            assert!(clause.ends_with(&scope.place()), "{clause}");
+        }
+    }
+
+    #[test]
+    fn a_preferred_workload_reads_no_figure_and_no_ranking_window_as_one_answer() {
+        let nothing_read = account("new@example.com", vec![]);
+        let read_without_one = account("other@example.com", vec![window("5-hour", 30.0)]);
+
+        let unobserved = measured_of(&nothing_read, Measure::Preferred("fable"));
+        let unranked = measured_of(&read_without_one, Measure::Preferred("fable"));
+
+        assert_eq!(unobserved, unranked);
+        assert_eq!(unobserved.headroom, Headroom::Unobserved);
+        assert_eq!(unobserved.tier, 1);
+    }
+
+    /// The one narrowing that can leave nothing to measure: an Account whose
+    /// only window is the Ranking one and it is spent falls to the lower tier,
+    /// where what is ranked is every window but that one.
+    #[test]
+    fn an_account_whose_only_window_is_a_spent_ranking_one_is_ranked_on_no_figure() {
+        let spent = account("spent@example.com", vec![window("7-day-fable", 100.0)]);
+
+        let measured = measured_of(&spent, Measure::Preferred("fable"));
+
+        assert_eq!(measured.tier, 0, "it cannot serve the workload now");
+        assert_eq!(
+            measured.headroom,
+            Headroom::Unobserved,
+            "and nothing is left to say how much room it has"
+        );
+    }
 }
 
 /// Properties the ranking holds for every arrangement of Accounts, not only the

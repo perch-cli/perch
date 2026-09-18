@@ -2926,4 +2926,229 @@ mod tests {
             CURRENT_VERSION
         );
     }
+
+    /// The reason is what happened and the detail is how, so the detail joins
+    /// the sentence rather than replacing it — and nothing said adds nothing
+    /// rather than an empty parenthetical.
+    #[test]
+    fn a_quarantine_says_what_the_failure_underneath_said_beside_the_reason() {
+        let said = Quarantine::RenewalRejected.said_of(
+            "work",
+            "work",
+            Some("Anthropic answered 400 invalid_grant"),
+        );
+
+        assert!(said.contains("would not renew its Credential"), "{said}");
+        assert!(
+            said.contains("(Anthropic answered 400 invalid_grant)"),
+            "{said}"
+        );
+
+        let bare = Quarantine::RenewalRejected.said_of("work", "work", None);
+        assert!(!bare.contains('('), "{bare}");
+    }
+
+    #[test]
+    fn the_ungrouped_scope_answers_for_settings_as_a_group_does() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").expect("a free name");
+
+        assert!(registry.scope_settings(&Scope::Ungrouped).is_some());
+        assert!(
+            registry
+                .scope_settings(&Scope::Group("work".into()))
+                .is_some()
+        );
+        assert!(
+            registry
+                .scope_settings(&Scope::Group("nowhere".into()))
+                .is_none(),
+            "a Group nothing declared has no Settings to answer with"
+        );
+    }
+
+    /// An address Perch does not hold is said back as it was typed. Both
+    /// answers are reached with something the Registry cannot look up — a
+    /// Target that turned out to name nothing, said in the refusal about it.
+    #[test]
+    fn an_account_perch_does_not_hold_is_named_by_the_address_that_was_typed() {
+        let registry = Registry::default();
+
+        assert_eq!(
+            registry.target_of("nobody@example.com"),
+            "nobody@example.com"
+        );
+        assert_eq!(
+            registry.named_for_the_user("nobody@example.com"),
+            "nobody@example.com"
+        );
+    }
+
+    /// Two Accounts may hold one address across providers, and then the address
+    /// alone names neither. The Workspace joins the clause only where there is
+    /// one: a provider that identifies a user and no Workspace has nothing to
+    /// add after the provider's name.
+    #[test]
+    fn one_address_held_twice_is_named_by_the_provider_and_the_workspace_it_has() {
+        use crate::providers::provider::{AccountIdentity, Id};
+
+        let mut registry = Registry::default();
+        for workspace in [Some("workspace-1"), None] {
+            let mut account = crate::cycle::tests::account("shared@example.com", vec![]);
+            account.provider_identity = Some(
+                AccountIdentity::from_subject(
+                    Id::Claude,
+                    "user-1".to_string(),
+                    workspace.map(str::to_string),
+                )
+                .expect("the provider identifies the user"),
+            );
+            registry.upsert(account);
+        }
+
+        let named: Vec<String> = registry
+            .accounts
+            .iter()
+            .map(|account| registry.named_for_the_user(account.key()))
+            .collect();
+
+        assert!(
+            named[0].contains("Workspace workspace-1"),
+            "the one with a Workspace says which: {named:?}"
+        );
+        assert!(
+            !named[1].contains("Workspace"),
+            "and the one without says nothing about one: {named:?}"
+        );
+        assert_ne!(named[0], named[1], "{named:?}");
+    }
+
+    /// An Account carrying a provider identity: the description and the
+    /// identity are two records of one Account, and a Registry holding them
+    /// disagreeing is one no command could act on consistently.
+    #[test]
+    fn an_account_whose_description_disagrees_with_its_provider_identity_is_refused() {
+        use crate::providers::provider::{AccountIdentity, Id};
+
+        let identified = |uuid: Option<&str>| {
+            let mut account = crate::cycle::tests::account("someone@example.com", vec![]);
+            account.group = None;
+            account.identity.account_uuid = uuid.map(str::to_string);
+            account.provider_identity = Some(
+                AccountIdentity::from_subject(Id::Claude, "user-1".to_string(), None)
+                    .expect("the provider identifies the user"),
+            );
+            let mut registry = Registry::default();
+            registry.upsert(account);
+            registry
+        };
+
+        let refused = validate(&identified(Some("somebody-else")))
+            .expect_err("the two records name different users");
+        assert!(
+            refused.to_string().contains("provider identity"),
+            "{refused}"
+        );
+        validate(&identified(Some("user-1"))).expect("and agreeing is fine");
+    }
+
+    /// A provider's active state names an Account that provider holds. Nothing
+    /// else could be Switched to under it, so a Registry saying otherwise is
+    /// named rather than acted on.
+    #[test]
+    fn a_providers_active_state_naming_another_providers_account_is_refused() {
+        use crate::providers::provider::Id;
+
+        let mut registry = Registry::default();
+        let mut account = crate::cycle::tests::account("someone@example.com", vec![]);
+        account.group = None;
+        registry.upsert(account);
+        registry.select_provider(Id::Codex);
+        registry.settle(Some("someone@example.com".to_string()));
+
+        let refused = validate(&registry).expect_err("the Account is a Claude one");
+
+        assert!(
+            refused.to_string().contains("another provider"),
+            "{refused}"
+        );
+    }
+
+    /// The three hand edits `validate` names rather than repairs: one address
+    /// under two Aliases, an Account whose key is no address, and two Accounts
+    /// one `same_name` cannot tell apart.
+    #[test]
+    fn a_registry_only_a_hand_edit_could_produce_is_named_rather_than_repaired() {
+        let holding = || {
+            let mut registry = Registry::default();
+            let mut account = crate::cycle::tests::account("someone@example.com", vec![]);
+            account.group = None;
+            registry.upsert(account);
+            registry
+        };
+
+        let mut two_aliases = holding();
+        two_aliases
+            .aliases
+            .insert("work".into(), "someone@example.com".into());
+        two_aliases
+            .aliases
+            .insert("office".into(), "someone@example.com".into());
+        let refused = validate(&two_aliases).expect_err("one Account, two Aliases");
+        assert!(refused.to_string().contains("two Aliases"), "{refused}");
+
+        let mut not_an_address = holding();
+        // The storage key rather than the address, because `upsert` derives the
+        // first from the second and it is the key every command looks one up by.
+        not_an_address.accounts[0].storage_key = Some("someone".into());
+        let refused = validate(&not_an_address).expect_err("that is not an address");
+        assert!(refused.to_string().contains("not an"), "{refused}");
+
+        let mut twice = holding();
+        let mut again = crate::cycle::tests::account("SOMEONE@example.com", vec![]);
+        again.group = None;
+        twice.accounts.push(again);
+        let refused = validate(&twice).expect_err("those are one Account");
+        assert!(refused.to_string().contains("one Account"), "{refused}");
+    }
+
+    /// Aliases and Group names share one namespace, so a Group declared under a
+    /// name an Alias already answers to is a Target with two meanings — named
+    /// from the Group side, because every Group is walked either way.
+    #[test]
+    fn a_group_declared_under_a_name_an_alias_holds_is_refused_as_the_namespace_it_shares() {
+        let mut registry = Registry::default();
+        let mut account = crate::cycle::tests::account("someone@example.com", vec![]);
+        account.group = None;
+        registry.upsert(account);
+        registry
+            .aliases
+            .insert("work".into(), "someone@example.com".into());
+        registry
+            .groups
+            .insert("work".into(), crate::config::ScopeSettings::default());
+
+        let refused = validate(&registry).expect_err("one name, two meanings");
+
+        assert!(
+            refused.to_string().contains("already an Alias"),
+            "{refused}"
+        );
+    }
+
+    /// A Check is keyed on a Group's declared spelling, and a key naming no
+    /// Group has no spelling to be brought to — so it is left where it is and
+    /// named, rather than filed under a Group that is not there.
+    #[test]
+    fn a_check_against_a_group_perch_no_longer_holds_is_named_rather_than_refiled() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").expect("a free name");
+        registry.record_switch("work", Utc::now());
+        // The hand edit: the Group taken out of the file and its Check left.
+        registry.groups.clear();
+
+        let refused = readable(registry).expect_err("the Check names no Group");
+
+        assert!(refused.to_string().contains("not a Group"), "{refused}");
+    }
 }

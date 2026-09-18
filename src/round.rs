@@ -1021,4 +1021,64 @@ mod tests {
             "no candidates at all is nowhere to go, not a failure to read"
         );
     }
+
+    /// The two global answers, each ahead of everything a Scope says: a Watcher
+    /// that has been paused is not watching anything a Group declared, and a
+    /// provider somebody turned off is not one its Accounts are Switched within.
+    #[test]
+    fn a_paused_watcher_and_a_disabled_provider_are_each_refused_before_the_scope_is_read() {
+        let arranged = || granted(declared(watching_one()));
+
+        let mut paused = arranged();
+        paused.watcher_paused = true;
+        let refused = asking(&paused).expect_err("the watcher is paused");
+        assert!(refused.to_string().contains("paused"), "{refused}");
+
+        let mut disabled = arranged();
+        disabled
+            .provider_settings
+            .entry(disabled.selected_provider())
+            .or_default()
+            .enabled = false;
+        let refused = asking(&disabled).expect_err("the provider is disabled");
+        assert!(refused.to_string().contains("is disabled"), "{refused}");
+
+        asking(&arranged()).expect("and neither is true of the arranged machine");
+    }
+
+    /// A burst that came back about nobody the walk named. The reason is the
+    /// candidate's own rather than an attempt's, and the Back-off paces nothing:
+    /// a doubling charged for a request that never went out would sit the
+    /// Watcher down over a round it spent nothing on.
+    #[test]
+    fn a_candidate_the_refresh_never_answered_for_is_unread_and_paces_nothing() {
+        let (registry, candidates) = walked();
+        let about_somebody_else = observed("elsewhere@example.com");
+
+        let considered =
+            candidates.refreshed(&registry, cycle::Measure::Worst, &about_somebody_else);
+
+        assert!(
+            matches!(&considered[0].figure, Figure::Unread { why } if why.contains("nothing was read at all")),
+            "{:?}",
+            considered[0].figure
+        );
+        let refusal = refused_the_candidates(&considered, &about_somebody_else)
+            .expect("no candidate was read");
+        assert!(
+            !refusal.paced,
+            "an Observed reading is not a question nobody answered: {}",
+            refusal.why
+        );
+    }
+
+    /// The two outcomes a reading never arrives carrying, answered anyway: a
+    /// round that stopped is reported through `Report::stopped`, and a round
+    /// reads under its own spending, so the Watcher is never told to stand aside
+    /// for itself. Neither may quietly become a hold if one ever does arrive.
+    #[test]
+    fn a_reading_that_stopped_or_stood_aside_is_no_refusal_to_report() {
+        assert!(refused_the_reading(&attempt(Outcome::JustRead)).is_none());
+        assert!(refused_the_reading(&attempt(Outcome::Stopped(Lost::Stopped))).is_none());
+    }
 }

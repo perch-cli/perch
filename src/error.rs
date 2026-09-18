@@ -582,4 +582,21 @@ mod tests {
         assert!(said.contains("reads 2"), "{said}");
         assert!(said.contains("Upgrade Perch."), "{said}");
     }
+
+    /// The version is read ahead of the parse, so it answers about documents
+    /// this build has no variant for — and a document that claims none is not a
+    /// document from the future. What to make of that is the caller's, about
+    /// its own file.
+    #[test]
+    fn a_document_claims_a_version_only_where_it_carries_a_whole_number() {
+        assert_eq!(
+            claimed_version(r#"{"version": 7, "unreadable": {}}"#),
+            Some(7)
+        );
+        assert_eq!(claimed_version("{}"), None, "no version is no claim");
+        assert_eq!(claimed_version(r#"{"version": null}"#), None);
+        assert_eq!(claimed_version(r#"{"version": "7"}"#), None);
+        assert_eq!(claimed_version(r#"{"version": 7.5}"#), None);
+        assert_eq!(claimed_version("not json at all"), None);
+    }
 }

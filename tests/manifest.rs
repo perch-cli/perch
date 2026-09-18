@@ -2,7 +2,7 @@
 
 use perch::config::{Scope, Strategy};
 use perch::domain::Identity;
-use perch::host::{FakeHost, Files, Refusing};
+use perch::host::{FakeHost, Files, Refusing, Waiting};
 use perch::providers::provider::Id;
 use perch::registry::{self, Account, Registry};
 use serde_json::{Value, json};
@@ -338,4 +338,137 @@ fn the_documented_configuration_example_loads_as_a_mixed_provider_group() {
     );
     assert_eq!(registry.accounts[0].group.as_deref(), Some("work"));
     assert_eq!(registry.accounts[1].group.as_deref(), Some("work"));
+}
+
+/// A runtime record that is there and will not be read is not an absent one:
+/// reading it as absent would leave the provider with no Default and no
+/// Cooldown, and the next command would Switch inside one still running.
+#[test]
+fn a_runtime_record_that_will_not_be_read_is_a_failure_rather_than_an_absence() {
+    let host = machine()
+        .with_file(CONFIG, &document().to_string())
+        .with_file(
+            CLAUDE_STATE,
+            &json!({"version":registry::CURRENT_VERSION,
+            "active":registry::Active::Nobody,"checks":{},"accounts":{}})
+            .to_string(),
+        )
+        .with_a_path_refusing(CLAUDE_STATE, Refusing::Read, "Permission denied");
+
+    let error = registry::load(&host).unwrap_err().to_string();
+
+    assert!(error.contains("state.json"), "{error}");
+    assert!(error.contains("Permission denied"), "{error}");
+}
+
+/// The order Accounts are listed in is a position each one carries, so two
+/// carrying the same one leave the order to whatever the map happened to yield.
+#[test]
+fn two_accounts_claiming_one_position_are_refused_rather_than_ordered_arbitrarily() {
+    let mut manifest = document();
+    let mut second = manifest["accounts"]["one@example.com"].clone();
+    second["identity"]["email"] = "two@example.com".into();
+    manifest["accounts"]["two@example.com"] = second;
+    let host = machine().with_file(CONFIG, &manifest.to_string());
+
+    let error = registry::load(&host).unwrap_err().to_string();
+
+    assert!(error.contains("same position"), "{error}");
+}
+
+/// The directory key is what every command looks an Account up by, and an
+/// Account carrying a provider identity derives its key from that identity —
+/// so a manifest filing one under a different name is a lookup that misses.
+#[test]
+fn an_account_filed_under_a_key_its_identity_does_not_derive_is_refused() {
+    let mut manifest = document();
+    manifest["accounts"]["one@example.com"]["provider_identity"] =
+        json!({"user_id":"user-1","workspace_id":null,"key":"claude:not-this-one"});
+    let host = machine().with_file(CONFIG, &manifest.to_string());
+
+    let error = registry::load(&host).unwrap_err().to_string();
+
+    assert!(error.contains("directory key"), "{error}");
+}
+
+/// The runtime carries its own version, and a record this build does not
+/// understand is refused with the same instruction the manifest gives: there is
+/// no migration, so starting fresh is the whole of the way forward.
+#[test]
+fn a_runtime_record_of_another_version_asks_for_a_fresh_installation_too() {
+    for version in [registry::CURRENT_VERSION - 1, registry::CURRENT_VERSION + 1] {
+        let runtime = json!({"version":version,"active":registry::Active::Nobody,
+            "checks":{},"accounts":{}});
+        let host = machine()
+            .with_file(CONFIG, &document().to_string())
+            .with_file(CLAUDE_STATE, &runtime.to_string());
+
+        let error = registry::load(&host).unwrap_err().to_string();
+
+        assert!(
+            error.contains("fresh installation"),
+            "version {version}: {error}"
+        );
+    }
+}
+
+/// A Switch recorded as under way to an Account the manifest no longer holds:
+/// the arrival is nowhere to go, so what is left is the Account it was leaving,
+/// which is where the machine still is.
+#[test]
+fn a_landing_on_an_account_the_manifest_no_longer_holds_comes_back_to_the_one_being_left() {
+    let runtime = json!({"version":registry::CURRENT_VERSION,
+        "active":{"landing":{"leaving":"one@example.com","arriving":"gone@example.com"}},
+        "checks":{},"accounts":{}});
+    let host = machine()
+        .with_file(CONFIG, &document().to_string())
+        .with_file(CLAUDE_STATE, &runtime.to_string());
+
+    let registry = registry::load(&host).unwrap().unwrap();
+
+    assert_eq!(
+        *registry.active(),
+        registry::Active::Settled("one@example.com".into())
+    );
+}
+
+/// `perch run` falls back to the installed CLI unless somebody says not to, and
+/// the manifest says which of the two it is in words rather than as a flag —
+/// so a person reading the file can tell what it will do.
+#[test]
+fn a_run_that_may_not_fall_back_says_so_in_the_manifest_and_reads_back_the_same() {
+    let host = machine();
+    let mut registry = Registry::default();
+    registry.run_fallback = false;
+    save(&host, &mut registry);
+
+    let written: Value =
+        serde_json::from_str(&host.file(std::path::Path::new(CONFIG)).unwrap()).unwrap();
+    assert_eq!(written["global"]["run"]["fallback"], "disabled");
+    assert!(!registry::load(&host).unwrap().unwrap().run_fallback);
+}
+
+/// Each file checks the hold as it is about to be written, rather than trusting
+/// the one check the command made before any of them: `storage::save` writes
+/// several files, and the hold can go between two of them. Called under the
+/// command's guard rather than through it, which is the moment being described.
+#[test]
+fn every_file_a_save_writes_checks_the_hold_rather_than_the_command_checking_once() {
+    let host = machine();
+    let mut held = perch::holdings::lock(&host).unwrap();
+    // Perch's hold goes quiet past the staleness window, and somebody clears the
+    // artifact and makes their own — which carries their timestamp, not Perch's.
+    host.sleep(200_000);
+    host.touch(std::path::Path::new("/perch/.registry.lock"))
+        .unwrap();
+
+    let mut registry = Registry::default();
+    registry.upsert(account("one@example.com"));
+    let refused = perch::storage::save(&host, &mut held, &registry).unwrap_err();
+
+    assert!(refused.to_string().contains("lock was lost"), "{refused}");
+    assert!(
+        host.file(std::path::Path::new(CONFIG)).is_none(),
+        "and nothing was written over theirs"
+    );
 }

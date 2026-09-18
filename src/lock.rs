@@ -1148,6 +1148,126 @@ mod tests {
 
         take(&host, &lock).expect("so the next attempt takes the lock");
     }
+
+    /// A lock artifact that is a link to nothing: `mkdir` fails `EEXIST` at it
+    /// whatever it points at, and the stat behind it answers `NotFound` — which
+    /// is the reading that says nobody is holding it.
+    #[test]
+    fn a_lock_artifact_that_is_a_link_to_nothing_is_taken_over_rather_than_waited_out() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new().with_link(
+            crate::host::Link::Symbolic,
+            "/Users/someone/.claude/gone",
+            &lock.dir,
+        );
+
+        take(&host, &lock).expect("nobody is behind a link to nothing");
+
+        assert!(
+            host.modified_at(&lock.dir).is_ok(),
+            "what is at the path now is an artifact Perch holds"
+        );
+        assert!(
+            !host
+                .effects()
+                .iter()
+                .any(|effect| matches!(effect, Effect::Slept { .. })),
+            "and nothing was waited out first: {:?}",
+            host.effects()
+        );
+    }
+
+    /// A filesystem refusing outright is not contention: nothing is waited out,
+    /// and the sentence names the path rather than a program to quit.
+    #[test]
+    fn a_lock_the_filesystem_will_not_make_is_reported_rather_than_waited_out() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new().with_a_path_refusing(
+            &lock.dir,
+            Refusing::Write,
+            "Read-only file system (os error 30)",
+        );
+
+        let refused = take(&host, &lock).expect_err("the directory cannot be made");
+
+        assert!(
+            refused
+                .to_string()
+                .contains("could not take the refresh lock"),
+            "{refused}"
+        );
+        assert!(refused.to_string().contains("os error 30"), "{refused}");
+        assert!(
+            !host
+                .effects()
+                .iter()
+                .any(|effect| matches!(effect, Effect::Slept { .. })),
+            "nothing here is going to free up: {:?}",
+            host.effects()
+        );
+    }
+
+    /// Claude Code makes a lock's parent before locking it and so does Perch, so
+    /// what stops that is said as itself rather than as a lock somebody holds.
+    #[test]
+    fn a_lock_whose_parent_cannot_be_made_says_so_rather_than_reading_as_contention() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new().with_file("/Users/someone/.claude", "not a directory");
+
+        let Err(refused) = take_all(&host, vec![lock.clone()]) else {
+            panic!("there is nowhere to put the lock");
+        };
+
+        assert!(
+            refused
+                .to_string()
+                .contains("could not create /Users/someone/.claude"),
+            "{refused}"
+        );
+        assert!(!host.path_exists(Path::new(&lock.dir)));
+    }
+
+    /// The one step that *uses* a hold rather than only being protected by one.
+    /// The hold it is handed is Perch's own, and it is renewed either side of
+    /// the write as any other slow step is.
+    #[test]
+    fn a_registry_write_is_handed_perchs_own_hold_and_is_renewed_either_side() {
+        let theirs = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let ours = a_lock("/Users/someone/.config/perch/.registry.lock");
+        let host = FakeHost::new();
+
+        let mut wrote_under = None;
+        let mut both_held = false;
+        let taken: Result<()> = under(&host, vec![ours.clone()], |perch| {
+            under(&host, vec![theirs.clone()], |held| {
+                // Under the staleness window on its own, and over it together
+                // with the write below — so what decides this is the renewal on
+                // the way in.
+                host.sleep(55_000);
+
+                let mut holds = Holds::of(held, perch);
+                holds.around_a_registry_write(|writing| {
+                    wrote_under = writing.taken.first().map(|taken| taken.lock.dir.clone());
+                    host.sleep(55_000);
+                });
+
+                both_held = held.still_held() && perch.still_held();
+                Ok(())
+            })
+        });
+        taken.expect("the work finishes");
+
+        assert_eq!(
+            wrote_under.as_deref(),
+            Some(ours.dir.as_path()),
+            "the write takes the hold it is renewed with"
+        );
+        assert!(
+            both_held,
+            "and neither hold went quiet long enough to be judged abandoned: {:?}",
+            host.notes()
+        );
+    }
 }
 
 /// The exclusivity claim itself, on a real filesystem and with real threads.

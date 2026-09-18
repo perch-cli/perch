@@ -1022,4 +1022,31 @@ mod tests {
         assert_eq!(Wanted::Newest(None).version(), None);
         assert_eq!(Wanted::Newest(Some("0.3.0".to_string())).named(), None);
     }
+
+    /// Two vocabularies, deliberately: `--channel` takes a lowercase word and a
+    /// sentence names the thing it is installed from. The word round-trips, so
+    /// a Channel Perch detected is one somebody can name back to it.
+    #[test]
+    fn a_channel_is_spelled_for_a_flag_and_named_for_a_sentence() {
+        let channels = [
+            Channel::Homebrew {
+                prefix: PathBuf::from("/opt/homebrew"),
+            },
+            Channel::Npm,
+            Channel::Installer,
+        ];
+
+        assert_eq!(
+            channels.iter().map(Channel::name).collect::<Vec<_>>(),
+            ["Homebrew", "npm", "the installer"]
+        );
+        for channel in &channels {
+            assert_eq!(
+                Channel::spelled(channel.word()).as_ref().map(Channel::word),
+                Some(channel.word()),
+                "{}",
+                channel.name()
+            );
+        }
+    }
 }

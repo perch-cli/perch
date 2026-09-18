@@ -679,4 +679,113 @@ mod tests {
             );
         }
     }
+
+    /// The three rules the current row does not hold, each asked of a row of its
+    /// own: a rule is a rule, and one returning to the current row would
+    /// otherwise arrive without the sentence it refuses in.
+    #[test]
+    fn a_rule_no_current_row_holds_still_refuses_in_its_own_words() {
+        let row = Rules {
+            rules: &[Rule::Whitespace, Rule::LikeAnAddress, Rule::LeadingDash],
+            fold: Fold::Lowercase,
+        };
+
+        for (name, said) in [
+            ("my work", "carry no whitespace"),
+            ("someone@example.com", "carries `@`"),
+            ("-dev", "opens with `-`"),
+        ] {
+            let refused = row
+                .validate(NameKind::Group, name)
+                .expect_err("the row refuses this name");
+            assert!(refused.to_string().contains(said), "{refused}");
+        }
+        assert!(
+            row.accepts("dev.ops"),
+            "and no rule here is the allow-list, which is the current row's"
+        );
+    }
+
+    /// The other fold, kept as a live alternative. It is `str::to_lowercase`'s,
+    /// which applies Greek's final-sigma rule — an orthographic rule about
+    /// rendering Greek text, where a name is something somebody typed.
+    #[test]
+    fn the_other_fold_holds_two_spellings_of_a_greek_name_as_two_names() {
+        assert!(!Fold::Lowercase.one_name("ΟΔΟΣ", "οδοσ"));
+        assert!(Fold::OneSigma.one_name("ΟΔΟΣ", "οδοσ"));
+        assert!(
+            Fold::Lowercase.one_name("CAFÉ", "café"),
+            "and away from the sigma the two agree"
+        );
+    }
+
+    /// What [`acceptable`] rests on: a rule about one character answers about a
+    /// character, and a rule about the whole name answers nothing rather than
+    /// `false` — which the `unwrap_or(true)` reading it would take for a refusal
+    /// of every character there is.
+    #[test]
+    fn a_rule_answers_about_one_character_exactly_where_it_is_about_one() {
+        for rule in [
+            Rule::Empty,
+            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
+            Rule::MeansEveryScope(&[GLOBAL]),
+        ] {
+            assert_eq!(rule.keeps('a'), None, "{rule:?}");
+            assert_eq!(rule.opens('a'), None, "{rule:?}");
+        }
+
+        for (rule, refused) in [
+            (Rule::Unshowable(crate::host::UNSHOWABLE), '\u{200B}'),
+            (Rule::NotAnIdentifier, '.'),
+            (Rule::Whitespace, ' '),
+            (Rule::LikeAnAddress, '@'),
+        ] {
+            assert_eq!(rule.keeps(refused), Some(false), "{rule:?}");
+            assert_eq!(rule.keeps('a'), Some(true), "{rule:?}");
+            assert_eq!(rule.opens(refused), None, "{rule:?}");
+        }
+
+        for (rule, refused) in [(Rule::OpensWrong, '-'), (Rule::LeadingDash, '-')] {
+            assert_eq!(rule.opens(refused), Some(false), "{rule:?}");
+            assert_eq!(rule.opens('a'), Some(true), "{rule:?}");
+            assert_eq!(rule.keeps(refused), None, "{rule:?}");
+        }
+    }
+
+    /// The nearest name this build would hold. A character no rule keeps goes,
+    /// because no suffix rescues one; a reserved word is whole and takes a
+    /// number instead; and a name with nothing left is named for its kind.
+    #[test]
+    fn an_unacceptable_name_is_brought_to_the_nearest_one_perch_would_hold() {
+        let free: &[String] = &[];
+
+        assert_eq!(
+            acceptable(NameKind::Group, "dev.ops", free).as_deref(),
+            Some("devops")
+        );
+        assert_eq!(
+            acceptable(NameKind::Group, "-dev", free).as_deref(),
+            Some("dev"),
+            "a character that may only follow is trimmed rather than kept"
+        );
+        assert_eq!(
+            acceptable(NameKind::Group, "...", free).as_deref(),
+            Some("group")
+        );
+        assert_eq!(
+            acceptable(NameKind::Alias, "...", free).as_deref(),
+            Some("alias"),
+            "and which kind it is names it"
+        );
+        assert_eq!(
+            acceptable(NameKind::Group, "none", free).as_deref(),
+            Some("none-1"),
+            "a reserved word is a whole word, so it gains a number"
+        );
+        assert_eq!(
+            acceptable(NameKind::Group, "dev.ops", &["DEVOPS".to_string()]).as_deref(),
+            Some("devops-1"),
+            "and so does one something in the namespace already answers to"
+        );
+    }
 }

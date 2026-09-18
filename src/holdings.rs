@@ -440,4 +440,25 @@ mod tests {
             std::path::PathBuf::from("/Users/someone/.config/perch")
         );
     }
+
+    /// The claim kept beside the derivation, asserted against it: two keys share
+    /// a Profile exactly where the directory they derive is one directory.
+    #[test]
+    fn two_keys_that_slug_alike_derive_one_profile() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let dir = |key: &str| {
+            profile_dir_for(crate::providers::provider::Id::Claude, &host, key)
+                .expect("a Profile can be named after it")
+        };
+
+        assert!(same_profile("some.one@example.com", "SOME-ONE@example.com"));
+        assert_eq!(
+            dir("some.one@example.com"),
+            dir("SOME-ONE@example.com"),
+            "which is the hazard the predicate exists for"
+        );
+
+        assert!(!same_profile("one@example.com", "two@example.com"));
+        assert_ne!(dir("one@example.com"), dir("two@example.com"));
+    }
 }
