@@ -43,7 +43,7 @@ fn machine(workspace: &str) -> FakeHost {
         })
 }
 
-fn add_account(host: &FakeHost, alias: &str) {
+fn adding(host: &FakeHost, alias: &str) -> perch::Result<()> {
     add::run(
         host,
         add::AddArgs {
@@ -58,7 +58,10 @@ fn add_account(host: &FakeHost, alias: &str) {
         },
         &mut Vec::new(),
     )
-    .expect("Codex Account added");
+}
+
+fn add_account(host: &FakeHost, alias: &str) {
+    adding(host, alias).expect("Codex Account added");
 }
 
 fn launch(host: &FakeHost, provider: Selection, command: &[&str]) -> perch::Result<i32> {
@@ -551,12 +554,8 @@ fn exported_credential(
     )
 }
 
-fn with_codex_limits(host: FakeHost) -> FakeHost {
-    let response = [
-        json!({"id":1,"result":{}}),
-        json!({"id":2,"result":{"account":{"type":"chatgpt","email":EMAIL}}}),
-        json!({"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":32,"windowDurationMins":300,"resetsAt":1800000000}}}}),
-    ].map(|value| value.to_string()).join("\n");
+/// What a Codex app-server answers a Utilization read with, line by line.
+fn codex_answering(host: FakeHost, responses: &[serde_json::Value]) -> FakeHost {
     host.with_exec_under(
         CODEX,
         &[
@@ -568,9 +567,24 @@ fn with_codex_limits(host: FakeHost) -> FakeHost {
         ],
         perch::host::Execution {
             status: 0,
-            stdout: response,
+            stdout: responses
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
             stderr: String::new(),
         },
+    )
+}
+
+fn with_codex_limits(host: FakeHost) -> FakeHost {
+    codex_answering(
+        host,
+        &[
+            json!({"id":1,"result":{}}),
+            json!({"id":2,"result":{"account":{"type":"chatgpt","email":EMAIL}}}),
+            json!({"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":32,"windowDurationMins":300,"resetsAt":1800000000}}}}),
+        ],
     )
 }
 
@@ -1959,6 +1973,53 @@ fn codex_active(host: &FakeHost) -> Option<String> {
     registry.active().whose().map(str::to_string)
 }
 
+/// The Account an Alias names, as the Registry holds it.
+fn held(host: &FakeHost, alias: &str) -> registry::Account {
+    let registry = registry::load(host).unwrap().unwrap();
+    registry
+        .accounts
+        .iter()
+        .find(|account| registry.alias_of(account.key()) == Some(alias))
+        .expect("the Alias names an Account")
+        .clone()
+}
+
+/// The Profile directory of the Account an Alias names.
+fn profile_of(host: &FakeHost, alias: &str) -> std::path::PathBuf {
+    held(host, alias).profile_dir(host).unwrap()
+}
+
+/// A Landing recorded as in flight from `personal` to `work`, which is what a
+/// Switch interrupted between the Credential moving and the record of it
+/// leaves, and the two keys it is written in.
+fn a_landing_in_flight(host: &FakeHost) -> (String, String) {
+    common::run_switch(host, "personal").0.unwrap();
+    let personal = held(host, "personal").key().to_string();
+    let work = held(host, "work").key().to_string();
+    let mut registry = registry::load(host).unwrap().unwrap();
+    registry.select_provider(Id::Codex);
+    registry.begin_landing(Some(personal.clone()), &work);
+    common::save_registry(host, &registry);
+    (personal, work)
+}
+
+/// The Registry a Landing settles into, or the refusal that leaves it in flight.
+fn settled(host: &FakeHost) -> perch::Result<registry::Registry> {
+    let mut perch = perch::holdings::lock(host).unwrap();
+    let mut registry = registry::load(host).unwrap().unwrap();
+    registry.select_provider(Id::Codex);
+    perch::commands::a_settled_landing(host, &mut perch, &mut registry)?;
+    Ok(registry)
+}
+
+/// The same login, Renewed at a stated moment: `last_refresh` is what a
+/// Rotation moves.
+fn refreshed_at(workspace: &str, at: &str) -> String {
+    let mut value: serde_json::Value = serde_json::from_str(&credential(workspace, EMAIL)).unwrap();
+    value["last_refresh"] = json!(at);
+    value.to_string()
+}
+
 #[test]
 fn switching_to_a_codex_account_writes_its_credential_into_the_default_home() {
     let host = two_codex_workspaces();
@@ -2041,30 +2102,99 @@ fn a_codex_default_kept_in_the_keyring_is_refused_and_the_pin_is_named() {
 #[test]
 fn a_codex_landing_left_in_flight_is_settled_by_the_identity_of_the_live_credential() {
     let host = two_codex_workspaces();
-    common::run_switch(&host, "personal").0.unwrap();
-    let mut registry = registry::load(&host).unwrap().unwrap();
-    registry.select_provider(Id::Codex);
-    let key_of = |alias: &str| {
-        registry
-            .accounts
-            .iter()
-            .find(|a| registry.alias_of(a.key()) == Some(alias))
-            .unwrap()
-            .key()
-            .to_string()
-    };
-    let (personal, work) = (key_of("personal"), key_of("work"));
-    registry.begin_landing(Some(personal), &work);
-    common::save_registry(&host, &registry);
+    let (_, work) = a_landing_in_flight(&host);
     // Renewed since the Credential moved: no held copy is byte-equal.
     host.set_file(DEFAULT_AUTH, &rotated("work"));
+
+    let registry = settled(&host).expect("settled");
+
+    assert_eq!(registry.active().whose(), Some(work.as_str()));
+}
+
+#[test]
+fn a_landing_with_no_live_credential_settles_on_the_account_it_was_leaving() {
+    let host = two_codex_workspaces();
+    let (personal, _) = a_landing_in_flight(&host);
+    host.remove_file(std::path::Path::new(DEFAULT_AUTH))
+        .unwrap();
+
+    let registry = settled(&host).expect("a logged-out Codex says the Switch never landed");
+
+    assert_eq!(registry.active().whose(), Some(personal.as_str()));
+}
+
+#[test]
+fn a_landing_whose_live_credential_is_not_one_is_unaccounted_for_and_names_both_repairs() {
+    let host = two_codex_workspaces();
+    let (personal, work) = a_landing_in_flight(&host);
+    host.set_file(DEFAULT_AUTH, "not a Credential");
+
+    let said = settled(&host).unwrap_err().to_string();
+
+    assert!(
+        said.contains("and the live Credential is none Perch holds"),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("`perch relogin {work}` finishes that Switch")),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("`perch relogin {personal}` abandons it")),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_landing_whose_live_credential_will_not_open_names_the_switch_it_was_for() {
+    let host = two_codex_workspaces();
+    let (_, work) = a_landing_in_flight(&host);
+    host.now_refusing(DEFAULT_AUTH, Refusing::Read, "Permission denied");
+
+    let said = settled(&host).unwrap_err().to_string();
+
+    assert!(
+        said.contains(&format!("A Switch to {work} was in flight")),
+        "{said}"
+    );
+    assert!(said.contains("Make that file readable"), "{said}");
+    assert!(said.contains("Permission denied"), "{said}");
+}
+
+#[test]
+fn a_landing_a_watcher_is_told_to_leave_is_read_no_further_and_left_in_flight() {
+    let host = two_codex_workspaces();
+    a_landing_in_flight(&host);
+    host.set_file(DEFAULT_AUTH, &rotated("work"));
+    let asks = std::cell::Cell::new(0);
+    let mut still_ours = || {
+        asks.set(asks.get() + 1);
+        // The first ask is the one ahead of the provider; the walk itself is
+        // what the second stops.
+        if asks.get() > 1 {
+            Err(perch::lock::Lost::Stopped)
+        } else {
+            Ok(())
+        }
+    };
 
     let mut perch = perch::holdings::lock(&host).unwrap();
     let mut registry = registry::load(&host).unwrap().unwrap();
     registry.select_provider(Id::Codex);
-    perch::commands::a_settled_landing(&host, &mut perch, &mut registry).expect("settled");
+    let resolved =
+        perch::switch::resolve_a_landing(&host, &mut perch, &mut registry, &mut still_ours)
+            .unwrap();
 
-    assert_eq!(registry.active().whose(), Some(work.as_str()));
+    assert!(matches!(
+        resolved,
+        perch::switch::Resolved::Stopped(perch::lock::Lost::Stopped)
+    ));
+    let mut saved = registry::load(&host).unwrap().unwrap();
+    saved.select_provider(Id::Codex);
+    assert!(matches!(
+        saved.active(),
+        perch::registry::Active::Landing { .. }
+    ));
 }
 
 #[test]
@@ -2394,8 +2524,16 @@ fn a_codex_default_in_another_store_or_without_a_chatgpt_login_is_not_adopted() 
             DEFAULT_AUTH,
             r#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-test"}"#,
         );
+    // The same Credential a ChatGPT login writes, under the mode an API key
+    // login leaves behind: the claims read, and the mode is what refuses.
+    let api_key_with_claims = machine("work")
+        .with_env("HOME", "/Users/someone")
+        .with_file(
+            DEFAULT_AUTH,
+            &credential("native", "native@example.com").replace("\"chatgpt\"", "\"apikey\""),
+        );
 
-    for host in [in_the_keyring, api_key] {
+    for host in [in_the_keyring, api_key, api_key_with_claims] {
         let (result, _) = common::run_status(&host, false);
         let said = result.expect_err("nothing to adopt").to_string();
         assert!(said.contains("Perch holds no Accounts"), "{said}");
@@ -2501,4 +2639,832 @@ fn an_abandoned_codex_login_that_will_not_delete_is_noted_and_refuses_nothing() 
         "{:?}",
         host.notes()
     );
+}
+
+#[test]
+fn a_switch_to_the_active_account_whose_live_login_is_gone_writes_it_back() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "work").0.unwrap();
+    host.remove_file(std::path::Path::new(DEFAULT_AUTH))
+        .unwrap();
+
+    let (result, printed) = common::run_switch(&host, "work");
+
+    result.expect("a logged-out Default is not one the Account is already on");
+    assert_eq!(
+        host.file(DEFAULT_AUTH).as_deref(),
+        Some(credential("work", EMAIL).as_str())
+    );
+    assert!(printed.contains("Switched to "), "{printed}");
+}
+
+#[test]
+fn a_switch_to_the_account_already_live_is_refused_and_rewrites_no_credential() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "work").0.unwrap();
+    host.set_file(DEFAULT_AUTH, &rotated("work"));
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    let said = result.unwrap_err().to_string();
+    assert!(said.contains("is already the active Account."), "{said}");
+    assert_eq!(
+        host.file(DEFAULT_AUTH).as_deref(),
+        Some(rotated("work").as_str()),
+        "the Renewal Codex made is left alone"
+    );
+}
+
+#[test]
+fn a_live_credential_that_will_not_open_switches_nothing_and_names_who_it_was_for() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    let personal = held(&host, "personal").key().to_string();
+    host.now_refusing(DEFAULT_AUTH, Refusing::Read, "Permission denied");
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    let said = result.unwrap_err().to_string();
+    assert!(
+        said.contains(&format!("it was not Captured for {personal}")),
+        "{said}"
+    );
+    assert!(said.contains("Nothing was switched."), "{said}");
+}
+
+#[test]
+fn a_live_login_made_outside_perch_is_replaced_and_the_switch_says_whose_it_was() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    let personal = profile_of(&host, "personal").join("auth.json");
+    host.set_file(DEFAULT_AUTH, &credential("third", "outsider@example.com"));
+
+    let (result, printed) = common::run_switch(&host, "work");
+
+    result.expect("a login belonging to nobody held is not a reason to refuse");
+    assert!(
+        printed.contains("Note: outsider@example.com's login, made outside Perch, was replaced."),
+        "{printed}"
+    );
+    assert_eq!(
+        host.file(&personal).as_deref(),
+        Some(credential("personal", EMAIL).as_str()),
+        "it was not filed under an Account it does not belong to"
+    );
+}
+
+#[test]
+fn bytes_that_are_not_a_credential_are_left_where_they_lie_rather_than_captured() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    let personal = profile_of(&host, "personal").join("auth.json");
+    host.set_file(
+        DEFAULT_AUTH,
+        r#"{"auth_mode":"chatgpt","tokens":{"id_token":"opaque","account_id":"personal"}}"#,
+    );
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    result.expect("a Rotation Perch cannot read is not a Rotation to lose");
+    assert_eq!(
+        host.file(&personal).as_deref(),
+        Some(credential("personal", EMAIL).as_str())
+    );
+    assert_eq!(
+        host.file(DEFAULT_AUTH).as_deref(),
+        Some(credential("work", EMAIL).as_str())
+    );
+}
+
+#[test]
+fn a_held_copy_refreshed_later_than_the_live_one_is_not_written_over() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    let personal = profile_of(&host, "personal").join("auth.json");
+    let newest = refreshed_at("personal", "2026-09-16T12:00:00Z");
+    host.set_file(&personal, &newest);
+    host.set_file(
+        DEFAULT_AUTH,
+        &refreshed_at("personal", "2026-09-01T00:00:00Z"),
+    );
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    result.expect("the Switch lands");
+    assert_eq!(
+        host.file(&personal).as_deref(),
+        Some(newest.as_str()),
+        "a Capture exists to keep the newest Credential"
+    );
+}
+
+#[test]
+fn a_switch_onto_the_credential_already_live_captures_nothing_to_save() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    let personal = profile_of(&host, "personal").join("auth.json");
+    // A Switch interrupted after the Credential moved and before it was recorded.
+    host.set_file(DEFAULT_AUTH, &credential("work", EMAIL));
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    result.expect("the Switch lands");
+    assert_eq!(
+        host.file(&personal).as_deref(),
+        Some(credential("personal", EMAIL).as_str()),
+        "nothing of work's went into personal's Profile"
+    );
+}
+
+#[test]
+fn a_default_home_that_will_not_take_the_write_switches_nothing() {
+    let host = two_codex_workspaces().with_a_path_refusing(
+        DEFAULT_AUTH,
+        Refusing::Write,
+        "Read-only file system",
+    );
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    let said = result.unwrap_err().to_string();
+    assert!(said.contains("Read-only file system"), "{said}");
+    assert!(said.contains("Nothing was switched."), "{said}");
+    assert!(host.file(DEFAULT_AUTH).is_none());
+}
+
+#[test]
+fn a_switch_to_an_account_holding_no_credential_quarantines_it_and_names_the_repair() {
+    let host = two_codex_workspaces();
+    let work = held(&host, "work");
+    host.remove_file(&profile_of(&host, "work").join("auth.json"))
+        .unwrap();
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    let said = result.unwrap_err().to_string();
+    assert!(
+        said.contains(&format!("Perch holds no Credential for {}", work.key())),
+        "{said}"
+    );
+    assert!(said.contains("so it is Quarantined"), "{said}");
+    assert!(host.file(DEFAULT_AUTH).is_none(), "nothing was written");
+}
+
+#[test]
+fn removing_the_active_codex_account_lands_on_its_successor_over_the_live_credential() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    let work = held(&host, "work").key().to_string();
+
+    let (result, printed) = common::run_remove_with(
+        &host,
+        remove::RemoveArgs {
+            target: "personal".into(),
+            yes: true,
+        },
+    );
+
+    result.expect("the active Account is given up onto its successor");
+    assert_eq!(
+        host.file(DEFAULT_AUTH).as_deref(),
+        Some(credential("work", EMAIL).as_str())
+    );
+    assert_eq!(codex_active(&host).as_deref(), Some(work.as_str()));
+    assert!(printed.contains("Removed "), "{printed}");
+}
+
+/// One Utilization reading of the Account an Alias names, as a refresh makes it.
+fn observe(
+    host: &FakeHost,
+    alias: &str,
+) -> std::result::Result<Vec<registry::WindowUtilization>, perch::observe::Outcome> {
+    let registry = registry::load(host).unwrap().unwrap();
+    let account = held(host, alias);
+    account
+        .provider()
+        .adapter()
+        .configured(host)
+        .unwrap()
+        .observe(
+            host,
+            &mut perch::holdings::lock(host).unwrap(),
+            &registry.profile_context(host, &account).unwrap(),
+            &account.profile(host).unwrap(),
+            &mut || Ok(()),
+        )
+}
+
+/// Why an observation gave back no figures.
+fn why_unobserved(host: &FakeHost, alias: &str) -> String {
+    match observe(host, alias) {
+        Err(perch::observe::Outcome::Failed { why, .. }) => why,
+        Ok(windows) => panic!("{} windows were read", windows.len()),
+        Err(other) => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_codex_that_will_not_start_leaves_the_cached_utilization_alone() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+
+    let why = why_unobserved(&host, "personal");
+
+    assert!(
+        why.contains("Codex observation failed or timed out; cached Utilization is retained"),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_codex_that_answers_with_an_error_leaves_the_cached_utilization_alone() {
+    let host = codex_answering(
+        machine("personal"),
+        &[json!({"id":1,"error":{"code":-32000,"message":"no"}})],
+    );
+    add_account(&host, "personal");
+
+    let why = why_unobserved(&host, "personal");
+
+    assert!(
+        why.contains("Codex could not read this Account; cached Utilization is retained"),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_codex_account_that_is_not_subscription_backed_reports_no_utilization() {
+    let host = codex_answering(
+        machine("personal"),
+        &[
+            json!({"id":1,"result":{}}),
+            json!({"id":2,"result":{"account":{"type":"apikey"}}}),
+            json!({"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":32,"windowDurationMins":300,"resetsAt":1800000000}}}}),
+        ],
+    );
+    add_account(&host, "personal");
+
+    let why = why_unobserved(&host, "personal");
+
+    assert!(
+        why.contains("Codex did not identify a subscription-backed Account"),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_profile_credential_that_will_not_open_is_never_read_for_utilization() {
+    let host = with_codex_limits(machine("personal"));
+    add_account(&host, "personal");
+    host.now_refusing(
+        profile_of(&host, "personal").join("auth.json"),
+        Refusing::Read,
+        "Permission denied",
+    );
+
+    let why = why_unobserved(&host, "personal");
+
+    assert!(why.contains("Permission denied"), "{why}");
+}
+
+#[test]
+fn a_figure_is_never_recorded_against_the_account_whose_login_did_not_produce_it() {
+    let host = with_codex_limits(machine("personal"));
+    add_account(&host, "personal");
+    host.set_file(
+        profile_of(&host, "personal").join("auth.json"),
+        &credential("company", EMAIL),
+    );
+
+    let why = why_unobserved(&host, "personal");
+
+    assert!(
+        why.contains("Codex Credential belongs to another Account or Workspace"),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_codex_run_without_a_held_credential_names_the_relogin_that_repairs_it() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    host.remove_file(&profile_of(&host, "personal").join("auth.json"))
+        .unwrap();
+
+    let said = launch(&host, Selection::default(), &[])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        said.contains("No Codex Credential is held for it."),
+        "{said}"
+    );
+    assert!(said.contains("`perch relogin <target>`"), "{said}");
+}
+
+#[test]
+fn a_codex_profile_holding_another_workspaces_credential_is_not_run_against() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    host.set_file(
+        profile_of(&host, "personal").join("auth.json"),
+        &credential("company", EMAIL),
+    );
+
+    let said = launch(&host, Selection::default(), &[])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        said.contains("Codex Credential belongs to another Account or Workspace"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_codex_profile_already_being_run_against_does_not_take_a_second_client() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let host = host.with_login(|host, _| {
+        let said = launch(host, Selection::default(), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            said.contains("Codex is running against this Profile"),
+            "{said}"
+        );
+        0
+    });
+
+    assert_eq!(launch(&host, Selection::default(), &[]).unwrap(), 0);
+}
+
+#[test]
+fn a_profile_that_will_not_take_the_credential_is_taken_back_out_whole() {
+    let learned = machine("personal");
+    add_account(&learned, "personal");
+    let profile = profile_of(&learned, "personal");
+    let host = machine("personal").with_a_path_refusing(
+        profile.join("auth.json"),
+        Refusing::Write,
+        "No space left on device",
+    );
+
+    let said = adding(&host, "personal").unwrap_err().to_string();
+
+    assert!(
+        said.contains("Codex Credential could not be written"),
+        "{said}"
+    );
+    assert!(!host.path_exists(&profile), "the Profile went out with it");
+}
+
+#[test]
+fn a_profile_that_can_be_neither_written_nor_taken_back_out_says_both() {
+    let learned = machine("personal");
+    add_account(&learned, "personal");
+    let profile = profile_of(&learned, "personal");
+    let host = machine("personal")
+        .with_a_path_refusing(
+            profile.join("auth.json"),
+            Refusing::Write,
+            "No space left on device",
+        )
+        .with_a_path_refusing(&profile, Refusing::Delete, "Operation not permitted");
+
+    let said = adding(&host, "personal").unwrap_err().to_string();
+
+    assert!(said.contains("Rollback incomplete"), "{said}");
+    assert!(said.contains("Operation not permitted"), "{said}");
+    assert!(host.path_exists(&profile));
+}
+
+#[test]
+fn an_export_of_a_codex_profile_without_a_configuration_carries_its_credential_alone() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let account = held(&host, "personal");
+    host.remove_file(&profile_of(&host, "personal").join("config.toml"))
+        .unwrap();
+
+    let export = perch::export::gather(&host, &registry::load(&host).unwrap().unwrap()).unwrap();
+
+    assert!(common::exported_artifact(&export, account.key(), "config.toml").is_none());
+    assert!(common::exported_artifact(&export, account.key(), "auth.json").is_some());
+}
+
+#[test]
+fn a_codex_configuration_that_will_not_open_writes_no_partial_export() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    host.now_refusing(
+        profile_of(&host, "personal").join("config.toml"),
+        Refusing::Read,
+        "Permission denied",
+    );
+
+    let said = perch::export::gather(&host, &registry::load(&host).unwrap().unwrap())
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        said.contains("Codex Configuration could not be read; no partial Export was written"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_codex_cli_that_will_not_run_reports_a_version_perch_could_not_read() {
+    let host = machine("personal");
+
+    let report = Id::Codex.adapter().diagnose(&host);
+
+    let said = report.version.unwrap_err();
+    assert!(said.contains("Could not read Codex's version"), "{said}");
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| finding.code == "provider-unreadable")
+    );
+}
+
+#[test]
+fn a_codex_login_that_does_not_complete_holds_no_account() {
+    let host = FakeHost::new()
+        .with_env("PATH", "/usr/bin")
+        .with_file(CODEX, "")
+        .with_login(|_, _| 1);
+
+    let said = adding(&host, "personal").unwrap_err().to_string();
+
+    assert!(said.contains("Codex login did not complete"), "{said}");
+    assert!(
+        registry::load(&host)
+            .unwrap()
+            .is_none_or(|registry| registry.accounts.is_empty())
+    );
+}
+
+#[test]
+fn a_credential_whose_workspace_disagrees_with_its_claims_is_refused() {
+    let payload = URL_SAFE_NO_PAD.encode(
+        json!({
+            "email": EMAIL,
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "user-one",
+                "chatgpt_account_id": "personal"
+            }
+        })
+        .to_string(),
+    );
+    let document = json!({"auth_mode":"chatgpt","tokens":{"id_token":format!("fake.{payload}.fake"),"account_id":"another"}}).to_string();
+    let host = FakeHost::new()
+        .with_env("PATH", "/usr/bin")
+        .with_file(CODEX, "")
+        .with_login(move |host, at| {
+            host.set_file(at.join("auth.json"), &document);
+            0
+        });
+
+    let said = adding(&host, "personal").unwrap_err().to_string();
+
+    assert!(
+        said.contains("Codex Workspace identity disagrees with its Credential"),
+        "{said}"
+    );
+}
+
+#[test]
+fn an_unknown_provider_word_is_refused_naming_the_ones_there_are() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+
+    let (result, _) = common::config_set(&host, &["--global", "run-provider", "gemini"]);
+
+    let said = result.unwrap_err().to_string();
+    assert!(said.contains("Unknown provider gemini"), "{said}");
+    assert!(
+        said.contains("supported providers: claude, codex"),
+        "{said}"
+    );
+}
+
+#[test]
+fn codex_names_no_preferred_workload_and_reads_every_window_as_a_constraint() {
+    use perch::providers::provider::WindowRole;
+    let codex = Id::Codex.adapter();
+
+    assert!(codex.default_workload().is_none());
+    assert!(codex.configured_workload(&Default::default()).is_none());
+    assert!(
+        codex.window_role("codex", &common::window("codex/primary/300m", 10.0))
+            == WindowRole::Constraint
+    );
+}
+
+#[test]
+fn a_scope_option_codex_does_not_know_is_refused_and_changes_nothing() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let before = registry::load(&host).unwrap().unwrap();
+
+    let (result, _) = common::config_set(
+        &host,
+        &[
+            "ungrouped",
+            "--provider",
+            "codex",
+            "option.preferred_workload",
+            "codex",
+        ],
+    );
+
+    let said = result.unwrap_err().to_string();
+    assert!(
+        said.contains("Codex does not support the option `preferred_workload`"),
+        "{said}"
+    );
+    assert_eq!(registry::load(&host).unwrap().unwrap(), before);
+}
+
+#[test]
+fn an_account_identity_that_does_not_match_its_storage_key_is_refused() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let mut profile = held(&host, "personal").profile(&host).unwrap();
+    let mut subject = profile.provider_identity.clone().unwrap();
+    subject.key = "codex:0000000000000000".into();
+    profile.provider_identity = Some(subject);
+    host.forget_effects();
+
+    let said = Id::Codex
+        .adapter()
+        .forget_credential(&host, &profile)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        said.contains("Account identity does not match its storage key"),
+        "{said}"
+    );
+    assert!(host.effects().is_empty(), "{:?}", host.effects());
+}
+
+#[test]
+fn a_profile_whose_identity_names_another_account_is_refused_before_native_effects() {
+    use perch::providers::provider::AccountIdentity;
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let mut profile = held(&host, "personal").profile(&host).unwrap();
+    assert_eq!(profile.provider(), Id::Codex);
+    profile.provider_identity =
+        Some(AccountIdentity::new(Id::Codex, "user-two".into(), "company".into()).unwrap());
+    host.forget_effects();
+
+    let said = Id::Codex
+        .adapter()
+        .forget_credential(&host, &profile)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        said.contains("Profile identity disagrees with its Account"),
+        "{said}"
+    );
+    assert!(host.effects().is_empty(), "{:?}", host.effects());
+}
+
+#[test]
+fn an_observation_whose_context_names_another_profile_is_refused() {
+    let host = two_codex_workspaces();
+    let registry = registry::load(&host).unwrap().unwrap();
+    let personal = held(&host, "personal");
+    let work = held(&host, "work");
+    host.forget_effects();
+
+    let refused = work
+        .provider()
+        .adapter()
+        .configured(&host)
+        .unwrap()
+        .observe(
+            &host,
+            &mut perch::holdings::lock(&host).unwrap(),
+            &registry.profile_context(&host, &personal).unwrap(),
+            &work.profile(&host).unwrap(),
+            &mut || Ok(()),
+        );
+
+    let perch::observe::Outcome::Failed { why, .. } = refused.unwrap_err() else {
+        panic!("a refusal is not a stop")
+    };
+    assert!(
+        why.contains("Observation context names another Profile"),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_configured_cli_path_naming_no_file_is_refused_where_the_cli_is_needed() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+    common::config_set(&host, &["--provider", "codex", "cli-path", "/opt/codex"])
+        .0
+        .expect("a path is taken as given; the file is read when it is needed");
+
+    let said = common::run_switch(&host, "personal")
+        .0
+        .unwrap_err()
+        .to_string();
+
+    assert!(said.contains("No Codex CLI is at /opt/codex"), "{said}");
+    assert!(
+        said.contains("`perch config set --provider codex cli-path <path>`"),
+        "{said}"
+    );
+}
+
+#[test]
+fn an_authentication_is_never_installed_under_another_account_of_the_same_provider() {
+    use perch::providers::provider::InstallMode;
+    let host = two_codex_workspaces();
+    let installation = Id::Codex
+        .adapter()
+        .configured(&host)
+        .unwrap()
+        .installation(&host)
+        .unwrap();
+    // The machine's login is `work`'s: `two_codex_workspaces` leaves it there.
+    let authenticated = installation.authenticate(&host).unwrap();
+    let personal = held(&host, "personal").profile(&host).unwrap();
+
+    let Err(refused) =
+        Id::Codex
+            .adapter()
+            .install(&host, &personal, &authenticated, InstallMode::Repair)
+    else {
+        panic!("another Account's login is not this Account's")
+    };
+    let said = refused.to_string();
+
+    assert!(
+        said.contains("Authentication belongs to another Account or Workspace"),
+        "{said}"
+    );
+}
+
+#[test]
+fn an_authentication_is_never_installed_under_another_providers_profile() {
+    use perch::providers::provider::InstallMode;
+    let document = credential("company", EMAIL);
+    let host = common::logged_in_machine()
+        .with_file(CODEX, "")
+        .with_login(move |host, at| {
+            host.set_file(at.join("auth.json"), &document);
+            0
+        });
+    add_account(&host, "company");
+    let registry = registry::load(&host).unwrap().unwrap();
+    let claude = registry
+        .accounts
+        .iter()
+        .find(|account| account.provider() == Id::Claude)
+        .expect("the Claude login was adopted")
+        .profile(&host)
+        .unwrap();
+    let codex = Id::Codex
+        .adapter()
+        .configured(&host)
+        .unwrap()
+        .installation(&host)
+        .unwrap()
+        .authenticate(&host)
+        .unwrap();
+
+    let Err(refused) = Id::Claude
+        .adapter()
+        .install(&host, &claude, &codex, InstallMode::Repair)
+    else {
+        panic!("a Codex login is not Claude Code's")
+    };
+    let said = refused.to_string();
+
+    assert!(
+        said.contains("Authentication belongs to another provider"),
+        "{said}"
+    );
+}
+
+#[test]
+fn an_installation_nobody_commits_takes_its_profile_back_out() {
+    use perch::providers::provider::InstallMode;
+    let host = machine("personal");
+    add_account(&host, "personal");
+    let profile = held(&host, "personal").profile(&host).unwrap();
+    let authenticated = Id::Codex
+        .adapter()
+        .configured(&host)
+        .unwrap()
+        .installation(&host)
+        .unwrap()
+        .authenticate(&host)
+        .unwrap();
+    host.remove_dir_all(profile.directory()).unwrap();
+
+    let Ok(applied) =
+        Id::Codex
+            .adapter()
+            .install(&host, &profile, &authenticated, InstallMode::New)
+    else {
+        panic!("the Profile is installed")
+    };
+
+    assert!(host.path_exists(profile.directory()));
+    drop(applied);
+    assert!(!host.path_exists(profile.directory()));
+}
+
+#[test]
+fn a_custom_command_that_is_not_on_the_machine_is_a_launch_perch_says_it_could_not_make() {
+    let host = machine("personal");
+    add_account(&host, "personal");
+
+    let said = launch(&host, Selection::default(), &["/nowhere/bin/tool"])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        said.contains("Could not launch /nowhere/bin/tool"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_machine_with_no_holdings_directory_is_tidied_without_a_refusal() {
+    let host = FakeHost::new().with_env("PERCH_HOME", "relative/holdings");
+
+    Id::Codex.adapter().maintain(&host);
+
+    assert!(host.effects().is_empty(), "{:?}", host.effects());
+}
+
+/// Every Codex Profile an Export names, where an Import would put them.
+fn landing_places(host: &FakeHost, export: &perch::export::Export) -> Vec<std::path::PathBuf> {
+    export
+        .registry
+        .accounts
+        .iter()
+        .map(|account| account.profile_dir(host).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_codex_import_makes_a_profile_for_an_account_the_export_carries_no_credential_for() {
+    let source = two_codex_workspaces();
+    let mut export =
+        perch::export::gather(&source, &registry::load(&source).unwrap().unwrap()).unwrap();
+    let second = export.registry.accounts[1].key().to_string();
+    export.profiles.remove(&second);
+    let host = FakeHost::new();
+    let places = landing_places(&host, &export);
+    let (_, _, fresh) = perch::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+
+    perch::import::place(&host, &export, &fresh, || {
+        let mut perch = perch::holdings::lock(&host)?;
+        let mut restored = export.registry.clone();
+        perch::registry::save(&host, &mut perch, &mut restored)
+    })
+    .expect("an Account with nothing to place still gets its Profile");
+
+    assert!(host.is_file(&places[0].join("auth.json")));
+    assert!(host.is_file(&places[1].join("config.toml")));
+    assert!(!host.is_file(&places[1].join("auth.json")));
+}
+
+#[test]
+fn a_codex_import_that_fails_on_the_first_profile_makes_none_of_the_rest() {
+    let source = two_codex_workspaces();
+    let export =
+        perch::export::gather(&source, &registry::load(&source).unwrap().unwrap()).unwrap();
+    let host = FakeHost::new();
+    let places = landing_places(&host, &export);
+    let host = host.with_a_path_refusing(
+        places[0].join("auth.json"),
+        Refusing::Write,
+        "No space left on device",
+    );
+    let (_, _, fresh) = perch::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+
+    let said = perch::import::place(&host, &export, &fresh, || {
+        panic!("a restore that never started saved metadata")
+    })
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        said.contains("Codex Credential could not be written"),
+        "{said}"
+    );
+    assert!(places.iter().all(|path| !host.path_exists(path)));
 }

@@ -188,6 +188,27 @@ mod tests {
     }
 
     #[test]
+    fn a_marker_gone_by_the_time_it_is_read_is_not_session_evidence() {
+        for provider in [Id::Claude, Id::Codex] {
+            let empty = FakeHost::new();
+            let dir = provider.home(&empty).unwrap().join("profiles/one");
+            // A link to nothing: what a marker removed between the listing and
+            // the read looks like from here.
+            let host = empty.with_link(
+                crate::host::Link::Symbolic,
+                dir.join("sessions/gone.json"),
+                session_marker_at(&dir, 4242),
+            );
+
+            let Ok(evidence) = read(&host, &dir, true) else {
+                panic!("the sessions directory answered")
+            };
+            assert!(evidence.is_empty());
+            assert!(!live::ask(&host, &[Place::at(provider, &dir)]).counts_as_live());
+        }
+    }
+
+    #[test]
     fn ambiguous_timestamps_are_not_session_evidence() {
         for provider in [Id::Claude, Id::Codex] {
             let host = FakeHost::new();

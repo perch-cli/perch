@@ -573,3 +573,364 @@ fn rollback_reports_every_failed_cleanup_without_claiming_profiles_were_removed(
         assert!(!said.contains("second credential"));
     });
 }
+
+/// A machine holding the third provider's CLI and nothing native.
+fn a_fixture_machine() -> FakeHost {
+    FakeHost::new()
+        .with_env("PATH", "/usr/bin")
+        .with_file("/usr/bin/fixture", "")
+        .with_login(|_, _| 0)
+}
+
+/// The same machine, holding one Fixture Account.
+fn a_machine_holding_one(alias: &str) -> (FakeHost, crate::registry::Account) {
+    use crate::commands::{add, selection::Selection};
+    let host = a_fixture_machine();
+    add::run(
+        &host,
+        add::AddArgs {
+            provider: Selection {
+                provider: Some(Id::Fixture),
+                ..Default::default()
+            },
+            group: None,
+            alias: Some(alias.into()),
+            no_group: true,
+        },
+        &mut Vec::new(),
+    )
+    .unwrap();
+    let account = crate::registry::load(&host).unwrap().unwrap().accounts[0].clone();
+    (host, account)
+}
+
+#[test]
+fn a_third_provider_answers_the_installation_questions_every_command_asks() {
+    with_fixture(|| {
+        let host = a_fixture_machine();
+        let provider = Id::Fixture.adapter();
+
+        let setup = provider
+            .service_setup(&host)
+            .unwrap()
+            .expect("it is enabled");
+        assert!(setup.environment.is_empty());
+        assert_eq!(setup.probe_args, ["--version"]);
+        assert_eq!(setup.candidates, vec![PathBuf::from("/usr/bin/fixture")]);
+        assert_eq!(setup.override_key, "PERCH_FIXTURE_BIN");
+
+        let report = provider.diagnose(&host);
+        assert_eq!(report.version.unwrap(), "fixture-1");
+        assert_eq!(report.path, Some(PathBuf::from("/usr/bin/fixture")));
+        assert!(report.findings.is_empty());
+
+        let installation = provider
+            .configured(&host)
+            .unwrap()
+            .installation(&host)
+            .unwrap();
+        let session = installation
+            .diagnostic_session(&DiagnosticSession {
+                model: Some("fixture-mini"),
+                prompt: "ping",
+            })
+            .unwrap();
+        assert_eq!(session.program(), "/usr/bin/fixture");
+        assert_eq!(session.arguments, ["--model", "fixture-mini", "ping"]);
+    });
+}
+
+#[test]
+fn a_third_provider_with_no_live_default_is_refused_rather_than_switched() {
+    with_fixture(|| {
+        let (host, account) = a_machine_holding_one("third");
+        let provider = Id::Fixture.adapter();
+        let profile = account.profile(&host).unwrap();
+
+        assert!(!provider.default_matches(&host, &profile).unwrap());
+        let Err(said) = provider.inspect_default(&host) else {
+            panic!("a provider with no live Default cannot inspect one")
+        };
+        assert!(
+            said.to_string()
+                .contains("Fixture does not support inspecting a live Default"),
+            "{said}"
+        );
+
+        let mut held = crate::holdings::lock(&host).unwrap();
+        let refused = provider.prepare_default(
+            &host,
+            &mut held,
+            DefaultRequest {
+                incoming: profile,
+                outgoing: None,
+                known: Vec::new(),
+                overwrite: None,
+            },
+        );
+        let Err(said) = refused else {
+            panic!("a provider with no live Switching cannot switch")
+        };
+        assert!(
+            said.to_string()
+                .contains("Fixture does not support live Switching"),
+            "{said}"
+        );
+    });
+}
+
+#[test]
+fn a_third_provider_gives_up_its_credential_and_reaps_its_abandoned_logins() {
+    with_fixture(|| {
+        let (host, account) = a_machine_holding_one("third");
+        let provider = Id::Fixture.adapter();
+        let profile = account.profile(&host).unwrap();
+        let credential = profile.directory().join("fixture.auth");
+        assert!(host.is_file(&credential));
+
+        let removal = provider.forget_credential(&host, &profile).unwrap();
+
+        assert!(removal.removed);
+        assert!(removal.note.is_none());
+        assert!(!host.is_file(&credential));
+
+        let abandoned = crate::holdings::pending_login_dir(Id::Fixture, &host, host.now()).unwrap();
+        host.set_file(abandoned.join("fixture.auth"), "abandoned credential");
+        host.set_now(host.now() + chrono::Duration::hours(2));
+
+        provider.maintain(&host);
+
+        assert!(!host.path_exists(&abandoned));
+    });
+}
+
+#[test]
+fn a_third_provider_with_no_running_client_is_not_live() {
+    with_fixture(|| {
+        let (host, account) = a_machine_holding_one("third");
+        let profile = account.profile(&host).unwrap();
+
+        let evidence = Id::Fixture
+            .adapter()
+            .session_evidence(&host, profile.directory())
+            .unwrap_or_else(|_| panic!("a provider with no markers is sure"));
+
+        assert!(evidence.is_empty());
+        assert!(
+            !crate::live::ask(
+                &host,
+                &[crate::live::Place::at(Id::Fixture, profile.directory())]
+            )
+            .counts_as_live()
+        );
+    });
+}
+
+#[test]
+fn a_third_provider_launches_a_custom_command_against_its_own_profile() {
+    with_fixture(|| {
+        let (host, account) = a_machine_holding_one("third");
+        let profile = account.profile(&host).unwrap();
+
+        let prepared = Id::Fixture
+            .adapter()
+            .prepare_launch(
+                &host,
+                &LaunchRequest {
+                    kind: LaunchKind::Custom("npm"),
+                    account: &profile,
+                    arguments: &["test".to_string()],
+                    shared_profiles: Vec::new(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(prepared.program(), "npm");
+        assert_eq!(prepared.arguments, ["test"]);
+    });
+}
+
+#[test]
+fn a_third_provider_installation_nobody_commits_takes_its_profile_back_out() {
+    with_fixture(|| {
+        let (host, account) = a_machine_holding_one("third");
+        let provider = Id::Fixture.adapter();
+        let profile = account.profile(&host).unwrap();
+        let authenticated = provider
+            .configured(&host)
+            .unwrap()
+            .installation(&host)
+            .unwrap()
+            .authenticate(&host)
+            .unwrap();
+        host.remove_dir_all(profile.directory()).unwrap();
+
+        let Ok(applied) = provider.install(&host, &profile, &authenticated, InstallMode::New)
+        else {
+            panic!("the Profile is installed")
+        };
+
+        assert!(host.path_exists(profile.directory()));
+        applied.rollback().unwrap();
+        assert!(!host.path_exists(profile.directory()));
+    });
+}
+
+#[test]
+fn a_third_provider_restore_refuses_a_profile_directory_that_is_already_there() {
+    with_fixture(|| {
+        let (host, account) = a_machine_holding_one("third");
+
+        let refused = Id::Fixture.adapter().prepare_restore(
+            &host,
+            RestoreRequest {
+                profile: account.profile(&host).unwrap(),
+                bundle: None,
+            },
+        );
+
+        let Err(said) = refused else {
+            panic!("a Profile already there is not one to restore over")
+        };
+        assert!(
+            said.to_string().contains("Fixture Profile already exists"),
+            "{said}"
+        );
+    });
+}
+
+#[test]
+fn a_third_provider_restore_that_fails_on_the_first_profile_makes_none_of_the_rest() {
+    with_fixture(|| {
+        let export = fixture_export();
+        let host = FakeHost::new();
+        let profiles: Vec<_> = export
+            .registry
+            .accounts
+            .iter()
+            .map(|account| account.profile_dir(&host).unwrap())
+            .collect();
+        let host = host.with_a_path_refusing(
+            profiles[0].join("fixture.auth"),
+            crate::host::Refusing::Write,
+            "fixture write failure",
+        );
+        let (_, _, fresh) = crate::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+
+        let result = crate::import::place(&host, &export, &fresh, || {
+            panic!("a restore that never started saved metadata")
+        });
+
+        assert!(result.is_err());
+        assert!(profiles.iter().all(|path| !host.path_exists(path)));
+    });
+}
+
+#[test]
+fn a_third_provider_restore_makes_a_profile_for_an_account_carrying_no_credential() {
+    with_fixture(|| {
+        let mut export = fixture_export();
+        let last = export.registry.accounts.last().unwrap().key().to_string();
+        export.profiles.remove(&last);
+        let host = FakeHost::new();
+        let profiles: Vec<_> = export
+            .registry
+            .accounts
+            .iter()
+            .map(|account| account.profile_dir(&host).unwrap())
+            .collect();
+        let (_, _, fresh) = crate::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+
+        crate::import::place(&host, &export, &fresh, || {
+            let mut held = crate::holdings::lock(&host)?;
+            let mut registry = export.registry.clone();
+            crate::registry::save(&host, &mut held, &mut registry)
+        })
+        .expect("an Account with nothing to place still gets its Profile");
+
+        assert!(host.is_file(&profiles[0].join("fixture.auth")));
+        assert!(host.path_exists(&profiles[1]));
+        assert!(!host.is_file(&profiles[1].join("fixture.auth")));
+    });
+}
+
+/// What an adapter hands back from a login, with the identity a test is about.
+fn an_authentication(
+    subject: Option<AccountIdentity>,
+    identity: crate::domain::Identity,
+) -> Authenticated {
+    Authenticated {
+        provider: Id::Fixture,
+        identity,
+        subject,
+        plan: None,
+        credential: zeroize::Zeroizing::new("fixture credential".into()),
+        configuration: None,
+    }
+}
+
+#[test]
+fn an_authentication_whose_identity_disagrees_with_its_own_key_is_never_installed() {
+    with_fixture(|| {
+        let (host, account) = a_machine_holding_one("third");
+        let profile = account.profile(&host).unwrap();
+        let mut subject = profile.provider_identity.clone().unwrap();
+        subject.key = "fixture:0000000000000000".into();
+        let authenticated = an_authentication(Some(subject), profile.identity.clone());
+
+        let refused =
+            Id::Fixture
+                .adapter()
+                .install(&host, &profile, &authenticated, InstallMode::Repair);
+
+        let Err(said) = refused else {
+            panic!("an identity that does not match its key names no Account")
+        };
+        assert!(
+            said.to_string()
+                .contains("Account identity does not match its storage key"),
+            "{said}"
+        );
+    });
+}
+
+#[test]
+fn an_authentication_with_no_subject_is_matched_by_every_part_of_the_identity_it_names() {
+    with_fixture(|| {
+        let (host, account) = a_machine_holding_one("third");
+        let mut profile = account.profile(&host).unwrap();
+        profile.provider_identity = None;
+        let theirs = profile.identity.clone();
+
+        for elsewhere in [
+            crate::domain::Identity {
+                email: "somebody-else@example.com".into(),
+                ..theirs.clone()
+            },
+            crate::domain::Identity {
+                account_uuid: Some("another-user".into()),
+                ..theirs.clone()
+            },
+            crate::domain::Identity {
+                organization_uuid: Some("another-workspace".into()),
+                ..theirs.clone()
+            },
+        ] {
+            let authenticated = an_authentication(None, elsewhere);
+
+            let refused =
+                Id::Fixture
+                    .adapter()
+                    .install(&host, &profile, &authenticated, InstallMode::Repair);
+
+            let Err(said) = refused else {
+                panic!("another Identity is another Account")
+            };
+            assert!(
+                said.to_string()
+                    .contains("Authentication belongs to another Account or Workspace"),
+                "{said}"
+            );
+        }
+    });
+}

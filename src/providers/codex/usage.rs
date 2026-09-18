@@ -283,4 +283,31 @@ mod tests {
             assert!(parse_limits(&value).is_err());
         }
     }
+
+    #[test]
+    fn credit_and_spend_control_state_is_refused_rather_than_read_as_a_percentage() {
+        let window = || json!({"usedPercent":32,"windowDurationMins":300,"resetsAt":1800000000});
+        for bucket in [
+            json!({"limitId":"codex","individualLimit":5,"primary":window()}),
+            json!({"limitId":"codex","rateLimitReachedType":"credits","primary":window()}),
+            json!({"limitId":"codex","spendControlReached":true,"primary":window()}),
+            json!({"limitId":"codex","credits":{"hasCredits":true},"primary":window()}),
+            json!({"limitId":"codex","credits":{"unlimited":true},"primary":window()}),
+        ] {
+            let said = parse_limits(&json!({"rateLimits":bucket}))
+                .expect_err("credits are not a percentage")
+                .to_string();
+            assert!(said.contains("credit or spend-control state"), "{said}");
+        }
+    }
+
+    #[test]
+    fn a_quota_bucket_named_by_an_empty_string_has_no_identity() {
+        let said = parse_limits(
+            &json!({"rateLimits":{"limitId":"","primary":{"usedPercent":32,"windowDurationMins":300,"resetsAt":1800000000}}}),
+        )
+        .expect_err("a window with no bucket to belong to is not a figure")
+        .to_string();
+        assert!(said.contains("quota bucket has no identity"), "{said}");
+    }
 }
