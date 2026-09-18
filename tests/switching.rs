@@ -313,6 +313,84 @@ fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
     );
 }
 
+/// A bare Switch picks for itself, and two providers is two sets rather than one
+/// wider one: nothing has declared an Account of one interchangeable with an
+/// Account of the other, so the pick is somebody else's to make.
+#[test]
+fn a_cycle_over_accounts_of_two_providers_asks_which_one_rather_than_picking() {
+    use perch::providers::provider::{AccountIdentity, Id};
+
+    let host = machine_with_two_accounts();
+    let key = fixture_key(&host, SECOND_EMAIL);
+    let mut registry = registry_of(&host);
+    let held = registry.account_mut(&key).expect("an Account Perch holds");
+    held.provider = Id::Codex;
+    held.provider_identity =
+        Some(AccountIdentity::new(Id::Codex, "user-2".into(), "work".into()).expect("a Workspace"));
+    held.identity.account_uuid = Some("user-2".to_string());
+    held.identity.organization_uuid = Some("work".to_string());
+    save_registry(&host, &registry);
+
+    let (result, printed) = run_cycle(&host);
+
+    let refused = result.expect_err("two providers are not one set to Cycle within");
+    assert!(
+        refused.to_string().contains("--provider"),
+        "the refusal names the flag that answers it: {refused}"
+    );
+    assert!(
+        printed.is_empty(),
+        "and nothing was said about a landing: {printed}"
+    );
+}
+
+/// A Switch is over by the time it says where it landed, and neither of the two
+/// lines it says is wrapped in a note: what a terminal that will not take one
+/// owes a script is a non-zero exit over a Switch that happened.
+#[test]
+fn a_switch_that_landed_fails_when_either_of_its_lines_cannot_be_written() {
+    /// A stdout that takes everything but the one line named.
+    struct RefusingTheLine(&'static str);
+
+    impl std::io::Write for RefusingTheLine {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains(self.0) {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    for refused_at in ["Switched to ", "made outside Perch"] {
+        let host = machine_with_two_accounts();
+        host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, THIRD_CREDENTIAL);
+        host.set_file(IDENTITY_PATH, THIRD_IDENTITY_FILE);
+
+        perch::commands::switch::run(
+            &host,
+            perch::commands::switch::SwitchArgs {
+                provider: Default::default(),
+                target: Some(SECOND_EMAIL.to_string()),
+                no_refresh: true,
+            },
+            &mut RefusingTheLine(refused_at),
+        )
+        .expect_err("that line could not be written");
+
+        let landed = fixture_key(&host, SECOND_EMAIL);
+        let registry = registry_of(&host);
+        assert_eq!(
+            registry.active().whose(),
+            Some(landed.as_str()),
+            "{refused_at}: the Switch itself landed"
+        );
+    }
+}
+
 #[test]
 fn a_rotation_is_not_lost_to_an_identity_perch_itself_failed_to_patch() {
     // Three, because the Switch that loses the Rotation is the one to a *third*

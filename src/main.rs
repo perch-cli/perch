@@ -318,11 +318,30 @@ mod tests {
             assert!(!orders.trailed, "{line:?}");
         }
 
-        let orders = Cli::try_parse_from(["perch", "list"])
-            .expect("the line parses")
-            .command
-            .orders();
-        assert!(orders.trailed, "every other command is written down");
+        // Named as lines rather than as variants: six of these are absent from
+        // `tests/invoking.rs` for needing a provider's CLI installed, so this is
+        // the only place their arm is built at all.
+        for line in [
+            &["perch", "list"][..],
+            &["perch", "add"],
+            &["perch", "relogin", "dev"],
+            &["perch", "run", "dev"],
+            &["perch", "status"],
+            &["perch", "switch"],
+            &["perch", "upgrade"],
+            &["perch", "version"],
+            &["perch", "watcher", "check"],
+            &["perch", "wizard"],
+        ] {
+            let orders = Cli::try_parse_from(line)
+                .expect("the line parses")
+                .command
+                .orders();
+            assert!(
+                orders.trailed,
+                "every other command is written down: {line:?}"
+            );
+        }
     }
 
     #[test]

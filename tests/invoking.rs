@@ -402,6 +402,27 @@ fn a_machine_perch_holds_nothing_on_has_nothing_to_purge() {
     );
 }
 
+/// The other two verbs under the noun, told apart by the command each names
+/// when it meets a pipe instead of a terminal. Neither reads the path first, so
+/// an arm wired to its neighbor would refuse in the neighbor's words.
+#[test]
+fn the_export_and_import_arms_reach_their_own_commands() {
+    let machine = Scratch::holding_an_account("holdings");
+    let at = machine.home().join("perch.age");
+    let at = at.to_str().expect("a scratch path is text");
+
+    for verb in ["export", "import"] {
+        let ran = perch(&machine, &["holdings", verb, at]);
+
+        assert_eq!(ran.code, EXIT_INVALID, "{verb}: {}{}", ran.out, ran.err);
+        assert!(
+            ran.err.contains(&format!("perch holdings {verb}")),
+            "`perch holdings {verb}` is answered by its own command:\n{}",
+            ran.err
+        );
+    }
+}
+
 /// Asserted at the process, where the two streams are genuinely separate file
 /// descriptors rather than one buffer a test handed in.
 #[test]

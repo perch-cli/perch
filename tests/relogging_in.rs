@@ -85,6 +85,55 @@ fn a_repair_that_stands_says_so_when_only_the_report_could_not_be_written() {
     );
 }
 
+/// The other two lines a report is made of: the one for an Account that was
+/// working, and the note about one Cycling still will not choose. Both are
+/// written after the repair is on disk, so both owe the same sentence.
+#[test]
+fn a_repair_of_a_healthy_account_stands_when_either_of_its_lines_cannot_be_written() {
+    /// A stdout that takes everything but the one line named.
+    struct RefusingTheLine(&'static str);
+
+    impl std::io::Write for RefusingTheLine {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains(self.0) {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    for refused_at in ["Logged ", "Note: it is disabled"] {
+        let host = machine_with_two_accounts()
+            .with_login(login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE));
+        disable_account(&host, SECOND_EMAIL)
+            .0
+            .expect("it stops being chosen");
+
+        let refused = perch::commands::relogin::run(
+            &host,
+            perch::commands::relogin::ReloginArgs {
+                target: SECOND_EMAIL.to_string(),
+            },
+            &mut RefusingTheLine(refused_at),
+        )
+        .expect_err("that line could not be written");
+
+        assert!(
+            refused.to_string().contains("The repair finished"),
+            "{refused_at}: {refused}"
+        );
+        assert_eq!(
+            credential_of(&host, SECOND_EMAIL).as_deref(),
+            Some(SECOND_REPAIRED),
+            "{refused_at}: and it was the reporting half"
+        );
+    }
+}
+
 #[test]
 fn a_repair_replaces_the_credential_and_clears_the_quarantine() {
     let host = broken_second_account();

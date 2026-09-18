@@ -450,6 +450,25 @@ fn a_path_that_holds_nothing_is_said_rather_than_guessed_at() {
     assert!(refused.to_string().contains("typo.age"), "{refused}");
 }
 
+/// The third way a path can answer, beside the typo and the binary `age` file:
+/// something is there and the read of it failed. What the machine said is the
+/// whole of what Perch can add.
+#[test]
+fn an_export_the_machine_will_not_read_is_refused_in_the_words_the_read_failed_with() {
+    let host = machine_with_claude_code()
+        .with_file(AT, "an Export somebody else owns")
+        .with_a_path_refusing(AT, Refusing::Read, "Permission denied (os error 13)")
+        .with_secrets(&[PASSPHRASE]);
+
+    let (outcome, _printed) = run_import(&host, AT);
+
+    let refused = outcome.expect_err("the file would not open");
+    let said = refused.to_string();
+    assert!(said.contains(AT), "the refusal names the path: {said}");
+    assert!(said.contains("Permission denied"), "{said}");
+    assert_eq!(registry_on(&host), None);
+}
+
 #[test]
 fn a_file_that_is_not_an_export_is_refused_as_one_rather_than_as_a_bad_passphrase() {
     let host = machine_with_claude_code()

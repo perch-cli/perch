@@ -562,6 +562,61 @@ fn an_export_that_cannot_be_written_purges_nothing() {
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
 }
 
+/// The two shapes of naming nowhere: an empty line typed at the prompt, and a
+/// terminal that went away before one was.
+#[test]
+fn an_export_asked_for_and_given_nowhere_to_land_stops_the_purge() {
+    for answered in [&["y", ""][..], &["y"]] {
+        let host = a_machine_to_give_back().with_answers(answered);
+
+        let (outcome, printed) = run_purge(&host);
+
+        let refused = outcome.expect_err("no path was typed");
+        assert_eq!(refused.exit_code(), EXIT_INVALID, "{answered:?}: {refused}");
+        let said = refused.to_string();
+        assert!(said.contains("No path was typed"), "{answered:?}: {said}");
+        assert!(said.contains("Nothing was purged"), "{answered:?}: {said}");
+        assert_eq!(
+            registry_on(&host).map(|registry| registry.accounts.len()),
+            Some(3),
+            "{answered:?}: and every Account is still here: {printed}"
+        );
+    }
+}
+
+/// The line naming what will go is what the word is typed against, so a
+/// terminal that will not take it is one nothing can be agreed on.
+#[test]
+fn a_purge_whose_first_line_cannot_be_written_asks_nothing_and_takes_nothing() {
+    /// Every write refused, as a closed pipe refuses one.
+    struct NowhereToWrite;
+
+    impl std::io::Write for NowhereToWrite {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the pipe closed",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = a_machine_to_give_back();
+
+    let outcome = perch::commands::purge::run(&host, false, &mut NowhereToWrite);
+
+    outcome.expect_err("the line could not be written");
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "and every Account is still here"
+    );
+    assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
+}
+
 #[test]
 fn an_export_inside_what_the_purge_will_take_is_refused() {
     let inside = format!("{PERCH_HOME}/backup.age");

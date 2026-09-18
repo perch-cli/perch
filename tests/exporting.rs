@@ -522,6 +522,60 @@ fn an_export_says_accounts_in_the_plural_when_several_have_no_credential() {
     assert!(printed.contains("perch relogin"), "{printed}");
 }
 
+/// The two lines an Export writes that nothing else in this suite drives a
+/// failure through: the prompt that comes before a passphrase is typed, which
+/// is before the file exists, and the note that comes after it is written.
+#[test]
+fn an_export_says_which_half_it_was_when_a_line_either_side_of_the_write_fails() {
+    /// A stdout that takes everything but the one line named.
+    struct RefusingTheLine(&'static str);
+
+    impl std::io::Write for RefusingTheLine {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains(self.0) {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = a_machine_worth_backing_up();
+    let refused = perch::commands::export::run(
+        &host,
+        std::path::Path::new(AT),
+        &mut RefusingTheLine("Choose a passphrase"),
+    )
+    .expect_err("the prompt could not be written");
+    assert!(
+        !refused.to_string().contains("was written"),
+        "nothing landed, so nothing is named: {refused}"
+    );
+    assert!(host.file(AT).is_none(), "and no file is there");
+
+    let host = machine_with_three_accounts();
+    let store = store_of(&host, THIRD_EMAIL);
+    host.forget_keychain_item(&store.keychain_service, LOGIN_NAME);
+    host.remove_file(&store.credentials_file).ok();
+    let host = typing_the_passphrase(host);
+    let refused = perch::commands::export::run(
+        &host,
+        std::path::Path::new(AT),
+        &mut RefusingTheLine("holds no Credential"),
+    )
+    .expect_err("the note could not be written");
+    assert!(
+        refused
+            .to_string()
+            .contains("Only the report could not be printed"),
+        "the file is there and the failure says so: {refused}"
+    );
+    assert!(host.file(AT).is_some(), "which it is");
+}
+
 /// A Credential that Anthropic Rotated while the Account was active, so the live
 /// copy is ahead of the one in that Account's own Profile.
 const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated","refreshToken":"sk-ant-ort01-rotated","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;

@@ -329,6 +329,20 @@ fn the_other_word_for_no_group_is_taken_at_the_prompt_too() {
     assert_eq!(registry_of(&host).account(SECOND_KEY).unwrap().group, None);
 }
 
+/// End of input at the prompt, which is a terminal that went away mid-question
+/// rather than a machine that never had one: the login has already happened, so
+/// the Account is kept in no Group instead of the command failing over it.
+#[test]
+fn a_question_nobody_is_left_to_answer_keeps_the_account_in_no_group() {
+    let host = ready_to_add().with_answers(&[]);
+
+    let (result, printed) = run_add(&host, AddArgs::default());
+
+    result.expect("the login worked, so the Account is kept");
+    assert!(printed.contains("No answer given"), "{printed}");
+    assert_eq!(registry_of(&host).account(SECOND_KEY).unwrap().group, None);
+}
+
 #[test]
 fn a_machine_with_no_terminal_is_told_to_name_the_group_rather_than_guessed_for() {
     let host = ready_to_add().without_terminal();

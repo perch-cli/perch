@@ -877,6 +877,47 @@ fn a_scope_that_names_an_alias_is_not_offered_a_group_add_that_would_be_refused(
     );
 }
 
+/// The tail about what the Group still holds is the half a rename could have
+/// lost, so a Group that held nothing to begin with has no tail to earn.
+#[test]
+fn renaming_a_group_that_holds_no_accounts_says_only_that_it_was_renamed() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "spare");
+
+    let (result, printed) = rename_group(&host, "spare", "reserve");
+
+    result.expect("a Group holding nothing is renamed like any other");
+    assert_eq!(
+        printed.trim_end(),
+        "Renamed the Group `spare` to `reserve`.",
+        "{printed}"
+    );
+    let registry = registry_of(&host);
+    assert!(registry.group("reserve").is_some());
+    assert!(registry.group("spare").is_none());
+}
+
+/// The other half of what a name Perch holds an Account under means where a
+/// Group was wanted: an Account in no Group sits somewhere too, and the naming
+/// rules say nothing about which Scope was meant.
+#[test]
+fn an_account_in_no_group_is_said_to_be_one_rather_than_a_bad_group_name() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = run_group(
+        &host,
+        GroupCommand::Remove {
+            name: fixture_key(&host, EMAIL),
+        },
+    );
+
+    let refused = result.expect_err("an address is not a Group");
+    let said = refused.to_string();
+    assert_eq!(refused.exit_code(), EXIT_NOT_FOUND, "{said}");
+    assert!(said.contains("that is an Account"), "{said}");
+    assert!(said.contains("in no Group"), "{said}");
+}
+
 /// `config` draws "is already" against "is now" for the same reason: a report of
 /// a change is a claim that something changed.
 #[test]

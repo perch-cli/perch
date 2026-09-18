@@ -349,6 +349,28 @@ mod tests {
         }
     }
 
+    /// Perch's own provider flags are taken out before the Target is looked
+    /// for: left in, the first of them would read as the Target and the word
+    /// after it as something that needed a separator.
+    #[test]
+    fn a_provider_flag_is_perchs_own_and_never_the_target() {
+        for line in [
+            "run --claude dev",
+            "run --codex dev",
+            "run --provider codex dev",
+            "run --provider=codex dev",
+            "run --claude dev -- --resume",
+        ] {
+            assert!(
+                refuse_a_flag_without_the_separator(&typed(line)).is_ok(),
+                "{line}"
+            );
+        }
+
+        let said = refusal_for("run --provider codex dev --resume");
+        assert!(said.contains("perch run dev -- --resume"), "{said}");
+    }
+
     #[test]
     fn no_other_command_is_touched() {
         for line in ["list --json", "list work --refresh", "add --no-group"] {

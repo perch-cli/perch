@@ -1369,3 +1369,68 @@ fn a_value_perch_did_not_choose_is_drawn_rather_than_obeyed() {
         "the organization and the plan alike:\n{printed:?}"
     );
 }
+
+/// The provider is named beside the address, and the Workspace only where there
+/// is one: a Claude Account has no second half to the label, and drawing an
+/// empty one would read as a Workspace called nothing.
+#[test]
+fn an_account_enrolled_under_a_provider_is_listed_beside_the_providers_name() {
+    use perch::providers::provider::{AccountIdentity, Id};
+
+    let identity = AccountIdentity::from_subject(Id::Claude, "account-uuid-1".to_string(), None)
+        .expect("a user with no Workspace");
+    let key = identity.key.clone();
+    let mut held = account(EMAIL, "Acme");
+    held.identity.account_uuid = Some(identity.user_id.clone());
+    held.identity.organization_uuid = None;
+    held.provider_identity = Some(identity);
+    let mut registry = Registry::default();
+    registry.upsert(held);
+    registry.settle(Some(key));
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list(&host, false);
+
+    result.expect("the listing is drawn");
+    assert!(printed.contains(&format!("{EMAIL} [claude]")), "{printed}");
+    assert!(
+        !printed.contains("[claude: "),
+        "and no Workspace is drawn where there is none: {printed}"
+    );
+}
+
+/// A listing changes nothing, so a terminal that will not take the first row it
+/// draws leaves nothing half-done — what it owes a script is a non-zero exit
+/// rather than an empty page under a nought.
+#[test]
+fn a_listing_whose_first_row_cannot_be_written_is_a_failure_rather_than_an_empty_page() {
+    /// Every write refused, as a closed pipe refuses one.
+    struct NowhereToWrite;
+
+    impl std::io::Write for NowhereToWrite {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the pipe closed",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = machine_holding_three_accounts();
+
+    let refused = perch::commands::list::run(
+        &host,
+        perch::commands::list::ListArgs::default(),
+        &mut NowhereToWrite,
+    )
+    .expect_err("the headings could not be written");
+
+    assert!(
+        refused.to_string().contains("could not write its output"),
+        "{refused}"
+    );
+}
