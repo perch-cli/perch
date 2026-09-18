@@ -38,8 +38,15 @@ changelog entry is all there is, and it has to be there.
 One boundary inside the Holdings is worth stating, because it does not look like
 a format change. A Credential Store is derived from its Profile's path, so moving
 `profiles/` orphans the Credentials keyed to the old one, silently. A Profile's
-*contents* are Claude Code's shape rather than Perch's, and are not Perch's to
+*contents* are the client's shape rather than Perch's, and are not Perch's to
 break or to keep.
+
+One qualification stands over the Registry half of this, and only that half:
+the prelaunch provider redesign resets the layout rather than migrating to it,
+by the explicit authorization of the only person holding any
+(ADR a-fresh-provider-layout). A retired layout is refused with instructions and
+its files are preserved. Everything below governs from the first release that
+lands on layout 9 with somebody else's Holdings under it.
 
 ## An Export refuses and a Registry migrates
 

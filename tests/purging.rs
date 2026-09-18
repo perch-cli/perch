@@ -117,7 +117,7 @@ fn the_login_claude_code_is_running_on_is_left_exactly_where_it_is() {
     // rather than again in the report. Asserted whole, because the sentence is
     // the claim.
     assert!(
-        printed.contains("Claude Code goes on running as whatever it is logged in as."),
+        printed.contains("Claude Code and Codex go on running as whatever they are logged in as."),
         "which is said, because it is the one thing a Purge deliberately leaves \
          behind:\n{printed}"
     );

@@ -55,8 +55,8 @@ spare@example.com: the provider would not renew its Credential.
 `perch relogin spare@example.com` repairs it.
 ```
 
-Nothing arrives active. Claude Code goes on as whatever it is logged in as
-until you `perch switch <target>`:
+Nothing arrives active. Claude Code and Codex go on as whatever they are
+logged in as until you `perch switch <target>`:
 
 ```
 $ perch status
@@ -64,8 +64,8 @@ Perch holds no active Account. `perch switch <target>` makes one of the 3 it hol
 ```
 
 The login already on the new machine is not adopted. Credentials land wherever
-this machine's Claude Code keeps one, so an Export from a Mac restores onto
-Linux and the other way round. An Account the Export carried no Credential
+this machine's Claude Code or Codex keeps one, so an Export from a Mac restores
+onto Linux and the other way round. An Account the Export carried no Credential
 for arrives Quarantined, and `perch relogin` ends that.
 
 An Import refuses a Perch that already holds an Account. There is no `--force`
@@ -86,7 +86,7 @@ Export written by a newer Perch is refused, naming the version that wrote it.
 $ perch holdings purge
 Perch holds 3 Accounts: you@example.com, overflow@example.com, spare@example.com.
 A Purge deletes their Profiles, their Credentials, and /Users/you/.config/perch itself. Nothing undoes it.
-Claude Code goes on running as whatever it is logged in as.
+Claude Code and Codex go on running as whatever they are logged in as.
 Write an Export first? [Y/n]: y
 Where to write it: /Users/you/perch-backup.age
 Choose a passphrase. Nothing opens the Export without it.
@@ -107,7 +107,7 @@ ahead of time and writes no Export. Without a terminal and without the flag, a
 Purge is refused.
 
 A Service `perch watcher install` left is stopped and removed first. Whatever
-Claude Code is logged in as is left where it is. A Purge is refused while a
-client is running against one of the Profiles, checked before the questions
-and again after them. A Purge that stopped part way can be run again, and
-carries on from what is still there.
+Claude Code and Codex are logged in as is left where it is. A Purge is refused
+while a client is running against one of the Profiles, checked before the
+questions and again after them. A Purge that stopped part way can be run again,
+and carries on from what is still there.

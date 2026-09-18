@@ -105,7 +105,7 @@ enum Command {
     /// Make an Account active everywhere.
     Switch(SwitchArgs),
 
-    /// Hand what Perch sees of this machine to Claude Code.
+    /// Hand what Perch sees of this machine to Claude Code or Codex.
     Triage(TriageArgs),
 
     /// Upgrade Perch through whatever installed it.

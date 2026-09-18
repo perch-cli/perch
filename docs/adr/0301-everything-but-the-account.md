@@ -1,6 +1,12 @@
 # Everything but the Account
 
-A configuration directory holds two kinds of thing. The Account is
+Shared State is a capability a Provider declares, and what follows is Claude
+Code's answer to it (ADR a-provider-owns-its-tool). Codex declares none: its
+Profile is its whole configuration, nothing crosses from one Profile to another,
+and a Run asking a Provider to share what it has not declared is refused before
+any native effect.
+
+A Claude Code configuration directory holds two kinds of thing. The Account is
 `.credentials.json` and the `oauthAccount` block of `.claude.json`. Everything
 else in it is the person: memory, settings, plugins, past work, plans, and
 whatever the next Claude Code release adds.

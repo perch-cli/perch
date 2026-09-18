@@ -60,6 +60,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Every document Perch ships reads as a tool for two providers rather than one.
+  The README and the site are headed "Run Claude Code or Codex", the Guide's
+  Claude-only claims about adoption, backups, paths and exit codes name both
+  clients, `CONTEXT.md` defines Adoption, Profile, Credential Store, Shared
+  State, Quota Window, Rotation, Renewal, Refresh, Marker, Probe and Triage in
+  the Provider's terms, and the decision records state each general rule once
+  and name what each Provider supplies. Codex support is still called
+  experimental where it was. Two sentences Perch itself prints moved with them:
+  a Purge says both clients go on running as whatever they are logged in as, and
+  `perch triage --help` names both. No command, flag, exit code or `--json`
+  document changes.
 - Every sentence the provider redesign added says the verdict and the next
   command: provider refusals name the `perch config set --provider` or
   `perch run --codex` form to type, `perch config set --help` is its Setting

@@ -153,7 +153,7 @@ here.
 
 Two things do not belong in a public issue and go elsewhere. A security problem
 goes to https://github.com/perch-cli/perch/security/advisories/new, privately,
-because Perch holds Claude Code credentials. An idea or a feature request goes to
+because Perch holds provider credentials. An idea or a feature request goes to
 https://github.com/perch-cli/perch/discussions/categories/ideas.
 
 ## 9. Prefer a comment on a duplicate

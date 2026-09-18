@@ -142,7 +142,7 @@ again.
 
 Everything a Watcher can hold on, it holds on, so a Service that will not
 *start* is a machine somebody has to look at: a Registry that will not parse, a
-Claude Code that cannot be probed, a home directory that has gone. Restarting
+client that cannot be probed, a home directory that has gone. Restarting
 into that for ever is a loop nobody ever sees, because the only place it is
 visible is a log nobody is reading.
 
@@ -191,27 +191,31 @@ The rule is the most stable path that runs without a shell, which is a different
 answer per Channel (ADR an-upgrade-asks-its-channel) rather than a single call
 to `canonicalize`.
 
-The **environment**: `PERCH_HOME` and `CLAUDE_CONFIG_DIR` are read from the
-process environment and are typically set in a shell profile no service manager
-will ever source. A Service silently watching `~/.config/perch` while its owner
+The **environment**: `PERCH_HOME`, and each Provider's own variable —
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME` — are read from the process environment and
+are typically set in a shell profile no service manager will ever source. Which
+variables those are is the Provider's to declare rather than this document's to
+list. A Service silently watching `~/.config/perch` while its owner
 works out of `PERCH_HOME=~/work/perch` would be reporting, correctly and
 uselessly, that there is nothing to do. Both are written into the unit when — and
 only when — they are actually set, and nothing else from the shell is: a unit
 that captured the whole environment would bake a `PATH`, an `SSH_AUTH_SOCK` and
 whatever secret the installing shell was holding into a file on disk.
 
-The **Claude Code**: resolved at install time by the same search every command
-uses — so an explicit `PERCH_CLAUDE_BIN` passes through as itself — and written
-into the unit under that name. The service manager's `PATH` is not the
-installer's: launchd hands a LaunchAgent `/usr/bin:/bin:/usr/sbin:/sbin`, which
-holds no `claude` anybody installs today, so a unit carrying no answer leaves
-the Service holding on "no `claude` was found on PATH" from its first round
-while `install`, `probe` and `watcher status` all report health. `PATH` itself
-is still not carried: the one thing the Watcher needs from it is where `claude`
-is, and that fits in a variable the idempotent `install` re-resolves. An
-install that finds none writes none and says the Service will hold, rather than
-refusing — Claude Code arriving later is ordinary, and the repair is the same
-one command.
+The **client of each enabled Provider**: resolved at install time by the same
+search every command uses — so an explicit `PERCH_CLAUDE_BIN` or
+`PERCH_CODEX_BIN` passes through as itself — and written into the unit under
+that name. The service manager's `PATH` is not the installer's: launchd hands a
+LaunchAgent `/usr/bin:/bin:/usr/sbin:/sbin`, which holds no `claude` and no
+`codex` anybody installs today, so a unit carrying no answer leaves the Service
+holding on "no `claude` was found on PATH" from its first round while `install`,
+`probe` and `watcher status` all report health. `PATH` itself is still not
+carried: the one thing the Watcher needs from it is where each client is, and
+that fits in a variable per Provider that the idempotent `install` re-resolves.
+An install that finds one of them writes that one; an install that finds neither
+writes neither and says the Service will hold, rather than refusing — a client
+arriving later is ordinary, and the repair is the same one command. One Provider
+missing does not withhold another's answer.
 
 `perch watcher status` reads the binary and the log back out of the installed
 unit rather than recomputing them, because whether the unit and the machine

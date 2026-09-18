@@ -111,7 +111,10 @@ Utilization   5-hour      42%  (as of just now)
 `--refresh` reads the Accounts about to be shown and no others: `perch status
 --refresh` reads the one you are on, `perch list <scope> --refresh` that
 Scope's, and `perch list --refresh` every Account Perch holds. Every Quota
-Window Anthropic reports is recorded, with when it resets.
+Window the provider reports is recorded, with when it resets. A Claude Account's
+windows are named `5-hour`, `7-day` and the per-model weekly ones; a Codex
+Account's are named for the limit its app-server reports, as
+`codex/primary/300m`.
 
 A read that fails leaves the cached figure standing and says so above the
 table. The command still succeeds:

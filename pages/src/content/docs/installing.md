@@ -6,8 +6,8 @@ sidebar:
 
 Perch is pre-1.0: the command line may still change between releases, and the
 changelog marks every change that breaks something. macOS, Linux and Windows, on both Arm and Intel except Windows,
-which is x64 only. Claude Code has to be installed for Perch to have anything
-to switch between.
+which is x64 only. Claude Code or Codex has to be installed for Perch to have
+anything to switch between.
 
 ## Homebrew
 
@@ -176,8 +176,8 @@ The tests, if you want to run them first:
 # back by a feature rather than by a list somebody has to maintain
 cargo test
 
-# reads and writes state you own — your login keychain, your ~/.claude, the
-# Claude Code you have installed — so it wants Claude Code installed
+# reads and writes state you own: your login keychain, your ~/.claude, and the
+# clients you have installed, so it wants Claude Code or Codex there
 cargo test --features your-machine --test your_machine
 
 # both
@@ -203,7 +203,7 @@ Utilization   never observed
 ```
 
 The first command you run adopts the Claude Code login already on the machine
-as your first Account.
+as your first Account, and a Codex login the same way.
 [Accounts](accounts.md#adopting-the-login-you-already-have) picks up from
 there.
 
