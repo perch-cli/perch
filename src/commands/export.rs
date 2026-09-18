@@ -133,10 +133,6 @@ impl Destination {
         Ok(())
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     /// Where the bytes are, once they are: recorded the instant they land,
     /// because a report failing afterwards is not an Export never written.
     pub fn landed(&self) -> Option<&Path> {
