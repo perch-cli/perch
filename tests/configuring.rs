@@ -1097,3 +1097,533 @@ fn a_provider_option_can_be_read_back_and_cleared_without_changing_other_policy(
     assert_eq!(value.trim(), "inherit");
     assert!(!group_config(&host, "work").prefer_workload);
 }
+
+/// A Codex login for the fixture below; synthetic claims, no usable token.
+fn codex_credential(email: &str) -> String {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    let payload = URL_SAFE_NO_PAD.encode(
+        serde_json::json!({
+            "email": email,
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "user-one",
+                "chatgpt_account_id": "workspace-1",
+                "chatgpt_plan_type": "plus"
+            }
+        })
+        .to_string(),
+    );
+    serde_json::json!({
+        "auth_mode": "chatgpt",
+        "tokens": {"id_token": format!("fake.{payload}.fake"), "account_id": "workspace-1"}
+    })
+    .to_string()
+}
+
+/// The three Claude Accounts of `work`, with a Codex Account beside them there.
+fn a_group_holding_both_providers() -> FakeHost {
+    let document = codex_credential("person@example.com");
+    let host = three_accounts_in_one_group()
+        .with_file("/usr/bin/codex", "")
+        .with_login(move |host, at| {
+            host.set_file(at.join("auth.json"), &document);
+            0
+        });
+    perch::commands::add::run(
+        &host,
+        perch::commands::add::AddArgs {
+            provider: perch::commands::selection::Selection {
+                codex: true,
+                ..Default::default()
+            },
+            alias: Some("personal".into()),
+            group: Some("work".into()),
+            ..Default::default()
+        },
+        &mut Vec::new(),
+    )
+    .expect("the Codex Account is added into `work`");
+    host
+}
+
+#[test]
+fn a_scope_default_is_read_by_every_scope_that_says_nothing_of_its_own() {
+    let host = three_accounts_in_one_group();
+
+    for (key, value) in [
+        ("strategy", "soonest-reset"),
+        ("watcher-threshold-percent", "55"),
+        ("watcher-margin-percent", "20"),
+    ] {
+        let (result, printed) = config_set(&host, &["--defaults", key, value]);
+        result.unwrap_or_else(|err| panic!("`{key}` is a Scope default: {err}"));
+        assert_eq!(printed.trim(), format!("Scope default {key}: {value}"));
+    }
+
+    let settings = group_config(&host, "work");
+    assert_eq!(settings.strategy, Strategy::SoonestReset);
+    assert_eq!(settings.watcher_threshold_percent, 55);
+    assert_eq!(settings.watcher_margin_percent, 20);
+
+    let (result, printed) = config_get(&host, &["--defaults"]);
+
+    result.expect("the defaults read back");
+    assert!(
+        printed.contains("\"strategy\": \"soonest-reset\""),
+        "{printed}"
+    );
+    assert!(printed.contains("\"threshold_percent\": 55"), "{printed}");
+    assert!(printed.contains("\"margin_percent\": 20"), "{printed}");
+}
+
+#[test]
+fn a_scope_default_set_to_inherit_leaves_the_compiled_default_behind_it() {
+    let host = three_accounts_in_one_group();
+    config_set(&host, &["--defaults", "strategy", "soonest-reset"])
+        .0
+        .expect("it takes");
+
+    let (result, printed) = config_set(&host, &["--defaults", "strategy", "inherit"]);
+
+    result.expect("`inherit` unsays a default");
+    assert_eq!(printed.trim(), "Scope default strategy: inherit");
+    assert_eq!(group_config(&host, "work").strategy, Strategy::MostHeadroom);
+}
+
+#[test]
+fn a_key_the_scope_defaults_do_not_carry_is_refused_with_the_ones_they_do() {
+    let host = three_accounts_in_one_group();
+
+    let refusal = config_set(&host, &["--defaults", "watcher-may-act", "true"])
+        .0
+        .expect_err("consent is said about a Scope, never above every Scope");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    let said = refusal.to_string();
+    assert!(
+        said.contains(
+            "`--defaults` takes `strategy`, `watcher-threshold-percent` or \
+             `watcher-margin-percent`."
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains("perch config set <scope> watcher-may-act <value>"),
+        "and where the grant is said instead: {said}"
+    );
+    assert!(!group_config(&host, "work").watcher_may_act);
+}
+
+#[test]
+fn a_providers_own_numbers_within_a_scope_are_read_before_the_scopes_own() {
+    let host = three_accounts_in_one_group();
+    config_set(&host, &["work", "watcher-threshold-percent", "70"])
+        .0
+        .expect("the Scope's own number takes");
+
+    for (key, value) in [
+        ("strategy", "soonest-reset"),
+        ("watcher-threshold-percent", "60"),
+        ("watcher-margin-percent", "25"),
+    ] {
+        let (result, printed) = config_set(&host, &["work", "--provider", "claude", key, value]);
+        result.unwrap_or_else(|err| panic!("`{key}` is a provider's within a Scope: {err}"));
+        assert_eq!(printed.trim(), format!("work claude {key}: {value}"));
+    }
+
+    let (result, printed) = config_get(&host, &["--effective", "work"]);
+
+    result.expect("the effective page reads back");
+    assert!(
+        printed.contains("strategy soonest-reset (scope provider)"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("watcher-threshold-percent 60 (scope provider)"),
+        "the Scope's own 70 is under it: {printed}"
+    );
+    assert!(
+        printed.contains("watcher-margin-percent 25 (scope provider)"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("watcher-paused false (global)"),
+        "{printed}"
+    );
+}
+
+#[test]
+fn the_effective_page_is_read_for_the_provider_it_names() {
+    let host = three_accounts_in_one_group();
+    config_set(
+        &host,
+        &["work", "--provider", "codex", "watcher-may-act", "true"],
+    )
+    .0
+    .expect("a grant is one provider's");
+
+    let (result, codex) = config_get(&host, &["--effective", "work", "--provider", "codex"]);
+    result.expect("the provider named is the one resolved");
+    let (_, claude) = config_get(&host, &["--effective", "work"]);
+
+    assert!(
+        codex.contains("watcher-may-act true (scope provider grant)"),
+        "{codex}"
+    );
+    assert!(
+        claude.contains("watcher-may-act false (not granted)"),
+        "a grant said about one provider reaches no other: {claude}"
+    );
+}
+
+#[test]
+fn an_effective_page_that_names_no_scope_is_answered_with_the_form_it_takes() {
+    let host = three_accounts_in_one_group();
+
+    let refusal = config_get(&host, &["--effective"])
+        .0
+        .expect_err("`--effective` is about one Scope");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains(
+            "`perch config get --effective <scope> [--provider <name>]` shows where each \
+             value comes from."
+        ),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn a_provider_scope_key_perch_does_not_know_is_refused_with_the_ones_it_takes() {
+    let host = three_accounts_in_one_group();
+
+    let refusal = config_set(
+        &host,
+        &["work", "--provider", "claude", "interchangeable", "true"],
+    )
+    .0
+    .expect_err("a provider does not carry the declaration that a Scope is one");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains(
+            "A provider's Scope Settings are `strategy`, `watcher-threshold-percent`, \
+             `watcher-margin-percent`, `watcher-may-act` and `option.<name>`."
+        ),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn a_scopes_page_is_read_for_one_provider_whole_or_key_by_key() {
+    let host = three_accounts_in_one_group();
+    config_set(
+        &host,
+        &["work", "--provider", "codex", "strategy", "soonest-reset"],
+    )
+    .0
+    .expect("it takes");
+
+    let (result, page) = config_get(&host, &["work", "--provider", "codex"]);
+    result.expect("a Scope has a page per provider");
+    let (_, codex) = config_get(&host, &["work", "--provider", "codex", "strategy"]);
+    let (_, claude) = config_get(&host, &["work", "--provider", "claude", "strategy"]);
+
+    assert!(row(&page, "strategy", "soonest-reset"), "{page}");
+    assert_eq!(codex.trim(), "soonest-reset");
+    assert_eq!(
+        claude.trim(),
+        "most-headroom",
+        "the provider nobody said anything about is at the compiled default"
+    );
+}
+
+#[test]
+fn a_provider_page_asked_about_more_than_one_setting_names_the_form_it_takes() {
+    let host = three_accounts_in_one_group();
+
+    let refusal = config_get(
+        &host,
+        &["work", "--provider", "codex", "strategy", "and-another"],
+    )
+    .0
+    .expect_err("one Setting at most");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal
+            .to_string()
+            .contains("`perch config get <scope> [<key>]` takes one Setting at most."),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn a_grant_within_a_scope_holding_both_providers_has_to_name_whose_it_is() {
+    let host = a_group_holding_both_providers();
+
+    let refusal = config_set(&host, &["work", "watcher-may-act", "true"])
+        .0
+        .expect_err("a grant said about two providers at once says nothing about either");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    let said = refusal.to_string();
+    assert!(
+        said.contains("Group `work` holds both providers' Accounts"),
+        "{said}"
+    );
+    assert!(
+        said.contains("`perch config set work --provider <claude|codex> watcher-may-act <value>`"),
+        "{said}"
+    );
+    assert!(
+        !registry_of(&host)
+            .resolved_policy(
+                &perch::config::Scope::Group("work".to_string()),
+                perch::providers::provider::Id::Claude,
+            )
+            .settings
+            .watcher_may_act,
+        "and nothing was granted"
+    );
+}
+
+#[test]
+fn a_scope_setting_set_to_inherit_falls_through_to_the_scope_defaults() {
+    let host = three_accounts_in_one_group();
+    for (key, value) in [
+        ("strategy", "soonest-reset"),
+        ("watcher-threshold-percent", "55"),
+        ("watcher-margin-percent", "20"),
+    ] {
+        config_set(&host, &["--defaults", key, value])
+            .0
+            .expect("the default takes");
+    }
+    for (key, value) in [
+        ("strategy", "most-headroom"),
+        ("watcher-threshold-percent", "90"),
+        ("watcher-margin-percent", "40"),
+    ] {
+        config_set(&host, &["work", key, value])
+            .0
+            .expect("the Scope's own takes");
+    }
+
+    for (key, value) in [
+        ("strategy", "soonest-reset"),
+        ("watcher-threshold-percent", "55"),
+        ("watcher-margin-percent", "20"),
+    ] {
+        let (result, printed) = config_set(&host, &["work", key, "inherit"]);
+        result.unwrap_or_else(|err| panic!("`{key}` is unsaid with `inherit`: {err}"));
+        assert_eq!(printed.trim(), format!("work {key}: inherited"));
+        let (_, read_back) = config_get(&host, &["work", key]);
+        assert_eq!(
+            read_back.trim(),
+            value,
+            "`{key}` fell through to the Scope default"
+        );
+    }
+}
+
+#[test]
+fn a_setting_that_falls_through_to_nothing_takes_no_inherit() {
+    let host = three_accounts_in_one_group();
+
+    let refusal = config_set(&host, &["work", "watcher-may-act", "inherit"])
+        .0
+        .expect_err("a grant is said or it is not");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains(
+            "`watcher-may-act` takes no `inherit`. `perch config set work watcher-may-act \
+             <value>` sets it."
+        ),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn a_providers_installation_is_set_one_key_at_a_time_and_read_back() {
+    let host = three_accounts_in_one_group();
+
+    let (result, printed) = config_set(&host, &["--provider", "codex", "enabled", "false"]);
+    result.expect("a provider is switched off");
+    assert_eq!(printed.trim(), "codex enabled: false");
+    let (result, printed) = config_set(&host, &["--provider", "codex", "cli-path", "/opt/codex"]);
+    result.expect("and pointed at a CLI");
+    assert_eq!(printed.trim(), "codex cli-path: /opt/codex");
+
+    let (result, page) = config_get(&host, &["--provider", "codex"]);
+    result.expect("the Installation reads back whole");
+    assert!(row(&page, "enabled", "false"), "{page}");
+    assert!(row(&page, "cli-path", "/opt/codex"), "{page}");
+
+    let (_, enabled) = config_get(&host, &["--provider", "codex", "enabled"]);
+    let (_, path) = config_get(&host, &["--provider", "codex", "cli-path"]);
+    assert_eq!(enabled.trim(), "false");
+    assert_eq!(path.trim(), "/opt/codex");
+
+    config_set(&host, &["--provider", "codex", "cli-path", "auto"])
+        .0
+        .expect("and back to whatever is on the PATH");
+    let (_, path) = config_get(&host, &["--provider", "codex", "cli-path"]);
+    assert_eq!(path.trim(), "auto");
+    let (_, claude) = config_get(&host, &["--provider", "claude"]);
+    assert!(
+        row(&claude, "enabled", "true") && row(&claude, "cli-path", "auto"),
+        "the provider nobody said anything about is untouched: {claude}"
+    );
+}
+
+#[test]
+fn an_installation_key_perch_does_not_know_is_refused_both_ways() {
+    let host = three_accounts_in_one_group();
+    let both = "A provider's Installation Settings are `enabled` and `cli-path`.";
+
+    let refused_set = config_set(&host, &["--provider", "codex", "watcher-may-act", "true"])
+        .0
+        .expect_err("an Installation carries neither Settings nor grants");
+    let refused_get = config_get(&host, &["--provider", "codex", "enabled", "cli-path"])
+        .0
+        .expect_err("one key at a time");
+
+    assert_eq!(refused_set.exit_code(), EXIT_INVALID);
+    assert!(refused_set.to_string().contains(both), "{refused_set}");
+    assert_eq!(refused_get.exit_code(), EXIT_INVALID);
+    assert!(refused_get.to_string().contains(both), "{refused_get}");
+}
+
+#[test]
+fn a_provider_named_with_nothing_else_is_answered_with_the_form_each_half_takes() {
+    let host = three_accounts_in_one_group();
+
+    let refused_set = config_set(&host, &["--provider", "codex"])
+        .0
+        .expect_err("that names no Setting to set");
+    let refused_get = config_get(&host, &["--provider"])
+        .0
+        .expect_err("and that names no provider to read");
+
+    assert!(
+        refused_set.to_string().contains(
+            "`perch config set --provider <name> <enabled|cli-path> <value>` sets a \
+             provider's Installation."
+        ),
+        "{refused_set}"
+    );
+    assert!(
+        refused_get.to_string().contains(
+            "`perch config get --provider <name> [enabled|cli-path]` reads a provider's \
+             Installation."
+        ),
+        "{refused_get}"
+    );
+}
+
+#[test]
+fn the_global_settings_are_set_one_at_a_time_and_read_back_whole_or_by_name() {
+    let host = three_accounts_in_one_group();
+
+    let (result, whole) = config_get(&host, &["--global"]);
+    result.expect("the globals read back whole");
+    assert!(whole.contains("run-provider: claude"), "{whole}");
+    assert!(whole.contains("run-fallback: installed"), "{whole}");
+    assert!(whole.contains("watcher-paused: false"), "{whole}");
+    let (_, fallback) = config_get(&host, &["--global", "run-fallback"]);
+    assert_eq!(fallback.trim(), "installed");
+
+    for (key, value) in [
+        ("run-provider", "codex"),
+        ("run-fallback", "disabled"),
+        ("watcher-paused", "true"),
+    ] {
+        let (result, printed) = config_set(&host, &["--global", key, value]);
+        result.unwrap_or_else(|err| panic!("`{key}` is a global Setting: {err}"));
+        assert_eq!(printed.trim(), format!("{key}: {value}"));
+    }
+
+    let registry = registry_of(&host);
+    assert_eq!(registry.run_provider, perch::providers::provider::Id::Codex);
+    assert!(!registry.run_fallback);
+    assert!(registry.watcher_paused);
+
+    let (_, whole) = config_get(&host, &["--global"]);
+    assert!(whole.contains("run-fallback: disabled"), "{whole}");
+    let (_, provider) = config_get(&host, &["--global", "run-provider"]);
+    let (_, fallback) = config_get(&host, &["--global", "run-fallback"]);
+    let (_, paused) = config_get(&host, &["--global", "watcher-paused"]);
+    assert_eq!(provider.trim(), "codex");
+    assert_eq!(fallback.trim(), "disabled");
+    assert_eq!(paused.trim(), "true");
+}
+
+#[test]
+fn a_run_fallback_that_is_neither_word_is_refused_with_both_of_them() {
+    let host = three_accounts_in_one_group();
+
+    let refusal = config_set(&host, &["--global", "run-fallback", "maybe"])
+        .0
+        .expect_err("a fallback is installed or it is disabled");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal
+            .to_string()
+            .contains("`run-fallback` takes `installed` or `disabled`."),
+        "{refusal}"
+    );
+    assert!(registry_of(&host).run_fallback, "and nothing was written");
+}
+
+#[test]
+fn a_global_key_perch_does_not_know_is_refused_with_the_ones_there_are() {
+    let host = three_accounts_in_one_group();
+
+    let refused_set = config_set(&host, &["--global", "run-speed", "fast"])
+        .0
+        .expect_err("there is no such global");
+    let refused_get = config_get(&host, &["--global", "run-speed"])
+        .0
+        .expect_err("nor is there one to read");
+
+    assert_eq!(refused_set.exit_code(), EXIT_INVALID);
+    assert!(
+        refused_set.to_string().contains(
+            "The global Settings are `run-provider`, `run-fallback` and `watcher-paused`."
+        ),
+        "{refused_set}"
+    );
+    assert_eq!(refused_get.exit_code(), EXIT_INVALID);
+    assert!(
+        refused_get.to_string().contains(
+            "`perch config get --global [run-provider|run-fallback|watcher-paused]` reads a \
+             global Setting."
+        ),
+        "{refused_get}"
+    );
+}
+
+#[test]
+fn the_page_every_scope_is_read_on_carries_the_globals_above_them() {
+    let host = three_accounts_in_one_group();
+
+    let (result, printed) = config_get(&host, &[]);
+
+    result.expect("naming nothing asks about everything");
+    let globals = page_of(&printed, "--global");
+    assert!(row(&globals, "run-provider", "claude"), "{printed}");
+    assert!(row(&globals, "run-fallback", "installed"), "{printed}");
+    assert!(row(&globals, "watcher-paused", "false"), "{printed}");
+
+    config_set(&host, &["--global", "run-fallback", "disabled"])
+        .0
+        .expect("it takes");
+    let (_, printed) = config_get(&host, &[]);
+    assert!(
+        row(&page_of(&printed, "--global"), "run-fallback", "disabled"),
+        "{printed}"
+    );
+}

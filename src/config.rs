@@ -988,6 +988,52 @@ mod tests {
             "the clause `perch list` and `perch group list` share names it",
         );
     }
+
+    /// Codex names no workload to prefer, so the Setting has nothing to write.
+    #[test]
+    fn a_provider_that_prefers_no_workload_refuses_the_setting_that_names_one() {
+        let mut registry = holding_a_group();
+        registry.select_provider(crate::providers::provider::Id::Codex);
+
+        let refused = Setting::PreferredWorkload
+            .write(&mut registry, &work(), "true")
+            .expect_err("there is no workload for it to have meant");
+
+        assert!(
+            refused
+                .to_string()
+                .contains("This provider has no preferred workload"),
+            "{refused}"
+        );
+        assert!(!registry.settings(&work()).prefer_workload);
+    }
+
+    /// The conversion is how a flat Settings reaches a Scope, and the workload
+    /// is the one field that lands under a provider rather than beside them.
+    #[test]
+    fn settings_that_prefer_a_workload_convert_into_a_scope_that_still_prefers_it() {
+        let provider = crate::providers::provider::Id::default();
+
+        let preferring: ScopeSettings = Settings {
+            prefer_workload: true,
+            ..Settings::default()
+        }
+        .into();
+        let plain: ScopeSettings = Settings::default().into();
+
+        assert!(
+            preferring
+                .resolve(&PolicyDefaults::default(), provider)
+                .settings
+                .prefer_workload
+        );
+        assert!(
+            !plain
+                .resolve(&PolicyDefaults::default(), provider)
+                .settings
+                .prefer_workload
+        );
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
