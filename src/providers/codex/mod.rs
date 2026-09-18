@@ -25,6 +25,30 @@ fn refused(what: &str) -> PerchError {
     PerchError::Invalid(format!("Codex {what}"))
 }
 
+/// The door the gated suite reaches the installed `codex` through
+/// (ADR a-suite-is-named-and-gated).
+///
+/// It hands over what the product sends rather than a copy: a copy goes on
+/// passing after the product has moved. Feature-gated, so none of it ships.
+#[cfg(feature = "your-machine")]
+pub mod fixture {
+    use crate::Host;
+    use std::path::Path;
+
+    pub const ARGS: &[&str] = super::usage::ARGS;
+    pub const AUTH_FILE: &str = super::AUTH_FILE;
+    pub const STORE_SETTING: &str = "cli_auth_credentials_store";
+    pub const PIN: &str = super::layout::PIN;
+
+    pub fn requests() -> [String; 4] {
+        super::usage::requests()
+    }
+
+    pub fn environment(host: &dyn Host, home: &Path) -> Vec<(String, String)> {
+        super::process::environment(host, home)
+    }
+}
+
 pub struct Codex;
 
 impl super::provider::Adapter for Codex {

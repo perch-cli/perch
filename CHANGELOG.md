@@ -49,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] Account JSON includes `id`, `provider`, and `workspace`. Switch accepts
   provider flags and refuses an ambiguous Cycle when Codex Accounts are held.
 
+- The gated `your_machine` suite asks the installed Codex what it has always
+  asked the installed Claude Code: whether `codex --version` carries a version,
+  whether the four documents an observation sends are still methods it has, and
+  whether `cli_auth_credentials_store` still names the `file` store a Switch
+  pins. Logged out is enough for all three, which is what lets a runner ask
+  them: a method that has gone answers `unknown variant` where one that is
+  there answers about authentication, and an unknown `-c` key is taken in
+  silence where a bad value for a real one is refused naming its variants. CI
+  installs `codex` beside Claude Code and floats both versions, so the weekly
+  run catches a rename in either.
+
 ### Removed
 
 - `name::acceptable`, the pass that brought a name a published Perch accepted
