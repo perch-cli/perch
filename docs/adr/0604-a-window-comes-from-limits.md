@@ -73,7 +73,11 @@ Accounts where it turns out not to be sent. After a release there either are suc
 Accounts or there are not, and the answer is worth more than the second reader
 costs.
 
-## Utilization is never read through a client
+## Claude Utilization is never read through a client
+
+The Codex integration makes a separate, conditional choice for its structured
+account protocol (ADR codex-owns-its-renewal). The rule here governs the Claude
+terminal usage panel.
 
 `perch run <target> -- "/usage"` reads this endpoint. It is not a second source:
 the drift that breaks one breaks the other, with a panel drawn for a person in

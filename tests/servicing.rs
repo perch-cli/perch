@@ -347,6 +347,48 @@ fn an_install_whose_every_claude_fails_where_the_service_runs_carries_none_and_s
     );
 }
 
+/// A `claude` that will not start at all where the Service would run it — a
+/// shim whose interpreter has gone — never reaches an exit status of its own,
+/// so what the note carries is the stand-in for "never ran".
+#[test]
+fn an_install_whose_only_claude_could_not_be_started_says_so_as_an_exit_of_its_own() {
+    let host = mac()
+        .with_env("PATH", "/opt/bin")
+        .with_file("/opt/bin/claude", "");
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(
+        result.expect("a `claude` that will not start is said, not refused"),
+        EXIT_OK
+    );
+    let unit = host
+        .read_file(&unit_at(&host))
+        .expect("the unit is readable");
+    assert!(
+        !unit.contains("PERCH_CLAUDE_BIN"),
+        "a path that cannot be started there is not worth carrying: {unit}"
+    );
+    assert!(
+        printed.contains("/opt/bin/claude") && printed.contains("exits -1"),
+        "the install names the path and what it would die with: {printed}"
+    );
+}
+
+/// The directory a unit goes in is made on the way to writing one, so a file
+/// sitting where it belongs is a machine that can take no Service at all.
+#[test]
+fn an_install_with_no_room_for_the_unit_installs_nothing_and_names_the_path() {
+    let host = mac().with_file("/Users/someone/Library/LaunchAgents", "");
+
+    let (result, _) = run_service(&host, WatcherCommand::Install);
+
+    let refused = result.expect_err("there is nowhere to put the unit");
+    let said = refused.to_string();
+    assert!(said.contains("make room for the unit"), "{said}");
+    assert!(said.contains("Nothing was installed"), "{said}");
+}
+
 /// The same rehearsal on the other door to a unit: the re-install an Upgrade
 /// performs, whose one message would otherwise read as a clean restart.
 #[test]
@@ -1628,4 +1670,72 @@ fn windows_runs_the_schtasks_that_ships_with_windows_and_not_whichever_is_neares
         !ran.iter().any(|program| program == "schtasks"),
         "and the bare name is not used anywhere: {ran:?}"
     );
+}
+
+#[test]
+fn a_mixed_service_carries_both_providers_and_only_declared_environment() {
+    let host = linux()
+        .with_file("/usr/bin/codex", "")
+        .with_exec_under("/usr/bin/codex", &["--version"], worked())
+        .with_env("CLAUDE_CONFIG_DIR", "/native/claude")
+        .with_env("CODEX_HOME", "/native/codex")
+        .with_env("OPENAI_API_KEY", "do-not-persist")
+        .with_env("ANTHROPIC_API_KEY", "also-do-not-persist");
+    let (result, _) = run_service(&host, WatcherCommand::Install);
+    assert_eq!(result.unwrap(), EXIT_OK);
+    let unit = host.read_file(std::path::Path::new(UNIT)).unwrap();
+    for entry in [
+        "PERCH_CLAUDE_BIN=/usr/bin/claude",
+        "PERCH_CODEX_BIN=/usr/bin/codex",
+        "CLAUDE_CONFIG_DIR=/native/claude",
+        "CODEX_HOME=/native/codex",
+    ] {
+        assert!(unit.contains(entry), "{unit}");
+    }
+    assert!(!unit.contains("do-not-persist"));
+}
+
+#[test]
+fn service_configuration_skips_disabled_providers_and_prefers_configured_paths() {
+    use perch::commands::config::{self, ConfigCommand};
+    let host = linux()
+        .with_env("CLAUDE_CONFIG_DIR", "/native/claude")
+        .with_env("PERCH_CODEX_BIN", "/override/codex")
+        .with_env("CODEX_HOME", "/native/codex");
+    for words in [
+        ["--provider", "claude", "enabled", "false"],
+        ["--provider", "codex", "cli-path", "/configured/codex"],
+    ] {
+        config::run(
+            &host,
+            ConfigCommand::Set {
+                words: words.map(String::from).into(),
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+    }
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+    assert_eq!(result.unwrap(), EXIT_OK);
+    let unit = host.read_file(std::path::Path::new(UNIT)).unwrap();
+    assert!(unit.contains("PERCH_CODEX_BIN=/configured/codex"));
+    assert!(unit.contains("CODEX_HOME=/native/codex"));
+    assert!(!unit.contains("/override/codex"));
+    assert!(!unit.contains("CLAUDE"));
+    assert!(!printed.contains("Claude"));
+}
+
+#[test]
+fn an_unusable_codex_does_not_drop_the_carried_claude() {
+    let host = linux().with_file("/usr/bin/codex", "").with_exec_under(
+        "/usr/bin/codex",
+        &["--version"],
+        failed("missing runtime"),
+    );
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+    assert_eq!(result.unwrap(), EXIT_OK);
+    let unit = host.read_file(std::path::Path::new(UNIT)).unwrap();
+    assert!(unit.contains("PERCH_CLAUDE_BIN=/usr/bin/claude"));
+    assert!(!unit.contains("PERCH_CODEX_BIN="));
+    assert!(printed.contains("PERCH_CODEX_BIN") && printed.contains("exits 1"));
 }

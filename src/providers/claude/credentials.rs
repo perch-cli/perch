@@ -6,7 +6,7 @@
 //! believed, because one that already exists can be looked at.
 //!
 //! Nothing here decides *what* to write. The read-back guard and the removal of
-//! a superseded copy live in [`crate::profile`].
+//! a superseded copy live in the provider's Profile implementation.
 
 use std::path::PathBuf;
 
@@ -15,7 +15,7 @@ use zeroize::Zeroizing;
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host, HostError, Platform};
 use crate::keychain::KeychainError;
-use crate::probe::Store;
+use crate::providers::claude::probe::Store;
 
 /// One place a Credential can be kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub fn stores_for(host: &dyn Host, config: &Store) -> [CredentialStore; 2] {
 #[derive(Clone, PartialEq, Eq)]
 pub struct StoredCredential {
     pub kept_in: CredentialStore,
-    /// `Zeroizing` for [`crate::probe::Credential`]'s reason, one step earlier:
+    /// `Zeroizing` for [`crate::providers::claude::probe::Credential`]'s reason, one step earlier:
     /// the first buffer on the machine to hold a live refresh token, and so the
     /// first worth wiping when it goes.
     pub credential: Zeroizing<String>,
@@ -220,42 +220,19 @@ fn tighten_if_loose(host: &dyn Host, path: &std::path::Path) {
     }
 }
 
-/// Why a Credential Store that Perch went to empty turned out to hold nothing,
-/// said about the store this machine actually has
-/// One function rather than a copy per
-/// caller: the day a third store is added is the day the copies disagree about
-/// where a Credential might still be.
-pub fn a_store_that_held_nothing(host: &dyn Host) -> &'static str {
-    match host.platform() {
-        // The item's account name is derived from `$USER`, so a Profile written
-        // under one login name keeps its Credential where a Perch under another
-        // will not look — the one way an empty store is not an empty Account.
-        Platform::MacOs => {
-            "on macOS a keychain item is filed under `$USER`, so one written \
-             under a different login name is still there"
-        }
-        // The store is a file inside the Profile, so the Profile going is the
-        // Credential going, and there is nowhere else for one to be.
-        _ => {
-            "its Credential Store is a file inside its Profile, and there was no \
-             file there"
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::host::FakeHost;
     use crate::host::Refusing;
-    use crate::probe;
+    use crate::providers::claude::probe;
 
     const CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test"}}"#;
 
     fn profile_store(host: &FakeHost) -> Store {
         probe::store_for_profile(
             host,
-            std::path::Path::new("/Users/someone/.config/perch/profiles/a"),
+            std::path::Path::new("/Users/someone/.config/perch/providers/claude/profiles/a"),
         )
         .expect("USER is set")
     }
@@ -278,7 +255,9 @@ mod tests {
         let host = FakeHost::new();
         assert_eq!(
             profile_store(&host).credentials_file,
-            std::path::Path::new("/Users/someone/.config/perch/profiles/a/.credentials.json")
+            std::path::Path::new(
+                "/Users/someone/.config/perch/providers/claude/profiles/a/.credentials.json"
+            )
         );
     }
 
@@ -363,7 +342,7 @@ mod tests {
         let host = FakeHost::new()
             .with_platform(Platform::Other)
             .with_file_mode(
-                "/Users/someone/.config/perch/profiles/a/.credentials.json",
+                "/Users/someone/.config/perch/providers/claude/profiles/a/.credentials.json",
                 0o644,
             );
         let store = profile_store(&host);
@@ -396,6 +375,54 @@ mod tests {
 
         let error = read(&host, &store).unwrap_err();
         assert!(error.to_string().contains("Permission denied"), "{error}");
+    }
+
+    /// The keychain is primary on macOS, so a lock there and a file nobody may
+    /// read is both stores refusing at once.
+    #[test]
+    fn where_neither_store_will_answer_the_primarys_failure_is_the_one_reported() {
+        let host = FakeHost::new();
+        let store = profile_store(&host);
+        let host =
+            host.with_a_path_refusing(&store.credentials_file, Refusing::Read, "Permission denied");
+        host.set_keychain_item(&store.keychain_service, &store.keychain_account, CREDENTIAL);
+        host.set_file(&store.credentials_file, CREDENTIAL);
+        host.lock_keychain("User interaction is not allowed");
+
+        let error = read(&host, &store).unwrap_err();
+
+        assert!(
+            matches!(error, PerchError::KeychainUnavailable(_)),
+            "the store this machine reads first is the half to look at: {error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("User interaction is not allowed"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_stored_credential_names_its_store_and_its_size_and_never_its_bytes() {
+        let host = FakeHost::new();
+        let store = profile_store(&host);
+        let [primary, _] = stores_for(&host, &store);
+
+        let shown = format!(
+            "{:?}",
+            StoredCredential {
+                kept_in: primary,
+                credential: Zeroizing::new(CREDENTIAL.to_string()),
+            }
+        );
+
+        assert!(shown.contains("Keychain"), "{shown}");
+        assert!(
+            shown.contains(&format!("<{} bytes>", CREDENTIAL.len())),
+            "{shown}"
+        );
+        assert!(!shown.contains("sk-ant-oat01-test"), "{shown}");
     }
 
     #[test]

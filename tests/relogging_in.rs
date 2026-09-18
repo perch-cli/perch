@@ -37,7 +37,7 @@ fn broken_second_account() -> FakeHost {
 
 fn is_disabled(host: &FakeHost, email: &str) -> bool {
     registry_of(host)
-        .account(email)
+        .account(&fixture_key(host, email))
         .expect("an Account Perch holds")
         .disabled
 }
@@ -85,6 +85,55 @@ fn a_repair_that_stands_says_so_when_only_the_report_could_not_be_written() {
     );
 }
 
+/// The other two lines a report is made of: the one for an Account that was
+/// working, and the note about one Cycling still will not choose. Both are
+/// written after the repair is on disk, so both owe the same sentence.
+#[test]
+fn a_repair_of_a_healthy_account_stands_when_either_of_its_lines_cannot_be_written() {
+    /// A stdout that takes everything but the one line named.
+    struct RefusingTheLine(&'static str);
+
+    impl std::io::Write for RefusingTheLine {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains(self.0) {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    for refused_at in ["Logged ", "Note: it is disabled"] {
+        let host = machine_with_two_accounts()
+            .with_login(login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE));
+        disable_account(&host, SECOND_EMAIL)
+            .0
+            .expect("it stops being chosen");
+
+        let refused = perch::commands::relogin::run(
+            &host,
+            perch::commands::relogin::ReloginArgs {
+                target: SECOND_EMAIL.to_string(),
+            },
+            &mut RefusingTheLine(refused_at),
+        )
+        .expect_err("that line could not be written");
+
+        assert!(
+            refused.to_string().contains("The repair finished"),
+            "{refused_at}: {refused}"
+        );
+        assert_eq!(
+            credential_of(&host, SECOND_EMAIL).as_deref(),
+            Some(SECOND_REPAIRED),
+            "{refused_at}: and it was the reporting half"
+        );
+    }
+}
+
 #[test]
 fn a_repair_replaces_the_credential_and_clears_the_quarantine() {
     let host = broken_second_account();
@@ -119,7 +168,7 @@ fn a_repair_says_what_it_repaired_and_nothing_about_what_it_left_alone() {
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(
-            format!("Repaired {SECOND_EMAIL} (as `overflow`). It is no longer Quarantined.")
+            format!("Repaired {SECOND_LABEL} (as `overflow`). It is no longer Quarantined.")
                 .as_str()
         ),
         "{printed}"
@@ -156,12 +205,8 @@ fn a_repair_keeps_the_alias_the_group_the_cycling_state_and_the_place() {
 
     result.expect("the Account is repaired");
     let registry = registry_of(&host);
-    let account = registry.account(SECOND_EMAIL).expect("still held");
-    assert_eq!(
-        registry.alias_of(SECOND_EMAIL),
-        Some("overflow"),
-        "{printed}"
-    );
+    let account = registry.account(SECOND_KEY).expect("still held");
+    assert_eq!(registry.alias_of(SECOND_KEY), Some("overflow"), "{printed}");
     assert_eq!(account.group.as_deref(), Some("work"));
     assert!(
         is_disabled(&host, SECOND_EMAIL),
@@ -172,9 +217,9 @@ fn a_repair_keeps_the_alias_the_group_the_cycling_state_and_the_place() {
         registry
             .accounts
             .iter()
-            .map(|account| account.email().to_string())
+            .map(|account| account.key().to_string())
             .collect::<Vec<_>>(),
-        vec![EMAIL.to_string(), SECOND_EMAIL.to_string()],
+        vec![KEY.to_string(), SECOND_KEY.to_string()],
         "and it is repaired where it stood rather than rebuilt at the end"
     );
 }
@@ -190,12 +235,13 @@ fn a_repaired_account_is_a_cycle_candidate_again() {
         .expect_err("while it is Quarantined there is nowhere to go");
 
     run_relogin(&host, "overflow").0.expect("repaired");
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 1.0)]);
     let (cycled, printed) = run_cycle(&host);
 
     cycled.expect("the Account with all the room works again");
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "{printed}"
     );
 }
@@ -215,7 +261,7 @@ fn the_account_you_are_working_in_is_untouched_by_repairing_another() {
          does not notice: {printed}"
     );
     assert_eq!(host.file(IDENTITY_PATH).as_deref(), Some(before.as_str()));
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
@@ -308,12 +354,12 @@ fn a_login_as_a_different_account_is_refused_and_takes_nothing_over() {
 
     let registry = registry_of(&host);
     assert_eq!(
-        registry.alias_of(SECOND_EMAIL),
+        registry.alias_of(SECOND_KEY),
         Some("overflow"),
         "an Alias the user chose for one Account is not handed to another because \
          a browser was signed into somebody else"
     );
-    assert!(registry.account(THIRD_EMAIL).is_none());
+    assert!(registry.account(THIRD_KEY).is_none());
     assert_eq!(
         credential_of(&host, SECOND_EMAIL).as_deref(),
         Some(SECOND_CREDENTIAL)
@@ -342,7 +388,7 @@ fn repairing_the_account_you_are_on_makes_its_fresh_credential_the_live_one() {
     assert_eq!(quarantine_of(&host, EMAIL), None);
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "and it is still the active Account: this was a repair, not a Switch"
     );
     assert_eq!(
@@ -397,7 +443,7 @@ fn a_terminal_that_goes_away_after_the_repair_still_makes_the_fresh_credential_l
          contingent on somebody reading a sentence"
     );
     assert_eq!(quarantine_of(&host, EMAIL), None);
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 /// A Landing nothing can account for is the one state that names this command as
@@ -421,7 +467,7 @@ fn a_landing_nothing_accounts_for_is_repaired_rather_than_refused() {
         ),
     ] {
         let host = machine_with_two_accounts().with_login(login_producing(fresh, identity));
-        a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+        a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
         // A Rotation after the interruption: the corner Perch refuses to guess
         // at, and the refusal that names this command.
         host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_REPAIRED);
@@ -440,7 +486,7 @@ fn a_landing_nothing_accounts_for_is_repaired_rather_than_refused() {
         );
         assert_eq!(
             *registry_of(&host).active(),
-            Active::Settled(repairing.to_string()),
+            Active::Settled(fixture_key(&host, repairing)),
             "{what}: and the Landing is gone, because the Account repaired is \
              the one the machine is now on"
         );
@@ -460,7 +506,7 @@ fn a_store_that_will_not_answer_stops_the_repair_rather_than_being_stepped_past(
     run_list(&host, false)
         .0
         .expect("adoption holds the login it finds");
-    a_switch_died_mid_flight(&host, Some(EMAIL), EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), EMAIL);
     host.now_refusing(CREDENTIALS_PATH, Refusing::Read, "Permission denied");
 
     let (result, _) = run_relogin(&host, EMAIL);
@@ -481,7 +527,7 @@ fn a_store_that_will_not_answer_stops_the_repair_rather_than_being_stepped_past(
 fn a_landing_nothing_accounts_for_does_not_stop_an_unrelated_repair() {
     let host = machine_with_three_accounts()
         .with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE));
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_REPAIRED);
 
     let (result, printed) = run_relogin(&host, THIRD_EMAIL);
@@ -705,7 +751,11 @@ fn a_repair_that_could_not_be_recorded_says_the_login_worked_and_not_to_switch()
         .expect("the first command adopts the login");
     quarantine(&host, EMAIL);
 
-    let host = host.with_a_path_refusing(REGISTRY_PATH, Refusing::Write, "read-only file system");
+    let host = host.with_a_path_refusing(
+        "/Users/someone/.config/perch/providers/claude/state.json",
+        Refusing::Write,
+        "read-only file system",
+    );
 
     let (result, _) = run_relogin(&host, EMAIL);
 
@@ -741,7 +791,11 @@ fn a_repair_whose_landing_could_not_be_recorded_says_so_rather_than_claiming_it_
     // Two writes land — the repair, and the Landing written down before the
     // Credential moves — and the third does not. A Registry lock taken over
     // mid-command reaches the same refusal.
-    let host = host.with_a_file_unwritable_after(REGISTRY_PATH, 2, "read-only file system");
+    let host = host.with_a_file_unwritable_after(
+        "/Users/someone/.config/perch/providers/claude/state.json",
+        2,
+        "read-only file system",
+    );
 
     let (result, printed) = run_relogin(&host, EMAIL);
 
@@ -840,7 +894,7 @@ fn a_repair_whose_identity_patch_failed_is_live_and_still_recorded_as_active() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "so Perch goes on recording the Account it is really on, and a Switch \
          away from it Captures whatever this session Rotates"
     );
@@ -859,6 +913,7 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -916,7 +971,7 @@ fn an_account_removed_while_its_login_was_open_says_the_login_still_worked() {
         // still open. Through `forget`, which is what `perch remove` calls:
         // dropping the entry by hand leaves a Registry `load` refuses.
         let mut registry = registry_of(host);
-        registry.forget(SECOND_EMAIL);
+        registry.forget(SECOND_KEY);
         save_registry(host, &registry);
 
         login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE)(host, dir)
@@ -948,7 +1003,10 @@ fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
     let mut registry = registry_of(&host);
     for email in ["some-one@example.com", "some.one@example.com"] {
         registry.upsert(perch::registry::Account {
-            identity: perch::probe::Identity {
+            storage_key: None,
+            provider: perch::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: perch::domain::Identity {
                 email: email.to_string(),
                 account_uuid: None,
                 organization_name: None,
@@ -989,4 +1047,32 @@ fn repairing_an_account_whose_profile_is_shared_is_refused_before_the_login() {
         "and no browser round trip was spent finding that out: {:?}",
         host.effects()
     );
+}
+
+#[test]
+fn an_identity_changed_during_browser_login_is_not_overwritten_by_the_repair() {
+    let host = broken_second_account();
+    let before = credential_of(&host, SECOND_EMAIL);
+    let host = host.with_login(|host, dir| {
+        let mut registry = registry_of(host);
+        let mut account = registry.held(SECOND_KEY).unwrap().clone();
+        registry.forget(SECOND_KEY);
+        account.identity.organization_uuid = Some("another-workspace".into());
+        account.provider_identity = Some(
+            perch::providers::provider::AccountIdentity::from_subject(
+                account.provider(),
+                account.identity.account_uuid.clone().unwrap(),
+                account.identity.organization_uuid.clone(),
+            )
+            .unwrap(),
+        );
+        registry.upsert(account);
+        save_registry(host, &registry);
+        login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE)(host, dir)
+    });
+    let refused = run_relogin(&host, SECOND_EMAIL)
+        .0
+        .expect_err("the Account was replaced during login");
+    assert!(refused.to_string().contains("removed during"), "{refused}");
+    assert_eq!(credential_of(&host, SECOND_KEY), before);
 }

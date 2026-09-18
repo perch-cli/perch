@@ -10,56 +10,15 @@
 //! by a [`Departure`], and by nothing else.
 
 use chrono::{DateTime, Utc};
-use zeroize::Zeroizing;
 
 use crate::config::Scope;
-use crate::credentials;
 use crate::error::{PerchError, Result};
-use crate::holdings;
-use crate::host::{self, Host};
-use crate::live;
+use crate::host::Host;
 use crate::lock;
 use crate::lock::Asking;
-use crate::name;
-use crate::probe::{self, Credential, Installed, Store};
-use crate::profile;
-use crate::registry::{self, Account, Active, Quarantine, Registry, Settled};
+use crate::registry::{self, Account, Active, Registry, Settled};
 
-/// What the Capture found — the part of a Switch worth saying out loud, because
-/// it is what protects the Account being left behind.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Captured {
-    /// The live Credential went back into the outgoing Account's Profile.
-    Copied { from: String },
-    /// Nothing was live to Capture — Claude Code is logged out.
-    NothingLive,
-    /// Something was live, and the Identity beside it names somebody other than
-    /// the Account Perch believes is active — so it was left where it was rather
-    /// than filed under a Profile it does not belong to.
-    NotTheirs {
-        /// The Account it was about to be written into.
-        outgoing: String,
-        /// Who the Identity beside the live Credential names instead.
-        live: String,
-    },
-    /// Something was live, the store handed it over, and it is not a Credential
-    /// Perch can make sense of — so it was left where it was: bytes nothing
-    /// understands are not a Rotation to lose. Only where the store *answered*;
-    /// one that would not is a refusal, in [`capture`].
-    Unreadable { outgoing: String, why: String },
-    /// Perch holds no active Account, so there was nothing to Capture into.
-    NoOutgoing,
-    /// The live Credential is already byte-for-byte the one this Switch would
-    /// write — the trace of a Switch interrupted after the Credential moved and
-    /// before it was recorded. No Rotation to save, whether or not the Account
-    /// being left is the Account being switched to.
-    NothingToSave,
-    /// The outgoing Account's own Profile holds a Credential newer than the live
-    /// one, so Capturing would write a retired refresh token over the working
-    /// copy. Declined: a Capture exists to keep the newest Credential, and here
-    /// the newest is the one already stored.
-    Superseded { outgoing: String },
-}
+pub use crate::providers::provider::Captured;
 
 /// Why a Switch is being made, and so what else the save recording it carries.
 ///
@@ -147,12 +106,11 @@ pub fn switch_to(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
-    installed: &Installed,
     incoming: &Account,
     departure: Departure<'_>,
     reason: Reason,
 ) -> std::result::Result<Switched, NotSwitched> {
-    let landing = perform(host, perch, installed, incoming, departure, registry);
+    let landing = perform(host, perch, incoming, departure, registry);
     record_the_switch(host, perch, registry, landing, reason)
 }
 
@@ -165,7 +123,7 @@ fn record_the_switch(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
-    landing: Landing,
+    landing: Landing<'_>,
     reason: Reason,
 ) -> std::result::Result<Switched, NotSwitched> {
     // Asked before the write, because a Switch that moved starts a Cooldown
@@ -190,7 +148,9 @@ fn record_the_switch(
 /// Written after the Capture and before the Credential moves, so a Perch that
 /// arrives on the gap knows which two Accounts the live Credential could belong
 /// to. `record` consumes it: no reading what a Switch found without recording.
-struct Landing {
+struct Landing<'a> {
+    // The provider's Default lock covers the final durable record too.
+    lease: Option<Box<dyn crate::providers::provider::DefaultChange + 'a>>,
     outcome: Result<Captured>,
     /// The Account this Switch was to. Held rather than borrowed, so a caller
     /// may hand `record` the `&mut Registry` the Account was read out of.
@@ -206,7 +166,7 @@ struct Landing {
     wrote_it_down: bool,
 }
 
-impl Landing {
+impl Landing<'_> {
     /// Whether the incoming Account's Credential is the live one — true of a
     /// Switch that finished, and of one that failed after the Credential was
     /// written but before the Identity was patched. Asked before the write
@@ -233,6 +193,7 @@ impl Landing {
             leaving,
             incoming_is_live,
             wrote_it_down,
+            lease: _lease,
         } = self;
 
         if let Err(PerchError::Quarantined { why, .. }) = &outcome
@@ -295,37 +256,19 @@ fn record_active(
     })
 }
 
-/// Everything the three steps need, established under the locks.
-///
-/// Under them, not before them: the liveness refusal is a statement about a
-/// moment, and taking a lock can take seconds. Once the locks are held nothing
-/// can change the answer, which is the only condition under which asking helps.
-struct Prepared<'h> {
-    installed: Installed<'h>,
-    store: Store,
-    credential: Credential,
-    /// The `oauthAccount` block to write, ready to splice in.
-    identity_block: String,
-}
-
-/// Makes `incoming` the active Account, leaving by `departure`.
-///
-/// `registry` is expected to be settled: handed a stale `outgoing`, the Capture
-/// files the live Credential under the wrong Account. `perch` is held across the
-/// whole of it, and the Landing write is the first thing a stale hold meets.
-fn perform(
-    host: &dyn Host,
+/// The caller holds a settled Registry until the Landing is recorded.
+fn perform<'a>(
+    host: &'a dyn Host,
     perch: &mut lock::Held<'_>,
-    installed: &Installed,
     incoming: &Account,
     departure: Departure<'_>,
     registry: &mut Registry,
-) -> Landing {
+) -> Landing<'a> {
     let outgoing = departure.captured();
     // Who is being left, whether or not they are Captured: an Overwriting
     // departure still leaves somebody, and the Landing has to name them.
     let leaving = match &departure {
-        Departure::Capturing(outgoing) => outgoing.map(|outgoing| outgoing.email().to_string()),
+        Departure::Capturing(outgoing) => outgoing.map(|outgoing| outgoing.key().to_string()),
         Departure::Overwriting { .. } => registry.active().whose().map(str::to_string),
     };
 
@@ -333,10 +276,11 @@ fn perform(
     // did not land — the same shape, so the one way out is the same way out.
     let failed = |error| Landing {
         outcome: Err(error),
-        incoming: incoming.email().to_string(),
+        incoming: incoming.key().to_string(),
         leaving: leaving.clone(),
         incoming_is_live: false,
         wrote_it_down: false,
+        lease: None,
     };
 
     if let Err(error) = refuse_a_shared_profile(incoming, registry) {
@@ -352,58 +296,57 @@ fn perform(
         return failed(error);
     }
 
-    let store = match holdings::the_default_profile(host) {
-        Ok(ground) => ground,
-        Err(error) => return failed(error),
-    };
-
     let mut incoming_is_live = false;
     let mut wrote_it_down = false;
-    // Every step is slow enough to outlast a hold: a keychain that stops to
-    // ask stretches `prepare` or `capture` past the ten seconds the
-    // config-file lock goes stale in.
-    let switched: Result<Captured> = store.entered(host, perch, |holds| {
-        // An Overwriting departure asks the Default Profile itself, since no
-        // outgoing Profile will be: what is live is about to be written over
-        // where it lies. Under the locks, for the reason [`Prepared`] gives.
-        if let Departure::Overwriting { whose } = &departure {
-            holds.around(|| {
-                live::ask(host, &[live::Place::new(*whose, &store.config_dir)])
-                    .idle_or(installed, &live::NOTHING_WAS_CHANGED)
-            })?;
-        }
-
-        let prepared =
-            holds.around(|| prepare(host, incoming, outgoing, installed.clone(), &store))?;
-
-        let captured = holds
-            .around(|| capture(host, &prepared, incoming, outgoing, registry))
+    let mut lease = None;
+    let switched = (|| {
+        let request = crate::providers::provider::DefaultRequest {
+            incoming: incoming.profile(host)?,
+            outgoing: outgoing.map(|account| account.profile(host)).transpose()?,
+            known: registry
+                .accounts
+                .iter()
+                .filter(|account| account.provider() == incoming.provider())
+                .map(|account| account.profile(host))
+                .collect::<Result<Vec<_>>>()?,
+            overwrite: match &departure {
+                Departure::Overwriting { whose } => Some((*whose).to_string()),
+                _ => None,
+            },
+        };
+        let mut prepared = incoming
+            .provider()
+            .adapter()
+            .prepare_default(host, perch, request)?;
+        let captured = prepared
+            .capture(perch)
             .map_err(|error| error.with_note(NOTHING_SWITCHED))?;
-
-        holds
-            .around_a_registry_write(|perch| {
-                write_it_down(host, perch, registry, &leaving, incoming)
-            })
+        write_it_down(host, perch, registry, &leaving, incoming)
             .map_err(|error| error.with_note(NOTHING_SWITCHED))?;
         wrote_it_down = true;
-
-        holds
-            .around(|| {
-                profile::store_credential(host, &prepared.store, prepared.credential.as_str())
-            })
-            .map_err(|error| error.with_note(NOTHING_SWITCHED))?;
-        incoming_is_live = true;
-
-        holds
-            .around(|| patch_identity(host, &prepared))
-            .map_err(|error| error.with_note(&live_but_unnamed(outgoing, incoming)))?;
-
+        lease = Some(prepared);
+        match lease
+            .as_mut()
+            .expect("the Default guard remains held")
+            .apply(perch)
+        {
+            Ok(()) => incoming_is_live = true,
+            Err(failure) => {
+                incoming_is_live = failure.moved;
+                return Err(if failure.moved {
+                    failure.error
+                } else {
+                    failure.error.with_note(NOTHING_SWITCHED)
+                });
+            }
+        }
         Ok(captured)
-    });
+    })();
 
     Landing {
+        lease,
         outcome: switched,
-        incoming: incoming.email().to_string(),
+        incoming: incoming.key().to_string(),
         leaving,
         incoming_is_live,
         wrote_it_down,
@@ -422,7 +365,7 @@ fn write_it_down(
     leaving: &Option<String>,
     incoming: &Account,
 ) -> Result<()> {
-    let before = registry.begin_landing(leaving.clone(), incoming.email());
+    let before = registry.begin_landing(leaving.clone(), incoming.key());
 
     if let Err(error) = registry::save(host, perch, registry) {
         registry.abandon_landing(before);
@@ -442,13 +385,11 @@ pub fn make_live(
     registry: &mut Registry,
     account: &Account,
     whose: &str,
-    installed: &Installed,
 ) -> std::result::Result<(), NotSwitched> {
     switch_to(
         host,
         perch,
         registry,
-        installed,
         account,
         Departure::Overwriting { whose },
         // Not a Cycle, so no Cooldown starts: whoever asked for this named the
@@ -498,113 +439,45 @@ pub fn resolve_a_landing<E>(
         return Ok(Resolved::Stopped(lost));
     }
 
-    let store = holdings::the_default_profile(host)?;
-
-    // Under Claude Code's own locks, and the save is inside them too, so the
-    // window they close is the whole of read-decide-record. A Rotation Perch
-    // could have locked out would otherwise defeat resolution for good.
-    store.entered(host, perch, |holds| {
-        // A store that will not answer says nothing about what it holds, and
-        // what it holds is the whole of the evidence. Refused rather than
-        // guessed at.
-        let live = match asking_first(holds, still_ours, || credentials::read(host, &store)) {
-            Err(lost) => return Ok(Resolved::Stopped(lost)),
-            Ok(read) => read.map_err(|would_not_answer| {
-                would_not_answer.with_note(&format!(
-                    "A Switch to {arriving} was in flight and was not recorded. \
-                     Make that store readable and run this again."
-                ))
-            })?,
-        };
-
-        let settled_on = match whose_the_live_credential_is(
-            host,
-            holds,
-            still_ours,
-            registry,
-            leaving.as_deref(),
-            &arriving,
-            live.as_ref().map(|held| held.credential.as_str()),
-        ) {
-            Err(lost) => return Ok(Resolved::Stopped(lost)),
-            Ok(Whose::Settles(on)) => on,
-            Ok(Whose::Unaccounted) => {
-                return Err(PerchError::Conflict(the_landing_is_unaccounted_for(
-                    leaving.as_deref(),
-                    &arriving,
-                )));
+    let profiles = registry
+        .accounts
+        .iter()
+        .filter(|account| account.provider() == registry.selected_provider())
+        .map(|account| account.profile(host))
+        .collect::<Result<Vec<_>>>()?;
+    let mut inspection = registry
+        .selected_provider()
+        .adapter()
+        .inspect_default(host)?;
+    let mut stopped = None;
+    let observed =
+        inspection.resolve(perch, &profiles, leaving.as_deref(), &arriving, &mut || {
+            match still_ours() {
+                Ok(()) => true,
+                Err(lost) => {
+                    stopped = Some(lost);
+                    false
+                }
             }
-        };
-
-        let settled = registry.settle(settled_on);
-        holds.around_a_registry_write(|perch| registry::save(host, perch, registry))?;
-        Ok(Resolved::Settled(settled))
-    })
-}
-
-/// Every keychain read on this path, asked for first.
-///
-/// The one door the ask reaches this file through: on a Mac with a locked
-/// keychain each read is a prompt, the walk below makes one per Account, and a
-/// Watcher told to stop part way through makes no more of them.
-fn asking_first<T, E>(
-    holds: &mut lock::Holds<'_, '_, '_>,
-    still_ours: Asking<'_, E>,
-    read: impl FnOnce() -> T,
-) -> std::result::Result<T, E> {
-    still_ours()?;
-    Ok(holds.around(read))
-}
-
-/// What the live Credential says about who is active. A stop is not one of the
-/// answers: it is what the walk was interrupted instead of reaching, so it
-/// travels as the `Err` of the walk rather than as an arm here.
-enum Whose {
-    /// The Account to settle on. `None` is a machine on nobody, which is what
-    /// nothing live and a Switch that was leaving nobody come to.
-    Settles(Option<String>),
-    /// Nothing on the machine says.
-    Unaccounted,
-}
-
-/// Which Account the live Credential belongs to. It takes the holds rather than
-/// being wrapped in one `around`, because the walk spends a keychain prompt per
-/// Account and the config-file lock goes stale after ten seconds.
-fn whose_the_live_credential_is<E>(
-    host: &dyn Host,
-    holds: &mut lock::Holds<'_, '_, '_>,
-    still_ours: Asking<'_, E>,
-    registry: &Registry,
-    leaving: Option<&str>,
-    arriving: &str,
-    live: Option<&str>,
-) -> std::result::Result<Whose, E> {
-    // Nothing live is nothing a later Capture could destroy, so this reading has
-    // nothing at stake: a `claude /logout` mid-Switch is what it looks like.
-    let Some(live) = live else {
-        return Ok(Whose::Settles(leaving.map(str::to_string)));
-    };
-
-    // Arriving, then leaving, then everybody else. The two named by the Landing
-    // are where the answer nearly always is, and each Account past them costs a
-    // prompt.
-    let named = [Some(arriving), leaving]
-        .into_iter()
-        .flatten()
-        .filter_map(|email| registry.account(email));
-    let rest = registry.accounts.iter().filter(|account| {
-        !name::same_name(account.email(), arriving)
-            && !leaving.is_some_and(|leaving| name::same_name(account.email(), leaving))
-    });
-
-    for account in named.chain(rest) {
-        if let Some(held) = asking_first(holds, still_ours, || held_by(host, account))?
-            && *held == live
-        {
-            return Ok(Whose::Settles(Some(account.email().to_string())));
+        })?;
+    use crate::providers::provider::DefaultObservation;
+    let settled_on = match observed {
+        DefaultObservation::Stopped => {
+            return Ok(Resolved::Stopped(
+                stopped.expect("the observation stops only when control is withdrawn"),
+            ));
         }
-    }
-    Ok(Whose::Unaccounted)
+        DefaultObservation::Unknown => {
+            return Err(PerchError::Conflict(the_landing_is_unaccounted_for(
+                leaving.as_deref(),
+                &arriving,
+            )));
+        }
+        DefaultObservation::Settled(on) => on,
+    };
+    let settled = registry.settle(settled_on);
+    registry::save(host, perch, registry)?;
+    Ok(Resolved::Settled(settled))
 }
 
 /// The corner that stays undecidable: a Landing in flight, and a live Credential
@@ -634,22 +507,11 @@ fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> Stri
 /// /logout` empties the live store and leaves `.claude.json` naming whoever was
 /// there, so an Identity read on its own says a Switch has already landed onto a
 /// machine that is logged out.
-pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account) -> Result<bool> {
-    let store = holdings::the_default_profile(host)?;
-    // An Identity Perch cannot understand is a file naming nobody, so nothing
-    // has landed, and `perch switch <the active Account>` is the command that
-    // rewrites it. Propagated, it would refuse the repair it exists for.
-    let named = probe::read_identity(host, &store, installed)
-        .ok()
-        .flatten()
-        .is_some_and(|identity| name::same_name(&identity.email, account.email()));
-
-    // A live store holding bytes that are not a Credential has landed nowhere,
-    // and the Switch this would turn away is the one that writes a good
-    // Credential over the bad one. So `false` rather than an error.
-    let usable = matches!(probe::read_credential(host, &store, installed), Ok(Some(_)));
-
-    Ok(named && usable)
+pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
+    account
+        .provider()
+        .adapter()
+        .default_matches(host, &account.profile(host)?)
 }
 
 /// Refuses to act *as* an Account whose Profile is not its alone: two addresses
@@ -664,304 +526,24 @@ pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result
     Err(PerchError::Conflict(format!(
         "{} and {} share one Profile, so Perch cannot act as either.\n\
          `perch remove` one of them, then `perch add` it again.",
-        account.email(),
-        sharer.email(),
+        account.key(),
+        sharer.key(),
     )))
-}
-
-fn prepare<'h>(
-    host: &dyn Host,
-    incoming: &Account,
-    outgoing: Option<&Account>,
-    installed: Installed<'h>,
-    store: &Store,
-) -> Result<Prepared<'h>> {
-    // Before anything is written, and only of the Profile written to. The
-    // incoming Account's is only ever read from, and reading takes nothing away
-    // from the session using it.
-    if let Some(outgoing) = outgoing {
-        live::ask(host, &[live::Place::of_the_profile(host, outgoing)?])
-            .idle_or(&installed, &live::NOTHING_WAS_CHANGED)?;
-    }
-
-    // Derived once and read twice: a derivation is a `PERCH_HOME` lookup, a
-    // slug, a component walk and a SHA-256 of the result.
-    let incoming_store = incoming.store(host)?;
-
-    // From whichever of the Profile's two Credential Stores holds one: an
-    // Account is switchable to as long as its Credential is somewhere Claude
-    // Code would have looked.
-    let held =
-        credentials::read(host, &incoming_store)?.ok_or_else(|| PerchError::Quarantined {
-            why: Quarantine::NoCredential,
-            said: format!(
-                "Perch holds no Credential for {}, so it is Quarantined. {}",
-                incoming.email(),
-                registry::how_to_repair(incoming.email()),
-            ),
-        })?;
-    let credential = probe::understand_credential(
-        held.credential,
-        &format!("the Credential Perch holds for {}", incoming.email()),
-        &installed,
-    )?;
-
-    Ok(Prepared {
-        identity_block: identity_block_for(host, incoming, &incoming_store)?,
-        installed,
-        store: store.clone(),
-        credential,
-    })
-}
-
-/// Step one: the live Credential goes back where it belongs — and "where it
-/// belongs" is the careful part, because Perch is not the only thing that writes
-/// the Default Profile. The evidence is the machine's own Identity beside the
-/// Credential; one that is absent or unreadable is not evidence against and
-/// still Captures, because losing a Rotation is what this step prevents.
-fn capture(
-    host: &dyn Host,
-    prepared: &Prepared,
-    incoming: &Account,
-    outgoing: Option<&Account>,
-    registry: &Registry,
-) -> Result<Captured> {
-    let Some(outgoing) = outgoing else {
-        return Ok(Captured::NoOutgoing);
-    };
-
-    // Bytes that are not a Credential are not a Rotation, so a live store
-    // holding rubbish is declined. One that *would not answer* says nothing
-    // about what it holds and is refused, with nothing written.
-    let live = match probe::read_credential(host, &prepared.store, &prepared.installed) {
-        Ok(live) => live,
-        Err(why @ PerchError::ProbeRefused(_)) => {
-            return Ok(Captured::Unreadable {
-                outgoing: outgoing.email().to_string(),
-                why: why.to_string(),
-            });
-        }
-        Err(would_not_answer) => {
-            return Err(would_not_answer.with_note(&format!(
-                "The live Credential could not be read, so it was not Captured \
-                 for {}. Make that store readable and run this again.",
-                outgoing.email(),
-            )));
-        }
-    };
-    let Some(live) = live else {
-        return Ok(Captured::NothingLive);
-    };
-
-    // Ahead of the Identity, because a stale Identity is the whole of what an
-    // interrupted Switch is: read as ownership it would file the incoming
-    // Credential into the outgoing Account's Profile.
-    if live.as_str() == prepared.credential.as_str() {
-        return Ok(Captured::NothingToSave);
-    }
-
-    // The repair for a Switch that stopped between steps two and three, and the
-    // check above has taken the case with nothing to do. What is left has two
-    // readings and nothing tells them apart, so neither is acted on.
-    if name::same_name(incoming.email(), outgoing.email()) {
-        return Err(PerchError::Conflict(
-            the_live_credential_is_unaccounted_for(incoming),
-        ));
-    }
-
-    // Over the whole of Unicode, as every other comparison of two addresses is.
-    // `.claude.json` is Claude Code's file and nothing makes it agree with the
-    // Registry about the case of a letter outside ASCII.
-    if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.installed)
-        && !name::same_name(&identity.email, outgoing.email())
-    {
-        // The Identity is decisive only where something else agrees with it: it
-        // is the one piece of evidence here Perch does not write, and it goes
-        // stale in a state Perch itself produces.
-        return match corroborates(host, registry, outgoing, &identity.email, live.as_str()) {
-            Corroboration::NothingAtStake => Ok(Captured::NothingToSave),
-            Corroboration::NotOurs => Ok(Captured::NotTheirs {
-                outgoing: outgoing.email().to_string(),
-                live: identity.email,
-            }),
-            Corroboration::Unaccounted => Err(PerchError::Conflict(
-                the_identity_is_not_corroborated(outgoing, &identity.email),
-            )),
-        };
-    }
-
-    // A Run points a client at the Account's own Profile (ADR a-run-is-one-shot),
-    // so a Rotation there leaves the live copy the older of the two and
-    // Capturing it would retire the newer.
-    let store = outgoing.store(host)?;
-    if let Ok(Some(held)) = probe::read_credential(host, &store, &prepared.installed)
-        && supersedes(&held, &live)
-    {
-        return Ok(Captured::Superseded {
-            outgoing: outgoing.email().to_string(),
-        });
-    }
-    profile::store_credential(host, &store, live.as_str())?;
-
-    Ok(Captured::Copied {
-        from: outgoing.email().to_string(),
-    })
-}
-
-/// Whether the copy an Account's own Profile holds is newer than the live one.
-///
-/// `expiresAt` is what a Rotation moves. Strictly later, and only where both say
-/// so: a Credential silent about its expiry is no evidence.
-fn supersedes(held: &Credential, live: &Credential) -> bool {
-    matches!(
-        (held.expires_at, live.expires_at),
-        (Some(held), Some(live)) if held > live
-    )
-}
-
-/// Whether an Identity naming somebody other than the outgoing Account is borne
-/// out by anything besides itself.
-enum Corroboration {
-    /// There is no Rotation here to lose: the live Credential is already exactly
-    /// what the outgoing Account's Profile holds, so a Capture would copy a file
-    /// over itself and skipping it costs nothing whoever the Identity names.
-    NothingAtStake,
-    /// The live Credential is not the outgoing Account's to save: the address
-    /// belongs to a login Perch does not hold, or to an Account Perch holds
-    /// whose own stored copy is exactly what is live.
-    NotOurs,
-    /// The live Credential is a Rotation of something — it matches neither the
-    /// outgoing Account's stored copy nor that of the Account the Identity names
-    /// — and nothing on the machine says whose.
-    Unaccounted,
-}
-
-/// Reads the second opinion, in the order that settles it most cheaply.
-///
-/// A store that will not answer corroborates nothing, which lands on
-/// [`Corroboration::Unaccounted`]: "the keychain was locked" is not evidence
-/// that a refresh token is safe to write over.
-fn corroborates(
-    host: &dyn Host,
-    registry: &Registry,
-    outgoing: &Account,
-    named: &str,
-    live: &str,
-) -> Corroboration {
-    // Asked first, and of the outgoing Account rather than the one named: it is
-    // the question with something at stake, and where the live Credential is
-    // already that Profile's copy there is no Rotation to lose.
-    if held_by(host, outgoing).is_some_and(|held| *held == live) {
-        return Corroboration::NothingAtStake;
-    }
-    let Some(account) = registry.account(named) else {
-        return Corroboration::NotOurs;
-    };
-    match held_by(host, account) {
-        Some(held) if *held == live => Corroboration::NotOurs,
-        _ => Corroboration::Unaccounted,
-    }
-}
-
-/// What an Account's own Profile holds, where it can be read at all.
-fn held_by(host: &dyn Host, account: &Account) -> Option<Zeroizing<String>> {
-    let store = account.store(host).ok()?;
-    Some(credentials::read(host, &store).ok()??.credential)
-}
-
-/// The refusal for a live Credential an Identity names somebody else for, where
-/// that somebody else is an Account Perch holds and is not holding this.
-fn the_identity_is_not_corroborated(outgoing: &Account, named: &str) -> String {
-    let outgoing = outgoing.email();
-    format!(
-        "The Identity beside the live Credential names {named}, and Perch holds \
-         that Credential for neither {named} nor {outgoing}, the Account it is \
-         on. It may be {outgoing}'s from a Switch that could not finish, or \
-         {named}'s, Rotated since.\n\
-         `perch relogin {outgoing}` files the live Credential under the Account \
-         Perch is on."
-    )
-}
-
-/// What Perch cannot establish, when the repair for an interrupted Switch finds
-/// a live Credential that is not the one it holds. Both readings are named,
-/// because the remedies differ and `perch relogin` is the way through either
-/// way.
-fn the_live_credential_is_unaccounted_for(account: &Account) -> String {
-    let email = account.email();
-    format!(
-        "{email} is the Account Perch is on and the Account asked for, but the \
-         live Credential is not the one Perch holds for it. It may be {email}'s \
-         own, Rotated since, or a login made outside Perch.\n\
-         `perch relogin {email}` finishes the repair. To keep a login made \
-         outside Perch instead, `perch add` holds it as an Account of its own \
-         first."
-    )
-}
-
-/// Step three: `.claude.json` comes to name the Account whose Credential is now
-/// live — that key of it, and nothing else of it
-/// (ADR everything-but-the-account).
-fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
-    let file = &prepared.store.identity_file;
-    let patched = match host.read_file(file).map(Zeroizing::new) {
-        Ok(contents) => probe::patch_oauth_account(
-            &contents,
-            &prepared.identity_block,
-            file,
-            &prepared.installed,
-        )?,
-        // No file at all is a Claude Code that has never been run here. One
-        // holding the Account and nothing else is exactly what it would write
-        // for itself, and leaves it displaying the Account it is acting as.
-        Err(host::HostError::NotFound { .. }) => {
-            crate::secret::Secret::taken_over(probe::fresh_identity_file(&prepared.identity_block))
-        }
-        Err(err) => return Err(PerchError::file_read(file.clone(), err)),
-    };
-
-    host::write_atomically(host, file, &patched)
-        .map_err(|err| PerchError::file_write(file.clone(), err))
-}
-
-/// The `oauthAccount` block for an Account. Its own Profile holds the block
-/// Claude Code wrote at login, which carries fields beyond the Identity Perch
-/// records, so that block is preferred verbatim; one is composed only for an
-/// Account that has none, such as the login Adoption took over
-/// (ADR a-login-perch-does-not-need).
-fn identity_block_for(host: &dyn Host, incoming: &Account, kept_in: &Store) -> Result<String> {
-    let held = host
-        .read_file(&kept_in.identity_file)
-        .map(Zeroizing::new)
-        .ok()
-        .and_then(|contents| probe::oauth_account_block(&contents).map(str::to_string));
-
-    Ok(held.unwrap_or_else(|| incoming.identity.oauth_account_block()))
 }
 
 /// Kept on every step through the live write, which fails whole: a half-done
 /// Switch is what the reader cannot see (ADR a-refusal-is-a-promise).
 const NOTHING_SWITCHED: &str = "Nothing was switched.";
 
-fn live_but_unnamed(outgoing: Option<&Account>, incoming: &Account) -> String {
-    let named = match outgoing {
-        Some(outgoing) => outgoing.email().to_string(),
-        None => "another Account".to_string(),
-    };
-    format!(
-        "{incoming} is active, but Claude Code still displays {named}.\n\
-         `perch switch {incoming}` again finishes the job.",
-        incoming = incoming.email(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
 
     use super::*;
+    use crate::domain::Identity;
+    use crate::holdings;
     use crate::host::FakeHost;
-    use crate::probe::Identity;
+    use crate::registry::Quarantine;
 
     const INCOMING: &str = "incoming@example.com";
     const OUTGOING: &str = "outgoing@example.com";
@@ -970,6 +552,9 @@ mod tests {
         let mut registry = Registry::default();
         for email in [OUTGOING, INCOMING] {
             registry.upsert(Account {
+                storage_key: None,
+                provider: crate::providers::provider::Id::Claude,
+                provider_identity: None,
                 identity: Identity {
                     email: email.to_string(),
                     account_uuid: None,
@@ -989,13 +574,14 @@ mod tests {
 
     /// A Landing as `perform` hands one back: written down, because everything
     /// below is about what `record` does with one that was.
-    fn landing(outcome: Result<Captured>, incoming_is_live: bool) -> Landing {
+    fn landing<'a>(outcome: Result<Captured>, incoming_is_live: bool) -> Landing<'a> {
         Landing {
             outcome,
             incoming: INCOMING.to_string(),
             leaving: Some(OUTGOING.to_string()),
             incoming_is_live,
             wrote_it_down: true,
+            lease: None,
         }
     }
 
@@ -1004,294 +590,6 @@ mod tests {
             why: Quarantine::NoCredential,
             said: "neither store holds a Credential".to_string(),
         }
-    }
-
-    /// A parseable Credential, distinct per `tag`; `expires_at` is what a
-    /// Rotation moves, so it is the axis these fixtures vary on.
-    fn credential_json(tag: &str, expires_at: Option<i64>) -> String {
-        let expiry = match expires_at {
-            Some(at) => format!(",\"expiresAt\":{at}"),
-            None => String::new(),
-        };
-        format!(
-            "{{\"claudeAiOauth\":{{\"accessToken\":\"sk-ant-oat01-{tag}\",\
-             \"refreshToken\":\"sk-ant-ort01-{tag}\"{expiry}}}}}"
-        )
-    }
-
-    fn understood(json: &str) -> Credential {
-        probe::understand_credential(
-            Zeroizing::new(json.to_string()),
-            "a fixture Credential",
-            &Installed::unknown("2.1.221"),
-        )
-        .expect("the fixture is a Credential")
-    }
-
-    fn a_home() -> FakeHost {
-        FakeHost::new()
-            .with_env("HOME", "/Users/someone")
-            .with_env("USER", "someone")
-    }
-
-    fn prepared_to_write(host: &FakeHost, incoming_credential: &str) -> Prepared<'static> {
-        Prepared {
-            installed: Installed::unknown("2.1.221"),
-            store: holdings::the_default_profile(host).expect("home is known"),
-            credential: understood(incoming_credential),
-            identity_block: String::new(),
-        }
-    }
-
-    fn write_live(host: &FakeHost, json: &str) {
-        let store = holdings::the_default_profile(host).expect("home is known");
-        let [primary, _] = credentials::stores_for(host, &store);
-        primary.write(host, json).expect("the store takes it");
-    }
-
-    fn write_own(host: &FakeHost, registry: &Registry, email: &str, json: &str) {
-        let store = registry
-            .account(email)
-            .expect("the fixture holds it")
-            .store(host)
-            .expect("home is known");
-        let [primary, _] = credentials::stores_for(host, &store);
-        primary.write(host, json).expect("the store takes it");
-    }
-
-    fn one_of(registry: &Registry, email: &str) -> Account {
-        registry
-            .account(email)
-            .expect("the fixture holds it")
-            .clone()
-    }
-
-    #[test]
-    fn a_copy_supersedes_only_where_both_expiries_are_said_and_the_held_is_later() {
-        let earlier = understood(&credential_json("live", Some(1_000)));
-        let later = understood(&credential_json("held", Some(2_000)));
-        let silent = understood(&credential_json("silent", None));
-
-        assert!(supersedes(&later, &earlier));
-        assert!(!supersedes(&earlier, &later));
-        assert!(
-            !supersedes(&earlier, &earlier),
-            "equal is not strictly later"
-        );
-        assert!(!supersedes(&silent, &earlier), "silence is no evidence");
-        assert!(!supersedes(&later, &silent));
-    }
-
-    #[test]
-    fn a_capture_with_no_outgoing_has_nothing_to_save_into() {
-        let host = a_home();
-        let registry = two_accounts();
-        let prepared = prepared_to_write(&host, &credential_json("incoming", Some(1_000)));
-
-        let captured = capture(
-            &host,
-            &prepared,
-            &one_of(&registry, INCOMING),
-            None,
-            &registry,
-        )
-        .expect("nothing to do is not a failure");
-
-        assert_eq!(captured, Captured::NoOutgoing);
-    }
-
-    #[test]
-    fn a_capture_with_nothing_live_saves_nothing() {
-        let host = a_home();
-        let registry = two_accounts();
-        let prepared = prepared_to_write(&host, &credential_json("incoming", Some(1_000)));
-
-        let captured = capture(
-            &host,
-            &prepared,
-            &one_of(&registry, INCOMING),
-            Some(&one_of(&registry, OUTGOING)),
-            &registry,
-        )
-        .expect("a logged-out machine is not a failure");
-
-        assert_eq!(captured, Captured::NothingLive);
-    }
-
-    #[test]
-    fn a_live_credential_this_switch_would_write_is_not_saved_anywhere() {
-        let host = a_home();
-        let registry = two_accounts();
-        let incoming = credential_json("incoming", Some(1_000));
-        write_live(&host, &incoming);
-        let prepared = prepared_to_write(&host, &incoming);
-
-        let captured = capture(
-            &host,
-            &prepared,
-            &one_of(&registry, INCOMING),
-            Some(&one_of(&registry, OUTGOING)),
-            &registry,
-        )
-        .expect("an interrupted Switch's trace is not a failure");
-
-        assert_eq!(captured, Captured::NothingToSave);
-    }
-
-    #[test]
-    fn a_repair_that_finds_a_stranger_credential_live_is_refused() {
-        let host = a_home();
-        let registry = two_accounts();
-        write_live(&host, &credential_json("stranger", Some(1_000)));
-        let prepared = prepared_to_write(&host, &credential_json("incoming", Some(1_000)));
-        let on = one_of(&registry, OUTGOING);
-
-        let refused = capture(&host, &prepared, &on, Some(&on), &registry)
-            .expect_err("two readings and nothing tells them apart");
-
-        assert!(matches!(refused, PerchError::Conflict(_)), "{refused}");
-    }
-
-    #[test]
-    fn an_identity_naming_a_login_perch_does_not_hold_leaves_the_credential_where_it_lies() {
-        let host = a_home();
-        let registry = two_accounts();
-        write_live(&host, &credential_json("live", Some(1_000)));
-        let prepared = prepared_to_write(&host, &credential_json("incoming", Some(1_000)));
-        host.set_file(
-            prepared.store.identity_file.clone(),
-            "{\"oauthAccount\":{\"emailAddress\":\"stranger@example.com\"}}",
-        );
-
-        let captured = capture(
-            &host,
-            &prepared,
-            &one_of(&registry, INCOMING),
-            Some(&one_of(&registry, OUTGOING)),
-            &registry,
-        )
-        .expect("somebody else's Credential is not a failure");
-
-        assert_eq!(
-            captured,
-            Captured::NotTheirs {
-                outgoing: OUTGOING.to_string(),
-                live: "stranger@example.com".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn an_outgoing_copy_newer_than_the_live_one_is_kept() {
-        let host = a_home();
-        let registry = two_accounts();
-        write_live(&host, &credential_json("live", Some(1_000)));
-        write_own(
-            &host,
-            &registry,
-            OUTGOING,
-            &credential_json("rotated", Some(2_000)),
-        );
-        let prepared = prepared_to_write(&host, &credential_json("incoming", Some(1_000)));
-
-        let captured = capture(
-            &host,
-            &prepared,
-            &one_of(&registry, INCOMING),
-            Some(&one_of(&registry, OUTGOING)),
-            &registry,
-        )
-        .expect("declining is not a failure");
-
-        assert_eq!(
-            captured,
-            Captured::Superseded {
-                outgoing: OUTGOING.to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn a_rotation_is_copied_back_into_the_profile_it_belongs_to() {
-        let host = a_home();
-        let registry = two_accounts();
-        let live = credential_json("live", Some(2_000));
-        write_live(&host, &live);
-        write_own(
-            &host,
-            &registry,
-            OUTGOING,
-            &credential_json("stale", Some(1_000)),
-        );
-        let prepared = prepared_to_write(&host, &credential_json("incoming", Some(1_000)));
-
-        let captured = capture(
-            &host,
-            &prepared,
-            &one_of(&registry, INCOMING),
-            Some(&one_of(&registry, OUTGOING)),
-            &registry,
-        )
-        .expect("the ordinary Capture");
-
-        assert_eq!(
-            captured,
-            Captured::Copied {
-                from: OUTGOING.to_string(),
-            }
-        );
-        let store = one_of(&registry, OUTGOING)
-            .store(&host)
-            .expect("home is known");
-        let held = credentials::read(&host, &store)
-            .expect("the store answers")
-            .expect("it holds the copy now");
-        assert_eq!(*held.credential, live, "the live Credential went home");
-    }
-
-    #[test]
-    fn a_second_opinion_is_read_in_the_order_that_settles_it_most_cheaply() {
-        let host = a_home();
-        let registry = two_accounts();
-        let live = credential_json("live", Some(1_000));
-        let outgoing = one_of(&registry, OUTGOING);
-
-        write_own(&host, &registry, OUTGOING, &live);
-        assert!(
-            matches!(
-                corroborates(&host, &registry, &outgoing, INCOMING, &live),
-                Corroboration::NothingAtStake
-            ),
-            "the outgoing Profile already holds exactly what is live"
-        );
-
-        write_own(
-            &host,
-            &registry,
-            OUTGOING,
-            &credential_json("other", Some(1_000)),
-        );
-        assert!(
-            matches!(
-                corroborates(&host, &registry, &outgoing, "stranger@example.com", &live),
-                Corroboration::NotOurs
-            ),
-            "an address Perch does not hold corroborates the Identity"
-        );
-
-        write_own(
-            &host,
-            &registry,
-            INCOMING,
-            &credential_json("different", Some(1_000)),
-        );
-        assert!(
-            matches!(
-                corroborates(&host, &registry, &outgoing, INCOMING, &live),
-                Corroboration::Unaccounted
-            ),
-            "an Account whose own copy is not the live one corroborates nothing"
-        );
     }
 
     /// Not `Quarantined`, and not one either caller turns into an outcome of
@@ -1487,6 +785,9 @@ mod tests {
         // Store and the Credential read out of it need not be either one's.
         for email in ["some-one@example.com", "some.one@example.com"] {
             registry.upsert(Account {
+                storage_key: None,
+                provider: crate::providers::provider::Id::Claude,
+                provider_identity: None,
                 identity: Identity {
                     email: email.to_string(),
                     account_uuid: None,
@@ -1512,7 +813,6 @@ mod tests {
             &mut registry,
             &sharer,
             "the Default Profile",
-            &Installed::unknown("2.1.221"),
         )
         .expect_err("neither of them can be made live");
 
@@ -1544,5 +844,33 @@ mod tests {
             quarantined().exit_code(),
             "the Quarantine is what the user is told about, not the write"
         );
+    }
+    #[test]
+    fn the_provider_default_guard_outlives_the_final_registry_write() {
+        struct Guard<'a>(&'a FakeHost);
+        impl crate::providers::provider::DefaultChange for Guard<'_> {
+            fn capture(&mut self, _: &mut lock::Held<'_>) -> Result<Captured> {
+                unreachable!()
+            }
+            fn apply(
+                &mut self,
+                _: &mut lock::Held<'_>,
+            ) -> std::result::Result<(), crate::providers::provider::DefaultFailure> {
+                unreachable!()
+            }
+        }
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                let saved = registry::load(self.0).unwrap().unwrap();
+                assert_eq!(saved.active().whose(), Some(INCOMING));
+            }
+        }
+        let host = FakeHost::new();
+        let mut registry = two_accounts();
+        let mut held = holdings::lock(&host).unwrap();
+        registry::save(&host, &mut held, &mut registry).unwrap();
+        let mut pending = landing(Ok(Captured::NoOutgoing), true);
+        pending.lease = Some(Box::new(Guard(&host)));
+        pending.record(&host, &mut held, &mut registry).unwrap();
     }
 }

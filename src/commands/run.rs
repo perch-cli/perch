@@ -1,33 +1,28 @@
-//! `perch run <target>` — a client against one Account's Profile, without a
-//! Switch (ADR a-run-is-one-shot).
+//! One process uses one Account's Profile (ADR a-run-is-one-shot).
 //!
-//! One process is pointed at one Profile by setting `CLAUDE_CONFIG_DIR` for it
-//! and nothing else, so a Run shares none of a Switch's machinery. Several Runs
-//! coexist, which is why nothing here holds anything for as long as the client
-//! lives — the Registry least of all. It is the one path where a Profile is a
-//! live configuration directory, so the one path that Reconciles and the one
-//! that makes a Profile Live. Perch's own remarks go to standard error, because
-//! what the client says on stdout is the whole of what a Run says on stdout.
+//! Runs stay pinned while provider Defaults change. Claude Profiles reconcile
+//! shared state; Codex Profiles isolate auth, configuration, and history.
+//! A Marker protects the Profile while the child lives; no Registry lock spans
+//! the session. Perch's remarks go to stderr so stdout belongs to the child.
 
 use std::io::Write;
 
 use crate::adopt;
 use crate::error::{PerchError, Result};
-use crate::holdings;
 use crate::host::Host;
 use crate::registry::{self, Registry};
-use crate::say;
-use crate::switch;
-use crate::{carry, probe, reconcile, target};
+use crate::target;
 
 /// What a Run was asked for. `command` is text, like every other word Perch
 /// takes: one that is not text is refused by the parser rather than mangled here.
 #[derive(Debug, Clone, clap::Args)]
 pub struct RunArgs {
+    #[command(flatten)]
+    pub provider: super::selection::Selection,
     /// An Alias or email address
     pub target: String,
 
-    /// After `--`, a program and its arguments, or Claude Code's own
+    /// After `--`, a program and its arguments, or the provider's own
     #[arg(last = true, allow_hyphen_values = true, num_args = .., value_name = "COMMAND")]
     pub command: Vec<String>,
 }
@@ -44,100 +39,96 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
 
     // A Group names a set of Accounts declared interchangeable, which is
     // nothing a Run can act on: there is no one Profile to point a process at.
-    let found = target::resolve_account(&registry, &args.target)?;
-    refuse_a_quarantined_account(&registry, &found.email)?;
-    // Beside the Quarantine refusal, and for a reason of the same size: a
-    // Profile two Accounts share holds one Credential, so the client runs as
-    // whichever of them is in it while the line above named the other.
-    switch::refuse_a_shared_profile(registry.held(&found.email)?, &registry)?;
-
-    // Settled before anything is linked: where this is the Claude Code the probe
-    // has to find, a machine without one is a refusal that should cost the
-    // filesystem nothing.
-    let launch = what_to_launch(host, &args.command)?;
-    let profile = holdings::profile_dir_for(host, &found.email)?;
-    let default_profile = holdings::the_default_profile(host)?;
-
-    // Claimed before anything is linked: until the Marker exists nothing on the
-    // machine knows this Run is happening, and a `perch remove` elsewhere would
-    // be told the Profile is idle and delete it while this is linking into it.
-    let _live = probe::claim(host, &profile)?;
-
-    reconcile::reconcile(host, &default_profile.config_dir, &profile)?;
-
-    // The one file Reconcile cannot link, because it holds the Account as well
-    // as the person (ADR everything-but-the-account). It asks whether a Landing
-    // is in flight rather than settling one, since a Run holds no Registry lock.
-    let settled = registry::nothing_in_flight(&registry);
-
-    carry::carry(
-        host,
-        &registry,
-        &found.email,
-        &default_profile,
-        &profile,
-        settled.as_ref(),
-    );
-
-    host.note(&launching(&registry, &found.email, &launch.said));
-    // Flushed before the client is handed the terminal: a command run before
-    // this one may have left something in the buffer, and it would be delivered
-    // after the output of the thing it was announcing.
-    out.flush().map_err(say::failed)?;
-
-    // The environment of this one process, and the whole of what makes the Run
-    // a Run.
-    let handed: Vec<&str> = launch.args.iter().map(String::as_str).collect();
-    // As the Credential Store was derived from it, rather than as this command
-    // spelled it: two spellings of one Profile are two keychain namespaces, and
-    // the client would be pointed at the one Perch does not read.
-    let told = probe::one_spelling(&profile);
-    let ended = host.exec_interactive(
-        &launch.program,
-        &handed,
-        &[("CLAUDE_CONFIG_DIR", &told.to_string_lossy())],
-    );
-
-    ended.map_err(|err| PerchError::Other(format!("could not launch {}: {err}", launch.said)))
-}
-
-/// The program a Run launches and what it is handed.
-struct Launch {
-    /// As the operating system will look for it: a path for the Claude Code the
-    /// probe found, and otherwise the word as typed, so `npm` is found the way
-    /// the shell would have found it.
-    program: String,
-    /// What it is handed, in the order it was typed. Claude Code's own arguments
-    /// where nothing else was named, and the program's own where something was.
-    args: Vec<String>,
-    /// How the line printed before the launch says what is starting.
-    said: String,
-}
-
-/// Reads the words after `--` as a command line.
-///
-/// The first word decides totally: a word beginning with `-` is an argument,
-/// because nothing beginning with `-` can name a program the operating system
-/// would find. Nothing after `--` at all is Claude Code with no arguments.
-fn what_to_launch(host: &dyn Host, command: &[String]) -> Result<Launch> {
-    match command.split_first() {
-        // The empty string names a program the operating system would find no
-        // more than a leading `-` does, and for the same reason: `PATH` is
-        // searched for names and a path is written with a separator.
-        Some((program, args)) if !program.is_empty() && !program.starts_with('-') => Ok(Launch {
-            program: program.clone(),
-            args: args.to_vec(),
-            said: format!("`{program}`"),
-        }),
-        // The probe is what finds Claude Code, and it is reached only where
-        // Claude Code is what is being launched: a Run of `npm` on a machine
-        // Perch could not find a client on is still a Run of `npm`.
-        _ => Ok(Launch {
-            program: probe::claude_bin(host)?.to_string_lossy().into_owned(),
-            args: command.to_vec(),
-            said: "Claude Code".to_string(),
-        }),
+    let custom = args
+        .command
+        .first()
+        .is_some_and(|word| !word.is_empty() && !word.starts_with('-'));
+    let installation = if custom {
+        None
+    } else if !registry.run_fallback && args.provider.explicit().is_none() {
+        Some(
+            registry
+                .run_provider
+                .adapter()
+                .configured(host)?
+                .installation(host)?,
+        )
+    } else {
+        Some(args.provider.installed(host, registry.run_provider)?)
+    };
+    let selected = installation
+        .as_ref()
+        .map(|installed| installed.provider())
+        .or(args.provider.explicit());
+    let found = target::resolve_for(&registry, &args.target, selected)?;
+    let account = registry.held(&found.email)?;
+    refuse_a_quarantined_account(&registry, account.key())?;
+    let held = crate::holdings::lock(host)?;
+    let latest = registry::load(host)?.ok_or_else(|| {
+        PerchError::NotFound("The configuration disappeared before launch".into())
+    })?;
+    let current = latest.held(account.key())?;
+    if current.provider() != account.provider()
+        || current.provider_identity != account.provider_identity
+        || current.identity.account_uuid != account.identity.account_uuid
+        || current.identity.organization_uuid != account.identity.organization_uuid
+    {
+        return Err(PerchError::Invalid(
+            "The Account identity changed before launch; run the command again. Nothing was launched."
+                .into(),
+        ));
     }
+    let account = current;
+    refuse_a_quarantined_account(&latest, account.key())?;
+    crate::switch::refuse_a_shared_profile(account, &latest)?;
+    let active = latest.active_for(account.provider());
+    let mut shared_profiles = Vec::new();
+    if account.provider().adapter().capabilities().shared_state
+        && !matches!(active, crate::registry::Active::Landing { .. })
+    {
+        for peer in &latest.accounts {
+            let same_group = match (&peer.group, &account.group) {
+                (Some(a), Some(b)) => crate::name::same_name(a, b),
+                _ => false,
+            };
+            if peer.provider() == account.provider() && (peer.key() == account.key() || same_group)
+            {
+                shared_profiles.push(crate::providers::provider::SharedProfile {
+                    path: peer.profile_dir(host)?,
+                    is_default: active.is_active(peer.key()),
+                });
+            }
+        }
+    }
+    let profile = account.profile(host)?;
+    let launch = account.provider().adapter().prepare_launch(
+        host,
+        &crate::providers::provider::LaunchRequest {
+            kind: match &installation {
+                Some(installed) => crate::providers::provider::LaunchKind::Client(installed),
+                None => crate::providers::provider::LaunchKind::Custom(&args.command[0]),
+            },
+            account: &profile,
+            arguments: if custom {
+                &args.command[1..]
+            } else {
+                &args.command
+            },
+            shared_profiles,
+        },
+    )?;
+    drop(held);
+    let program = if custom {
+        format!("`{}`", launch.program())
+    } else {
+        account.provider().adapter().name().to_string()
+    };
+    host.note(&format!(
+        "Running {program} as {}, in this terminal alone.",
+        latest.named_for_the_user(account.key())
+    ));
+    out.flush().map_err(crate::say::failed)?;
+    launch.execute(host)
 }
 
 /// Refuses `perch run <target> <anything>`, where what was meant for the program
@@ -146,7 +137,24 @@ fn what_to_launch(host: &dyn Host, command: &[String]) -> Result<Launch> {
 /// against: clap claims `--resume` for Perch and reports an unknown argument. It
 /// ends at the Target — anything before one is Perch's beyond doubt.
 pub fn refuse_a_flag_without_the_separator(typed: &[String]) -> Result<()> {
-    let typed = words(typed);
+    let mut filtered = Vec::new();
+    let mut input = words(typed).into_iter();
+    while let Some(word) = input.next() {
+        if word == "--" {
+            filtered.push(word);
+            filtered.extend(input);
+            break;
+        }
+        if matches!(word, "--claude" | "--codex") || word.starts_with("--provider=") {
+            continue;
+        }
+        if word == "--provider" {
+            input.next();
+            continue;
+        }
+        filtered.push(word);
+    }
+    let typed = filtered;
     let ["run", target, rest @ ..] = typed.as_slice() else {
         return Ok(());
     };
@@ -226,14 +234,6 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> 
         email,
         "Nothing was launched. The client would open on an Account it cannot \
          authenticate as and ask you to log in.",
-    )
-}
-
-/// What is about to happen.
-fn launching(registry: &Registry, email: &str, said: &str) -> String {
-    format!(
-        "Running {said} as {}, in this terminal alone.",
-        registry.named_for_the_user(email)
     )
 }
 
@@ -347,6 +347,28 @@ mod tests {
                 "{line}"
             );
         }
+    }
+
+    /// Perch's own provider flags are taken out before the Target is looked
+    /// for: left in, the first of them would read as the Target and the word
+    /// after it as something that needed a separator.
+    #[test]
+    fn a_provider_flag_is_perchs_own_and_never_the_target() {
+        for line in [
+            "run --claude dev",
+            "run --codex dev",
+            "run --provider codex dev",
+            "run --provider=codex dev",
+            "run --claude dev -- --resume",
+        ] {
+            assert!(
+                refuse_a_flag_without_the_separator(&typed(line)).is_ok(),
+                "{line}"
+            );
+        }
+
+        let said = refusal_for("run --provider codex dev --resume");
+        assert!(said.contains("perch run dev -- --resume"), "{said}");
     }
 
     #[test]

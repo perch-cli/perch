@@ -51,11 +51,11 @@ fn a_bare_switch_lands_on_the_account_with_the_most_room_in_the_group() {
     let (result, printed) = run_cycle(&host);
 
     result.expect("there is somewhere to go");
-    assert_eq!(active(&host).as_deref(), Some(THIRD_EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(THIRD_KEY), "{printed}");
     assert_eq!(live_credential(&host).as_deref(), Some(THIRD_CREDENTIAL));
     assert!(
         printed.contains(&format!(
-            "Switched to {THIRD_EMAIL}, the most room in Group `work`."
+            "Switched to {THIRD_LABEL}, the most room in Group `work`."
         )),
         "the landing line names the Account, what it was chosen on, and the \
          Group the Cycle stayed inside: {printed}"
@@ -79,7 +79,7 @@ fn a_bare_switch_never_leaves_the_group_it_started_in() {
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "a work subscription running dry must not land on a personal Account: {printed}"
     );
 }
@@ -96,7 +96,7 @@ fn naming_a_group_cycles_within_that_group() {
     let (result, printed) = run_switch(&host, "work");
 
     result.expect("the Group names somewhere to go");
-    assert_eq!(active(&host).as_deref(), Some(THIRD_EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(THIRD_KEY), "{printed}");
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn ranking_reads_each_accounts_worst_quota_window() {
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(THIRD_EMAIL),
+        Some(THIRD_KEY),
         "the five-hour window alone would have chosen the Account about to die \
          on its weekly limit: {printed}"
     );
@@ -155,7 +155,7 @@ fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
     );
     assert_eq!(
         said[0],
-        format!("Switched to {SECOND_EMAIL}, the most room in Group `work`."),
+        format!("Switched to {SECOND_LABEL}, the most room in Group `work`."),
         "which names the Account and the Group the Cycle stayed inside: {printed}"
     );
     for (window, used) in [("5-hour", "12%"), ("7-day", "40%")] {
@@ -189,7 +189,7 @@ fn an_exhausted_account_is_never_chosen() {
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(THIRD_EMAIL),
+        Some(THIRD_KEY),
         "an Account with a full window is blocked whatever its others say: {printed}"
     );
 }
@@ -207,7 +207,7 @@ fn a_disabled_account_is_never_chosen() {
     let (result, printed) = run_cycle(&host);
 
     result.expect("there is somewhere to go");
-    assert_eq!(active(&host).as_deref(), Some(THIRD_EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(THIRD_KEY), "{printed}");
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn a_quarantined_account_is_never_chosen() {
     let (result, printed) = run_cycle(&host);
 
     result.expect("there is somewhere to go");
-    assert_eq!(active(&host).as_deref(), Some(THIRD_EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(THIRD_KEY), "{printed}");
 }
 
 #[test]
@@ -260,7 +260,7 @@ fn every_account_exhausted_picks_nothing_and_names_the_one_that_frees_up_soonest
         Some(CREDENTIAL),
         "nothing was switched: {printed}"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn a_reset_that_has_already_gone_by_is_not_what_frees_up_soonest() {
          so the wait may be shorter than the one figure that can still speak: \
          {said}"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(KEY), "{printed}");
 }
 
 #[test]
@@ -436,10 +436,10 @@ fn an_unobserved_account_is_still_somewhere_to_go_when_the_current_one_is_spent(
         "out of the box nothing has been observed, and the command \
                    the whole tool exists for still has to work",
     );
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY), "{printed}");
     assert!(
         printed.contains(&format!(
-            "Switched to {SECOND_EMAIL}, nothing observed to rank on in Group `work`."
+            "Switched to {SECOND_LABEL}, nothing observed to rank on in Group `work`."
         )),
         "the landing line says it was made on no evidence rather than naming a \
          basis it did not have: {printed}"
@@ -468,7 +468,7 @@ fn from_an_ungrouped_account_a_bare_switch_switches_nowhere_and_names_both_fixes
         Some(CREDENTIAL),
         "nothing was switched"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 #[test]
@@ -481,7 +481,7 @@ fn with_the_setting_on_a_bare_switch_cycles_among_the_ungrouped_accounts() {
     let (result, printed) = run_cycle(&host);
 
     result.expect("they have been declared interchangeable now");
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY), "{printed}");
 }
 
 #[test]
@@ -553,7 +553,7 @@ fn naming_a_group_that_holds_no_accounts_switches_nowhere() {
     let error = result.expect_err("there is nobody in it");
     assert_eq!(error.exit_code(), EXIT_NO_CANDIDATE);
     assert!(error.to_string().contains("holds no Accounts"), "{error}");
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 /// A Cycle is a Switch that chooses for you, so it inherits the rule about
@@ -567,13 +567,13 @@ fn a_cycle_lands_on_a_live_account_like_any_other() {
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
     a_client_running_against(
         &host,
-        "/Users/someone/.config/perch/profiles/overflow-example-com",
+        "/Users/someone/.config/perch/providers/claude/profiles/claude-47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9",
         4242,
     );
 
     run_cycle(&host).0.expect("a Run does not close an Account");
 
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY));
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
 }
 
@@ -587,7 +587,7 @@ fn a_cycle_away_from_a_live_profile_is_refused() {
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
     a_client_running_against(
         &host,
-        "/Users/someone/.config/perch/profiles/someone-example-com",
+        "/Users/someone/.config/perch/providers/claude/profiles/claude-17a9e82e199f9341793949dfee4b65fa3f875bc724112bdc0218fa39715c529b",
         4242,
     );
 
@@ -595,7 +595,7 @@ fn a_cycle_away_from_a_live_profile_is_refused() {
 
     let error = result.expect_err("the Capture would write under that client");
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 /// A bare Cycle asks the Group of the Account it is leaving where it may look,
@@ -672,7 +672,7 @@ fn cycling_among_ungrouped_accounts_reads_the_strategy_that_scope_holds() {
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(THIRD_EMAIL),
+        Some(THIRD_KEY),
         "the compiled-in default is still the most room left: {printed}"
     );
 
@@ -685,7 +685,7 @@ fn cycling_among_ungrouped_accounts_reads_the_strategy_that_scope_holds() {
     result.expect("there is somewhere to go");
     assert_eq!(
         active(&host).as_deref(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "and the Scope Cycles by what it was told: {printed}"
     );
 }
@@ -703,7 +703,10 @@ fn a_cycle_never_chooses_an_account_whose_profile_another_shares() {
     // Account being left, so ranking would reach for them first.
     for email in ["some-one@example.com", "some.one@example.com"] {
         registry.upsert(perch::registry::Account {
-            identity: perch::probe::Identity {
+            storage_key: None,
+            provider: perch::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: perch::domain::Identity {
                 email: email.to_string(),
                 account_uuid: None,
                 organization_name: None,

@@ -1,7 +1,7 @@
 //! The three Anthropic endpoints Perch talks to, and the only place in Perch
 //! that knows an address.
 //!
-//! None of this is a published contract, so it is held the way [`crate::probe`]
+//! None of this is a published contract, so it is held the way [`crate::providers::claude::probe`]
 //! holds Claude Code's internals (ADR an-assumption-is-probed): one module
 //! carries every assumption, and a reply Perch cannot make sense of is reported
 //! as such rather than guessed at. What is assumed is that the usage endpoint
@@ -13,9 +13,9 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::domain::WindowUtilization;
 use crate::host::{Host, HttpRequest, HttpResponse};
 use crate::lock::{Lost, StillOurs};
-use crate::registry::WindowUtilization;
 use crate::secret::Secret;
 
 /// Where an Account's Quota Windows are read from. Roughly 28-30 requests per
@@ -162,17 +162,40 @@ pub fn whose(
     host: &dyn Host,
     access_token: &str,
     still_ours: StillOurs<'_>,
-) -> Result<String, Refused> {
-    let document = read(host, PROFILE_URL, access_token, still_ours)?;
-    email_in(&document).ok_or_else(|| {
+) -> Result<TokenOwner, Refused> {
+    owner_in(&read(host, PROFILE_URL, access_token, still_ours)?)
+}
+
+pub(super) struct TokenOwner {
+    pub email: String,
+    pub subject: Option<super::super::provider::AccountIdentity>,
+}
+
+fn owner_in(document: &Value) -> Result<TokenOwner, Refused> {
+    let email = email_in(document).ok_or_else(|| {
         Refused::Unrecognized(
             "the profile endpoint named no email address, so whose an access \
-             token is cannot be established from Anthropic. The check that keeps \
-             one Account's figures out of another's falls back to what this \
-             machine holds."
+             token is cannot be established from Anthropic."
                 .to_string(),
         )
-    })
+    })?;
+    let subject = document
+        .pointer("/account/uuid")
+        .and_then(Value::as_str)
+        .zip(
+            document
+                .pointer("/organization/uuid")
+                .and_then(Value::as_str),
+        )
+        .and_then(|(user, workspace)| {
+            super::super::provider::AccountIdentity::new(
+                super::super::provider::Id::Claude,
+                user.into(),
+                workspace.into(),
+            )
+            .ok()
+        });
+    Ok(TokenOwner { email, subject })
 }
 
 /// Renews an access token, and reports the Rotation when there was one.
@@ -397,6 +420,7 @@ fn limits_in(
             return Err(drifted(&named, "percent"));
         };
         windows.push(WindowUtilization {
+            group: group_of(&named).map(str::to_string),
             resets_at: reset_time_in(&named, entry, said),
             window: named,
             // A window cannot be less than empty or more than full, and clamping
@@ -653,6 +677,7 @@ fn window_from(
 ) -> WindowUtilization {
     let named = window_name(name);
     WindowUtilization {
+        group: group_of(&named).map(str::to_string),
         // A window cannot be less than empty or more than full, and clamping
         // here is what stops a figure outside that becoming "105% headroom" in a
         // sentence somebody is asked to act on.
@@ -1419,6 +1444,105 @@ mod tests {
 
             assert!(refused.contains(left_out), "{refused}");
         }
+    }
+
+    #[test]
+    fn a_scope_spelled_as_a_bare_name_still_names_its_window() {
+        let document: Value = serde_json::from_str(
+            r#"{"limits": [
+                {"kind": "session", "group": "session", "percent": 2},
+                {"kind": "weekly_all", "group": "weekly", "percent": 10},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 5,
+                 "scope": {"model": "Fable (1M context)"}}
+            ]}"#,
+        )
+        .unwrap();
+
+        let named = named(windows_of(&document).expect("every limit answers"));
+
+        assert_eq!(
+            named,
+            vec!["5-hour", "7-day", "7-day-fable-1m-context"],
+            "a run of punctuation is one hyphen, and the name ends on a character"
+        );
+    }
+
+    #[test]
+    fn every_refusal_says_which_one_it_is() {
+        assert_eq!(Refused::Throttled.to_string(), THROTTLED);
+        assert_eq!(Refused::Rejected.to_string(), REJECTED);
+        assert_eq!(Refused::Stopped(Lost::Stopped).to_string(), STOPPED);
+        assert!(
+            Refused::Unrecognized("no window at all".into())
+                .to_string()
+                .contains("no window at all")
+        );
+        assert!(Refused::Failed(503).to_string().contains("503"));
+        assert!(
+            Refused::Unreachable("dns lookup failed".into())
+                .to_string()
+                .contains("dns lookup failed")
+        );
+    }
+
+    #[test]
+    fn a_renewal_prints_neither_the_token_it_gives_nor_the_one_it_rotated_in() {
+        let shown = format!(
+            "{:?}",
+            Fresh {
+                access_token: Zeroizing::new("sk-ant-oat01-new".to_string()),
+                refresh_token: Some(Zeroizing::new("sk-ant-ort01-rotated".to_string())),
+                expires_at: Some(1_785_000_000_000),
+            }
+        );
+
+        assert!(!shown.contains("sk-ant-"), "{shown}");
+        assert_eq!(shown.matches("<redacted>").count(), 2, "{shown}");
+        assert!(
+            shown.contains("1785000000000"),
+            "when a token expires is not a secret: {shown}"
+        );
+    }
+
+    /// The remark is a fact about the shape of Anthropic's replies, so it is made
+    /// where the windows are handed on and not where they are refused.
+    #[test]
+    fn a_reset_time_perch_could_not_read_is_remarked_on_where_the_windows_are_handed_on() {
+        let host = crate::host::FakeHost::new();
+        host.reply(
+            USAGE_URL,
+            Some("sk-ant-oat01-live"),
+            200,
+            r#"{"five_hour": {"utilization": 42, "resets_at": "in about two hours"},
+                "seven_day": {"utilization": 18}}"#,
+        );
+
+        let windows = utilization(&host, "sk-ant-oat01-live", &mut || Ok(()))
+            .expect("both windows say how full they are");
+
+        let notes = host.notes();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("5-hour"), "{notes:?}");
+        assert!(notes[0].contains("soonest-reset"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_usage_reply_naming_no_window_is_refused_rather_than_read_as_an_empty_one() {
+        let host = crate::host::FakeHost::new();
+        host.reply(
+            USAGE_URL,
+            Some("sk-ant-oat01-live"),
+            200,
+            r#"{"limits": []}"#,
+        );
+
+        assert_eq!(
+            utilization(&host, "sk-ant-oat01-live", &mut || Ok(())),
+            Err(Refused::Unrecognized(
+                "the usage endpoint named no Quota Window".to_string()
+            ))
+        );
     }
 
     #[test]

@@ -164,6 +164,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:USERPROFILE ".local\bin")
 
+      # The other client the gated suite asks. No installer script to pin here:
+      # the npm package is the product, so the version floats as Claude Code's
+      # does. A registry that will not answer degrades to the "no Codex" branch.
+      - name: Install Codex
+        shell: bash
+        run: |
+          npm install -g @openai/codex@latest \
+            || echo "::warning::codex install failed; the tests below will assert the absent branch"
+
       # Held back because it needs state a developer owns and did not offer,
       # and a runner is the one machine that can be asked for that consent
       # (ADR a-suite-is-named-and-gated). A step of its own, so a failure reads

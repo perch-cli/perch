@@ -1,10 +1,8 @@
 //! Whether a client is running against a config directory, and what that means
 //! for what the caller is about to do (ADR a-profile-is-live-by-evidence).
 //!
-//! Above `probe`, which holds the Marker's shape because Claude Code invented it,
-//! and above `registry`, which holds the document: the five-second NTP margin,
-//! doubt resolving towards Live, and what a refusal says are judgments Perch
-//! makes rather than fields it reads (ADR code-lives-where-it-reaches).
+//! Providers interpret session records. Process corroboration, clock tolerance,
+//! and doubt resolving toward Live are shared policy.
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +10,7 @@ use chrono::{DateTime, Utc};
 
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
-use crate::probe::{self, Installed};
+use crate::providers::provider::Id;
 use crate::registry::Account;
 
 /// A config directory the ask covers, and what a refusal about it calls it.
@@ -22,13 +20,15 @@ use crate::registry::Account;
 pub struct Place {
     whose: String,
     dir: PathBuf,
+    provider: Id,
 }
 
 impl Place {
     /// A directory the caller has a name for — an Account's Profile, the Default
     /// Profile, a Profile an Import is about to write into.
-    pub fn new(whose: impl Into<String>, dir: impl Into<PathBuf>) -> Place {
+    pub fn new(provider: Id, whose: impl Into<String>, dir: impl Into<PathBuf>) -> Place {
         Place {
+            provider,
             whose: whose.into(),
             dir: dir.into(),
         }
@@ -37,9 +37,9 @@ impl Place {
     /// A directory named by its own path, for the caller with nothing better to
     /// call it: a login Perch is driving, a Profile a Run is Carrying into, a
     /// Credential Store a Renewal would replace.
-    pub fn at(dir: impl Into<PathBuf>) -> Place {
+    pub fn at(provider: Id, dir: impl Into<PathBuf>) -> Place {
         let dir = dir.into();
-        Place::new(dir.display().to_string(), dir)
+        Place::new(provider, dir.display().to_string(), dir)
     }
 
     /// An Account's own Profile. Fails where the address has no character a
@@ -47,7 +47,8 @@ impl Place {
     /// rather than about liveness and so reaches the caller as itself.
     pub fn of_the_profile(host: &dyn Host, account: &Account) -> Result<Place> {
         Ok(Place::new(
-            format!("{}'s Profile", account.email()),
+            account.provider(),
+            format!("{}'s Profile", account.key()),
             account.profile_dir(host)?,
         ))
     }
@@ -95,7 +96,7 @@ pub fn ask(host: &dyn Host, places: &[Place]) -> Answer {
     let mut found = Vec::new();
     let mut doubt = None;
     for place in places {
-        match clients_in(host, &place.dir) {
+        match clients_in(host, place.provider, &place.dir) {
             Ok(running) => found.extend(running.into_iter().map(|pid| Client {
                 pid,
                 whose: place.whose.clone(),
@@ -120,10 +121,10 @@ impl Answer {
     /// only when it is quiet.
     /// The witness, or the refusal — for the caller that hands a [`PerchError`]
     /// on rather than deciding between the two ways it was not Idle.
-    pub fn idle_or(self, installed: &Installed, consequence: &Consequence) -> Result<Idle> {
+    pub fn idle_or(self, consequence: &Consequence) -> Result<Idle> {
         match self {
             Answer::Idle(idle) => Ok(idle),
-            Answer::NotIdle(not_idle) => Err(not_idle.refusal(installed, consequence)),
+            Answer::NotIdle(not_idle) => Err(not_idle.refusal(consequence)),
         }
     }
 
@@ -153,7 +154,7 @@ impl NotIdle {
     ///
     /// A doubt keeps only the promise: its own refusal names the broken assumption
     /// and says what to do about the directory (ADR an-assumption-is-probed).
-    pub fn refusal(self, installed: &Installed, consequence: &Consequence) -> PerchError {
+    pub fn refusal(self, consequence: &Consequence) -> PerchError {
         let Consequence {
             nothing_happened,
             quit_it,
@@ -167,8 +168,8 @@ impl NotIdle {
                     .unwrap_or_default(),
             )),
             NotIdle::Unsure(unsure) => match nothing_happened {
-                Some(said) => unsure.refusal(installed).with_note(said),
-                None => unsure.refusal(installed),
+                Some(said) => unsure.refusal().with_note(said),
+                None => unsure.refusal(),
             },
         }
     }
@@ -213,17 +214,12 @@ pub fn clause(clients: &[Client]) -> String {
 
 /// Why whether anything is running went unanswered. Both are doubt rather than
 /// an answer, and neither is decided here: a caller that must not write under a
-/// client reads either as one, and the caller that can name a Claude Code
-/// version turns either into a refusal that says which it met.
+/// client reads either as one. A refusal preserves the evidence that is missing.
 pub enum Unsure {
     /// A marker naming a running process whose start the operating system will
     /// not say, so it can be neither corroborated nor dismissed.
     WhenItBegan(PathBuf),
-    /// A marker naming a running process that Perch could not read at all —
-    /// root-owned after a `sudo claude`, most often. Its own variant rather than
-    /// the one above, because they are told apart by what the reader has to do:
-    /// one is a file whose permissions are wrong, and the other is an operating
-    /// system that would not answer.
+    /// File permissions and unavailable process timing require different remedies.
     Unreadable(PathBuf),
     /// The sessions directory is there and would not be read. Told apart from
     /// an absent one, which is the ordinary "nothing is running" and the whole
@@ -232,14 +228,13 @@ pub enum Unsure {
 }
 
 impl Unsure {
-    /// The refusal a doubt makes: the assumption it broke, what it met, and the
-    /// Claude Code that was installed when it did.
-    pub fn refusal(&self, installed: &Installed) -> PerchError {
-        probe::refusal(
-            probe::assumption::SESSION_MARKER,
-            &self.detail(),
-            installed.version(),
-        )
+    pub fn refusal(&self) -> PerchError {
+        PerchError::ProbeRefused(Box::new(crate::error::ProbeRefusal {
+            assumption: "a session marker names its process and when the session started".into(),
+            detail: self.detail(),
+            context: None,
+            note: None,
+        }))
     }
 
     fn detail(&self) -> String {
@@ -270,43 +265,24 @@ impl Unsure {
 /// The processes running against a config directory, or the marker that could
 /// be neither corroborated nor dismissed. Both callers phrase that doubt in
 /// their own terms, and neither decides it.
-fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32>, Unsure> {
-    let dir = probe::sessions_dir(config_dir);
-    let markers = match host.list_dir(&dir) {
-        Ok(markers) => markers,
-        // Never having run a client is the *only* case that means nothing is
-        // running. A directory that is there and will not be read is doubt, and
-        // every doubt in this function resolves towards Live.
-        Err(HostError::NotFound { .. }) => return Ok(Vec::new()),
-        Err(why) => return Err(Unsure::Unlistable { dir, why }),
-    };
-
-    // Once rather than per Marker: a machine does not reboot between two files.
+fn clients_in(
+    host: &dyn Host,
+    provider: Id,
+    config_dir: &Path,
+) -> std::result::Result<Vec<u32>, Unsure> {
+    let evidence = provider.adapter().session_evidence(host, config_dir)?;
     let booted = host.booted_at();
     let mut running = Vec::new();
-    for marker in markers {
-        let pid: u32 = match marker
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.strip_suffix(".json"))
-            .and_then(|name| name.parse().ok())
-        {
-            Some(pid) => pid,
+    for session in evidence {
+        let crate::providers::provider::SessionEvidence {
+            pid,
+            marker,
+            started_at,
+        } = session;
+        let session_began = match started_at {
+            Some(at) => at,
+            None if host.process_alive(pid) => return Err(Unsure::Unreadable(marker)),
             None => continue,
-        };
-        let session_began = match probe::session_start_in(host, &marker) {
-            probe::Marker::Began(at) => at,
-            // Either way it does not say what a marker has to say, which is a
-            // judgment about the *content* of a file Perch can see all of: a
-            // Profile is Live when something says so.
-            probe::Marker::SaysNothing => continue,
-            // Nothing has been established, so it resolves towards Live — and
-            // only for a pid that is running, since litter must not refuse every
-            // Switch for ever. One halfway written is `SaysNothing` above.
-            probe::Marker::Unreadable if host.process_alive(pid) => {
-                return Err(Unsure::Unreadable(marker));
-            }
-            probe::Marker::Unreadable => continue,
         };
 
         // A session does not outlive a reboot, so this Marker names no client
@@ -353,72 +329,18 @@ pub fn written_before_the_boot(booted_at: Option<DateTime<Utc>>, began: i64) -> 
 /// recorded and a boot look later than a Marker that preceded it.
 const CLOCK_STEP_MARGIN_MILLIS: i64 = 5_000;
 
-/// Refuses to write into a Profile a client is holding, over the one or two this
-/// command writes; `also_the_default_profile` is why that one joins them. One
-/// function rather than one per command: each asks twice, and two spellings of
-/// one pair of checks is how the second ask comes to be weaker than the first.
-pub fn refuse_while_anything_is_running(
-    host: &dyn Host,
-    account: &crate::registry::Account,
-    also_the_default_profile: Option<&'static str>,
-    installed: &crate::probe::Installed,
-    consequence: &Consequence,
-) -> Result<()> {
-    let mut places = vec![Place::of_the_profile(host, account)?];
-    if let Some(why) = also_the_default_profile {
-        // Its Credential is the one a running client is holding, and this would
-        // replace it rather than renew it.
-        places.push(Place::new(
-            why,
-            crate::holdings::the_default_profile(host)?.config_dir,
-        ));
-    }
-
-    ask(host, &places).idle_or(installed, consequence)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use crate::domain::Identity;
     use crate::host::{FakeHost, Platform};
-    use crate::probe::Identity;
 
     /// Midday on an ordinary day, as the epoch milliseconds a Marker records.
     const NOON: i64 = 1_754_308_800_000;
 
-    fn live(host: &dyn Host, dir: &Path) -> bool {
-        ask(host, &[Place::at(dir)]).counts_as_live()
-    }
-
     fn moment(millis: i64) -> DateTime<Utc> {
         DateTime::from_timestamp_millis(millis).expect("a time")
-    }
-
-    /// Asserted through the ask rather than by reaching for the marker path,
-    /// because a check on the path is a check past the interface. The fake
-    /// reports its own process as running, which is the situation being modeled:
-    /// Perch waits for what it started, so the pid a claim names is alive for
-    /// precisely as long as the Run or the login.
-    #[test]
-    fn a_claim_makes_a_directory_live_and_letting_it_go_stops_it() {
-        let dir = Path::new("/Users/someone/.perch/profiles/someone-example-com");
-        let host = FakeHost::new();
-
-        assert!(!live(&host, dir), "nothing has claimed it yet");
-
-        let claimed = probe::claim(&host, dir).expect("the marker is written");
-        assert!(
-            live(&host, dir),
-            "a Run or a login holding this is a Live Profile"
-        );
-
-        drop(claimed);
-        assert!(
-            !live(&host, dir),
-            "and it stops being Live when the thing holding it lets go"
-        );
     }
 
     /// `startedAt` is a number out of a file Perch does not own, so the margin
@@ -436,7 +358,7 @@ mod tests {
             );
 
         assert_eq!(
-            clients_in(&host, Path::new("/tmp/profile")).ok(),
+            clients_in(&host, Id::Claude, Path::new("/tmp/profile")).ok(),
             Some(vec![4242]),
             "a process that began long before the marker claims is running against \
              the Profile, whatever the claim adds up to"
@@ -457,7 +379,7 @@ mod tests {
             .with_live_process_started_at(0, DateTime::<Utc>::MIN_UTC);
 
         assert_eq!(
-            clients_in(&host, Path::new("/tmp/profile")).ok(),
+            clients_in(&host, Id::Claude, Path::new("/tmp/profile")).ok(),
             Some(vec![]),
             "a start time believed here would refuse every Switch, Capture and \
              Renewal against the Profile for ever, and no client could be quit \
@@ -482,7 +404,7 @@ mod tests {
                 .with_booted_at(moment(NOON + 65 * 60 * 1_000));
 
             assert_eq!(
-                clients_in(&host, Path::new("/tmp/profile")).ok(),
+                clients_in(&host, Id::Claude, Path::new("/tmp/profile")).ok(),
                 Some(vec![]),
                 "{platform:?}: no session survives a reboot, so the pid this \
                  marker names is one the boot handed out again"
@@ -504,7 +426,7 @@ mod tests {
 
         assert!(
             matches!(
-                clients_in(&host, Path::new("/tmp/profile")),
+                clients_in(&host, Id::Claude, Path::new("/tmp/profile")),
                 Err(Unsure::WhenItBegan(_))
             ),
             "a live pid with no readable start, inside this boot, still resolves \
@@ -525,9 +447,28 @@ mod tests {
             .with_booted_at(moment(NOON + CLOCK_STEP_MARGIN_MILLIS - 1));
 
         assert!(
-            clients_in(&host, Path::new("/tmp/profile")).is_err(),
+            clients_in(&host, Id::Claude, Path::new("/tmp/profile")).is_err(),
             "two seconds of NTP correction must not dismiss the marker of a \
              client that is running"
+        );
+    }
+
+    /// Two clients against one Profile: the reader has to quit a Profile rather
+    /// than read the same name twice.
+    #[test]
+    fn clients_in_one_place_are_named_once_with_every_pid_after_it() {
+        let client = |pid, whose: &str| Client {
+            pid,
+            whose: whose.to_string(),
+        };
+
+        assert_eq!(
+            clause(&[
+                client(4242, "someone@example.com"),
+                client(4343, "someone@example.com"),
+                client(4444, "overflow@example.com"),
+            ]),
+            "someone@example.com (pid 4242, 4343), overflow@example.com (pid 4444)"
         );
     }
 
@@ -543,7 +484,7 @@ mod tests {
             )
             .with_live_process_of_unknown_start(532);
 
-        assert!(clients_in(&host, Path::new("/tmp/profile")).is_err());
+        assert!(clients_in(&host, Id::Claude, Path::new("/tmp/profile")).is_err());
     }
 
     /// Not a Live Profile and not a refusal: nothing about that Profile was ever
@@ -553,6 +494,9 @@ mod tests {
     fn an_address_no_profile_can_be_named_after_has_nowhere_to_ask_about() {
         let host = FakeHost::new();
         let nameless = Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 // Nothing a directory can be named after survives the slug.
                 email: "@".to_string(),

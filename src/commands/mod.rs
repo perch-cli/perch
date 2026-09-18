@@ -16,6 +16,7 @@ pub mod purge;
 pub mod relogin;
 pub mod remove;
 pub mod run;
+pub mod selection;
 pub mod service;
 pub mod status;
 pub mod switch;
@@ -88,14 +89,19 @@ impl<'a> Viewing<'a> {
     /// Exclusively only where something will be written, which is `--refresh`
     /// and nothing else: two listings drawn at once are ordinary, and a read
     /// that took the write lock would fail on one of them.
-    pub fn opened(host: &'a dyn Host, refresh: bool) -> Result<Self> {
-        let (perch, registry) = match refresh {
+    pub fn opened(
+        host: &'a dyn Host,
+        refresh: bool,
+        provider: selection::Selection,
+    ) -> Result<Self> {
+        let (perch, mut registry) = match refresh {
             true => {
                 let (perch, registry) = crate::adopt::ensure_adopted_exclusively(host)?;
                 (Some(perch), registry)
             }
             false => (None, crate::adopt::ensure_adopted(host)?),
         };
+        registry.select_provider(registry.provider_spoken_for(provider.explicit()));
         Ok(Self {
             host,
             perch,
@@ -129,50 +135,15 @@ pub fn read_now(
     registry: &mut crate::registry::Registry,
     about: &[String],
 ) -> crate::observe::Report {
-    let installed = crate::probe::Installed::for_the_figures(host);
     crate::observe::refresh(
         host,
         perch,
         registry,
         about,
-        &installed,
         // Somebody typed this, so a Watcher running behind it is already
         // keeping the active Account's figure and this read is left to it.
         crate::observe::Spending::BesideTheWatcher,
     )
-}
-
-/// Brings the Registry on this machine forward, once, ahead of the command.
-///
-/// Shape 1's sequence without shape 1's door, which adopts a login where there
-/// is no Registry and a migration has nothing to adopt. Here rather than inside
-/// `load`, which cannot take a lock it is already being called under.
-pub fn bring_the_registry_forward(host: &dyn Host) -> Result<()> {
-    let path = crate::holdings::registry_path(host)?;
-    let Some(was) = crate::migration::behind(host, &path) else {
-        return Ok(());
-    };
-
-    let mut perch = crate::holdings::lock(host)?;
-    // Asked again under the lock rather than trusted from outside it: between
-    // the two reads, another Perch may have brought the same file forward.
-    if crate::migration::behind(host, &path).is_none() {
-        return Ok(());
-    }
-    let renamed = host
-        .read_file(&path)
-        .map(|held| crate::migration::renames(&held))
-        .unwrap_or_default();
-    let Some(mut registry) = crate::registry::load(host)? else {
-        return Ok(());
-    };
-    // Through `save` rather than by writing what the step returned: it stamps
-    // the version, refuses what a later `load` could not read, and replaces the
-    // file in one step, so a migration that fails leaves the old shape intact.
-    crate::registry::save(host, &mut perch, &mut registry)?;
-
-    host.note(&crate::migration::brought_forward_note(was, &renamed));
-    Ok(())
 }
 
 /// The Landing settled, for the four Switch paths somebody types.

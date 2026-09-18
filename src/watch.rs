@@ -16,7 +16,6 @@ use crate::config::Settings;
 use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, Result};
 use crate::live::{self, NotIdle};
 use crate::lock::Lost;
-use crate::probe::Installed;
 use crate::registry::{Account, CachedUtilization, Checked};
 use crate::say;
 
@@ -582,10 +581,10 @@ impl Fullest {
         Self::read(crate::cycle::fullest_window_of(account))
     }
 
-    /// The same for a *candidate*, judged by the Scope's Measure: under Fable
-    /// First a fall-through candidate is measured on the windows its tier ranks
-    /// on, so a full Fable weekly does not set aside the one place a
-    /// Fable-spent Scope can still go (ADR fable-is-spent-first).
+    /// The same for a *candidate*, judged by the Scope's Measure: under
+    /// Preferred First a fall-through candidate is measured on the windows its
+    /// tier ranks on, so a full Ranking window does not set aside the one place
+    /// a spent Scope can still go (ADR fable-is-spent-first).
     pub fn measured(account: &Account, measure: crate::cycle::Measure) -> Option<Fullest> {
         Self::read(crate::cycle::measured_fullest_of(account, measure))
     }
@@ -960,20 +959,18 @@ impl Outcome {
 ///
 /// Every variant answered by name, with no catch-all — a third way for the ask to fail
 /// breaks the build here until the round says which of the two it is.
-pub fn refused_or_raised(not_idle: NotIdle, installed: &Installed) -> Result<Outcome> {
+pub fn refused_or_raised(not_idle: NotIdle) -> Result<Outcome> {
     match not_idle {
         // Reported as the Switch would have reported it, because it is the same refusal
         // about the same Profile — and waiting is an answer, because the client exits
         // and the round after it moves.
         running @ NotIdle::Live(_) => Ok(Outcome::Refused {
-            why: running
-                .refusal(installed, &live::NOTHING_WAS_CHANGED)
-                .to_string(),
+            why: running.refusal(&live::NOTHING_WAS_CHANGED).to_string(),
             contended: false,
         }),
         // This does not clear itself: a `sessions` directory nobody can read is a machine
         // somebody has to look at, so the loop stops rather than deciding.
-        unsure @ NotIdle::Unsure(_) => Err(unsure.refusal(installed, &live::NOTHING_WAS_CHANGED)),
+        unsure @ NotIdle::Unsure(_) => Err(unsure.refusal(&live::NOTHING_WAS_CHANGED)),
     }
 }
 
@@ -2214,6 +2211,36 @@ mod tests {
         );
     }
 
+    /// A Switch that was turned away rests for the cooldown a burst that found
+    /// nowhere rests for, and every round inside the rest says so as the refusal
+    /// it was rather than as a lock to come straight back for.
+    #[test]
+    fn a_burst_whose_switch_was_refused_rests_and_is_not_reported_as_a_contention() {
+        let mut burst = Burst::none();
+        burst.refused(
+            now(),
+            &spare(),
+            "A client is running against spare@example.com.",
+        );
+
+        let Some(Outcome::Refused { why, contended }) =
+            burst.resting(now() + Duration::minutes(2), &spare())
+        else {
+            panic!("two minutes into a fifteen minute rest");
+        };
+
+        assert!(
+            why.starts_with("A client is running against spare@example.com. The candidates"),
+            "the burst's reason still opens the line: {why}"
+        );
+        assert!(why.contains("another 13 minutes"), "{why}");
+        assert!(
+            !contended,
+            "nothing here is a lock somebody else is holding"
+        );
+        assert_eq!(burst.resting(now() + Duration::minutes(15), &spare()), None);
+    }
+
     #[test]
     fn a_burst_nobody_answered_backs_off_and_the_first_that_reads_drops_it() {
         let mut burst = Burst::none();
@@ -2259,11 +2286,13 @@ mod tests {
             "spare@example.com",
             vec![
                 crate::registry::WindowUtilization {
+                    group: None,
                     window: "5-hour".to_string(),
                     used_percent: 20.0,
                     resets_at: None,
                 },
                 crate::registry::WindowUtilization {
+                    group: None,
                     window: "7-day-fable".to_string(),
                     used_percent: 100.0,
                     resets_at: None,
@@ -2276,7 +2305,7 @@ mod tests {
             100.0,
             "every window still decides the Account's own fullness"
         );
-        let measured = Fullest::measured(&spare, crate::cycle::Measure::FableFirst)
+        let measured = Fullest::measured(&spare, crate::cycle::Measure::Preferred("fable"))
             .expect("its tier has a figure");
         assert_eq!(
             (measured.window.as_str(), measured.used_percent),
@@ -2344,15 +2373,10 @@ mod tests {
 
     #[test]
     fn every_way_the_liveness_ask_fails_is_a_refused_round_or_a_raise() {
-        let installed = Installed::unknown("1.2.3");
-
-        let refused = refused_or_raised(
-            NotIdle::Live(vec![live::Client {
-                pid: 4242,
-                whose: "someone@example.com's Profile".to_string(),
-            }]),
-            &installed,
-        )
+        let refused = refused_or_raised(NotIdle::Live(vec![live::Client {
+            pid: 4242,
+            whose: "someone@example.com's Profile".to_string(),
+        }]))
         .expect("a client that will exit is a round that decided, not a failure");
         assert!(
             matches!(&refused, Outcome::Refused { why, .. } if why.contains("pid 4242")),
@@ -2360,13 +2384,10 @@ mod tests {
         );
         assert_eq!(refused.exit_code(), EXIT_NOTHING_TO_DO);
 
-        let unreadable = refused_or_raised(
-            NotIdle::Unsure(live::Unsure::Unlistable {
-                dir: std::path::PathBuf::from("/home/someone/.claude/sessions"),
-                why: crate::host::HostError::Other("permission denied".to_string()),
-            }),
-            &installed,
-        )
+        let unreadable = refused_or_raised(NotIdle::Unsure(live::Unsure::Unlistable {
+            dir: std::path::PathBuf::from("/home/someone/.claude/sessions"),
+            why: crate::host::HostError::Other("permission denied".to_string()),
+        }))
         .expect_err("a directory nobody can read does not clear itself");
         assert_eq!(unreadable.exit_code(), crate::error::EXIT_PROBE_REFUSED);
     }

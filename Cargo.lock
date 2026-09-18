@@ -1094,6 +1094,7 @@ name = "perch"
 version = "0.3.8"
 dependencies = [
  "age",
+ "base64",
  "chrono",
  "clap",
  "junction",

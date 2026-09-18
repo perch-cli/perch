@@ -5,83 +5,36 @@
 //! (ADR the-holdings-outlive-a-perch): a Registry claiming more than this build
 //! understands is refused rather than silently misread.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Scope, Settings, UngroupedConfig};
+use crate::domain::Identity;
 use crate::error::{PerchError, Result};
 use crate::holdings;
-use crate::host::{Host, HostError};
+use crate::host::Host;
 use crate::lock;
 use crate::name::{self, NameKind, UNGROUPED, means_ungrouped, same_name};
-use crate::probe::Identity;
 
 /// The version this build writes.
 ///
 /// A Registry claiming a higher one is refused rather than silently misread, and
 /// the guard is only worth having if this moves whenever the shape does.
-pub const CURRENT_VERSION: u32 = 6;
+pub const CURRENT_VERSION: u32 = 9;
 
-/// A version is a row of name rules, so the table's length is this number: a row
-/// joining without this moving, or this moving without a row, fails the build
-/// (ADR an-invariant-gets-a-door).
-const _: () = assert!(CURRENT_VERSION as usize == crate::name::ROWS.len());
-
-/// One Quota Window's Utilization, as observed at a point in time
-/// (ADR a-figure-carries-its-age).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WindowUtilization {
-    /// The window this figure describes, e.g. `5-hour`, `7-day`, `7-day-opus`.
-    pub window: String,
-    /// How full the window is, 0-100.
-    pub used_percent: f64,
-    /// When the window next resets, if the observation carried one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resets_at: Option<DateTime<Utc>>,
-}
-
-/// Cached Utilization for one Account. What every surface renders, and what
-/// only a `--refresh` ever goes and fetches.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CachedUtilization {
-    pub observed_at: DateTime<Utc>,
-    pub windows: Vec<WindowUtilization>,
-}
-
-/// Why an Account's Credential can no longer be used and cannot be recovered
-/// from anything Perch holds (ADR a-broken-account-is-repaired).
-///
-/// Recorded rather than merely counted: every one of these is terminal, and
-/// which one it is implies the repair.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Quarantine {
-    /// Anthropic turned the refresh token down — retired, revoked, or belonging
-    /// to a login that has been ended elsewhere.
-    RenewalRejected,
-    /// Anthropic Rotated the refresh token and the new one could not be stored,
-    /// so the old one is retired and the new one is gone.
-    RotationLost,
-    /// The Credential carries no refresh token, so the access token that ran out
-    /// was the last thing it could offer.
-    NoRefreshToken,
-    /// Neither of the Profile's Credential Stores holds anything at all.
-    NoCredential,
-}
+pub use crate::domain::{CachedUtilization, Quarantine, WindowUtilization};
 
 impl Quarantine {
     /// What happened, as the middle of a sentence about the Account: "{named}
     /// is Quarantined: {because}."
     pub fn because(&self) -> &'static str {
         match self {
-            Quarantine::RenewalRejected => "Anthropic would not renew its Credential",
+            Quarantine::RenewalRejected => "the provider would not renew its Credential",
             Quarantine::RotationLost => {
-                "Anthropic Rotated its refresh token and the new one could not be stored, \
+                "the provider Rotated its refresh token and the new one could not be stored, \
                  so the one Perch holds is retired"
             }
             Quarantine::NoRefreshToken => {
@@ -91,10 +44,10 @@ impl Quarantine {
         }
     }
 
-    /// Whether getting here cost a request to Anthropic, which is what the
+    /// Whether getting here cost a request to the provider, which is what the
     /// Watcher's Back-off paces. A property of what happened rather than of why
     /// the Renewal was wanted: both reasons reach both halves of this.
-    pub fn reached_anthropic(&self) -> bool {
+    pub fn reached_provider(&self) -> bool {
         match self {
             Quarantine::RenewalRejected | Quarantine::RotationLost => true,
             Quarantine::NoRefreshToken | Quarantine::NoCredential => false,
@@ -191,6 +144,12 @@ pub fn how_to_repair_them(targets: &[impl AsRef<str>]) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Account {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_identity: Option<crate::providers::provider::AccountIdentity>,
+    #[serde(default)]
+    pub provider: crate::providers::provider::Id,
     /// Who this Account is. Its email address is also its identifier.
     pub identity: Identity,
     /// The subscription the Credential reports — `pro`, `max`, and so on. It
@@ -336,12 +295,6 @@ impl Active {
             None => Active::Nobody,
         }
     }
-
-    /// Absent from the file rather than written as a word, which is what the
-    /// Registry of a machine that has never Switched has always looked like.
-    fn is_nobody(&self) -> bool {
-        matches!(self, Active::Nobody)
-    }
 }
 
 /// No Landing is in flight, so the Registry a reader is about to ask tells the
@@ -367,13 +320,23 @@ pub fn nothing_in_flight(registry: &Registry) -> Option<Settled> {
 #[serde(deny_unknown_fields)]
 pub struct Registry {
     pub version: u32,
-    /// The active Account, or the Switch under way when this was last written.
-    ///
-    /// Private, and the only field here that is: assigning it directly is a
-    /// Switch recorded without having been written down first. Reached through
-    /// `begin_landing`, `settle` and `abandon_landing`.
-    #[serde(default, skip_serializing_if = "Active::is_nobody")]
-    active: Active,
+    #[serde(default = "crate::storage::provider_defaults")]
+    pub provider_settings:
+        BTreeMap<crate::providers::provider::Id, crate::storage::ProviderSettings>,
+    #[serde(default)]
+    pub run_provider: crate::providers::provider::Id,
+    #[serde(default = "enabled_by_default")]
+    pub run_fallback: bool,
+    #[serde(default)]
+    pub watcher_paused: bool,
+    #[serde(default)]
+    pub scope_defaults: crate::config::PolicyDefaults,
+    #[serde(default)]
+    pub next_group_id: u64,
+    #[serde(default)]
+    pub runtime: BTreeMap<crate::providers::provider::Id, ProviderState>,
+    #[serde(skip)]
+    pub(crate) selected_provider: crate::providers::provider::Id,
     #[serde(default)]
     pub accounts: Vec<Account>,
     /// Alias to Account email.
@@ -383,53 +346,84 @@ pub struct Registry {
     /// Group exists here even when it holds no Accounts: it is a statement
     /// somebody made, not a summary of where the Accounts happen to be.
     #[serde(default)]
-    pub groups: BTreeMap<String, Settings>,
+    pub groups: BTreeMap<String, crate::config::ScopeSettings>,
     /// What the Accounts in no Group hold, taken as one Scope. Not a Group and
     /// never one; here rather than under a reserved key in `groups` so that
     /// nothing can walk it as one.
     #[serde(default)]
     pub ungrouped: UngroupedConfig,
-    /// The last unasked Switch in each Scope. Written by `perch watcher run` and
-    /// `perch watcher check`, and absent from the file until one of them
-    /// Switches. Spelled `checks` because a Watcher that only ran scheduled
-    /// wrote it first, and a key is Registry shape: renaming it is a migration
-    /// rather than a rename.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+}
+
+/// Defaults and watcher timing are independent for each provider.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderState {
+    #[serde(default)]
+    active: Active,
+    #[serde(default)]
     pub checks: BTreeMap<String, Checked>,
+}
+
+impl ProviderState {
+    pub(crate) fn from_parts(active: Active, checks: BTreeMap<String, Checked>) -> Self {
+        Self { active, checks }
+    }
+}
+
+fn enabled_by_default() -> bool {
+    true
 }
 
 impl Default for Registry {
     fn default() -> Self {
         Registry {
             version: CURRENT_VERSION,
-            active: Active::Nobody,
+            provider_settings: crate::storage::provider_defaults(),
+            run_provider: crate::providers::provider::Id::Claude,
+            run_fallback: true,
+            watcher_paused: false,
+            scope_defaults: crate::config::PolicyDefaults::default(),
+            next_group_id: 0,
+            runtime: BTreeMap::new(),
+            selected_provider: crate::providers::provider::Id::default(),
             accounts: Vec::new(),
             aliases: BTreeMap::new(),
             groups: BTreeMap::new(),
             ungrouped: UngroupedConfig::default(),
-            checks: BTreeMap::new(),
         }
     }
 }
 
 impl Account {
+    pub fn profile(&self, host: &dyn Host) -> Result<crate::providers::provider::ProfileRef> {
+        Ok(crate::providers::provider::ProfileRef {
+            id: self.key().into(),
+            provider: self.provider(),
+            identity: self.identity.clone(),
+            provider_identity: self.provider_identity.clone(),
+            quarantine: self.quarantine,
+            directory: self.profile_dir(host)?,
+        })
+    }
+
+    pub fn key(&self) -> &str {
+        self.provider_identity.as_ref().map_or(
+            self.storage_key.as_deref().unwrap_or(&self.identity.email),
+            |identity| &identity.key,
+        )
+    }
+
+    pub fn provider(&self) -> crate::providers::provider::Id {
+        self.provider
+    }
+
     pub fn email(&self) -> &str {
         &self.identity.email
     }
 
-    /// The Profile this Account's Credential lives in.
-    ///
-    /// Derived from the email address the Registry already keys on rather than
-    /// recorded beside it (ADR claude-code-chooses-the-store): two statements of
-    /// one fact can disagree.
+    /// Profile paths derive from provider and Account identity, never mutable Aliases.
     pub fn profile_dir(&self, host: &dyn Host) -> Result<PathBuf> {
-        holdings::profile_dir_for(host, self.email())
-    }
-
-    /// Where the installed Claude Code would keep this Account's configuration
-    /// if it were pointed at its Profile.
-    pub fn store(&self, host: &dyn Host) -> Result<crate::probe::Store> {
-        crate::probe::store_for_profile(host, &self.profile_dir(host)?)
+        holdings::profile_dir_for(self.provider(), host, self.key())
     }
 
     /// Whether this Account is Quarantined, for the places that only need the
@@ -476,11 +470,79 @@ impl Registry {
     pub fn account(&self, email: &str) -> Option<&Account> {
         self.accounts
             .iter()
-            .find(|account| same_name(account.email(), email))
+            .find(|account| same_name(account.key(), email))
+    }
+
+    /// The provider a reading command speaks for: the one named, else the one
+    /// whose Accounts are held, else the Run preference. A default rather than
+    /// a refusal because nothing is changed by reading, and `perch status` sits
+    /// in shell prompts (ADR each-provider-has-a-default).
+    pub fn provider_spoken_for(
+        &self,
+        named: Option<crate::providers::provider::Id>,
+    ) -> crate::providers::provider::Id {
+        if let Some(named) = named {
+            return named;
+        }
+        let mut held: BTreeSet<_> = self.accounts.iter().map(Account::provider).collect();
+        match (held.pop_first(), held.is_empty()) {
+            (Some(only), true) => only,
+            _ => self.run_provider,
+        }
+    }
+
+    pub fn selected_provider(&self) -> crate::providers::provider::Id {
+        self.selected_provider
+    }
+
+    /// Selects the provider context for one command or watcher round; never serialized.
+    pub fn select_provider(&mut self, provider: crate::providers::provider::Id) {
+        self.selected_provider = provider;
+    }
+
+    pub fn state_for(&self, provider: crate::providers::provider::Id) -> &ProviderState {
+        static EMPTY: std::sync::LazyLock<ProviderState> =
+            std::sync::LazyLock::new(ProviderState::default);
+        self.runtime.get(&provider).unwrap_or(&EMPTY)
+    }
+
+    pub fn active_for(&self, provider: crate::providers::provider::Id) -> &Active {
+        &self.state_for(provider).active
+    }
+
+    pub fn state(&self) -> &ProviderState {
+        self.state_for(self.selected_provider)
+    }
+
+    pub fn state_mut(&mut self) -> &mut ProviderState {
+        self.runtime.entry(self.selected_provider).or_default()
+    }
+
+    pub fn profile_context(
+        &self,
+        host: &dyn Host,
+        account: &Account,
+    ) -> Result<crate::providers::provider::ProfileContext> {
+        use crate::providers::provider::{DefaultRelation, ProfileContext};
+        let default = match self.active_for(account.provider()) {
+            Active::Settled(key) if same_name(key, account.key()) => DefaultRelation::Active,
+            Active::Landing { arriving, .. } if same_name(arriving, account.key()) => {
+                DefaultRelation::Arriving
+            }
+            Active::Landing {
+                leaving: Some(key), ..
+            } if same_name(key, account.key()) => DefaultRelation::Leaving,
+            _ => DefaultRelation::Parked,
+        };
+        Ok(ProfileContext {
+            profile: account.profile(host)?,
+            default,
+            shared_with: sharing_a_profile_with(self, account).map(|peer| peer.key().into()),
+        })
     }
 
     pub fn active_account(&self, _settled: &Settled) -> Option<&Account> {
-        self.active.whose().and_then(|email| self.account(email))
+        self.active().whose().and_then(|email| self.account(email))
     }
 
     /// Which Account is active, or the Switch that was in flight when this was
@@ -488,7 +550,7 @@ impl Registry {
     ///
     /// Reading is nobody's to get wrong. Writing is three named transitions.
     pub fn active(&self) -> &Active {
-        &self.active
+        &self.state().active
     }
 
     /// Writes down that a Switch is about to move the live Credential, naming
@@ -498,7 +560,7 @@ impl Registry {
     /// it means anything — see [`Registry::abandon_landing`].
     pub fn begin_landing(&mut self, leaving: Option<String>, arriving: &str) -> Active {
         std::mem::replace(
-            &mut self.active,
+            &mut self.state_mut().active,
             Active::Landing {
                 leaving,
                 arriving: arriving.to_string(),
@@ -512,7 +574,7 @@ impl Registry {
     /// Not [`Registry::settle`]: this Landing never existed anywhere but in
     /// memory, and nothing has moved.
     pub fn abandon_landing(&mut self, before: Active) {
-        self.active = before;
+        self.state_mut().active = before;
     }
 
     /// Records who is active now that a Switch is over. `None` is a machine on
@@ -521,7 +583,7 @@ impl Registry {
     /// An address rather than an [`Active`], which is what makes "settled" true
     /// of what it leaves: handed the enum it would accept a Landing.
     pub fn settle(&mut self, on: Option<String>) -> Settled {
-        self.active = Active::settled_on(on);
+        self.state_mut().active = Active::settled_on(on);
         Settled(())
     }
 
@@ -531,7 +593,7 @@ impl Registry {
     /// `upsert` stores the incoming spelling, so an Identity re-read with
     /// different capitalization would leave an exact `==` answering wrongly.
     pub fn is_active(&self, _settled: &Settled, email: &str) -> bool {
-        self.active.is_active(email)
+        self.active().is_active(email)
     }
 
     /// Every Group name in use. A Group an Account claims is always declared
@@ -545,7 +607,7 @@ impl Registry {
     ///
     /// Through [`declared_group`](Self::declared_group), because that is how
     /// every other question about a Group name is answered here.
-    pub fn group(&self, name: &str) -> Option<&Settings> {
+    pub fn group(&self, name: &str) -> Option<&crate::config::ScopeSettings> {
         self.groups.get(self.declared_group(name)?)
     }
 
@@ -562,24 +624,51 @@ impl Registry {
 
     /// The Settings a Scope holds.
     ///
-    /// A lookup rather than a cascade: there is no chain. A Group Perch does not
-    /// hold is not a Scope, and answers with the compiled-in defaults.
+    /// Resolved for the selected provider through the configured policy cascade.
     pub fn settings(&self, scope: &Scope) -> Settings {
+        self.resolved_policy(scope, self.selected_provider).settings
+    }
+
+    pub fn resolved_policy(
+        &self,
+        scope: &Scope,
+        provider: crate::providers::provider::Id,
+    ) -> crate::config::ResolvedPolicy {
+        let empty = crate::config::ScopeSettings::default();
+        let configured = match scope {
+            Scope::Ungrouped => &self.ungrouped.settings,
+            Scope::Group(name) => self.group(name).unwrap_or(&empty),
+        };
+        configured.resolve(&self.scope_defaults, provider)
+    }
+
+    pub fn scope_settings(&self, scope: &Scope) -> Option<&crate::config::ScopeSettings> {
         match scope {
-            Scope::Ungrouped => self.ungrouped.settings,
-            Scope::Group(name) => self.group(name).copied().unwrap_or_default(),
+            Scope::Ungrouped => Some(&self.ungrouped.settings),
+            Scope::Group(name) => self.group(name),
         }
     }
 
-    /// The same, to write through. A Group Perch does not hold has nothing to
-    /// write to: declaring one is `declare_group`'s.
-    pub fn settings_mut(&mut self, scope: &Scope) -> Option<&mut Settings> {
+    pub fn scope_settings_mut(
+        &mut self,
+        scope: &Scope,
+    ) -> Option<&mut crate::config::ScopeSettings> {
         match scope {
             Scope::Ungrouped => Some(&mut self.ungrouped.settings),
             Scope::Group(name) => {
                 let declared = self.declared_group(name)?.to_string();
                 self.groups.get_mut(&declared)
             }
+        }
+    }
+
+    pub fn scope_id(&self, name: &str) -> String {
+        if name::means_the_ungrouped_scope(name) {
+            return "ungrouped".into();
+        }
+        match self.group(name) {
+            Some(scope) if !scope.id.is_empty() => scope.id.clone(),
+            _ => format!("named:{}", name::folded(name)),
         }
     }
 
@@ -635,7 +724,23 @@ impl Registry {
         })?;
         // At the compiled-in defaults, which is what every Setting means until
         // somebody says otherwise about this Group.
-        self.groups.insert(name.to_string(), Settings::default());
+        let id = loop {
+            self.next_group_id = self
+                .next_group_id
+                .checked_add(1)
+                .ok_or_else(|| PerchError::Invalid("Group identity space is exhausted".into()))?;
+            let candidate = format!("g{}", self.next_group_id);
+            if !self.groups.values().any(|group| group.id == candidate) {
+                break candidate;
+            }
+        };
+        self.groups.insert(
+            name.to_string(),
+            crate::config::ScopeSettings {
+                id,
+                ..Default::default()
+            },
+        );
         Ok(())
     }
 
@@ -667,6 +772,7 @@ impl Registry {
                     NameKind::Alias => {
                         if !renaming_itself && let Some((held, target)) = self.declared_alias(name)
                         {
+                            let target = self.named_for_the_user(target);
                             return Err(PerchError::Conflict(format!(
                                 "`{held}` already names {target}. Free it with \
                                  `perch alias {held} --unset` first."
@@ -725,7 +831,8 @@ impl Registry {
     fn refuse_an_alias_of_this_name(&self, name: &str) -> Result<()> {
         match self.declared_alias(name) {
             Some((held, target)) => Err(PerchError::Conflict(format!(
-                "`{held}` is already an Alias for {target}, and a name cannot be both."
+                "`{held}` is already an Alias for {}, and a name cannot be both.",
+                self.named_for_the_user(target)
             ))),
             None => Ok(()),
         }
@@ -753,7 +860,9 @@ impl Registry {
 
         // `declared` is one of this map's own keys, `declared_group` having
         // just read it out — so the refusal above is the only one there is.
-        let settings = self.groups.remove(&declared).unwrap_or_default();
+        let identity = self.scope_id(&declared);
+        let mut settings = self.groups.remove(&declared).unwrap_or_default();
+        settings.id = identity;
         self.groups.insert(to.to_string(), settings);
         for account in &mut self.accounts {
             if account
@@ -764,8 +873,10 @@ impl Registry {
                 account.group = Some(to.to_string());
             }
         }
-        if let Some(checked) = self.checks.remove(&declared) {
-            self.checks.insert(to.to_string(), checked);
+        for state in self.runtime.values_mut() {
+            if let Some(checked) = state.checks.remove(&declared) {
+                state.checks.insert(to.to_string(), checked);
+            }
         }
         Ok(())
     }
@@ -793,12 +904,15 @@ impl Registry {
             return;
         };
         self.groups.remove(&declared);
-        self.checks.remove(&declared);
+        for state in self.runtime.values_mut() {
+            state.checks.remove(&declared);
+        }
     }
 
     /// The last unasked Switch within a Scope, if one has happened there.
     pub fn checked(&self, group: &str) -> Option<&Checked> {
-        self.checks
+        self.state()
+            .checks
             .iter()
             .find(|(declared, _)| same_name(declared, group))
             .map(|(_, checked)| checked)
@@ -810,13 +924,15 @@ impl Registry {
     /// it in another case does not leave a second record pacing nothing.
     pub fn record_switch(&mut self, group: &str, at: DateTime<Utc>) {
         let under = self.declared_group(group).unwrap_or(group).to_string();
-        self.checks.insert(under, Checked { switched_at: at });
+        self.state_mut()
+            .checks
+            .insert(under, Checked { switched_at: at });
     }
 
     pub fn account_mut(&mut self, email: &str) -> Option<&mut Account> {
         self.accounts
             .iter_mut()
-            .find(|account| same_name(account.email(), email))
+            .find(|account| same_name(account.key(), email))
     }
 
     /// The same, where the Account has to be there.
@@ -844,6 +960,29 @@ impl Registry {
             .map(|(alias, _)| alias.as_str())
     }
 
+    /// The shortest Target that names this Account alone: its Alias, else its
+    /// email where no other Account shares it, else its key. Two Accounts may
+    /// share an email across providers, and then the email is no Target.
+    pub fn target_of<'a>(&'a self, key: &'a str) -> &'a str {
+        if let Some(alias) = self.alias_of(key) {
+            return alias;
+        }
+        let Some(account) = self.account(key) else {
+            return key;
+        };
+        let shared = self
+            .accounts
+            .iter()
+            .filter(|other| same_name(other.email(), account.email()))
+            .count()
+            > 1;
+        if shared {
+            account.key()
+        } else {
+            account.email()
+        }
+    }
+
     /// Every Account's Alias at once, for a caller asking about more than one.
     ///
     /// [`Registry::alias_of`] scans, the map being keyed by Alias rather than by
@@ -859,11 +998,38 @@ impl Registry {
     }
 
     /// An Account as the user names it: by its Alias when it has one, so a
-    /// message about it reads the way they would say it.
+    /// message about it reads the way they would say it. The provider and
+    /// Workspace are added only where another Account shares the email, since
+    /// two Accounts may hold one address across providers.
     pub fn named_for_the_user(&self, email: &str) -> String {
+        let display = self.account(email).map_or_else(
+            || email.to_string(),
+            |account| {
+                let shared = self
+                    .accounts
+                    .iter()
+                    .filter(|other| same_name(other.email(), account.email()))
+                    .count()
+                    > 1;
+                match &account.provider_identity {
+                    Some(identity) if shared && identity.workspace_id.is_some() => format!(
+                        "{} ({}, Workspace {})",
+                        account.email(),
+                        account.provider().adapter().name(),
+                        identity.workspace_id.as_deref().unwrap()
+                    ),
+                    Some(_) if shared => format!(
+                        "{} ({})",
+                        account.email(),
+                        account.provider().adapter().name()
+                    ),
+                    _ => account.email().to_string(),
+                }
+            },
+        );
         match self.alias_of(email) {
-            Some(alias) => format!("{email} (as `{alias}`)"),
-            None => email.to_string(),
+            Some(alias) => format!("{display} (as `{alias}`)"),
+            None => display,
         }
     }
 
@@ -894,7 +1060,7 @@ impl Registry {
         // the Alias at a string no `accounts` entry has.
         let held = self
             .account(email)
-            .map_or_else(|| email.to_string(), |account| account.email().to_string());
+            .map_or_else(|| email.to_string(), |account| account.key().to_string());
         self.aliases.retain(|_, named| !same_name(named, email));
         self.aliases.insert(alias.to_string(), held);
         Ok(previous)
@@ -937,26 +1103,35 @@ impl Registry {
     /// can still be named.
     pub fn forget(&mut self, email: &str) {
         self.accounts
-            .retain(|account| !same_name(account.email(), email));
+            .retain(|account| !same_name(account.key(), email));
         self.aliases.retain(|_, named| !same_name(named, email));
         // Either half of a Landing, and it comes back to whichever half is
         // still held: a Landing naming an Account Perch no longer holds is a
         // dangling pointer `load` refuses. Through `settle`, like every writer.
-        if self.active.names(email) {
-            let comes_back_to = self
-                .active
-                .whose()
-                .filter(|whose| !same_name(whose, email))
-                .map(str::to_string);
-            self.settle(comes_back_to);
+        for state in self.runtime.values_mut() {
+            if state.active.names(email) {
+                let remaining = state
+                    .active
+                    .whose()
+                    .filter(|key| !same_name(key, email))
+                    .map(str::to_string);
+                state.active = Active::settled_on(remaining);
+            }
         }
     }
 
-    pub fn upsert(&mut self, account: Account) {
+    pub fn upsert(&mut self, mut account: Account) {
+        if account.provider_identity.is_none() {
+            let key = self
+                .account(account.key())
+                .map(|held| held.key().to_string())
+                .unwrap_or_else(|| account.key().to_string());
+            account.storage_key = Some(key);
+        }
         match self
             .accounts
             .iter_mut()
-            .find(|existing| same_name(existing.email(), account.email()))
+            .find(|existing| same_name(existing.key(), account.key()))
         {
             Some(existing) => *existing = account,
             None => self.accounts.push(account),
@@ -987,8 +1162,12 @@ impl Sharers {
             std::collections::HashSet::with_capacity(registry.accounts.len());
         let mut twice = std::collections::HashSet::new();
         let mut slugged = String::new();
-        for account in &registry.accounts {
-            holdings::slug_into(&mut slugged, account.email());
+        for account in registry
+            .accounts
+            .iter()
+            .filter(|account| account.provider_identity.is_none())
+        {
+            holdings::slug_into(&mut slugged, account.key());
             if !once.insert(slugged.clone()) {
                 twice.insert(slugged.clone());
             }
@@ -1014,11 +1193,11 @@ pub fn sharing_a_profile_with<'a>(
     // Slugged once rather than once per comparison, and the other side into a
     // buffer this scan keeps: `is_a_candidate` asks this of every Account and
     // is itself asked of every one, so an allocation here is paid n² times.
-    let mine = holdings::slug(account.email());
+    let mine = holdings::slug(account.key());
     let mut theirs = String::with_capacity(mine.len());
     registry.accounts.iter().find(|held| {
-        !same_name(held.email(), account.email()) && {
-            holdings::slug_into(&mut theirs, held.email());
+        held.provider() == account.provider() && !same_name(held.key(), account.key()) && {
+            holdings::slug_into(&mut theirs, held.key());
             theirs == mine
         }
     })
@@ -1026,84 +1205,7 @@ pub fn sharing_a_profile_with<'a>(
 
 /// Reads the Registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
-    let path = &holdings::registry_path(host)?;
-    let contents = match host.read_file(path) {
-        Ok(contents) => contents,
-        Err(HostError::NotFound { .. }) => return Ok(None),
-        Err(err) => {
-            return Err(PerchError::Other(format!(
-                "could not read {}: {err}",
-                path.display()
-            )));
-        }
-    };
-
-    // The version first, off a shape that is only the version. A newer Perch is
-    // exactly the thing that writes a value this build has no variant for, and
-    // reading the document first fails on that with serde's own words.
-    let claimed = crate::error::claimed_version(&contents);
-    match claimed {
-        Some(version) if version > u64::from(CURRENT_VERSION) => {
-            return Err(crate::error::written_by_a_newer_perch(
-                &path.display().to_string(),
-                "registry",
-                version,
-                CURRENT_VERSION,
-            ));
-        }
-        Some(version) if version < u64::from(crate::migration::EARLIEST_VERSION) => {
-            return Err(no_perch_wrote(path, Some(version)));
-        }
-        None if crate::migration::says_no_version(&contents) => {
-            return Err(no_perch_wrote(path, None));
-        }
-        _ => {}
-    }
-
-    // In memory here and written back by `migration::bring_forward`, because
-    // every path that writes holds the lock before it reads. Decorated as every
-    // other refusal here is: a step that names a field names no file otherwise.
-    let forwarded = crate::migration::forward_from(&contents, claimed)
-        .map_err(|refused| refused.with_note(&the_file_to_edit(path)))?;
-
-    // Strictly, so a key nobody recognizes is a refusal naming it rather than a
-    // value that quietly did nothing. Every type here is Perch's own — Claude
-    // Code's `.claude.json` is read through `probe`'s lenient shapes instead.
-    let registry: Registry = serde_json::from_str(forwarded.as_deref().unwrap_or(&contents))
-        .map_err(|err| {
-            PerchError::Malformed {
-                path: path.display().to_string(),
-                detail: err.to_string(),
-            }
-            .with_note(&the_file_to_edit(path))
-        })?;
-
-    let registry =
-        readable(registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
-
-    Ok(Some(registry))
-}
-
-/// The refusal for a Registry claiming a version no Perch has stamped, or none
-/// (ADR a-registry-comes-forward).
-///
-/// Neither names a shape, and a document whose shape is unstated half-parses
-/// rather than refusing.
-fn no_perch_wrote(path: &Path, claimed: Option<u64>) -> PerchError {
-    // Without the path, which `Malformed` has already said.
-    let what = match claimed {
-        Some(version) => format!("it is registry version {version}, which no Perch has written."),
-        None => "it does not say which registry version it is.".to_string(),
-    };
-    PerchError::Malformed {
-        path: path.display().to_string(),
-        detail: what,
-    }
-    .with_note(&format!(
-        "This Perch reads versions {} through {CURRENT_VERSION}. {}",
-        crate::migration::EARLIEST_VERSION,
-        the_file_to_edit(path),
-    ))
+    crate::storage::load(host)
 }
 
 /// Where to put right something only a hand edit could have put wrong.
@@ -1132,10 +1234,102 @@ fn no_such_account(email: &str) -> PerchError {
 /// that reads them is a loop nobody is watching. Public because an Import writes
 /// a Registry without reading one, and what it accepts must not differ.
 pub fn validate(registry: &Registry) -> Result<()> {
+    use crate::providers::provider::OptionScope;
+    for (provider, settings) in &registry.provider_settings {
+        provider
+            .adapter()
+            .validate_options(&settings.options, OptionScope::Installation)?;
+    }
+    for settings in registry
+        .groups
+        .values()
+        .chain(std::iter::once(&registry.ungrouped.settings))
+    {
+        for (provider, local) in &settings.providers {
+            provider
+                .adapter()
+                .validate_options(&local.options, OptionScope::Policy)?;
+        }
+    }
+
+    let mut group_ids = std::collections::BTreeSet::new();
+    for name in registry.groups.keys() {
+        let id = registry.scope_id(name);
+        if id == "ungrouped" || !group_ids.insert(id) {
+            return Err(PerchError::Invalid(
+                "Group identities must be unique and cannot identify the Ungrouped Scope".into(),
+            ));
+        }
+    }
+
+    for account in &registry.accounts {
+        if let Some(identity) = &account.provider_identity {
+            identity.validate(account.provider())?;
+            if account.identity.account_uuid.as_deref() != Some(identity.user_id.as_str())
+                || account.identity.organization_uuid.as_deref() != identity.workspace_id.as_deref()
+            {
+                return Err(PerchError::Invalid(
+                    "Account description disagrees with its provider identity".into(),
+                ));
+            }
+        }
+    }
+    for (provider, state) in &registry.runtime {
+        let keys: Vec<&str> = match &state.active {
+            Active::Nobody => Vec::new(),
+            Active::Settled(key) => vec![key],
+            Active::Landing { leaving, arriving } => leaving
+                .iter()
+                .map(String::as_str)
+                .chain(std::iter::once(arriving.as_str()))
+                .collect(),
+        };
+        for key in keys {
+            let role = match &state.active {
+                Active::Landing { arriving, .. } if name::same_name(key, arriving) => {
+                    format!("a Switch to {key} was under way")
+                }
+                Active::Landing { .. } => format!("a Switch away from {key} was under way"),
+                _ => format!("names {key} in {}'s active state", provider.word()),
+            };
+            refuse_a_dangling_pointer(registry, key, &role)?;
+            if registry.held(key)?.provider() != *provider {
+                return Err(PerchError::Invalid(format!(
+                    "{}'s active state names an Account from another provider",
+                    provider.word()
+                )));
+            }
+        }
+        for named in state.checks.keys() {
+            if !same_name(named, UNGROUPED) && registry.declared_group(named).is_none() {
+                return Err(PerchError::Invalid(format!(
+                    "The Registry records a Check against `{named}`, which is not a Group \
+                     Perch holds."
+                )));
+            }
+        }
+        if let Some((a, b)) = first_collision(state.checks.keys().map(String::as_str)) {
+            return Err(PerchError::Invalid(format!(
+                "The Registry records a Check against `{a}` and one against `{b}`, \
+                 which are one Group."
+            )));
+        }
+    }
+
     // Every Scope, and every Scope is all of them: with no layer above, one
     // walk over the Scopes is the whole of the check.
-    for scope in registry.scopes() {
-        registry.settings(&scope).validate(&scope)?;
+    let empty = crate::config::ScopeSettings::default();
+    for provider in crate::providers::provider::catalog() {
+        empty
+            .resolve(&registry.scope_defaults, provider.id())
+            .settings
+            .validate(&Scope::Ungrouped)?;
+        for scope in registry.scopes() {
+            registry
+                .resolved_policy(&scope, provider.id())
+                .settings
+                .validate(&scope)?;
+        }
     }
 
     // The Group *names* an Account claims, the declared Groups, and the Aliases
@@ -1161,7 +1355,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
     let held: std::collections::HashSet<String> = registry
         .accounts
         .iter()
-        .map(|account| name::folded(account.email()))
+        .map(|account| name::folded(account.key()))
         .collect();
     let mut named: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
     for (alias, email) in &registry.aliases {
@@ -1181,41 +1375,15 @@ pub fn validate(registry: &Registry) -> Result<()> {
         }
     }
 
-    // The other pointer into the Accounts, and both ends of a Landing, because
-    // resolving one reads the Credential of the other. Holding nothing is a
-    // state and not a fault.
-    match &registry.active {
-        Active::Nobody => {}
-        Active::Settled(active) => refuse_a_dangling_pointer(
-            registry,
-            active,
-            &format!("says {active} is the active Account"),
-        )?,
-        Active::Landing { leaving, arriving } => {
-            if let Some(leaving) = leaving {
-                refuse_a_dangling_pointer(
-                    registry,
-                    leaving,
-                    &format!("says a Switch away from {leaving} was under way"),
-                )?;
-            }
-            refuse_a_dangling_pointer(
-                registry,
-                arriving,
-                &format!("says a Switch to {arriving} was under way"),
-            )?;
-        }
-    }
-
     // The third member of the namespace. `name::validate` keeps an Alias and a
     // Group name tellable from an address, no `@` being an identifier
     // character; the mirror rule, that an address looks like one, is this.
     for account in &registry.accounts {
-        if !account.email().contains('@') {
+        if account.provider_identity.is_none() && !account.key().contains('@') {
             return Err(PerchError::Invalid(format!(
                 "The Registry holds an Account called `{}`, which is not an \
                  address.",
-                account.email(),
+                account.key(),
             )));
         }
         // Nothing here about a character a terminal would act on. An address is
@@ -1226,33 +1394,10 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // One entry per Account. `upsert` replaces the matching entry, so two for
     // one address is a hand edit — after which `account` acts on the first,
     // `perch list` renders two rows, and a Cycle counts it twice.
-    if let Some((already, again)) = first_collision(registry.accounts.iter().map(Account::email)) {
+    if let Some((already, again)) = first_collision(registry.accounts.iter().map(Account::key)) {
         return Err(PerchError::Invalid(format!(
             "The Registry holds two Accounts spelled `{already}` and `{again}`, \
              which are one Account."
-        )));
-    }
-
-    // What `checks` is keyed on, the one pointer into the Group namespace with no
-    // rule of its own: `record_switch` keeps the name it was handed when it cannot
-    // resolve one, and `forget_group` only clears what it can.
-    for named in registry.checks.keys() {
-        if same_name(named, UNGROUPED) || registry.declared_group(named).is_some() {
-            continue;
-        }
-        return Err(PerchError::Invalid(format!(
-            "The Registry records a Check against `{named}`, which is not a Group \
-             Perch holds."
-        )));
-    }
-
-    // `checked` answers with the first match in `BTreeMap` order and
-    // `record_switch` writes under the declared spelling, so two keys that fold
-    // to one pace the next Check off a record nothing is keeping.
-    if let Some((already, name)) = first_collision(registry.checks.keys().map(String::as_str)) {
-        return Err(PerchError::Invalid(format!(
-            "The Registry records a Check against `{already}` and one against \
-             `{name}`, which are one Group."
         )));
     }
 
@@ -1273,7 +1418,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
                     "The Registry says {} is {}% through its {} window.\n\
                      Delete the Account's `utilization`, and `perch status \
                      --refresh` reads it again.",
-                    account.email(),
+                    account.key(),
                     window.used_percent,
                     window.window,
                 )));
@@ -1399,7 +1544,9 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
             }
             Some(_) => {}
             None => {
-                registry.groups.insert(name, Settings::default());
+                registry
+                    .groups
+                    .insert(name, crate::config::ScopeSettings::default());
             }
         }
     }
@@ -1410,30 +1557,33 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
 /// key and the two mutators remove it exactly, so a key differing only in case
 /// outlives its Group and leaves `validate` refusing what `save` just built.
 fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Registry {
-    let keyed: Vec<String> = registry.checks.keys().cloned().collect();
-    for name in keyed {
-        // The Ungrouped Scope has no declaration to be brought to, so it is
-        // brought to the constant `record_switch` writes. Without this the key is
-        // the only one in the map that can outlive its own spelling.
-        let declared = match means_ungrouped(&name) {
-            true => Some(UNGROUPED.to_string()),
-            false => registry.declared_group(&name).map(str::to_string),
-        };
-        let Some(declared) = declared else {
-            continue;
-        };
-        if declared == name {
-            continue;
-        }
-        if let Some(checked) = registry.checks.remove(&name) {
-            // The later of the two, where both spellings carry a record: byte
-            // order would otherwise decide, and the older one winning is a
-            // Check free to Switch inside a Cooldown still running.
-            let later = match registry.checks.get(&declared) {
-                Some(held) if held.switched_at > checked.switched_at => held.clone(),
-                _ => checked,
+    let groups: Vec<String> = registry.groups.keys().cloned().collect();
+    for state in registry.runtime.values_mut() {
+        let keyed: Vec<String> = state.checks.keys().cloned().collect();
+        for name in keyed {
+            // The Ungrouped Scope has no declaration to be brought to, so it is
+            // brought to the constant `record_switch` writes. Without this the key is
+            // the only one in the map that can outlive its own spelling.
+            let declared = match means_ungrouped(&name) {
+                true => Some(UNGROUPED.to_string()),
+                false => groups.iter().find(|group| same_name(group, &name)).cloned(),
             };
-            registry.checks.insert(declared, later);
+            let Some(declared) = declared else {
+                continue;
+            };
+            if declared == name {
+                continue;
+            }
+            if let Some(checked) = state.checks.remove(&name) {
+                // The later of the two, where both spellings carry a record: byte
+                // order would otherwise decide, and the older one winning is a
+                // Check free to Switch inside a Cooldown still running.
+                let later = match state.checks.get(&declared) {
+                    Some(held) if held.switched_at > checked.switched_at => held.clone(),
+                    _ => checked,
+                };
+                state.checks.insert(declared, later);
+            }
         }
     }
     registry
@@ -1464,28 +1614,8 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry
         PerchError::Other(format!("{invalid}\n{}", crate::report::this_is_a_bug(),))
     })?;
 
-    let path = holdings::registry_path(host)?;
-    // In place, so the caller's field cannot disagree with the file — and because
-    // cloning the Holdings to set one `u32` is a deep copy of every Account and
-    // its figures per write, which a Watcher pays every round.
     registry.version = CURRENT_VERSION;
-    // Pushed rather than `format!`ed onto, for the reason the line above is in
-    // place: a second full copy of the Holdings is a copy a Watcher pays for
-    // every round.
-    let mut body = serde_json::to_string_pretty(&*registry)
-        .map_err(|err| PerchError::Other(format!("could not serialize the Registry: {err}")))?;
-    body.push('\n');
-    write(host, &path, &body)
-}
-
-/// Replaces the Registry in one step, or not at all, and for its owner alone.
-///
-/// One step because every command reads this file first, and a crash mid-write
-/// would leave it half written for good. Its owner alone because it holds no
-/// Credential and everything else about every Account.
-fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
-    host.write_private_file(path, contents)
-        .map_err(|err| PerchError::file_write(path, err))
+    crate::storage::save(host, perch, registry)
 }
 
 /// Why there is no active Account, in the terms the way out depends on: holding
@@ -1494,16 +1624,31 @@ fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
 /// command wanted an active Account for. One function, because two commands meet
 /// this state and only one of them told the difference.
 pub fn no_active_account(registry: &Registry, because: &str) -> PerchError {
+    // Of the selected provider alone: the Accounts of the other are the ones a
+    // Switch under this selection refuses.
+    let provider = registry.selected_provider();
+    let held = registry
+        .accounts
+        .iter()
+        .filter(|account| account.provider() == provider)
+        .count();
     if registry.accounts.is_empty() {
         return PerchError::NotFound(format!(
-            "Perch holds no Accounts{because}. Run `claude` and log in, then run \
-             Perch again."
+            "Perch holds no Accounts{because}. To log in, run `perch add --claude` or \
+             `perch add --codex`."
+        ));
+    }
+    if held == 0 {
+        return PerchError::NotFound(format!(
+            "Perch holds no {} Accounts{because}. To log in, run `perch add --{}`.",
+            provider.adapter().name(),
+            provider.word(),
         ));
     }
     PerchError::NotFound(format!(
         "Perch holds no active Account{because}. `perch switch <target>` makes \
          {} active.",
-        match registry.accounts.len() {
+        match held {
             1 => "the one it holds".to_string(),
             held => format!("one of the {held} it holds"),
         }
@@ -1543,7 +1688,17 @@ mod tests {
         let empty = Registry::default();
         let said = no_active_account(&empty, "").to_string();
         assert!(said.contains("no Accounts"), "{said}");
-        assert!(said.contains("`claude`"), "{said}");
+        assert!(
+            said.contains("`perch add --claude`") && said.contains("`perch add --codex`"),
+            "{said}"
+        );
+
+        let mut other = Registry::default();
+        other.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
+        other.select_provider(crate::providers::provider::Id::Codex);
+        let said = no_active_account(&other, "").to_string();
+        assert!(said.contains("no Codex Accounts"), "{said}");
+        assert!(said.contains("`perch add --codex`"), "{said}");
 
         let mut held = Registry::default();
         held.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
@@ -1551,7 +1706,7 @@ mod tests {
         assert!(said.contains("no Group to Cycle within"), "{said}");
         assert!(said.contains("the one it holds"), "{said}");
         assert!(
-            !said.contains("`claude`"),
+            !said.contains("`perch add"),
             "a login repairs nothing here: {said}"
         );
     }
@@ -1560,6 +1715,9 @@ mod tests {
     fn an_account_is_found_however_its_address_is_capitalized() {
         let mut registry = Registry::default();
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "café@example.com".into(),
                 account_uuid: None,
@@ -1599,6 +1757,9 @@ mod tests {
         let mut registry = Registry::default();
         for email in ["one@example.com", "two@example.com"] {
             registry.upsert(Account {
+                storage_key: None,
+                provider: crate::providers::provider::Id::Claude,
+                provider_identity: None,
                 identity: Identity {
                     email: email.into(),
                     account_uuid: None,
@@ -1679,7 +1840,13 @@ mod tests {
     #[test]
     fn an_active_pointer_naming_nothing_is_refused_like_a_dangling_alias() {
         let mut registry = Registry {
-            active: Active::Settled("nobody@example.com".to_string()),
+            runtime: BTreeMap::from([(
+                crate::providers::provider::Id::default(),
+                ProviderState {
+                    active: Active::Settled("nobody@example.com".to_string()),
+                    ..ProviderState::default()
+                },
+            )]),
             ..Default::default()
         };
 
@@ -1689,7 +1856,7 @@ mod tests {
             "{refused}"
         );
 
-        registry.active = Active::Nobody;
+        registry.state_mut().active = Active::Nobody;
         validate(&registry).expect("holding nothing is a state rather than a fault");
     }
 
@@ -1698,6 +1865,9 @@ mod tests {
         let held = "someone@example.com";
         let mut registry = Registry::default();
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: held.to_string(),
                 account_uuid: None,
@@ -1731,7 +1901,7 @@ mod tests {
                 "a Switch away from nobody@example.com was under way",
             ),
         ] {
-            registry.active = active;
+            registry.state_mut().active = active;
 
             let refused = validate(&registry).expect_err("it names an Account Perch does not hold");
 
@@ -1744,7 +1914,7 @@ mod tests {
 
         // A Landing naming Accounts Perch does hold is a state, not a fault: it
         // is what every interrupted Switch leaves, and the next one resolves it.
-        registry.active = Active::Landing {
+        registry.state_mut().active = Active::Landing {
             leaving: None,
             arriving: held.to_string(),
         };
@@ -1759,6 +1929,9 @@ mod tests {
         fn held() -> Registry {
             let mut registry = Registry::default();
             registry.upsert(Account {
+                storage_key: None,
+                provider: crate::providers::provider::Id::Claude,
+                provider_identity: None,
                 identity: Identity {
                     email: "someone@example.com".into(),
                     account_uuid: None,
@@ -1892,7 +2065,7 @@ mod tests {
             .insert("work".to_string(), "someone@example.com".to_string());
         registry
             .groups
-            .insert("Work".to_string(), Settings::default());
+            .insert("Work".to_string(), Settings::default().into());
 
         let refused = registry
             .refuse(Claim::Naming {
@@ -1979,7 +2152,13 @@ mod tests {
         let before = load(&host).expect("it reads").expect("they wrote one");
 
         let mut stale = Registry {
-            active: Active::Settled("someone@example.com".into()),
+            runtime: BTreeMap::from([(
+                crate::providers::provider::Id::default(),
+                ProviderState {
+                    active: Active::Settled("someone@example.com".into()),
+                    ..ProviderState::default()
+                },
+            )]),
             ..Registry::default()
         };
         let refused =
@@ -1999,7 +2178,7 @@ mod tests {
     #[test]
     fn a_check_against_a_group_nothing_declares_is_not_a_registry() {
         let mut registry = Registry::default();
-        registry.checks.insert(
+        registry.state_mut().checks.insert(
             "a-group-nobody-declared".to_string(),
             Checked {
                 switched_at: Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
@@ -2014,8 +2193,8 @@ mod tests {
 
         // The Ungrouped Scope keeps one and is not a Group, which is why the
         // fallback that produces these entries exists at all.
-        registry.checks.clear();
-        registry.checks.insert(
+        registry.state_mut().checks.clear();
+        registry.state_mut().checks.insert(
             UNGROUPED.to_string(),
             Checked {
                 switched_at: Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
@@ -2034,9 +2213,10 @@ mod tests {
         let mut registry = Registry::default();
         registry
             .groups
-            .insert("work".to_string(), Settings::default());
+            .insert("work".to_string(), Settings::default().into());
         for spelling in ["Work", "work"] {
             registry
+                .state_mut()
                 .checks
                 .insert(spelling.to_string(), Checked { switched_at: at });
         }
@@ -2059,21 +2239,26 @@ mod tests {
         let mut registry = Registry::default();
         registry
             .groups
-            .insert("work".to_string(), Settings::default());
+            .insert("work".to_string(), Settings::default().into());
         registry
+            .state_mut()
             .checks
             .insert("Work".to_string(), Checked { switched_at: at });
 
         let mut registry = readable(registry).expect("one Group, one Check");
         assert_eq!(
-            registry.checks.keys().collect::<Vec<_>>(),
+            registry.state().checks.keys().collect::<Vec<_>>(),
             vec!["work"],
             "the Check is filed under the spelling the Group was declared under"
         );
 
         registry.forget_group("work");
         validate(&registry).expect("and it goes when the Group it paces goes");
-        assert!(registry.checks.is_empty(), "{:?}", registry.checks);
+        assert!(
+            registry.state().checks.is_empty(),
+            "{:?}",
+            registry.state().checks
+        );
     }
 
     /// The order is the whole of the contract: `validate` asks `declared_group`
@@ -2086,6 +2271,9 @@ mod tests {
         // A Group an Account claims and nothing declared, which is the shape
         // `with_every_claimed_group_declared` exists to repair.
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "someone@example.com".into(),
                 account_uuid: None,
@@ -2099,6 +2287,7 @@ mod tests {
             utilization: None,
         });
         registry
+            .state_mut()
             .checks
             .insert("work".to_string(), Checked { switched_at: at });
 
@@ -2116,11 +2305,12 @@ mod tests {
         let mut registry = Registry::default();
         registry
             .groups
-            .insert("work".to_string(), Settings::default());
+            .insert("work".to_string(), Settings::default().into());
         registry
+            .state_mut()
             .checks
             .insert("Work".to_string(), Checked { switched_at: noon });
-        registry.checks.insert(
+        registry.state_mut().checks.insert(
             "work".to_string(),
             Checked {
                 switched_at: january,
@@ -2140,7 +2330,10 @@ mod tests {
     fn an_alias_points_at_the_address_as_the_registry_holds_it() {
         let mut registry = Registry::default();
         registry.upsert(Account {
-            identity: crate::probe::Identity {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: crate::domain::Identity {
                 email: "café@example.com".to_string(),
                 account_uuid: None,
                 organization_name: None,
@@ -2165,51 +2358,8 @@ mod tests {
     }
 
     #[test]
-    fn a_key_the_registry_does_not_know_is_refused_rather_than_ignored() {
-        let path = "/Users/someone/.config/perch/registry.json";
-        for (written, key) in [
-            (
-                format!(
-                    "{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"groups\":\
-                     {{\"work\":{{\"watcher_treshold_percent\":50}}}}}}"
-                ),
-                "watcher_treshold_percent",
-            ),
-            (
-                format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"aliasses\":{{}}}}"),
-                "aliasses",
-            ),
-            // A transposed `leaving` deserializes as `None`, which is not
-            // nothing: it is the Landing saying Perch had been on nobody, so the
-            // Capture that resumes it has no Profile to file into.
-            (
-                format!(
-                    "{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"active\":\
-                     {{\"landing\":{{\"leavign\":\"one@example.com\",\
-                     \"arriving\":\"two@example.com\"}}}}}}"
-                ),
-                "leavign",
-            ),
-        ] {
-            let host = crate::host::FakeHost::new().with_file(path, &written);
-
-            let refused = load(&host).expect_err("a key Perch does not know is not a registry");
-
-            let said = refused.to_string();
-            assert!(
-                said.contains(key),
-                "it names the key it could not read: {said}"
-            );
-            assert!(
-                said.contains("registry.json"),
-                "and the file to put it right in: {said}"
-            );
-        }
-    }
-
-    #[test]
     fn a_save_that_fails_leaves_the_registry_exactly_as_it_was() {
-        let path = "/Users/someone/.config/perch/registry.json";
+        let path = "/Users/someone/.config/perch/config.json";
         let before = format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[]}}");
         let host = crate::host::FakeHost::new()
             .with_file(path, &before)
@@ -2223,7 +2373,13 @@ mod tests {
         // unwritable file is what fails the save: refused at the first step, the
         // two assertions below are true of a write that was never attempted.
         let mut registry = Registry {
-            active: Active::Settled("someone@example.com".into()),
+            runtime: BTreeMap::from([(
+                crate::providers::provider::Id::default(),
+                ProviderState {
+                    active: Active::Settled("someone@example.com".into()),
+                    ..ProviderState::default()
+                },
+            )]),
             ..Registry::default()
         };
         registry.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
@@ -2267,6 +2423,9 @@ mod tests {
     fn a_registry_round_trips_through_json() {
         let mut registry = Registry::default();
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "someone@example.com".into(),
                 account_uuid: None,
@@ -2334,6 +2493,9 @@ mod tests {
     fn a_healthy_account_records_no_quarantine_at_all() {
         let mut registry = Registry::default();
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "someone@example.com".into(),
                 account_uuid: None,
@@ -2370,6 +2532,9 @@ mod tests {
     fn an_account_nobody_has_disabled_records_no_disable_at_all() {
         let mut registry = Registry::default();
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "someone@example.com".into(),
                 account_uuid: None,
@@ -2414,6 +2579,9 @@ mod tests {
     fn nothing_about_where_a_credential_is_kept_is_written_down() {
         let mut registry = Registry::default();
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "someone@example.com".into(),
                 account_uuid: None,
@@ -2441,7 +2609,7 @@ mod tests {
     fn a_group_carries_its_configuration_through_json() {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
-        registry.groups.get_mut("work").unwrap().strategy = Strategy::SoonestReset;
+        registry.groups.get_mut("work").unwrap().cycle.strategy = Some(Strategy::SoonestReset);
 
         let json = serde_json::to_string(&registry).unwrap();
         assert!(json.contains("soonest-reset"), "{json}");
@@ -2476,7 +2644,7 @@ mod tests {
             DEFAULT_WATCHER_THRESHOLD_PERCENT
         );
 
-        registry.ungrouped.settings.watcher_threshold_percent = 55;
+        registry.ungrouped.settings.watcher.threshold_percent = Some(55);
         assert_eq!(
             registry.settings(&work).watcher_threshold_percent,
             DEFAULT_WATCHER_THRESHOLD_PERCENT,
@@ -2490,10 +2658,21 @@ mod tests {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
         registry
-            .settings_mut(&Scope::Group("work".to_string()))
+            .scope_settings_mut(&Scope::Group("work".to_string()))
             .expect("declared")
-            .watcher_may_act = true;
-        registry.ungrouped.settings.watcher_may_act = true;
+            .providers
+            .entry(crate::providers::provider::Id::Claude)
+            .or_default()
+            .watcher
+            .enabled = true;
+        registry
+            .ungrouped
+            .settings
+            .providers
+            .entry(crate::providers::provider::Id::Claude)
+            .or_default()
+            .watcher
+            .enabled = true;
 
         registry.declare_group("personal").unwrap();
 
@@ -2668,6 +2847,9 @@ mod tests {
         let mut registry = Registry::default();
         registry.declare_group("work").expect("a usable name");
         registry.upsert(Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: "someone@example.com".into(),
                 account_uuid: None,
@@ -2682,9 +2864,10 @@ mod tests {
         });
 
         registry
-            .settings_mut(&Scope::Group("WORK".to_string()))
+            .scope_settings_mut(&Scope::Group("WORK".to_string()))
             .expect("the Group is declared, whatever it was typed as")
-            .watcher_threshold_percent = 65;
+            .watcher
+            .threshold_percent = Some(65);
         assert_eq!(
             registry
                 .settings(&Scope::Group("Work".to_string()))
@@ -2728,423 +2911,6 @@ mod tests {
     }
 
     #[test]
-    fn a_group_an_account_claims_is_declared_by_the_time_anything_reads_it() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"work"}],"groups":{}}"#,
-        );
-
-        let registry = load(&host).expect("it reads").expect("it is there");
-
-        let declared: Vec<&str> = registry.group_names().collect();
-        assert!(
-            declared.contains(&"work"),
-            "the Group the Account claims is in the declared set: {declared:?}"
-        );
-        assert_eq!(
-            registry.group("work"),
-            Some(&Settings::default()),
-            "carrying what a freshly declared Group carries"
-        );
-        assert_eq!(registry.accounts_in("work").len(), 1);
-    }
-
-    /// The `checks` rule asks `declared_group`, so it has to be asked after the
-    /// claim is declared and not before. Judged the other way round it refused
-    /// every command on the file, `holdings purge` among them.
-    #[test]
-    fn a_check_against_a_group_only_an_account_claims_is_read_rather_than_refused() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"work"}],"groups":{},"checks":{"work":{"switched_at":"2026-01-01T00:00:00Z"}}}"#,
-        );
-
-        let registry = load(&host).expect("it reads").expect("it is there");
-
-        assert!(
-            registry.checked("work").is_some(),
-            "the Check is still there"
-        );
-    }
-
-    /// The other half: normalizing first must not make the rule toothless.
-    #[test]
-    fn a_check_against_a_group_nobody_claims_is_still_refused() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"}}],"groups":{},"checks":{"ghost":{"switched_at":"2026-01-01T00:00:00Z"}}}"#,
-        );
-
-        let refused = load(&host).expect_err("that Cooldown paces nothing");
-
-        assert!(refused.to_string().contains("ghost"), "{refused}");
-    }
-
-    #[test]
-    fn a_group_an_account_claims_in_another_case_joins_the_one_that_is_declared() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"Work"}],"groups":{"work":{"watcher_threshold_percent":65}}}"#,
-        );
-
-        let registry = load(&host).expect("it reads").expect("it is there");
-
-        let declared: Vec<&str> = registry.group_names().collect();
-        assert_eq!(declared.len(), 1, "one Group, not two: {declared:?}");
-        assert_eq!(
-            registry.accounts_in("work").len(),
-            1,
-            "and the Account is in it, rather than in a namesake beside it"
-        );
-        assert_eq!(
-            registry.group("work").unwrap().watcher_threshold_percent,
-            65,
-            "the declared Group keeps the policy it was declared with"
-        );
-    }
-
-    #[test]
-    fn a_claim_declare_group_would_have_refused_is_named_rather_than_declared() {
-        let claims = [
-            (r#""none""#, "{}", "addresses the Accounts in no Group"),
-            (r#""my work""#, "{}", "carries ` ` (U+0020)"),
-            (r#""overflow""#, r#"{}"#, "already an Alias"),
-        ];
-
-        for (claimed, groups, expected) in claims {
-            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = holdings::registry_path(&host).unwrap();
-            let aliases = if expected == "already an Alias" {
-                r#","aliases":{"overflow":"someone@example.com"}"#
-            } else {
-                ""
-            };
-            host.set_file(
-                &path,
-                &format!(
-                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"group":{claimed}}}],"groups":{groups}{aliases}}}"#
-                ),
-            );
-
-            let refused = load(&host).expect_err("that is not a Group name");
-            let said = refused.to_string();
-            assert!(
-                said.contains(expected),
-                "`{claimed}` should be refused for `{expected}`: {said}"
-            );
-            assert!(
-                said.contains("registry.json"),
-                "and the refusal names the file, because every command reads it \
-                 — including the ones that would set this: {said}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_declared_group_or_an_alias_nothing_would_have_accepted_is_named_too() {
-        let holdings = [
-            (2, r#""groups":{"my work":{}}"#, "carries ` ` (U+0020)"),
-            (
-                2,
-                r#""groups":{"none":{}}"#,
-                "addresses the Accounts in no Group",
-            ),
-            (
-                2,
-                r#""aliases":{"someone@example.com":"other@example.com"}"#,
-                "carries `@` (U+0040)",
-            ),
-            (
-                2,
-                r#""groups":{"work":{}},"aliases":{"work":"someone@example.com"}"#,
-                "share one namespace",
-            ),
-            // Version 3, where a control character is a name no Perch gave. A
-            // version 2 Perch gave one for six of the eight days it was current,
-            // so the step forward owes that document a rename rather than this.
-            (
-                3,
-                r#""groups":{"\u001b[31mred":{}}"#,
-                "a control character (U+001B)",
-            ),
-        ];
-
-        for (version, held, expected) in holdings {
-            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = holdings::registry_path(&host).unwrap();
-            host.set_file(
-                &path,
-                &format!(r#"{{"version":{version},"accounts":[],{held}}}"#),
-            );
-
-            let refused = load(&host).expect_err("that is not a name Perch would have given");
-            let said = refused.to_string();
-            assert!(
-                said.contains(expected),
-                "`{held}` should be refused for `{expected}`: {said}"
-            );
-            // These registries hold no Accounts at all, so a refusal explaining
-            // itself in terms of what an Account can be in says nothing.
-            assert!(
-                !said.contains("an Account cannot be in it"),
-                "a declared Group is refused in words about the name rather \
-                 than about Accounts this registry does not hold: {said}"
-            );
-            assert!(
-                said.contains("registry.json"),
-                "and the refusal names the file to edit: {said}"
-            );
-        }
-    }
-
-    /// Both files parse as JSON perfectly well — a Strategy this build has no
-    /// variant for, and a missing `version`. Told "not valid JSON", somebody goes
-    /// looking for a syntax error that is not there.
-    #[test]
-    fn a_registry_that_is_json_and_still_unreadable_is_not_called_bad_json() {
-        let files = [
-            r#"{"version":2,"accounts":[],"groups":{"work":{"strategy":"round-robin"}}}"#,
-            r#"{"accounts":[],"groups":{}}"#,
-        ];
-
-        for contents in files {
-            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = holdings::registry_path(&host).unwrap();
-            host.set_file(&path, contents);
-
-            let refused = load(&host).expect_err("this build cannot read it");
-            let said = refused.to_string();
-            assert!(
-                !said.contains("not valid JSON"),
-                "the file parses as JSON perfectly well: {said}"
-            );
-            assert!(
-                said.contains("registry.json"),
-                "and the refusal still names it: {said}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_percentage_that_is_not_one_is_refused_rather_than_ranked_on() {
-        for figure in ["-50", "150"] {
-            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = holdings::registry_path(&host).unwrap();
-            host.set_file(
-                &path,
-                &format!(
-                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"utilization":{{"observed_at":"2025-01-01T00:00:00Z","windows":[{{"window":"5-hour","used_percent":{figure}}}]}}}}],"groups":{{}}}}"#
-                ),
-            );
-
-            let refused = load(&host).expect_err("that is not a percentage");
-            assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
-            let said = refused.to_string();
-            assert!(
-                said.contains("5-hour") && said.contains("someone@example.com"),
-                "`{figure}` should be refused naming the window and the Account: \
-                 {said}"
-            );
-            assert!(
-                said.contains("registry.json"),
-                "and the file to edit: {said}"
-            );
-        }
-
-        // And the ends of the range are figures, not refusals: a window that has
-        // just reset and one that is completely spent are both ordinary.
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"utilization":{"observed_at":"2025-01-01T00:00:00Z","windows":[{"window":"5-hour","used_percent":0},{"window":"7-day","used_percent":100}]}}],"groups":{}}"#,
-        );
-        load(&host).expect("0 and 100 are both percentages");
-    }
-
-    #[test]
-    fn an_alias_for_an_account_perch_does_not_hold_is_refused_and_names_both() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"}}],"aliases":{"overflow":"gone@example.com"}}"#,
-        );
-
-        let refused = load(&host).expect_err("the Alias names nobody");
-
-        assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
-        let said = refused.to_string();
-        assert!(said.contains("overflow"), "which Alias: {said}");
-        assert!(
-            said.contains("gone@example.com"),
-            "and who it names: {said}"
-        );
-        assert!(
-            said.contains("registry.json"),
-            "and the file to edit: {said}"
-        );
-    }
-
-    #[test]
-    fn two_names_in_one_half_of_the_namespace_that_differ_only_in_case_are_refused() {
-        let holdings = [
-            r#""groups":{"work":{},"Work":{}}"#,
-            // Two Accounts, one Alias each: giving both names to one Account is
-            // a different refusal.
-            r#""aliases":{"work":"someone@example.com","Work":"other@example.com"}"#,
-        ];
-
-        for held in holdings {
-            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = holdings::registry_path(&host).unwrap();
-            host.set_file(
-                &path,
-                &format!(
-                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}}}},{{"identity":{{"email":"other@example.com"}}}}],{held}}}"#
-                ),
-            );
-
-            let refused = load(&host).expect_err("which of the two a Target finds is undecided");
-            let said = refused.to_string();
-            assert!(said.contains("differ only in case"), "`{held}`: {said}");
-            assert!(
-                said.contains("registry.json"),
-                "and the file to edit: {said}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_account_address_a_name_could_be_confused_with_is_refused() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"work"}},{"identity":{"email":"real@example.com"}}],"groups":{"work":{}}}"#,
-        );
-
-        let refused = load(&host).expect_err("that Target has two answers");
-        let said = refused.to_string();
-        assert!(said.contains("Account called `work`"), "{said}");
-        assert!(
-            said.contains("is not an address"),
-            "it says what is wrong with it: {said}"
-        );
-        assert!(
-            said.contains("registry.json"),
-            "and the file to edit: {said}"
-        );
-    }
-
-    /// An address is Claude Code's rather than anybody's choice, so it is
-    /// refused where it enters and drawn stripped. Refused here it would be
-    /// refused at `load`, which takes every command with it — including
-    /// `perch remove`, which is the only way such an Account could ever go.
-    #[test]
-    fn an_account_address_a_terminal_would_obey_reads_rather_than_bricking() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"bad\u001brow@example.com"}}]}"#,
-        );
-
-        let registry = load(&host)
-            .expect("a registry a published Perch wrote is readable")
-            .expect("it is there");
-        assert_eq!(registry.accounts.len(), 1);
-    }
-
-    #[test]
-    fn one_account_reached_twice_over_is_refused() {
-        let cases = [
-            (
-                r#""aliases":{"spare":"someone@example.com","work":"someone@example.com"}"#,
-                "two Aliases",
-            ),
-            (
-                r#""aliases":{}"#,
-                // Two entries for one address, spelled differently.
-                "which are one Account",
-            ),
-        ];
-
-        for (index, (held, expected)) in cases.iter().enumerate() {
-            let accounts = if index == 0 {
-                r#"[{"identity":{"email":"someone@example.com"}}]"#
-            } else {
-                r#"[{"identity":{"email":"someone@example.com"}},{"identity":{"email":"SOMEONE@example.com"}}]"#
-            };
-            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let path = holdings::registry_path(&host).unwrap();
-            host.set_file(
-                &path,
-                &format!(r#"{{"version":2,"accounts":{accounts},{held}}}"#),
-            );
-
-            let refused = load(&host).expect_err("one Account reached twice over");
-            let said = refused.to_string();
-            assert!(said.contains(expected), "`{held}`: {said}");
-            assert!(
-                said.contains("registry.json"),
-                "and the file to edit: {said}"
-            );
-        }
-    }
-
-    /// The margin reaches `load` by the same door, so a hand edit is refused where
-    /// no `perch config set` could have written it.
-    #[test]
-    fn a_margin_of_nothing_in_the_file_is_refused_by_the_read() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[],"groups":{"work":{"watcher_margin_percent":0}}}"#,
-        );
-
-        let refused = load(&host).expect_err("nothing is not a margin");
-
-        assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
-        let said = refused.to_string();
-        assert!(said.contains("watcher-margin-percent"), "{said}");
-        assert!(said.contains("between 1 and 100"), "{said}");
-    }
-
-    #[test]
-    fn a_number_out_of_range_in_the_file_is_refused_by_the_read_and_names_the_file() {
-        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-        let path = holdings::registry_path(&host).unwrap();
-        host.set_file(
-            &path,
-            r#"{"version":2,"accounts":[],"groups":{"work":{"watcher_threshold_percent":101}}}"#,
-        );
-
-        let refused = load(&host).expect_err("101 is not a percentage");
-
-        assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
-        let said = refused.to_string();
-        assert!(said.contains("work"), "which Group: {said}");
-        assert!(
-            said.contains("watcher-threshold-percent"),
-            "which setting, spelled the way it is set: {said}"
-        );
-        assert!(
-            said.contains(&path.display().to_string()),
-            "and where to go and change it, because no command can: {said}"
-        );
-    }
-
-    #[test]
     fn a_registry_this_build_writes_says_so() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
         let mut perch = holdings::lock(&host).expect("the registry lock is free");
@@ -3159,5 +2925,230 @@ mod tests {
             load(&host).expect("it reads").expect("it is there").version,
             CURRENT_VERSION
         );
+    }
+
+    /// The reason is what happened and the detail is how, so the detail joins
+    /// the sentence rather than replacing it — and nothing said adds nothing
+    /// rather than an empty parenthetical.
+    #[test]
+    fn a_quarantine_says_what_the_failure_underneath_said_beside_the_reason() {
+        let said = Quarantine::RenewalRejected.said_of(
+            "work",
+            "work",
+            Some("Anthropic answered 400 invalid_grant"),
+        );
+
+        assert!(said.contains("would not renew its Credential"), "{said}");
+        assert!(
+            said.contains("(Anthropic answered 400 invalid_grant)"),
+            "{said}"
+        );
+
+        let bare = Quarantine::RenewalRejected.said_of("work", "work", None);
+        assert!(!bare.contains('('), "{bare}");
+    }
+
+    #[test]
+    fn the_ungrouped_scope_answers_for_settings_as_a_group_does() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").expect("a free name");
+
+        assert!(registry.scope_settings(&Scope::Ungrouped).is_some());
+        assert!(
+            registry
+                .scope_settings(&Scope::Group("work".into()))
+                .is_some()
+        );
+        assert!(
+            registry
+                .scope_settings(&Scope::Group("nowhere".into()))
+                .is_none(),
+            "a Group nothing declared has no Settings to answer with"
+        );
+    }
+
+    /// An address Perch does not hold is said back as it was typed. Both
+    /// answers are reached with something the Registry cannot look up — a
+    /// Target that turned out to name nothing, said in the refusal about it.
+    #[test]
+    fn an_account_perch_does_not_hold_is_named_by_the_address_that_was_typed() {
+        let registry = Registry::default();
+
+        assert_eq!(
+            registry.target_of("nobody@example.com"),
+            "nobody@example.com"
+        );
+        assert_eq!(
+            registry.named_for_the_user("nobody@example.com"),
+            "nobody@example.com"
+        );
+    }
+
+    /// Two Accounts may hold one address across providers, and then the address
+    /// alone names neither. The Workspace joins the clause only where there is
+    /// one: a provider that identifies a user and no Workspace has nothing to
+    /// add after the provider's name.
+    #[test]
+    fn one_address_held_twice_is_named_by_the_provider_and_the_workspace_it_has() {
+        use crate::providers::provider::{AccountIdentity, Id};
+
+        let mut registry = Registry::default();
+        for workspace in [Some("workspace-1"), None] {
+            let mut account = crate::cycle::tests::account("shared@example.com", vec![]);
+            account.provider_identity = Some(
+                AccountIdentity::from_subject(
+                    Id::Claude,
+                    "user-1".to_string(),
+                    workspace.map(str::to_string),
+                )
+                .expect("the provider identifies the user"),
+            );
+            registry.upsert(account);
+        }
+
+        let named: Vec<String> = registry
+            .accounts
+            .iter()
+            .map(|account| registry.named_for_the_user(account.key()))
+            .collect();
+
+        assert!(
+            named[0].contains("Workspace workspace-1"),
+            "the one with a Workspace says which: {named:?}"
+        );
+        assert!(
+            !named[1].contains("Workspace"),
+            "and the one without says nothing about one: {named:?}"
+        );
+        assert_ne!(named[0], named[1], "{named:?}");
+    }
+
+    /// An Account carrying a provider identity: the description and the
+    /// identity are two records of one Account, and a Registry holding them
+    /// disagreeing is one no command could act on consistently.
+    #[test]
+    fn an_account_whose_description_disagrees_with_its_provider_identity_is_refused() {
+        use crate::providers::provider::{AccountIdentity, Id};
+
+        let identified = |uuid: Option<&str>| {
+            let mut account = crate::cycle::tests::account("someone@example.com", vec![]);
+            account.group = None;
+            account.identity.account_uuid = uuid.map(str::to_string);
+            account.provider_identity = Some(
+                AccountIdentity::from_subject(Id::Claude, "user-1".to_string(), None)
+                    .expect("the provider identifies the user"),
+            );
+            let mut registry = Registry::default();
+            registry.upsert(account);
+            registry
+        };
+
+        let refused = validate(&identified(Some("somebody-else")))
+            .expect_err("the two records name different users");
+        assert!(
+            refused.to_string().contains("provider identity"),
+            "{refused}"
+        );
+        validate(&identified(Some("user-1"))).expect("and agreeing is fine");
+    }
+
+    /// A provider's active state names an Account that provider holds. Nothing
+    /// else could be Switched to under it, so a Registry saying otherwise is
+    /// named rather than acted on.
+    #[test]
+    fn a_providers_active_state_naming_another_providers_account_is_refused() {
+        use crate::providers::provider::Id;
+
+        let mut registry = Registry::default();
+        let mut account = crate::cycle::tests::account("someone@example.com", vec![]);
+        account.group = None;
+        registry.upsert(account);
+        registry.select_provider(Id::Codex);
+        registry.settle(Some("someone@example.com".to_string()));
+
+        let refused = validate(&registry).expect_err("the Account is a Claude one");
+
+        assert!(
+            refused.to_string().contains("another provider"),
+            "{refused}"
+        );
+    }
+
+    /// The three hand edits `validate` names rather than repairs: one address
+    /// under two Aliases, an Account whose key is no address, and two Accounts
+    /// one `same_name` cannot tell apart.
+    #[test]
+    fn a_registry_only_a_hand_edit_could_produce_is_named_rather_than_repaired() {
+        let holding = || {
+            let mut registry = Registry::default();
+            let mut account = crate::cycle::tests::account("someone@example.com", vec![]);
+            account.group = None;
+            registry.upsert(account);
+            registry
+        };
+
+        let mut two_aliases = holding();
+        two_aliases
+            .aliases
+            .insert("work".into(), "someone@example.com".into());
+        two_aliases
+            .aliases
+            .insert("office".into(), "someone@example.com".into());
+        let refused = validate(&two_aliases).expect_err("one Account, two Aliases");
+        assert!(refused.to_string().contains("two Aliases"), "{refused}");
+
+        let mut not_an_address = holding();
+        // The storage key rather than the address, because `upsert` derives the
+        // first from the second and it is the key every command looks one up by.
+        not_an_address.accounts[0].storage_key = Some("someone".into());
+        let refused = validate(&not_an_address).expect_err("that is not an address");
+        assert!(refused.to_string().contains("not an"), "{refused}");
+
+        let mut twice = holding();
+        let mut again = crate::cycle::tests::account("SOMEONE@example.com", vec![]);
+        again.group = None;
+        twice.accounts.push(again);
+        let refused = validate(&twice).expect_err("those are one Account");
+        assert!(refused.to_string().contains("one Account"), "{refused}");
+    }
+
+    /// Aliases and Group names share one namespace, so a Group declared under a
+    /// name an Alias already answers to is a Target with two meanings — named
+    /// from the Group side, because every Group is walked either way.
+    #[test]
+    fn a_group_declared_under_a_name_an_alias_holds_is_refused_as_the_namespace_it_shares() {
+        let mut registry = Registry::default();
+        let mut account = crate::cycle::tests::account("someone@example.com", vec![]);
+        account.group = None;
+        registry.upsert(account);
+        registry
+            .aliases
+            .insert("work".into(), "someone@example.com".into());
+        registry
+            .groups
+            .insert("work".into(), crate::config::ScopeSettings::default());
+
+        let refused = validate(&registry).expect_err("one name, two meanings");
+
+        assert!(
+            refused.to_string().contains("already an Alias"),
+            "{refused}"
+        );
+    }
+
+    /// A Check is keyed on a Group's declared spelling, and a key naming no
+    /// Group has no spelling to be brought to — so it is left where it is and
+    /// named, rather than filed under a Group that is not there.
+    #[test]
+    fn a_check_against_a_group_perch_no_longer_holds_is_named_rather_than_refiled() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").expect("a free name");
+        registry.record_switch("work", Utc::now());
+        // The hand edit: the Group taken out of the file and its Check left.
+        registry.groups.clear();
+
+        let refused = readable(registry).expect_err("the Check names no Group");
+
+        assert!(refused.to_string().contains("not a Group"), "{refused}");
     }
 }

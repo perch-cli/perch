@@ -11,11 +11,13 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use crate::error::{EXIT_OK, PerchError, Result};
+use crate::error::{EXIT_OK, Result};
 use crate::host::Host;
+pub use crate::providers::provider::Finding;
+use crate::providers::provider::{DiagnosticReport, Id, catalog};
 use crate::redact::Redaction;
 use crate::registry::Registry;
-use crate::{commands, holdings, probe, registry, say, service, trail, upgrade};
+use crate::{commands, holdings, registry, say, service, trail, upgrade};
 
 #[derive(Debug, clap::Args)]
 pub struct ProbeArgs {
@@ -28,81 +30,16 @@ pub struct ProbeArgs {
     pub raw: bool,
 }
 
-/// Whether an assumption held.
-///
-/// `Unread` is not a doubt about the assumption: it is the probe having stopped
-/// before it got there, which is a different thing from a belief that failed.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Stood {
-    Held,
-    Broke,
-    Unread,
-}
-
-impl Stood {
-    fn said(self) -> &'static str {
-        match self {
-            Stood::Held => "held",
-            Stood::Broke => "broke",
-            Stood::Unread => "unread",
-        }
-    }
-}
-
-/// The assumptions in the order the probe reaches them, so everything after the
-/// one that broke is honestly reported as never having been asked.
-const REACHED: [&str; 6] = [
-    probe::assumption::INSTALLED,
-    probe::assumption::CREDENTIAL_LOCATION,
-    probe::assumption::ACCOUNT_NAME,
-    probe::assumption::CREDENTIAL_SHAPE,
-    probe::assumption::IDENTITY_BLOCK,
-    probe::assumption::SESSION_MARKER,
-];
-
-/// Named findings, as [`crate::probe::assumption`] names assumptions and for its
-/// reason: a script counts these, and a Triage decides on four of them, so a
+/// Named findings: a script counts these, and a Triage decides on four of them, so a
 /// rename here is a rename everywhere rather than a literal that stops matching.
 pub mod finding {
-    pub const CLAUDE_CODE_UNREADABLE: &str = "claude-code-unreadable";
+    pub use crate::providers::provider::diagnostic_code::*;
     pub const REGISTRY_UNREADABLE: &str = "registry-unreadable";
-    pub const REGISTRY_BEHIND: &str = "registry-behind";
     pub const ACCOUNT_QUARANTINED: &str = "account-quarantined";
     pub const TRAIL_NOT_KEPT: &str = "trail-not-kept";
     pub const WATCHER_MAY_ACT_NOWHERE: &str = "watcher-may-act-nowhere";
     pub const COMMAND_NEVER_FINISHED: &str = "command-never-finished";
     pub const TRAIL_EMPTY: &str = "trail-empty";
-    pub const ASSUMPTION_BROKE: &str = "assumption-broke";
-    pub const KEYCHAIN_UNAVAILABLE: &str = "keychain-unavailable";
-    pub const STORE_UNREADABLE: &str = "store-unreadable";
-}
-
-/// Something that would make a command refuse, with the code it would refuse
-/// with. `code` is what a script counts; `said` is the same thing for a person.
-pub struct Finding {
-    pub code: &'static str,
-    pub exit_code: Option<i32>,
-    pub said: String,
-}
-
-impl Finding {
-    /// A failure Perch already knows how to refuse over, said as it says it.
-    fn refused(code: &'static str, err: &PerchError) -> Finding {
-        Finding {
-            code,
-            exit_code: Some(err.exit_code()),
-            said: err.to_string(),
-        }
-    }
-
-    /// Something true of the machine that no single failure carries a code for.
-    fn noticed(code: &'static str, said: String) -> Finding {
-        Finding {
-            code,
-            exit_code: None,
-            said,
-        }
-    }
 }
 
 /// The counts a Listing would show, gathered once for the two renderers.
@@ -134,8 +71,8 @@ impl Tally {
 
 /// Which Account is active, said once for both renderers so a Landing cannot be
 /// visible at a terminal and absent from `--json`.
-fn active_said(registry: &Registry, hidden: &Redaction) -> String {
-    match registry.active() {
+fn active_said(registry: &Registry, provider: Id, hidden: &Redaction) -> String {
+    match registry.active_for(provider) {
         registry::Active::Nobody => "nobody".to_string(),
         registry::Active::Settled(email) => hidden.text(email),
         // A Switch written down and not yet recorded, which is the state a
@@ -150,21 +87,30 @@ fn active_said(registry: &Registry, hidden: &Redaction) -> String {
     }
 }
 
+fn defaults_said(
+    registry: &Registry,
+    hidden: &Redaction,
+) -> std::collections::BTreeMap<Id, String> {
+    catalog()
+        .iter()
+        .map(|provider| {
+            let id = provider.id();
+            (id, active_said(registry, id, hidden))
+        })
+        .collect()
+}
+
 /// Everything gathered, before anything is rendered or redacted.
 struct Seen {
     channel: Option<String>,
     exe: Option<PathBuf>,
-    claude: std::result::Result<String, String>,
-    claude_at: Option<PathBuf>,
+    providers: Vec<(Id, DiagnosticReport)>,
     home: Option<PathBuf>,
     registry: Option<Registry>,
-    /// The version the file on disk states. Not the loaded Registry's, which
-    /// `registry::load` has already carried forward in memory — reporting that
-    /// would say every machine is current and undo the point of the exemption.
+    /// The manifest's stated version remains reportable when loading is refused.
     on_disk: Option<u64>,
     registry_said: Option<String>,
     watcher: Option<service::Standing>,
-    assumptions: [Stood; REACHED.len()],
     trail: trail::Reading,
     findings: Vec<Finding>,
 }
@@ -185,6 +131,7 @@ fn redaction_over(host: &dyn Host, seen: &Seen) -> Redaction {
 /// the machine: an agent investigates from the raw reading and pastes the
 /// redacted one (ADR a-triage-hands-over-evidence).
 pub struct Gathered {
+    pub preferred_provider: Id,
     pub raw: String,
     pub redacted: String,
     /// What it found, so a caller can act on one without parsing the rendering
@@ -198,6 +145,11 @@ pub fn gathered(host: &dyn Host) -> Gathered {
     let seen = gather(host);
     let hidden = redaction_over(host, &seen);
     Gathered {
+        preferred_provider: seen
+            .registry
+            .as_ref()
+            .map(|registry| registry.run_provider)
+            .unwrap_or_default(),
         raw: lines(&seen, &Redaction::none()).join("\n"),
         redacted: lines(&seen, &hidden).join("\n"),
         found: seen.findings,
@@ -233,15 +185,6 @@ fn gather(host: &dyn Host) -> Seen {
     let mut findings = Vec::new();
     let trail_read = trail::read(host);
 
-    let installed = probe::Installed::for_a_refusal(host);
-    let claude = match &installed {
-        Ok(installed) => Ok(installed.version().to_string()),
-        Err(err) => {
-            findings.push(Finding::refused(finding::CLAUDE_CODE_UNREADABLE, err));
-            Err(err.to_string())
-        }
-    };
-
     let on_disk = holdings::registry_path(host)
         .ok()
         .and_then(|at| host.read_file(&at).ok())
@@ -256,24 +199,13 @@ fn gather(host: &dyn Host) -> Seen {
     };
 
     if let Some(registry) = &registry {
-        if on_disk.is_some_and(|stated| stated < u64::from(registry::CURRENT_VERSION)) {
-            findings.push(Finding::noticed(
-                finding::REGISTRY_BEHIND,
-                format!(
-                    "The Registry on disk is version {} and this Perch writes \
-                     version {}. No command has brought it forward yet, which the \
-                     next one that reads it will do.",
-                    on_disk.unwrap_or_default(),
-                    registry::CURRENT_VERSION
-                ),
-            ));
-        }
         for account in registry
             .accounts
             .iter()
             .filter(|held| held.quarantine.is_some())
         {
             findings.push(Finding {
+                provider: Some(account.provider()),
                 code: finding::ACCOUNT_QUARANTINED,
                 exit_code: Some(crate::error::EXIT_QUARANTINED),
                 said: format!(
@@ -305,7 +237,26 @@ fn gather(host: &dyn Host) -> Seen {
         }
     }
 
-    let assumptions = asked(host, &mut findings);
+    let preferred = registry
+        .as_ref()
+        .map(|registry| registry.run_provider)
+        .unwrap_or_default();
+    let mut providers = Vec::new();
+    for provider in catalog() {
+        let id = provider.id();
+        let held = registry.as_ref().is_some_and(|registry| {
+            registry
+                .accounts
+                .iter()
+                .any(|account| account.provider() == id)
+        });
+        let mut report = provider.diagnose(host);
+        if id != preferred && !held && report.path.is_none() {
+            continue;
+        }
+        findings.append(&mut report.findings);
+        providers.push((id, report));
+    }
 
     let watcher = commands::service::asked_of_the_machine(host).ok();
     if let Some(standing) = &watcher
@@ -347,62 +298,15 @@ fn gather(host: &dyn Host) -> Seen {
             .flatten()
             .map(|channel| format!("{channel:?}").to_lowercase()),
         exe: host.current_exe().ok(),
-        claude,
-        claude_at: probe::claude_bin(host).ok(),
+        providers,
         home: holdings::perch_home(host).ok(),
         registry,
         on_disk,
         registry_said,
         watcher,
-        assumptions,
         trail: trail_read,
         findings,
     }
-}
-
-/// Runs the one probe there is against the Default Profile's store, and reads
-/// its outcome back onto the list of assumptions it passes through.
-fn asked(host: &dyn Host, findings: &mut Vec<Finding>) -> [Stood; REACHED.len()] {
-    let mut held = [Stood::Unread; REACHED.len()];
-    let store = match probe::default_profile_store(host) {
-        Ok(store) => store,
-        Err(_) => return held,
-    };
-
-    match probe::probe(host, store) {
-        // A Probe claims no Profile, so the last one is never reached.
-        Ok(_) => {
-            held = [Stood::Held; REACHED.len()];
-            held[REACHED.len() - 1] = Stood::Unread;
-        }
-        Err(PerchError::ProbeRefused(refusal)) => {
-            let broke = REACHED
-                .iter()
-                .position(|named| *named == refusal.assumption)
-                .unwrap_or(0);
-            for (at, one) in held.iter_mut().enumerate() {
-                *one = match at.cmp(&broke) {
-                    std::cmp::Ordering::Less => Stood::Held,
-                    std::cmp::Ordering::Equal => Stood::Broke,
-                    std::cmp::Ordering::Greater => Stood::Unread,
-                };
-            }
-            findings.push(Finding {
-                code: finding::ASSUMPTION_BROKE,
-                exit_code: Some(crate::error::EXIT_PROBE_REFUSED),
-                said: refusal.to_string(),
-            });
-        }
-        Err(err) => {
-            held[0] = Stood::Held;
-            let code = match err {
-                PerchError::KeychainUnavailable(_) => finding::KEYCHAIN_UNAVAILABLE,
-                _ => finding::STORE_UNREADABLE,
-            };
-            findings.push(Finding::refused(code, &err));
-        }
-    }
-    held
 }
 
 /// What a person reads, in the order they read it: the judgment first, and the
@@ -447,17 +351,19 @@ fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
     }
     // The version and the path are asked for separately, so a binary that is
     // there and will not answer `--version` names both.
-    let claude = match &seen.claude {
-        Ok(version) => version.clone(),
-        Err(said) => hidden.text(said),
-    };
-    said.push(column(
-        "Claude Code",
-        match &seen.claude_at {
-            Some(at) => format!("{claude}, at {}", hidden.path(at)),
-            None => claude,
-        },
-    ));
+    for (id, report) in &seen.providers {
+        let version = match &report.version {
+            Ok(version) => hidden.text(version),
+            Err(said) => hidden.text(said),
+        };
+        said.push(column(
+            id.adapter().name(),
+            match &report.path {
+                Some(at) => format!("{version}, at {}", hidden.path(at)),
+                None => version,
+            },
+        ));
+    }
     // Read off the version rather than off the loaded registry: a file that
     // states none is a file that would not load, so the two answers are one.
     said.push(column(
@@ -478,7 +384,14 @@ fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
         },
     ));
     if let Some(registry) = &seen.registry {
-        said.push(column("Active", active_said(registry, hidden)));
+        said.push(column(
+            "Active",
+            defaults_said(registry, hidden)
+                .into_iter()
+                .map(|(id, state)| format!("{}: {state}", id.word()))
+                .collect::<Vec<_>>()
+                .join("; "),
+        ));
         let tally = Tally::of(registry);
         said.push(column(
             "Holdings",
@@ -540,8 +453,17 @@ fn lines(seen: &Seen, hidden: &Redaction) -> Vec<String> {
     said.push(String::new());
     said.push("Assumptions".to_string());
     let verdicts = crate::column::Labeled::of(2, 9);
-    for (assumption, held) in REACHED.iter().zip(seen.assumptions) {
-        said.push(verdicts.row(held.said(), &crate::host::Shown::of(assumption)));
+    for (id, report) in &seen.providers {
+        for assumption in &report.assumptions {
+            said.push(verdicts.row(
+                assumption.status.said(),
+                &crate::host::Shown::of(&format!(
+                    "{}: {}",
+                    id.word(),
+                    hidden.text(&assumption.name)
+                )),
+            ));
+        }
     }
 
     said.push(String::new());
@@ -596,11 +518,16 @@ fn document(seen: &Seen, hidden: &Redaction) -> serde_json::Value {
             "channel": seen.channel,
             "binary": seen.exe.as_ref().map(|at| hidden.path(at)),
         },
-        "claude_code": {
-            "version": seen.claude.as_ref().ok(),
-            "path": seen.claude_at.as_ref().map(|at| hidden.path(at)),
-            "said": seen.claude.as_ref().err().map(|said| hidden.text(said)),
-        },
+        "providers": seen.providers.iter().map(|(id, report)| serde_json::json!({
+            "id": id.word(),
+            "version": report.version.as_ref().ok().map(|version| hidden.text(version)),
+            "path": report.path.as_ref().map(|at| hidden.path(at)),
+            "said": report.version.as_ref().err().map(|said| hidden.text(said)),
+            "assumptions": report.assumptions.iter().map(|assumption| serde_json::json!({
+                "assumption": hidden.text(&assumption.name),
+                "verdict": assumption.status.said(),
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
         "home": {
             "path": seen.home.as_ref().map(|at| hidden.path(at)),
             "registry_version": seen.on_disk,
@@ -609,7 +536,7 @@ fn document(seen: &Seen, hidden: &Redaction) -> serde_json::Value {
         "holdings": seen.registry.as_ref().map(|registry| {
             let tally = Tally::of(registry);
             serde_json::json!({
-                "active": active_said(registry, hidden),
+                "active": defaults_said(registry, hidden),
                 "accounts": tally.accounts,
                 "groups": tally.groups,
                 "quarantined": tally.quarantined,
@@ -617,10 +544,8 @@ fn document(seen: &Seen, hidden: &Redaction) -> serde_json::Value {
             })
         }),
         "watcher": seen.watcher.as_ref().map(service::Standing::document),
-        "assumptions": REACHED.iter().zip(seen.assumptions).map(|(assumption, held)| {
-            serde_json::json!({ "assumption": assumption, "verdict": held.said() })
-        }).collect::<Vec<_>>(),
         "findings": seen.findings.iter().map(|finding| serde_json::json!({
+            "provider": finding.provider,
             "code": finding.code,
             "exit_code": finding.exit_code,
             "said": hidden.text(&finding.said),

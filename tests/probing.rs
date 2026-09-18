@@ -74,7 +74,7 @@ fn every_account_comes_out_as_its_place_in_the_registry() {
     let said = probed(&host);
 
     assert!(
-        !said.contains(EMAIL) && !said.contains(SECOND_EMAIL),
+        !said.contains(KEY) && !said.contains(SECOND_EMAIL),
         "an address reached the output a Probe exists to have pasted: {said}"
     );
     assert!(
@@ -123,7 +123,7 @@ fn raw_says_the_names_as_they_are() {
     );
 
     assert_eq!(code, EXIT_OK);
-    assert!(said.contains(EMAIL), "{said}");
+    assert!(said.contains(KEY), "{said}");
     assert!(!said.contains("<account 1>"), "{said}");
 }
 
@@ -544,14 +544,8 @@ fn a_registry_written_after_the_trails_last_line_says_the_trail_is_not_kept() {
 /// renderings rather than to the one a person happens to read.
 #[test]
 fn a_landing_is_named_in_the_text_and_in_the_json_alike() {
-    let host = logged_in_machine().with_file(
-        REGISTRY_PATH,
-        &format!(
-            r#"{{"version":{},"active":{{"landing":{{"leaving":"{EMAIL}","arriving":"{SECOND_EMAIL}"}}}},
-                "accounts":[{{"identity":{{"email":"{EMAIL}"}}}},{{"identity":{{"email":"{SECOND_EMAIL}"}}}}]}}"#,
-            perch::registry::CURRENT_VERSION
-        ),
-    );
+    let host = machine_with_two_accounts();
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
 
     let said = probed(&host);
     let document = probed_json(&host);
@@ -561,7 +555,7 @@ fn a_landing_is_named_in_the_text_and_in_the_json_alike() {
         "{said}"
     );
     assert_eq!(
-        document["holdings"]["active"], "a Landing from <account 1> to <account 2>",
+        document["holdings"]["active"]["claude"], "a Landing from <account 1> to <account 2>",
         "{document:#}"
     );
 }
@@ -606,21 +600,17 @@ fn a_start_a_reboot_left_behind_falls_out_of_the_window_with_everything_else() {
     assert!(!said.contains("never finished"), "{said}");
 }
 
-/// `registry::load` carries an old Registry forward in memory, so the loaded
-/// value says every machine is current. What the file states is the finding.
 #[test]
-fn a_registry_no_command_has_carried_forward_is_said_at_the_version_it_states() {
-    let host = logged_in_machine().with_file(
-        REGISTRY_PATH,
-        &format!(r#"{{"version":4,"accounts":[{{"identity":{{"email":"{EMAIL}"}}}}]}}"#),
-    );
-
+fn an_unsupported_registry_is_reported_without_rewriting_it() {
+    let content = format!(r#"{{"version":4,"accounts":[{{"identity":{{"email":"{EMAIL}"}}}}]}}"#);
+    let host = logged_in_machine().with_file(REGISTRY_PATH, &content);
     let said = probed(&host);
-    let document = probed_json(&host);
-
-    assert!(said.contains("Registry version 4"), "{said}");
-    assert!(said.contains("No command has brought it forward"), "{said}");
-    assert_eq!(document["home"]["registry_version"], 4, "{document:#}");
+    assert!(said.contains("unsupported layout"), "{said}");
+    assert!(said.contains("fresh installation"), "{said}");
+    assert_eq!(
+        host.file(Path::new(REGISTRY_PATH)).as_deref(),
+        Some(content.as_str())
+    );
 }
 
 /// `PERCH_HOME` naming a place that depends on where a command was typed is the
@@ -673,16 +663,16 @@ fn a_machine_without_claude_code_says_what_it_looked_for_and_where() {
     let said = probed(&host);
     let document = probed_json(&host);
 
-    assert!(said.contains("PATH is unset"), "{said}");
+    assert!(said.contains("CLI is on PATH"), "{said}");
     assert_eq!(
-        document["claude_code"]["version"],
+        document["providers"][0]["version"],
         serde_json::Value::Null,
         "{document:#}"
     );
     assert!(
-        document["claude_code"]["said"]
+        document["providers"][0]["said"]
             .as_str()
-            .is_some_and(|said| said.contains("PATH is unset")),
+            .is_some_and(|said| said.contains("CLI is on PATH")),
         "{document:#}"
     );
     assert!(
@@ -690,7 +680,7 @@ fn a_machine_without_claude_code_says_what_it_looked_for_and_where() {
             .as_array()
             .expect("findings")
             .iter()
-            .any(|finding| finding["code"] == "claude-code-unreadable"),
+            .any(|finding| finding["code"] == "provider-unreadable"),
         "{document:#}"
     );
 }
@@ -760,7 +750,9 @@ fn a_machine_that_will_not_say_who_is_logged_in_asks_nothing_of_the_store() {
         .without_env("USERNAME");
 
     let document = probed_json(&host);
-    let assumptions = document["assumptions"].as_array().expect("assumptions");
+    let assumptions = document["providers"][0]["assumptions"]
+        .as_array()
+        .expect("assumptions");
 
     assert!(
         assumptions
@@ -922,7 +914,9 @@ fn an_assumption_that_broke_leaves_the_ones_after_it_unasked() {
 
     let said = probed(&host);
     let document = probed_json(&host);
-    let assumptions = document["assumptions"].as_array().expect("assumptions");
+    let assumptions = document["providers"][0]["assumptions"]
+        .as_array()
+        .expect("assumptions");
 
     assert!(said.contains("broke"), "{said}");
     assert_eq!(assumptions[0]["verdict"], "held", "{document:#}");

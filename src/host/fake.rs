@@ -155,7 +155,7 @@ pub struct KeychainLock {
 /// What a login does when Perch launches one: whatever Claude Code would have
 /// left behind in the config directory it was pointed at, and the status it
 /// exited with. Written as a closure so the derivation of a Profile's keychain
-/// namespace stays in [`crate::probe`] and out of the fake.
+/// namespace belongs to the provider.
 pub type Login = Box<dyn Fn(&FakeHost, &Path) -> i32>;
 
 /// Something that happens while Perch waits — contending for a lock, or putting
@@ -1413,6 +1413,15 @@ impl port::Clock for FakeHost {
 }
 
 impl port::Environment for FakeHost {
+    fn inherited_env(&self) -> Vec<(String, String)> {
+        self.environment
+            .vars
+            .borrow()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
+    }
+
     fn home_dir(&self) -> Result<PathBuf, HostError> {
         Ok(self.environment.home.clone())
     }
@@ -2216,13 +2225,42 @@ impl port::Keys for FakeHost {
 /// Whether a program is named as a path rather than as a word `PATH` answers.
 ///
 /// Off the platform the Host reports rather than through `Path::parent`, for
-/// [`crate::probe::rooted`]'s reason: a backslash separates on Windows alone, so
+/// [`crate::host::programs::rooted`]'s reason: a backslash separates on Windows alone, so
 /// a fake claiming it must not answer by the runner it is on.
 fn names_a_place(program: &str, on_windows: bool) -> bool {
     program.contains('/') || (on_windows && program.contains('\\'))
 }
 
 impl port::Processes for FakeHost {
+    fn exec_interactive_under(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<i32, HostError> {
+        self.exec_interactive(program, args, env)
+    }
+
+    fn rpc(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+        _requests: &[String],
+        control: port::RpcControl<'_>,
+    ) -> Result<Vec<String>, HostError> {
+        (control.checkpoint)()?;
+        if control.timeout.is_zero() {
+            return Err(HostError::Other("RPC deadline expired".into()));
+        }
+        let output = self.exec_under(program, args, env)?;
+        (control.checkpoint)()?;
+        if !output.succeeded() {
+            return Err(HostError::Other("RPC child failed".into()));
+        }
+        Ok(output.stdout.lines().map(str::to_owned).collect())
+    }
+
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
         self.record(Effect::Exec {
             program: program.to_string(),
@@ -2277,7 +2315,7 @@ impl port::Processes for FakeHost {
     ) -> Result<i32, HostError> {
         let config_dir = env
             .iter()
-            .find(|(key, _)| *key == "CLAUDE_CONFIG_DIR")
+            .find(|(key, _)| matches!(*key, "CLAUDE_CONFIG_DIR" | "CODEX_HOME"))
             .map(|(_, value)| PathBuf::from(value))
             .unwrap_or_else(|| self.environment.home.join(".claude"));
 
@@ -2588,9 +2626,11 @@ mod tests {
         let host = FakeHost::new().with_link(
             Link::Symbolic,
             "/Users/someone/.claude/.oauth_refresh.lock",
-            "/Users/someone/.config/perch/profiles/a/.oauth_refresh.lock",
+            "/Users/someone/.config/perch/providers/claude/profiles/a/.oauth_refresh.lock",
         );
-        let at = Path::new("/Users/someone/.config/perch/profiles/a/.oauth_refresh.lock");
+        let at = Path::new(
+            "/Users/someone/.config/perch/providers/claude/profiles/a/.oauth_refresh.lock",
+        );
 
         // The target never existed, so the link dangles.
         assert!(!host.path_exists(at), "the link resolves to nothing");
@@ -2610,7 +2650,8 @@ mod tests {
     /// wherever whoever planted it wanted the secret to land.
     #[test]
     fn a_private_write_over_a_planted_link_replaces_it_rather_than_following_it() {
-        let planted = Path::new("/Users/someone/.config/perch/profiles/a/.credentials.json");
+        let planted =
+            Path::new("/Users/someone/.config/perch/providers/claude/profiles/a/.credentials.json");
         let elsewhere = Path::new("/tmp/somewhere-a-stranger-can-read");
         let host = FakeHost::new().with_link(Link::Symbolic, elsewhere, planted);
 
@@ -2650,5 +2691,168 @@ mod tests {
             !host.process_alive(u32::MAX),
             "4294967295 narrows to -1, which is every process the caller may signal"
         );
+    }
+
+    /// One machine however it is made: a fixture reaching for either
+    /// constructor must not be arranging a different world from its neighbor.
+    #[test]
+    fn a_fake_made_by_default_is_the_one_new_makes() {
+        let made = FakeHost::new();
+        let defaulted = FakeHost::default();
+
+        assert_eq!(defaulted.process_id(), made.process_id());
+        assert_eq!(defaulted.user_id(), made.user_id());
+        assert_eq!(defaulted.home_dir().ok(), made.home_dir().ok());
+        assert_eq!(defaulted.platform(), made.platform());
+    }
+
+    /// Two links pointing at each other, which a real filesystem answers
+    /// `ELOOP` to: the walk is bounded, so the path names nothing rather than
+    /// going round for ever.
+    #[test]
+    fn a_loop_of_links_names_nothing_rather_than_going_round_for_ever() {
+        let host = FakeHost::new()
+            .with_link(Link::Symbolic, "/Users/someone/b", "/Users/someone/a")
+            .with_link(Link::Symbolic, "/Users/someone/a", "/Users/someone/b");
+        let a = Path::new("/Users/someone/a");
+
+        assert!(
+            !host.path_exists(a),
+            "the walk gives up rather than spinning"
+        );
+        assert!(!host.is_file(a));
+        assert!(host.read_file(a).is_err());
+    }
+
+    /// A regular file where a directory would have to go, which is `ENOTDIR` on
+    /// a real machine: all three writes refuse rather than making a path that
+    /// cannot exist.
+    #[test]
+    fn a_write_under_something_that_is_not_a_directory_is_refused_here_too() {
+        let host = FakeHost::new().with_file("/Users/someone/.claude.json", "{}");
+        let under = Path::new("/Users/someone/.claude.json/credentials");
+
+        let refused = host
+            .create_file_with_mode(under, "{}", PRIVATE_FILE_MODE)
+            .expect_err("nothing goes under a file");
+
+        assert!(refused.to_string().contains(".claude.json"), "{refused}");
+        assert!(host.write_private_file(under, "a refresh token").is_err());
+        assert!(host.append_private_line(under, "a line").is_err());
+        assert_eq!(host.file(under), None);
+    }
+
+    /// The mode of a path that is not there is not a thing to set: a real
+    /// `chmod` answers `ENOENT`, and a fake that shrugged would let a Reconcile
+    /// report a Credential narrowed that it never touched.
+    #[test]
+    fn narrowing_a_path_that_is_not_there_is_not_found() {
+        let host = FakeHost::new();
+        let gone = Path::new("/Users/someone/.claude/.credentials.json");
+
+        assert!(matches!(
+            host.make_private(gone),
+            Err(HostError::NotFound { path }) if path == gone
+        ));
+    }
+
+    /// A child that ended badly has not answered, and the lines it did not
+    /// write are no replies rather than none: an exchange read off it would
+    /// hand a command the empty set as a figure.
+    #[test]
+    fn an_rpc_child_that_ends_badly_is_a_failure_rather_than_nothing_to_say() {
+        let host = FakeHost::new().with_exec_under(
+            "/usr/local/bin/codex",
+            &["mcp-server"],
+            Execution {
+                status: 1,
+                stdout: String::new(),
+                stderr: "codex: not logged in".to_string(),
+            },
+        );
+        let mut checkpoint = || Ok(());
+        let control = crate::host::RpcControl {
+            timeout: std::time::Duration::from_secs(5),
+            checkpoint: &mut checkpoint,
+        };
+
+        let refused = host
+            .rpc("/usr/local/bin/codex", &["mcp-server"], &[], &[], control)
+            .expect_err("a child that exited 1 has not answered");
+
+        assert!(
+            refused.to_string().contains("RPC child failed"),
+            "{refused}"
+        );
+    }
+
+    /// `AlreadyExists` is contention and is waited out; a filesystem refusing is
+    /// neither, and a lock reading the second as the first would wait on a
+    /// failure that is never going to clear.
+    #[test]
+    fn a_path_that_will_not_take_a_write_is_reported_rather_than_read_as_contention() {
+        let incoming = Path::new("/Users/someone/.claude/incoming");
+        let held = Path::new("/Users/someone/.claude/.oauth_refresh.lock");
+        let target = Path::new("/Users/someone/.claude/.credentials.json");
+        let read_only = "Read-only file system (os error 30)";
+        let host = FakeHost::new()
+            .with_file(incoming, "a refresh token")
+            .with_a_path_refusing(held, Refusing::Write, read_only)
+            .with_a_path_refusing(target, Refusing::Write, read_only);
+
+        let refused = host
+            .create_dir_exclusive(held)
+            .expect_err("the volume is read-only");
+        assert!(matches!(refused, HostError::Other(said) if said == read_only));
+
+        let refused = host
+            .rename(incoming, target)
+            .expect_err("the volume is read-only");
+        assert!(matches!(refused, HostError::Other(said) if said == read_only));
+        assert_eq!(host.file(target), None, "and nothing lands at the name");
+    }
+
+    /// A rename moves the file, mode and all: what ends up at the target is the
+    /// file that was created beside it, so one carrying no mode leaves the
+    /// target with none rather than with the one it replaced.
+    #[test]
+    fn a_rename_leaves_the_target_with_the_mode_of_what_moved_onto_it() {
+        let incoming = Path::new("/Users/someone/.claude/incoming");
+        let target = Path::new("/Users/someone/.claude/.credentials.json");
+        let host = FakeHost::new()
+            .with_file(incoming, "the new one")
+            .with_file(target, "the old one")
+            .with_file_mode(target, 0o644);
+
+        host.rename(incoming, target).expect("it moves");
+
+        assert_eq!(host.file(target).as_deref(), Some("the new one"));
+        assert_eq!(host.mode_of(target), None);
+    }
+
+    /// A hard link is a second name for a *file*, so a directory and a path
+    /// that is nothing have no second name to give — which is what the real
+    /// call answers, and the refusal `reconcile::make` tries a kind after.
+    #[test]
+    fn a_hard_link_is_refused_where_there_is_no_file_to_give_a_second_name() {
+        let host = FakeHost::new()
+            .with_file("/Users/someone/.claude/settings.json", "{}")
+            .with_file(
+                "/Users/someone/.config/perch/profiles/a/settings.json",
+                "{}",
+            );
+        let at = Path::new("/Users/someone/.config/perch/profiles/a/shared.json");
+
+        let refused = host
+            .link(Link::Hard, Path::new("/Users/someone/.claude"), at)
+            .expect_err("a directory has no second name");
+
+        assert!(refused.to_string().contains("not a file"), "{refused}");
+        assert!(
+            host.link(Link::Hard, Path::new("/Users/someone/gone.json"), at)
+                .is_err(),
+            "and neither has a path with nothing at it"
+        );
+        assert_eq!(host.link_at(at), None);
     }
 }

@@ -10,7 +10,7 @@
 disallowed-methods = [
     { path = "std::path::Path::starts_with", reason = "use `host::is_inside`, which follows every link on both sides" },
     # Reached directly, a request goes out with no still-ours question in front
-    # of it — the shape five reviews kept returning. `anthropic::send` asks it,
-    # and is the only path from that module to the port.
-    { path = "perch::host::Network::http", reason = "reach Anthropic through `anthropic::utilization`, `whose` or `renew`, each of which asks whether this Watcher is still the one to act" },
+    # of it — the shape five reviews kept returning. The Claude adapter's
+    # `service::send` asks it, and is the only path from that module to the port.
+    { path = "perch::host::Network::http", reason = "reach Anthropic through the Claude adapter's `service::utilization`, `whose` or `renew`, each of which asks whether this Watcher is still the one to act" },
 ]

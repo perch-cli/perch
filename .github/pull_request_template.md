@@ -19,4 +19,4 @@ printed. -->
 - [ ] If the shape of the registry or of an Export moved, its `version` moved with it, and the change lands as a migration or as a refusal naming the version that wrote the file.
 - [ ] `cargo fmt --all`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --locked`.
 - [ ] `typos`, `typos - < Cargo.toml`, `typos - < typos.toml`. Perch writes American English.
-- [ ] Comments say one of the four things `CLAUDE.md` lists and stay inside the caps. A decision that is new to the repository has an ADR under `docs/adr/`, cited once per file as `ADR <slug>`.
+- [ ] Comments say one of the four things `AGENTS.md` lists and stay inside the caps. A decision that is new to the repository has an ADR under `docs/adr/`, cited once per file as `ADR <slug>`.

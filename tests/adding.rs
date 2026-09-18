@@ -7,6 +7,8 @@
 
 mod common;
 
+use common::session_fixture;
+
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
@@ -34,7 +36,7 @@ fn login_directory(host: &FakeHost) -> std::path::PathBuf {
 /// there, still active, and its Credential is untouched.
 fn assert_the_active_account_survived(host: &FakeHost) {
     let registry = registry_of(host);
-    assert_eq!(registry.active().whose(), Some(EMAIL));
+    assert_eq!(registry.active().whose(), Some(KEY));
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(CREDENTIAL),
@@ -80,7 +82,7 @@ fn an_add_that_landed_says_so_when_only_the_report_could_not_be_written() {
         "the failure says which half of the command it was: {refused}"
     );
     assert!(
-        registry_of(&host).account(SECOND_EMAIL).is_some(),
+        registry_of(&host).account(SECOND_KEY).is_some(),
         "and it was the reporting half, so the Account is held"
     );
 }
@@ -123,7 +125,7 @@ fn the_account_is_recorded_under_the_email_the_login_produced() {
 
     let registry = registry_of(&host);
     let added = registry
-        .account(SECOND_EMAIL)
+        .account(SECOND_KEY)
         .expect("the new Account is recorded under its email address");
     assert_eq!(
         added.identity.organization_name.as_deref(),
@@ -195,6 +197,7 @@ fn a_group_and_an_alias_are_applied_in_the_same_invocation() {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             group: Some("work".into()),
             no_group: false,
             alias: Some("overflow".into()),
@@ -206,10 +209,10 @@ fn a_group_and_an_alias_are_applied_in_the_same_invocation() {
     let registry = registry_of(&host);
     assert_eq!(
         registry.aliases.get("overflow").map(String::as_str),
-        Some(SECOND_EMAIL)
+        Some(SECOND_KEY)
     );
     assert_eq!(
-        registry.account(SECOND_EMAIL).unwrap().group.as_deref(),
+        registry.account(SECOND_KEY).unwrap().group.as_deref(),
         Some("work")
     );
 }
@@ -229,7 +232,7 @@ fn with_no_group_the_organization_is_offered_and_accepted_by_confirming() {
     );
     assert_eq!(
         registry_of(&host)
-            .account(SECOND_EMAIL)
+            .account(SECOND_KEY)
             .unwrap()
             .group
             .as_deref(),
@@ -246,6 +249,7 @@ fn a_group_the_command_would_refuse_is_never_offered() {
     // under, and one name cannot be both.
     let host = ready_to_add().with_answers(&[""]);
     let args = AddArgs {
+        provider: Default::default(),
         alias: Some("Overflow-Ltd".to_string()),
         ..AddArgs::default()
     };
@@ -258,11 +262,9 @@ fn a_group_the_command_would_refuse_is_never_offered() {
         "an offer this command would refuse is no help as a default:\n{printed}"
     );
     let registry = registry_of(&host);
-    let added = registry
-        .account(SECOND_EMAIL)
-        .expect("the Account was added");
+    let added = registry.account(SECOND_KEY).expect("the Account was added");
     assert_eq!(added.group, None, "and Enter left it in no Group");
-    assert_eq!(registry.alias_of(SECOND_EMAIL), Some("Overflow-Ltd"));
+    assert_eq!(registry.alias_of(SECOND_KEY), Some("Overflow-Ltd"));
 }
 
 #[test]
@@ -273,7 +275,7 @@ fn the_offered_group_is_only_a_default_and_can_be_answered_over() {
 
     assert_eq!(
         registry_of(&host)
-            .account(SECOND_EMAIL)
+            .account(SECOND_KEY)
             .unwrap()
             .group
             .as_deref(),
@@ -297,7 +299,7 @@ fn a_group_name_perch_cannot_accept_is_asked_about_again_rather_than_losing_the_
     );
     assert_eq!(
         registry_of(&host)
-            .account(SECOND_EMAIL)
+            .account(SECOND_KEY)
             .unwrap()
             .group
             .as_deref(),
@@ -311,10 +313,7 @@ fn declining_the_offered_group_leaves_the_account_in_none() {
 
     run_add(&host, AddArgs::default()).0.unwrap();
 
-    assert_eq!(
-        registry_of(&host).account(SECOND_EMAIL).unwrap().group,
-        None
-    );
+    assert_eq!(registry_of(&host).account(SECOND_KEY).unwrap().group, None);
 }
 
 /// `none` and `ungrouped` are one word for one Scope, and every command refuses
@@ -327,10 +326,21 @@ fn the_other_word_for_no_group_is_taken_at_the_prompt_too() {
 
     run_add(&host, AddArgs::default()).0.unwrap();
 
-    assert_eq!(
-        registry_of(&host).account(SECOND_EMAIL).unwrap().group,
-        None
-    );
+    assert_eq!(registry_of(&host).account(SECOND_KEY).unwrap().group, None);
+}
+
+/// End of input at the prompt, which is a terminal that went away mid-question
+/// rather than a machine that never had one: the login has already happened, so
+/// the Account is kept in no Group instead of the command failing over it.
+#[test]
+fn a_question_nobody_is_left_to_answer_keeps_the_account_in_no_group() {
+    let host = ready_to_add().with_answers(&[]);
+
+    let (result, printed) = run_add(&host, AddArgs::default());
+
+    result.expect("the login worked, so the Account is kept");
+    assert!(printed.contains("No answer given"), "{printed}");
+    assert_eq!(registry_of(&host).account(SECOND_KEY).unwrap().group, None);
 }
 
 #[test]
@@ -362,16 +372,14 @@ fn no_group_is_available_without_a_terminal() {
     let (result, _) = run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
     );
 
     assert!(result.is_ok(), "{:?}", result.err());
-    assert_eq!(
-        registry_of(&host).account(SECOND_EMAIL).unwrap().group,
-        None
-    );
+    assert_eq!(registry_of(&host).account(SECOND_KEY).unwrap().group, None);
 }
 
 #[test]
@@ -403,6 +411,7 @@ fn a_duplicate_is_named_by_its_alias_when_it_has_one() {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             group: Some("work".into()),
             no_group: false,
             alias: Some("overflow".into()),
@@ -515,6 +524,7 @@ fn an_alias_that_is_already_a_group_name_is_refused_before_any_login() {
     let (result, _) = run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             group: Some("work".into()),
             no_group: false,
             alias: Some("work".into()),
@@ -538,6 +548,7 @@ fn one_invocation_cannot_plant_the_collision_it_would_later_refuse() {
     let (result, _) = run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             group: Some("work".into()),
             no_group: false,
             alias: Some("work".into()),
@@ -567,7 +578,7 @@ fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
     let host = host
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
         .with_a_path_refusing(
-            "/Users/someone/.config/perch/profiles/overflow-example-com/.claude.json",
+            "/Users/someone/.config/perch/providers/claude/profiles/claude-47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9/.claude.json",
             Refusing::Write,
             "Permission denied (os error 13)",
         );
@@ -600,7 +611,7 @@ fn a_profile_whose_credential_would_not_go_down_is_not_left_behind() {
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
         .with_platform(Platform::Other)
         .with_a_path_refusing(
-            "/Users/someone/.config/perch/profiles/overflow-example-com/.credentials.json",
+            "/Users/someone/.config/perch/providers/claude/profiles/claude-47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9/.credentials.json",
             Refusing::Write,
             "Permission denied (os error 13)",
         );
@@ -618,7 +629,7 @@ fn a_profile_whose_credential_would_not_go_down_is_not_left_behind() {
 
 /// The same one step later: the Profile is complete and the Registry will not
 /// take it. A Profile nothing records holds a live refresh token that
-/// `reap_abandoned` never walks, since that only walks `pending/`.
+/// no reaper walks, since the reaper only walks `pending/`.
 #[test]
 fn a_profile_the_registry_would_not_record_is_taken_back_out_again() {
     let host = logged_in_machine();
@@ -646,7 +657,7 @@ fn a_profile_the_registry_would_not_record_is_taken_back_out_again() {
         "no Credential is left in a namespace nothing names"
     );
     assert!(
-        host.file("/Users/someone/.config/perch/profiles/overflow-example-com/.claude.json")
+        host.file("/Users/someone/.config/perch/providers/claude/profiles/claude-47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9/.claude.json")
             .is_none(),
         "and no Profile directory either"
     );
@@ -679,6 +690,7 @@ fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
     let (result, printed) = run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -686,54 +698,45 @@ fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
 
     result.expect("the Account is added");
     let registry = registry_of(&host);
-    assert!(registry.account(THIRD_EMAIL).is_some(), "{printed}");
+    assert!(registry.account(THIRD_KEY).is_some(), "{printed}");
     assert_eq!(
         registry.active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "the Switch that happened during the login stands: an add records an \
          Account, it does not put the whole registry back to what it was"
     );
 }
 
-/// Plus-addressing on one inbox, which is exactly how somebody comes to hold
-/// several Anthropic Accounts, produces two addresses that slug to one Profile
-/// (ADR claude-code-chooses-the-store).
 #[test]
-fn a_login_whose_profile_is_already_held_is_refused_even_under_another_address() {
+fn colliding_email_slugs_have_separate_profiles_for_distinct_subjects() {
     const DOTTED: &str = "team.lead@example.com";
     const PLUSSED: &str = "team+lead@example.com";
     assert_eq!(
         perch::holdings::slug(DOTTED),
-        perch::holdings::slug(PLUSSED),
-        "the two addresses this test is about flatten to one Profile"
+        perch::holdings::slug(PLUSSED)
     );
-
     let host = logged_in_machine().with_login(login_producing(
-        leaked(&CREDENTIAL.replace("oat01-test", "oat01-dotted")),
-        leaked(&IDENTITY_FILE.replace(EMAIL, DOTTED)),
+        SECOND_CREDENTIAL,
+        leaked(&SECOND_IDENTITY_FILE.replace(SECOND_EMAIL, DOTTED)),
     ));
-    run_add(&host, no_group()).0.expect("a second Account");
-
+    run_add(&host, no_group()).0.unwrap();
     let host = host.with_login(login_producing(
-        leaked(&CREDENTIAL.replace("oat01-test", "oat01-plussed")),
-        leaked(&IDENTITY_FILE.replace(EMAIL, PLUSSED)),
+        THIRD_CREDENTIAL,
+        leaked(&THIRD_IDENTITY_FILE.replace(THIRD_EMAIL, PLUSSED)),
     ));
-    let (result, _) = run_add(&host, no_group());
-
-    let error = result.expect_err("both Accounts would be kept in one Profile");
-    assert_eq!(error.exit_code(), EXIT_CONFLICT);
-    let message = error.to_string();
-    assert!(
-        message.contains(DOTTED) && message.contains(PLUSSED),
-        "both addresses are named, since neither is obviously the wrong \
-         one:\n{message}"
+    run_add(&host, no_group()).0.unwrap();
+    assert_eq!(registry_of(&host).accounts.len(), 3);
+    assert_ne!(
+        store_of(&host, DOTTED).config_dir,
+        store_of(&host, PLUSSED).config_dir
     );
-
-    let registry = registry_of(&host);
-    assert_eq!(registry.accounts.len(), 2);
-    assert!(
-        credential_of(&host, DOTTED).is_some_and(|held| held.contains("oat01-dotted")),
-        "and the Credential already in that Profile is untouched"
+    assert_eq!(
+        credential_of(&host, DOTTED).as_deref(),
+        Some(SECOND_CREDENTIAL)
+    );
+    assert_eq!(
+        credential_of(&host, PLUSSED).as_deref(),
+        Some(THIRD_CREDENTIAL)
     );
     assert_the_active_account_survived(&host);
 }
@@ -746,6 +749,7 @@ fn leaked(text: &str) -> &'static str {
 
 fn no_group() -> AddArgs {
     AddArgs {
+        provider: Default::default(),
         no_group: true,
         ..AddArgs::default()
     }
@@ -816,8 +820,13 @@ fn what_an_abandoned_login_left_behind_is_reaped_by_the_next_command() {
 
     // What a login that was interrupted after Claude Code wrote its Credential
     // and before Perch cleared up leaves on the machine.
-    let abandoned = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
-    let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
+    let abandoned = perch::holdings::pending_login_dir(
+        perch::providers::provider::Id::Claude,
+        &host,
+        host.now(),
+    )
+    .expect("home is known");
+    let store = common::claude_fixture::store_for_profile(&host, &abandoned).expect("USER is set");
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
     assert!(
@@ -864,7 +873,7 @@ fn a_group_name_that_is_already_an_alias_is_asked_about_again() {
     );
     assert_eq!(
         registry_of(&host)
-            .account(SECOND_EMAIL)
+            .account(SECOND_KEY)
             .expect("the Account was added")
             .group
             .as_deref(),
@@ -915,8 +924,13 @@ fn a_login_that_exited_badly_repeats_the_status_it_exited_with() {
 #[test]
 fn a_login_whose_identity_file_cannot_be_read_is_refused_by_name() {
     let host = logged_in_machine();
-    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
-    let store = perch::probe::store_for_profile(&host, &pending).expect("USER is set");
+    let pending = perch::holdings::pending_login_dir(
+        perch::providers::provider::Id::Claude,
+        &host,
+        host.now(),
+    )
+    .expect("home is known");
+    let store = common::claude_fixture::store_for_profile(&host, &pending).expect("USER is set");
 
     let host = host
         .with_a_path_refusing(&store.identity_file, Refusing::Read, "permission denied")
@@ -946,15 +960,20 @@ fn a_login_somebody_is_still_driving_is_never_reaped_however_old_it_is() {
         .0
         .expect("the first Account is adopted");
 
-    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
-    let store = perch::probe::store_for_profile(&host, &pending).expect("USER is set");
+    let pending = perch::holdings::pending_login_dir(
+        perch::providers::provider::Id::Claude,
+        &host,
+        host.now(),
+    )
+    .expect("home is known");
+    let store = common::claude_fixture::store_for_profile(&host, &pending).expect("USER is set");
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.identity_file, SECOND_IDENTITY_FILE);
 
     // The `claude` this login is being driven through, still running.
     host.set_file(
-        perch::probe::session_marker_at(&pending, 4242),
-        &perch::probe::session_marker(4242, host.now()),
+        session_fixture::session_marker_at(&pending, 4242),
+        &session_fixture::session_marker(4242, host.now()),
     );
     host.set_live_process(4242);
 
@@ -984,8 +1003,13 @@ fn a_login_whose_sessions_directory_will_not_be_read_is_never_reaped_either() {
         .0
         .expect("the first Account is adopted");
 
-    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
-    let sessions = perch::probe::sessions_dir(&pending);
+    let pending = perch::holdings::pending_login_dir(
+        perch::providers::provider::Id::Claude,
+        &host,
+        host.now(),
+    )
+    .expect("home is known");
+    let sessions = session_fixture::sessions_dir(&pending);
     host.create_dir_all(&sessions).expect("the login made it");
     let host = host.with_a_path_refusing(&sessions, Refusing::List, "permission denied");
 
@@ -1009,8 +1033,13 @@ fn a_store_that_will_not_give_a_credential_up_keeps_the_directory_that_names_it(
         .0
         .expect("the first Account is adopted");
 
-    let abandoned = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
-    let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
+    let abandoned = perch::holdings::pending_login_dir(
+        perch::providers::provider::Id::Claude,
+        &host,
+        host.now(),
+    )
+    .expect("home is known");
+    let store = common::claude_fixture::store_for_profile(&host, &abandoned).expect("USER is set");
     // The Credential in the keychain, and the directory it is named after — on
     // macOS the item is outside the directory, which is the whole hazard.
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
@@ -1057,7 +1086,9 @@ fn a_pending_login_directory_with_an_unreadable_name_is_never_reaped() {
     let host = logged_in_machine();
     run_list(&host, false).0.expect("the Account is adopted");
 
-    let pending = perch::holdings::pending_logins_dir(&host).expect("home is known");
+    let pending =
+        perch::holdings::pending_logins_dir(perch::providers::provider::Id::Claude, &host)
+            .expect("home is known");
     let unnamed = pending.join("login-not-a-moment");
     host.set_file(unnamed.join("marker"), "left by something else");
 
@@ -1080,6 +1111,7 @@ fn a_name_that_is_not_usable_is_refused_as_that_rather_than_as_a_collision() {
     let (result, _) = run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             alias: Some(String::new()),
             group: Some(String::new()),
             ..AddArgs::default()
@@ -1116,6 +1148,7 @@ fn a_login_perch_is_driving_survives_a_command_run_in_another_terminal() {
     let (result, printed) = run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -1123,7 +1156,7 @@ fn a_login_perch_is_driving_survives_a_command_run_in_another_terminal() {
 
     result.expect("the login completes rather than being reaped mid-flight");
     assert!(
-        registry_of(&host).account(SECOND_EMAIL).is_some(),
+        registry_of(&host).account(SECOND_KEY).is_some(),
         "and the Account it produced is held: {printed}"
     );
 }
@@ -1234,7 +1267,11 @@ fn a_scope_that_stays_unanswered_is_told_again_on_the_add_after_that() {
         .expect("the third Account is added");
     let host = host.with_login(login_producing(
         SPARE,
-        leaked(&SECOND_IDENTITY_FILE.replace(SECOND_EMAIL, "fourth@example.com")),
+        leaked(
+            &SECOND_IDENTITY_FILE
+                .replace(SECOND_EMAIL, "fourth@example.com")
+                .replace("account-uuid-2", "account-uuid-4"),
+        ),
     ));
 
     let (result, printed) = run_add(&host, add_to_group("work"));

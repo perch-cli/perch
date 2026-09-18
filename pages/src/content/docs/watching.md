@@ -106,10 +106,12 @@ The Service is the same loop, started when you log in: a LaunchAgent on macOS,
 a `systemd --user` unit on Linux, a Scheduled Task on Windows. It is installed
 for your user, and `sudo perch watcher install` is refused.
 
-The unit carries the `claude` the install found on your PATH, so the Service
-runs the same Claude Code your shell does. `perch watcher status` says where
-the unit and the log are. On Linux the decisions go to the journal, and the
-status line says the command to read them:
+The unit carries each enabled provider's CLI: the configured `cli-path`, else
+`PERCH_CLAUDE_BIN` or `PERCH_CODEX_BIN`, else the first on your PATH that runs
+under the service manager's own environment. It also carries `PERCH_HOME`,
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME`, and none of the shell's credentials.
+`perch watcher status` says where the unit and the log are. On Linux the
+decisions go to the journal, and the status line says the command to read them:
 
 ```
 $ perch watcher status
@@ -120,9 +122,9 @@ Its decisions go to journalctl --user -u perch-watch -f.
 A Watcher is running on this machine and holds the watcher lock.
 ```
 
-An install that finds no `claude` still succeeds and says so, and the Service
-holds until you run `perch watcher install` again with Claude Code on your
-PATH. Re-running `install` is also the repair after the binary moves;
+An install that finds no `claude` or no `codex` still succeeds and names the
+provider it could not carry; `perch watcher install` again once that CLI is
+installed carries it. Re-running `install` is also the repair after the binary moves;
 `perch upgrade` does that for you and says if it could not. In a log, a hold that has not changed is
 said once an hour rather than every round.
 

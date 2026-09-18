@@ -46,9 +46,7 @@ fn a_machine_worth_backing_up() -> FakeHost {
 /// What the file at a path holds, given the passphrase it was written with.
 fn opened(host: &FakeHost, path: &str) -> export::Export {
     let sealed = host.file(path).expect("a file was written");
-    export::unseal(&sealed, PASSPHRASE)
-        .expect("it opens with the passphrase it was sealed with")
-        .0
+    export::unseal(&sealed, PASSPHRASE).expect("it opens with the passphrase it was sealed with")
 }
 
 #[test]
@@ -61,17 +59,19 @@ fn an_export_holds_every_account_every_credential_and_everything_said_about_them
     let export = opened(&host, AT);
     let registry = &export.registry;
     assert_eq!(registry.accounts.len(), 3);
-    assert_eq!(registry.alias_of(SECOND_EMAIL), Some("overflow"));
+    assert_eq!(registry.alias_of(SECOND_KEY), Some("overflow"));
     assert_eq!(
-        registry.account(EMAIL).unwrap().group.as_deref(),
+        registry.account(KEY).unwrap().group.as_deref(),
         Some("work")
     );
     assert!(
-        registry.account(THIRD_EMAIL).unwrap().disabled,
+        registry.account(THIRD_KEY).unwrap().disabled,
         "an Account taken out of Cycling comes back out of Cycling"
     );
     assert_eq!(
-        registry.group("work").unwrap().watcher_threshold_percent,
+        registry
+            .settings(&perch::config::Scope::Group("work".into()))
+            .watcher_threshold_percent,
         65,
         "a Group carries its policy, so a restore does not arrive with the defaults"
     );
@@ -82,7 +82,7 @@ fn an_export_holds_every_account_every_credential_and_everything_said_about_them
         (THIRD_EMAIL, THIRD_CREDENTIAL),
     ] {
         assert_eq!(
-            export.credentials.get(email).map(String::as_str),
+            exported_artifact(&export, email, "oauth").as_deref(),
             Some(credential),
             "{email}'s Credential is in the file"
         );
@@ -97,7 +97,7 @@ fn a_quarantined_account_is_exported_as_quarantined_with_its_reason() {
 
     let export = opened(&host, AT);
     assert_eq!(
-        export.registry.account(THIRD_EMAIL).unwrap().quarantine,
+        export.registry.account(THIRD_KEY).unwrap().quarantine,
         Some(Quarantine::RenewalRejected),
     );
 }
@@ -320,7 +320,11 @@ fn an_account_with_no_credential_is_exported_without_one_and_said_so() {
 
     let export = opened(&host, AT);
     assert_eq!(export.registry.accounts.len(), 3);
-    assert!(!export.credentials.contains_key(THIRD_EMAIL));
+    assert!(
+        !export
+            .profile_for(THIRD_EMAIL)
+            .is_some_and(|bundle| bundle.has_credentials())
+    );
     assert!(printed.contains(THIRD_EMAIL), "{printed}");
     assert!(printed.contains("perch relogin"), "{printed}");
 }
@@ -335,10 +339,7 @@ fn an_account_something_is_running_against_is_exported_like_any_other() {
     run_export(&host, AT).0.expect("the export is written");
 
     assert_eq!(
-        opened(&host, AT)
-            .credentials
-            .get(SECOND_EMAIL)
-            .map(String::as_str),
+        exported_artifact(&opened(&host, AT), SECOND_EMAIL, "oauth").as_deref(),
         Some(SECOND_CREDENTIAL),
     );
 }
@@ -521,6 +522,60 @@ fn an_export_says_accounts_in_the_plural_when_several_have_no_credential() {
     assert!(printed.contains("perch relogin"), "{printed}");
 }
 
+/// The two lines an Export writes that nothing else in this suite drives a
+/// failure through: the prompt that comes before a passphrase is typed, which
+/// is before the file exists, and the note that comes after it is written.
+#[test]
+fn an_export_says_which_half_it_was_when_a_line_either_side_of_the_write_fails() {
+    /// A stdout that takes everything but the one line named.
+    struct RefusingTheLine(&'static str);
+
+    impl std::io::Write for RefusingTheLine {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains(self.0) {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = a_machine_worth_backing_up();
+    let refused = perch::commands::export::run(
+        &host,
+        std::path::Path::new(AT),
+        &mut RefusingTheLine("Choose a passphrase"),
+    )
+    .expect_err("the prompt could not be written");
+    assert!(
+        !refused.to_string().contains("was written"),
+        "nothing landed, so nothing is named: {refused}"
+    );
+    assert!(host.file(AT).is_none(), "and no file is there");
+
+    let host = machine_with_three_accounts();
+    let store = store_of(&host, THIRD_EMAIL);
+    host.forget_keychain_item(&store.keychain_service, LOGIN_NAME);
+    host.remove_file(&store.credentials_file).ok();
+    let host = typing_the_passphrase(host);
+    let refused = perch::commands::export::run(
+        &host,
+        std::path::Path::new(AT),
+        &mut RefusingTheLine("holds no Credential"),
+    )
+    .expect_err("the note could not be written");
+    assert!(
+        refused
+            .to_string()
+            .contains("Only the report could not be printed"),
+        "the file is there and the failure says so: {refused}"
+    );
+    assert!(host.file(AT).is_some(), "which it is");
+}
+
 /// A Credential that Anthropic Rotated while the Account was active, so the live
 /// copy is ahead of the one in that Account's own Profile.
 const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated","refreshToken":"sk-ant-ort01-rotated","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;
@@ -533,7 +588,7 @@ fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_pr
     let host = machine_with_three_accounts();
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "the fixture's premise"
     );
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
@@ -543,12 +598,12 @@ fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_pr
 
     let export = opened(&host, AT);
     assert_eq!(
-        export.credentials.get(EMAIL).map(String::as_str),
+        exported_artifact(&export, EMAIL, "oauth").as_deref(),
         Some(ROTATED),
         "the Rotation the active Account is living on has to be what travels"
     );
     assert_eq!(
-        export.credentials.get(SECOND_EMAIL).map(String::as_str),
+        exported_artifact(&export, SECOND_EMAIL, "oauth").as_deref(),
         Some(SECOND_CREDENTIAL),
         "and every other Account still travels as its own Profile holds it"
     );
@@ -571,7 +626,7 @@ fn a_live_credential_belonging_to_somebody_else_is_not_exported_as_the_active_ac
     run_export(&host, AT).0.expect("the export is written");
 
     assert_eq!(
-        opened(&host, AT).credentials.get(EMAIL).map(String::as_str),
+        exported_artifact(&opened(&host, AT), EMAIL, "oauth").as_deref(),
         Some(CREDENTIAL),
         "the copy in its own Profile is the honest answer for it"
     );
@@ -594,7 +649,7 @@ fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
     let export = opened(&host, AT);
     assert_eq!(export.accounts(), 3, "{printed}");
     assert_eq!(
-        export.credentials.get(EMAIL).map(String::as_str),
+        exported_artifact(&export, EMAIL, "oauth").as_deref(),
         Some(ROTATED),
         "and the active Account still travels as the live Credential it is on: \
          no Identity could be read, and an Identity nothing can read has never \
@@ -611,7 +666,7 @@ fn an_export_settles_a_landing_before_it_decides_whose_the_live_credential_is() 
     // What a Switch leaves when it dies after the Credential moved and before
     // the Identity was patched: the arriving Account's Credential is live, and
     // `.claude.json` still names the one being left.
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_CREDENTIAL);
     let host = typing_the_passphrase(host);
 
@@ -619,13 +674,13 @@ fn an_export_settles_a_landing_before_it_decides_whose_the_live_credential_is() 
 
     let export = opened(&host, AT);
     assert_eq!(
-        export.credentials.get(EMAIL).map(String::as_str),
+        exported_artifact(&export, EMAIL, "oauth").as_deref(),
         Some(CREDENTIAL),
         "the Account being left travels as its own Profile holds it, not as \
          whatever the interrupted Switch happened to leave live"
     );
     assert_eq!(
-        export.credentials.get(SECOND_EMAIL).map(String::as_str),
+        exported_artifact(&export, SECOND_EMAIL, "oauth").as_deref(),
         Some(SECOND_CREDENTIAL),
         "and the Account arriving travels as itself, once rather than nowhere"
     );
@@ -650,7 +705,7 @@ fn a_live_credential_belonging_to_somebody_else_is_left_out_with_claude_code_gon
     run_export(&host, AT).0.expect("the export is written");
 
     assert_eq!(
-        opened(&host, AT).credentials.get(EMAIL).map(String::as_str),
+        exported_artifact(&opened(&host, AT), EMAIL, "oauth").as_deref(),
         Some(CREDENTIAL),
         "the copy in its own Profile is the honest answer for it"
     );
@@ -728,15 +783,12 @@ fn a_terminal_that_goes_away_reporting_still_says_the_export_was_written() {
     assert!(host.path_exists(std::path::Path::new(AT)), "which it is");
 }
 
-/// FNV-1a over the envelope's own field names, as `tests/migrating.rs` digests
-/// the name-rule table. The names alone: what each field *holds* is the
-/// Registry's question and is answered by the Registry's own version.
+/// The digest pins envelope field names; nested fields belong to the Registry version.
 fn what_the_envelope_holds() -> u64 {
     let envelope = export::Export {
         version: export::CURRENT_VERSION,
         registry: perch::registry::Registry::default(),
-        credentials: std::collections::BTreeMap::new(),
-        identity_files: std::collections::BTreeMap::new(),
+        profiles: std::collections::BTreeMap::new(),
     };
     let document = serde_json::to_value(&envelope).expect("an Export serializes");
     let named: Vec<&str> = document
@@ -762,8 +814,19 @@ fn what_the_envelope_holds() -> u64 {
 fn a_shape_that_moves_takes_the_export_version_with_it() {
     assert_eq!(
         (export::CURRENT_VERSION, what_the_envelope_holds()),
-        (1, 0xd8fd_6deb_9587_1cec),
+        (5, 6_271_292_601_233_125_334),
         "the envelope's shape and its version have to move together: bump \
          `export::CURRENT_VERSION` and record the new number here"
     );
+}
+
+#[test]
+fn unreadable_native_configuration_cannot_be_silently_omitted_from_a_backup() {
+    let host = a_machine_worth_backing_up();
+    let path = store_of(&host, SECOND_EMAIL).identity_file;
+    let host = host.with_a_path_refusing(&path, Refusing::Read, "Permission denied");
+    let registry = perch::registry::load(&host).unwrap().unwrap();
+    let refused =
+        export::gather(&host, &registry).expect_err("configuration is part of the Profile");
+    assert!(refused.to_string().contains("Permission denied"));
 }

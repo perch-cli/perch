@@ -9,11 +9,12 @@
 //! Two rules, and everything here is one of them: what crosses is decided by a
 //! denylist read at Run time, and it crosses by link or the Run is refused.
 
+use super::profile;
 use std::path::{Path, PathBuf};
 
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host, HostError, Link, Platform};
-use crate::{probe, profile};
+use crate::providers::claude::probe;
 
 /// The entries that stay behind, for the two reasons there are to hold one
 /// back: the first two are the Account rather than the person, and the last two
@@ -23,7 +24,7 @@ use crate::{probe, profile};
 pub const HELD_BACK: [&str; 4] = [
     probe::CREDENTIALS_FILE,
     probe::IDENTITY_FILE,
-    probe::SESSIONS,
+    crate::providers::sessions::SESSIONS,
     probe::REFRESH_LOCK,
 ];
 
@@ -311,7 +312,7 @@ mod tests {
     #[test]
     fn a_share_another_run_established_first_is_not_a_refusal() {
         let target = Path::new("/Users/someone/.claude/CLAUDE.md");
-        let at = Path::new("/Users/someone/.config/perch/profiles/one/CLAUDE.md");
+        let at = Path::new("/Users/someone/.config/perch/providers/claude/profiles/one/CLAUDE.md");
         let host = crate::host::FakeHost::new()
             .with_file(target, "remember this")
             .with_link(Link::Symbolic, target, at);
@@ -324,7 +325,7 @@ mod tests {
     #[test]
     fn a_link_to_somewhere_else_in_the_way_is_still_refused() {
         let target = Path::new("/Users/someone/.claude/CLAUDE.md");
-        let at = Path::new("/Users/someone/.config/perch/profiles/one/CLAUDE.md");
+        let at = Path::new("/Users/someone/.config/perch/providers/claude/profiles/one/CLAUDE.md");
         let host = crate::host::FakeHost::new()
             .with_file(target, "remember this")
             .with_file("/Users/someone/elsewhere.md", "not it")
@@ -375,6 +376,31 @@ mod tests {
         }
     }
 
+    /// The sweep is for links into a Default Profile entry that has gone, so a
+    /// Profile that is not there at all holds none of them.
+    #[test]
+    fn a_profile_that_is_not_there_holds_no_dangling_link_to_clear() {
+        let host = crate::host::FakeHost::new();
+
+        sweep(
+            &host,
+            Path::new("/Users/someone/.claude"),
+            Path::new("/Users/someone/.config/perch/providers/claude/profiles/gone"),
+        )
+        .expect("a Profile that was never made is not a failure");
+    }
+
+    /// A path that is not text keeps every byte it has: stripping a prefix off
+    /// one means reading it as text first.
+    #[cfg(unix)]
+    #[test]
+    fn a_target_that_is_not_text_is_the_path_it_already_was() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = Path::new(std::ffi::OsStr::from_bytes(b"/Users/someone/\xff\xfe"));
+
+        assert_eq!(plain(raw), raw);
+    }
+
     #[test]
     fn a_junctions_verbatim_target_is_the_path_it_names() {
         assert!(points_to(
@@ -391,3 +417,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "reconcile/behavior.rs"]
+mod behavior;

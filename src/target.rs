@@ -35,7 +35,7 @@ impl Target {
         }
     }
 
-    fn email(&self) -> Option<&str> {
+    fn key(&self) -> Option<&str> {
         match self {
             Target::Alias { email, .. } | Target::Account { email } => Some(email),
             Target::Group { .. } => None,
@@ -55,7 +55,7 @@ pub struct AccountTarget {
 
 /// The full order, for the commands that accept any kind of Target.
 pub fn resolve(registry: &Registry, target: &str) -> Result<Target> {
-    match matched(registry, target) {
+    match matched(registry, target)? {
         Some(target) => Ok(target),
         None => Err(nothing_called(target, every_name(registry))),
     }
@@ -65,14 +65,23 @@ pub fn resolve(registry: &Registry, target: &str) -> Result<Target> {
 /// A Group is resolved rather than ignored, so naming one gets an answer about
 /// the Group instead of a claim that it does not exist.
 pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarget> {
-    let found = match matched(registry, target) {
+    let found = match matched(registry, target)? {
         Some(found) => found,
         None => return Err(nothing_called(target, account_names(registry))),
     };
-    match found.email() {
+    match found.key() {
         Some(email) => Ok(AccountTarget {
             email: email.to_string(),
-            matched: found.matched(),
+            matched: match &found {
+                Target::Alias { name, .. } => format!(
+                    "`{name}` is an Alias for {}.",
+                    registry.held(email)?.email()
+                ),
+                _ => format!(
+                    "`{target}` is an Account: {}.",
+                    registry.named_for_the_user(email)
+                ),
+            },
         }),
         None => Err(PerchError::Invalid(format!(
             "{} Name one Account: its Alias, or its email address.",
@@ -85,24 +94,43 @@ pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarge
 /// made under: the Registry refuses an Alias or a Group differing from a held
 /// name only in case, so there is never more than one candidate to find. An
 /// exact lookup here would make resolving a Target stricter than setting one.
-fn matched(registry: &Registry, target: &str) -> Option<Target> {
+fn matched(registry: &Registry, target: &str) -> Result<Option<Target>> {
     if let Some((name, email)) = registry.declared_alias(target) {
-        return Some(Target::Alias {
+        return Ok(Some(Target::Alias {
             name: name.to_string(),
             email: email.to_string(),
-        });
+        }));
     }
-    if let Some(account) = registry.account(target) {
-        return Some(Target::Account {
-            email: account.email().to_string(),
-        });
+    let accounts: Vec<_> = registry
+        .accounts
+        .iter()
+        .filter(|account| crate::name::same_name(account.email(), target))
+        .collect();
+    if accounts.len() > 1 {
+        return Err(PerchError::Invalid(format!(
+            "{target} names more than one Account. Name one by its Alias: {}.",
+            accounts
+                .iter()
+                .map(|account| registry.alias_of(account.key()).unwrap_or(account.key()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    if let Some(account) = accounts
+        .first()
+        .copied()
+        .or_else(|| registry.account(target))
+    {
+        return Ok(Some(Target::Account {
+            email: account.key().to_string(),
+        }));
     }
     if let Some(name) = registry.declared_group(target) {
-        return Some(Target::Group {
+        return Ok(Some(Target::Group {
             name: name.to_string(),
-        });
+        }));
     }
-    None
+    Ok(None)
 }
 
 /// Every name a Target could have been.
@@ -118,6 +146,20 @@ fn account_names(registry: &Registry) -> Vec<String> {
         registry
             .accounts
             .iter()
+            .map(|account| account.key().to_string()),
+    );
+    names.extend(
+        registry
+            .accounts
+            .iter()
+            .filter(|account| {
+                registry
+                    .accounts
+                    .iter()
+                    .filter(|peer| crate::name::same_name(peer.email(), account.email()))
+                    .count()
+                    == 1
+            })
             .map(|account| account.email().to_string()),
     );
     names
@@ -209,9 +251,124 @@ fn edit_distance(left: &str, right: &str) -> usize {
     previous[right.len()]
 }
 
+/// A Target under a provider flag. An email can name one Account per provider
+/// (ADR an-account-has-a-workspace), so the flag picks among them; an Alias
+/// names one Account whatever the flag says, and a flag it disagrees with is a
+/// refusal on both paths rather than a Switch to the other provider.
+pub fn resolve_for(
+    registry: &Registry,
+    target: &str,
+    provider: Option<crate::providers::provider::Id>,
+) -> Result<AccountTarget> {
+    let found = match within_provider(registry, target, provider)? {
+        Some(found) => found,
+        None => resolve_account(registry, target)?,
+    };
+    let account = registry.held(&found.email)?;
+    if let Some(selected) = provider
+        && selected != account.provider()
+    {
+        return Err(PerchError::Invalid(format!(
+            "{target} is a {} Account. `--{}` selects it.",
+            account.provider().adapter().name(),
+            account.provider().word()
+        )));
+    }
+    Ok(found)
+}
+
+/// The one Account this email names among the provider's, or nothing where the
+/// Target is an Alias or no Account of that provider has the address.
+fn within_provider(
+    registry: &Registry,
+    target: &str,
+    provider: Option<crate::providers::provider::Id>,
+) -> Result<Option<AccountTarget>> {
+    if registry.declared_alias(target).is_some() {
+        return Ok(None);
+    }
+    let matches: Vec<_> = registry
+        .accounts
+        .iter()
+        .filter(|account| {
+            crate::name::same_name(account.email(), target)
+                && provider.is_none_or(|selected| selected == account.provider())
+        })
+        .collect();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [account] => Ok(Some(AccountTarget {
+            email: account.key().into(),
+            matched: format!(
+                "`{target}` is an Account: {}.",
+                registry.named_for_the_user(account.key())
+            ),
+        })),
+        _ => Err(PerchError::Invalid(format!(
+            "{target} names more than one Account. Name one by its Alias: {}.",
+            matches
+                .iter()
+                .map(|account| registry.alias_of(account.key()).unwrap_or(account.key()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Registry holding one Account, one Alias for it, and one Group: the
+    /// three kinds of name a Target can be, so every branch of the order is
+    /// there to be taken.
+    fn holding() -> Registry {
+        let mut registry = Registry::default();
+        registry.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
+        registry
+            .declare_group("work")
+            .expect("`work` is a usable Group name");
+        registry
+            .aliases
+            .insert("mine".to_string(), registry.accounts[0].key().to_string());
+        registry
+    }
+
+    #[test]
+    fn a_target_says_which_of_the_three_kinds_of_name_it_turned_out_to_be() {
+        let registry = holding();
+
+        assert_eq!(
+            resolve(&registry, "mine")
+                .expect("the Alias names it")
+                .matched(),
+            format!("`mine` is an Alias for {}.", registry.accounts[0].key())
+        );
+        assert_eq!(
+            resolve(&registry, "someone@example.com")
+                .expect("the address names it")
+                .matched(),
+            format!("`{}` is an Account.", registry.accounts[0].key())
+        );
+        assert_eq!(
+            resolve(&registry, "work")
+                .expect("the Group is declared")
+                .matched(),
+            "`work` is a Group."
+        );
+    }
+
+    #[test]
+    fn a_name_nothing_holds_is_refused_with_every_name_a_target_could_have_been() {
+        let refused = resolve(&holding(), "wrok").expect_err("nothing is called that");
+
+        let said = refused.to_string();
+        assert!(said.contains("work"), "the Group is a candidate: {said}");
+        assert!(
+            said.contains("wrok"),
+            "and the refusal quotes what was typed: {said}"
+        );
+    }
 
     #[test]
     fn a_distance_is_the_number_of_single_character_mistakes() {

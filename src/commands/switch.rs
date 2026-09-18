@@ -17,15 +17,16 @@ use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::live;
-use crate::probe::Installed;
 use crate::registry::{self, Account, Registry, Settled};
 use crate::say;
 use crate::switch::{self, Captured, Switched};
-use crate::target::{self, Target};
+use crate::target;
 use crate::utilization;
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct SwitchArgs {
+    #[command(flatten)]
+    pub provider: super::selection::Selection,
     /// An Alias or email address, or a Group to Cycle within
     pub target: Option<String>,
 
@@ -51,21 +52,47 @@ struct Decision {
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    let settled = crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
+    let explicit = args.provider.explicit();
+    let selected = match args.target.as_deref() {
+        Some(target) if registry.declared_group(target).is_none() => {
+            let found = target::resolve_for(&registry, target, explicit)?;
+            Some(registry.held(&found.email)?.provider())
+        }
+        _ => explicit,
+    };
+    let selected = match selected {
+        Some(provider) => provider,
+        None => {
+            let providers: std::collections::BTreeSet<_> =
+                registry.accounts.iter().map(Account::provider).collect();
+            if providers.len() > 1 {
+                return Err(PerchError::Invalid(
+                    "Choose --provider <name> for a Cycle containing multiple providers".into(),
+                ));
+            }
+            providers.into_iter().next().unwrap_or_default()
+        }
+    };
+    if !selected.adapter().capabilities().live_switch {
+        return Err(PerchError::Invalid(format!(
+            "{} live Switching is not supported yet; use perch run --provider {} with an Account Alias",
+            selected.adapter().name(),
+            selected.word()
+        )));
+    }
+    selected.executable(host)?;
+    registry.select_provider(selected);
 
-    // The refusals below and the Switch after them name the Claude Code they
-    // were reading in anything they refuse (ADR an-assumption-is-probed).
-    // Ahead of the Cycle now, which refuses on it.
-    let installed = Installed::for_a_refusal(host)?;
+    let settled = crate::commands::a_settled_landing(host, &mut perch, &mut registry)?;
 
     let Decision {
         incoming,
         chosen,
         unread,
-    } = decide(host, &mut perch, &mut registry, &settled, &args, &installed)?;
+    } = decide(host, &mut perch, &mut registry, &settled, &args)?;
     let outgoing = registry.active_account(&settled).cloned();
 
-    already_there(host, &installed, &registry, &settled, &incoming)?;
+    already_there(host, &registry, &settled, &incoming)?;
 
     // Everything the Switch owes the Registry is written by `switch_to`, which
     // is the only way to reach what the Switch found. `Reason::Asked` is all
@@ -74,7 +101,6 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         host,
         &mut perch,
         &mut registry,
-        &installed,
         &incoming,
         switch::Departure::Capturing(outgoing.as_ref()),
         switch::Reason::Asked,
@@ -102,22 +128,20 @@ fn decide(
     registry: &mut Registry,
     settled: &Settled,
     args: &SwitchArgs,
-    installed: &Installed,
 ) -> Result<Decision> {
     let scope = match args.target.as_deref() {
         Some(target) => {
-            let found = target::resolve(registry, target)?;
-            match found {
-                Target::Group { name } => Scope::Group(name),
-                Target::Alias { email, .. } | Target::Account { email } => {
-                    let incoming = registry.held(&email)?.clone();
-                    refuse_a_quarantined_account(registry, &incoming)?;
-                    return Ok(Decision {
-                        incoming,
-                        chosen: None,
-                        unread: Vec::new(),
-                    });
-                }
+            if let Some(name) = registry.declared_group(target) {
+                Scope::Group(name.into())
+            } else {
+                let found = target::resolve_for(registry, target, args.provider.explicit())?;
+                let incoming = registry.held(&found.email)?.clone();
+                refuse_a_quarantined_account(registry, &incoming)?;
+                return Ok(Decision {
+                    incoming,
+                    chosen: None,
+                    unread: Vec::new(),
+                });
             }
         }
         // Never outside the Group the current Account is in, so a work
@@ -125,7 +149,7 @@ fn decide(
         None => cycle::scope_for(registry, leaving(registry, settled)?)?,
     };
 
-    let unread = read_what_it_cannot_rank(host, perch, registry, settled, args, installed, &scope)?;
+    let unread = read_what_it_cannot_rank(host, perch, registry, settled, args, &scope)?;
 
     // Nothing is set aside: a Cycle somebody asked for is one they get, and the
     // margin and the cooldown are the Watcher's rules for acting unasked
@@ -154,7 +178,6 @@ fn read_what_it_cannot_rank(
     registry: &mut Registry,
     settled: &Settled,
     args: &SwitchArgs,
-    installed: &Installed,
     scope: &Scope,
 ) -> Result<Vec<String>> {
     if args.no_refresh {
@@ -167,18 +190,18 @@ fn read_what_it_cannot_rank(
     // (ADR a-profile-is-live-by-evidence).
     if let Some(leaving) = &leaving {
         live::ask(host, &[live::Place::of_the_profile(host, leaving)?])
-            .idle_or(installed, &live::NOTHING_WAS_CHANGED)?;
+            .idle_or(&live::NOTHING_WAS_CHANGED)?;
     }
 
     let mut unread = Vec::new();
     if let Some(leaving) = &leaving
         && cycle::trusted(leaving, host.now()).is_none()
     {
-        let about = [leaving.email().to_string()];
+        let about = [leaving.key().to_string()];
         unread.extend(crate::commands::read_now(host, perch, registry, &about).notes());
     }
 
-    let leaving = leaving.as_ref().map(Account::email);
+    let leaving = leaving.as_ref().map(Account::key);
     let to_beat = leaving
         .and_then(|leaving| registry.account(leaving))
         .and_then(|account| cycle::trusted(account, host.now()));
@@ -196,7 +219,7 @@ fn read_what_it_cannot_rank(
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
     registry::refuse_a_quarantined_account(
         registry,
-        incoming.email(),
+        incoming.key(),
         "Switching to it would make a Credential live that no longer works, and \
          cost you the Account you are on.",
     )
@@ -217,21 +240,20 @@ fn leaving<'a>(registry: &'a Registry, settled: &Settled) -> Result<&'a Account>
 /// active while Claude Code still names somebody else.
 fn already_there(
     host: &dyn Host,
-    installed: &Installed,
     registry: &Registry,
     settled: &Settled,
     incoming: &Account,
 ) -> Result<()> {
-    if !registry.is_active(settled, incoming.email()) {
+    if !registry.is_active(settled, incoming.key()) {
         return Ok(());
     }
-    if !switch::already_landed(host, installed, incoming)? {
+    if !switch::already_landed(host, incoming)? {
         return Ok(());
     }
 
     Err(PerchError::NothingToDo(format!(
         "{} is already the active Account.",
-        registry.named_for_the_user(incoming.email())
+        registry.named_for_the_user(incoming.key())
     )))
 }
 
@@ -254,7 +276,7 @@ fn report(
     // Where it landed, and — where the Account was chosen rather than named —
     // what it was chosen on and the Scope the Cycle stayed inside. One line,
     // because the ranking is not worth defending.
-    let named = registry.named_for_the_user(incoming.email());
+    let named = registry.named_for_the_user(incoming.key());
     say::line(
         out,
         &match chosen {
@@ -262,6 +284,10 @@ fn report(
             None => format!("Switched to {named}."),
         },
     )?;
+
+    if let Some(note) = incoming.provider().adapter().switched_note() {
+        say::line(out, note)?;
+    }
 
     // The one Capture outcome with something to do about it: a login made
     // outside Perch that this Switch replaced, which nothing else on the screen

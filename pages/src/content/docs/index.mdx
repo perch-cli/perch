@@ -1,9 +1,9 @@
 ---
 title: Perch
-description: Run Claude Code as whichever Claude account you want, without going through the login flow again.
+description: Run Claude Code or Codex as whichever account you want, without going through the login flow again.
 template: splash
 hero:
-  tagline: Run Claude Code as whichever Claude account you want, without going through the login flow again.
+  tagline: Run Claude Code or Codex as whichever account you want, without going through the login flow again.
   image:
     alt: The Perch icon — a perching bird above two switch arrows
     file: ../../../../docs/assets/icon.svg
@@ -24,11 +24,11 @@ sidebar:
 # and says what Perch does, which is what a search result and a shared card show.
 head:
   - tag: title
-    content: "Perch: run Claude Code as any Claude account you hold"
+    content: "Perch: run Claude Code or Codex as any account you hold"
   - tag: meta
     attrs:
       property: og:title
-      content: "Perch: run Claude Code as any Claude account you hold"
+      content: "Perch: run Claude Code or Codex as any account you hold"
   - tag: meta
     attrs:
       property: og:type
@@ -41,7 +41,7 @@ head:
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Perch",
-        "description": "Run Claude Code as whichever Claude account you want, without going through the login flow again.",
+        "description": "Run Claude Code or Codex as whichever account you want, without going through the login flow again.",
         "url": "https://perch-cli.github.io/perch/",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS, Linux, Windows",
@@ -56,6 +56,10 @@ import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 Perch is for one person moving between logins they already hold — their own
 accounts, on their own machine. It creates no accounts and authenticates nobody;
 it only chooses between logins you have already made yourself.
+
+Claude Code and Codex are separate providers. Each keeps its own active Account,
+its own Settings and its own quota, and no figure from one stands in for the
+other. Codex support is experimental.
 
 ## Quota ran out. Keep working.
 
@@ -72,7 +76,8 @@ Utilization   5-hour    12%  (as of 4m ago)
 
 It lands everywhere at once — every terminal, the editor extension, the desktop
 app. Your memory, settings, plugins and project history do not move: they are
-yours rather than the Account's.
+yours rather than the Account's. A Codex Switch writes the login the next `codex`
+starts with, so a Codex already open keeps its Account until it is restarted.
 
 ## Or stop being the one who notices
 
@@ -98,8 +103,8 @@ most of them. Nothing changes underneath you until a Group has been told it may.
   enough for a shell prompt.
 - `perch add` — gain an Account by logging in, without disturbing the one you are
   using.
-- `perch run <target>` — launch Claude Code as one Account in one terminal,
-  leaving the active one alone.
+- `perch run <target>` — launch Claude Code or Codex as one Account in one
+  terminal, leaving the active one alone.
 - `perch holdings export` — everything Perch holds, in one encrypted file,
   readable by the standard `age` command.
 
@@ -168,7 +173,7 @@ Quota Window, Capture, Rotation, Live Profile — see
 
 Perch is pre-1.0. Every release is real and works, but the command line may still
 change between them, and the changelog marks every change that breaks something.
-macOS, Linux and Windows. Claude Code has to be installed already, for
+macOS, Linux and Windows. Claude Code or Codex has to be installed already, for
 Perch to have anything to switch between.
 
 On macOS and Linux:

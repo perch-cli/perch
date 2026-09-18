@@ -43,6 +43,28 @@ pub struct Watching {
 /// yes underneath it, and every failure it gives is the same "not arranged yet". The
 /// [`Settled`] is why it cannot be asked too early (ADR an-ordering-is-a-type).
 pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
+    let provider = registry.selected_provider();
+    if registry.watcher_paused {
+        return Err(PerchError::Invalid(
+            "Automatic Switching is paused globally".into(),
+        ));
+    }
+    if !registry
+        .provider_settings
+        .get(&provider)
+        .is_none_or(|settings| settings.enabled)
+    {
+        return Err(PerchError::Invalid(format!(
+            "{} is disabled",
+            provider.word()
+        )));
+    }
+    if !provider.adapter().capabilities().live_switch {
+        return Err(PerchError::Invalid(format!(
+            "{} does not support automatic live Switching",
+            provider.word()
+        )));
+    }
     let account = registry.active_account(settled).cloned().ok_or_else(|| {
         PerchError::NotFound(
             "Perch holds no active Account, so there is nothing to watch. \
@@ -62,7 +84,7 @@ pub fn permitted(registry: &Registry, settled: &Settled) -> Result<Watching> {
                  interchangeable, so nothing is watched.\n\
                  `perch config set {UNGROUPED} interchangeable true` and `perch \
                  config set {UNGROUPED} watcher-may-act true` start it.",
-                registry.named_for_the_user(account.email()),
+                registry.named_for_the_user(account.key()),
             )));
         }
         cycle::MayAct::Ungranted => {
@@ -345,12 +367,12 @@ impl Candidates {
                 .filter(|account| {
                     // Through the Registry's own answer rather than `!=`, which would be
                     // correct only by two facts that are true two modules away.
-                    !name::same_name(account.email(), watching.account.email())
+                    !name::same_name(account.key(), watching.account.key())
                         && cycle::is_a_candidate(&sharers, account)
                 })
                 .map(|account| Candidate {
-                    email: account.email().to_string(),
-                    named: registry.named_for_the_user(account.email()),
+                    email: account.key().to_string(),
+                    named: registry.named_for_the_user(account.key()),
                 })
                 .collect(),
         )
@@ -406,7 +428,6 @@ mod tests {
     use crate::host::FakeHost;
     use crate::live;
     use crate::observe::Outcome;
-    use crate::probe::Installed;
     use crate::registry::{Quarantine, WindowUtilization};
     use crate::watch::Recently;
 
@@ -423,6 +444,7 @@ mod tests {
         let mut account = cycle::tests::account(
             email,
             vec![WindowUtilization {
+                group: None,
                 window: "5-hour".to_string(),
                 used_percent,
                 resets_at: None,
@@ -698,9 +720,13 @@ mod tests {
 
     fn granted(mut registry: Registry) -> Registry {
         registry
-            .settings_mut(&Scope::Ungrouped)
+            .scope_settings_mut(&Scope::Ungrouped)
             .expect("the Ungrouped Scope carries Settings")
-            .watcher_may_act = true;
+            .providers
+            .entry(crate::providers::provider::Id::Claude)
+            .or_default()
+            .watcher
+            .enabled = true;
         registry
     }
 
@@ -752,7 +778,7 @@ mod tests {
 
         let watching = asking(&registry).expect("declared and granted");
 
-        assert_eq!(watching.account.email(), WATCHED);
+        assert_eq!(watching.account.key(), WATCHED);
         assert_eq!(watching.scope, Scope::Ungrouped);
         assert_eq!(
             watching.policy,
@@ -847,7 +873,7 @@ mod tests {
             .crossed(80)
             .expect("90 is over 80");
         let idle = live::ask(&FakeHost::new(), &[])
-            .idle_or(&Installed::unknown("2.1.221"), &live::NOTHING_WAS_CHANGED)
+            .idle_or(&live::NOTHING_WAS_CHANGED)
             .expect("no Place was asked about, so nothing is live");
         (crossed, idle)
     }
@@ -994,5 +1020,65 @@ mod tests {
             refused_the_candidates(&[], &observe::Report::asked_for()).is_none(),
             "no candidates at all is nowhere to go, not a failure to read"
         );
+    }
+
+    /// The two global answers, each ahead of everything a Scope says: a Watcher
+    /// that has been paused is not watching anything a Group declared, and a
+    /// provider somebody turned off is not one its Accounts are Switched within.
+    #[test]
+    fn a_paused_watcher_and_a_disabled_provider_are_each_refused_before_the_scope_is_read() {
+        let arranged = || granted(declared(watching_one()));
+
+        let mut paused = arranged();
+        paused.watcher_paused = true;
+        let refused = asking(&paused).expect_err("the watcher is paused");
+        assert!(refused.to_string().contains("paused"), "{refused}");
+
+        let mut disabled = arranged();
+        disabled
+            .provider_settings
+            .entry(disabled.selected_provider())
+            .or_default()
+            .enabled = false;
+        let refused = asking(&disabled).expect_err("the provider is disabled");
+        assert!(refused.to_string().contains("is disabled"), "{refused}");
+
+        asking(&arranged()).expect("and neither is true of the arranged machine");
+    }
+
+    /// A burst that came back about nobody the walk named. The reason is the
+    /// candidate's own rather than an attempt's, and the Back-off paces nothing:
+    /// a doubling charged for a request that never went out would sit the
+    /// Watcher down over a round it spent nothing on.
+    #[test]
+    fn a_candidate_the_refresh_never_answered_for_is_unread_and_paces_nothing() {
+        let (registry, candidates) = walked();
+        let about_somebody_else = observed("elsewhere@example.com");
+
+        let considered =
+            candidates.refreshed(&registry, cycle::Measure::Worst, &about_somebody_else);
+
+        assert!(
+            matches!(&considered[0].figure, Figure::Unread { why } if why.contains("nothing was read at all")),
+            "{:?}",
+            considered[0].figure
+        );
+        let refusal = refused_the_candidates(&considered, &about_somebody_else)
+            .expect("no candidate was read");
+        assert!(
+            !refusal.paced,
+            "an Observed reading is not a question nobody answered: {}",
+            refusal.why
+        );
+    }
+
+    /// The two outcomes a reading never arrives carrying, answered anyway: a
+    /// round that stopped is reported through `Report::stopped`, and a round
+    /// reads under its own spending, so the Watcher is never told to stand aside
+    /// for itself. Neither may quietly become a hold if one ever does arrive.
+    #[test]
+    fn a_reading_that_stopped_or_stood_aside_is_no_refusal_to_report() {
+        assert!(refused_the_reading(&attempt(Outcome::JustRead)).is_none());
+        assert!(refused_the_reading(&attempt(Outcome::Stopped(Lost::Stopped))).is_none());
     }
 }

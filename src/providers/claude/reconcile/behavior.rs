@@ -15,17 +15,17 @@
 
 use std::path::{Path, PathBuf};
 
-use perch::host::fake::Effect;
-use perch::host::prelude::*;
-use perch::host::{FakeHost, Link, PRIVATE_DIR_MODE, Platform, Refusing};
-use perch::reconcile::reconcile;
+use super::reconcile;
+use crate::host::fake::Effect;
+use crate::host::prelude::*;
+use crate::host::{FakeHost, Link, PRIVATE_DIR_MODE, Platform, Refusing};
 
 /// The Default Profile: the configuration directory Claude Code falls back to,
 /// holding everything that belongs to the person.
 const SHARED: &str = "/Users/someone/.claude";
 
 /// The Profile a Run would be launched against.
-const PROFILE: &str = "/Users/someone/.config/perch/profiles/someone-example-com";
+const PROFILE: &str = "/Users/someone/.config/perch/providers/claude/profiles/someone-example-com";
 
 /// A machine whose Default Profile holds the spread a real one does: memory,
 /// settings, plugins, plans — and the entries that stay behind, the two that
@@ -50,7 +50,7 @@ fn profile(entry: &str) -> String {
 }
 
 /// Runs the pass a Run would run.
-fn run_reconcile(host: &FakeHost) -> perch::Result<()> {
+fn run_reconcile(host: &FakeHost) -> crate::Result<()> {
     reconcile(host, Path::new(SHARED), Path::new(PROFILE))
 }
 
@@ -266,7 +266,7 @@ fn a_windows_refusal_says_what_it_tried_and_what_would_let_it_through() {
 fn a_link_pointing_somewhere_stale_is_repaired_rather_than_left() {
     let host = machine().with_link(
         Link::Symbolic,
-        "/Users/someone/.config/perch/profiles/somebody-else/plugins",
+        "/Users/someone/.config/perch/providers/claude/profiles/somebody-else/plugins",
         profile("plugins"),
     );
 
@@ -593,7 +593,7 @@ fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mo
     let host = machine()
         .with_link(
             Link::Symbolic,
-            "/Users/someone/.config/perch/profiles/somebody-else/plugins",
+            "/Users/someone/.config/perch/providers/claude/profiles/somebody-else/plugins",
             &stale,
         )
         .with_a_path_refusing(&stale, Refusing::Delete, "Permission denied (os error 13)");
@@ -611,6 +611,50 @@ fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mo
     assert!(
         said.contains("Check that you own the directory"),
         "what actually refused is named: {said}"
+    );
+}
+
+#[test]
+fn a_default_profile_that_will_not_say_what_it_holds_refuses_the_run() {
+    let host =
+        machine().with_a_path_refusing(SHARED, Refusing::List, "Permission denied (os error 13)");
+
+    let said = run_reconcile(&host)
+        .expect_err("what crosses is read now rather than believed from a list")
+        .to_string();
+
+    assert!(said.contains("Permission denied"), "{said}");
+    assert!(said.contains(SHARED), "{said}");
+}
+
+/// The sweep clears links at entries that have gone, so a Profile that will not
+/// be walked leaves them: refused rather than passed over.
+#[test]
+fn a_profile_that_will_not_say_what_it_holds_refuses_the_run_too() {
+    let host =
+        machine().with_a_path_refusing(PROFILE, Refusing::List, "Permission denied (os error 13)");
+
+    let said = run_reconcile(&host)
+        .expect_err("a Profile that will not be read is not one holding nothing")
+        .to_string();
+
+    assert!(said.contains("Permission denied"), "{said}");
+    assert!(said.contains(PROFILE), "{said}");
+}
+
+/// A share of an ordinary entry, made by an earlier Run and left pointing at
+/// nothing when the person deleted what it named.
+#[test]
+fn a_share_of_an_entry_the_default_profile_no_longer_holds_is_taken_away() {
+    let host = machine().with_link(Link::Symbolic, shared("gone.md"), profile("gone.md"));
+
+    run_reconcile(&host).expect("everything still there can be linked");
+
+    let entries = entries_of(&host);
+    assert!(!entries.contains(&"gone.md".to_string()), "{entries:?}");
+    assert!(
+        entries.contains(&"CLAUDE.md".to_string()),
+        "and what the Default Profile does hold is untouched: {entries:?}"
     );
 }
 

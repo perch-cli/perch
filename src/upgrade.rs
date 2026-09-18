@@ -252,7 +252,7 @@ pub fn installer_dir(host: &dyn Host) -> Result<PathBuf> {
 
 /// A path built from its parts, spelled with `/`.
 ///
-/// Rather than `Path::join`, for the reason [`crate::probe::on_path`] gives:
+/// Rather than `Path::join`, for the reason [`crate::host::programs::on_path`] gives:
 /// `join` follows the platform this build runs on, where everything here follows
 /// the platform the *Host* reports. [`segments`] reads either separator.
 fn beneath(parts: &[&str]) -> PathBuf {
@@ -550,7 +550,7 @@ pub fn version_report(host: &dyn Host) -> String {
 /// two `brew`s, and only the one that owns this Installation can replace it.
 fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<String>)> {
     let brew = match prefix.as_os_str().is_empty() {
-        true => crate::probe::on_path(host, "brew"),
+        true => crate::host::programs::on_path(host, "brew"),
         // Asked for rather than assumed, so a prefix whose `bin/brew` has gone
         // reaches the refusal below — which names the command to type — rather
         // than a "No such file or directory" from running it.
@@ -571,7 +571,7 @@ fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<Stri
 /// with the version attached — a different command rather than a flag on the
 /// same one.
 fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, Vec<String>)> {
-    let npm = crate::probe::on_path(host, "npm").ok_or_else(|| {
+    let npm = crate::host::programs::on_path(host, "npm").ok_or_else(|| {
         PerchError::NotFound(
             "No `npm` was found on PATH. `npm update -g perch-cli` once there is.".to_string(),
         )
@@ -1021,5 +1021,32 @@ mod tests {
         );
         assert_eq!(Wanted::Newest(None).version(), None);
         assert_eq!(Wanted::Newest(Some("0.3.0".to_string())).named(), None);
+    }
+
+    /// Two vocabularies, deliberately: `--channel` takes a lowercase word and a
+    /// sentence names the thing it is installed from. The word round-trips, so
+    /// a Channel Perch detected is one somebody can name back to it.
+    #[test]
+    fn a_channel_is_spelled_for_a_flag_and_named_for_a_sentence() {
+        let channels = [
+            Channel::Homebrew {
+                prefix: PathBuf::from("/opt/homebrew"),
+            },
+            Channel::Npm,
+            Channel::Installer,
+        ];
+
+        assert_eq!(
+            channels.iter().map(Channel::name).collect::<Vec<_>>(),
+            ["Homebrew", "npm", "the installer"]
+        );
+        for channel in &channels {
+            assert_eq!(
+                Channel::spelled(channel.word()).as_ref().map(Channel::word),
+                Some(channel.word()),
+                "{}",
+                channel.name()
+            );
+        }
     }
 }

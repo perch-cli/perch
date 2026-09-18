@@ -624,6 +624,51 @@ fn a_check_exits_nought_whether_or_not_there_is_news() {
     }
 }
 
+/// The news a check ends on names the line that would take it, and a binary no
+/// Channel placed is the one machine where `perch upgrade` is not that line: it
+/// refuses there, so the news carries the flag that answers the refusal.
+#[test]
+fn a_check_with_no_channel_to_hand_the_work_to_says_which_flag_would_take_the_news() {
+    let host = machine().installed_at("/usr/local/bin/perch");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            check: true,
+            ..UpgradeArgs::default()
+        },
+    );
+
+    assert_eq!(outcome.expect("a check succeeded"), EXIT_OK, "{said}");
+    assert!(said.contains("channel    unknown"), "{said}");
+    assert!(said.contains("A newer Release is available"), "{said}");
+    assert!(said.contains("--channel homebrew|npm|installer"), "{said}");
+}
+
+/// The same machine with the word supplied: a check may go without the answer
+/// read off the path, and the one somebody typed is what fills it.
+#[test]
+fn a_check_takes_the_channel_it_was_told_where_the_path_says_nothing() {
+    let host = machine().installed_at("/usr/local/bin/perch");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            check: true,
+            channel: Some("npm".to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+
+    assert_eq!(outcome.expect("a check succeeded"), EXIT_OK, "{said}");
+    assert!(said.contains("channel    npm"), "{said}");
+    assert!(
+        said.contains("`perch upgrade` takes it"),
+        "and the news is the one for a Channel that can be handed the work: {said}"
+    );
+    assert!(ran(&host).is_empty(), "a check installs nothing");
+}
+
 #[test]
 fn a_check_can_answer_as_a_document() {
     let host = machine().installed_at("/Users/someone/.local/bin/perch");

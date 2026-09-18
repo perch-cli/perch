@@ -1,147 +1,108 @@
-//! Adoption: the existing login becomes the first Profile
-//! (ADR a-login-perch-does-not-need).
-//!
-//! On whichever command runs first, and once for the Holdings it begins — only a
-//! Purge undoes it, and the next command after one adopts again.
+//! Initial discovery and installation of native Defaults (ADR a-login-perch-does-not-need).
 
-use crate::error::{PerchError, Result};
-use crate::holdings;
-use crate::host::Host;
-use crate::login;
-use crate::probe::{self, Findings, Verdict};
-use crate::profile;
-use crate::registry::{self, Account, Registry};
-use crate::say;
+use crate::providers::provider::{InstallMode, catalog};
+use crate::registry::{Account, Registry};
+use crate::{Host, PerchError, Result, holdings, registry, say};
 
-/// Loads the Registry, adopting the existing login the first time Perch runs.
-///
-/// For the commands that only *read* the Registry, and for the two that spend a
-/// browser login before they change anything. A command that is going to write
-/// wants [`ensure_adopted_exclusively`].
 pub fn ensure_adopted(host: &dyn Host) -> Result<Registry> {
-    login::reap_abandoned(host);
+    for provider in catalog() {
+        provider.maintain(host);
+    }
     if let Some(registry) = registry::load(host)? {
         return Ok(registry);
     }
-    // The adoption itself writes, so it is done with the other Perches shut out
-    // — two of them adopting at once would each build the first Profile and one
-    // would overwrite the other's Registry wholesale.
-    let mut perch = holdings::lock(host)?;
-    load_or_adopt(host, &mut perch)
+    let mut held = holdings::lock(host)?;
+    load_or_adopt(host, &mut held)
 }
 
-/// The Registry, with every other Perch shut out of it until the returned hold
-/// is dropped.
-///
-/// The hold comes back rather than staying inside because the span that has to
-/// be exclusive is the whole load → change → save (see [`holdings::lock`]).
 pub fn ensure_adopted_exclusively(host: &dyn Host) -> Result<(crate::lock::Held<'_>, Registry)> {
-    login::reap_abandoned(host);
+    for provider in catalog() {
+        provider.maintain(host);
+    }
     let mut held = holdings::lock(host)?;
     let registry = load_or_adopt(host, &mut held)?;
     Ok((held, registry))
 }
 
-/// The Registry, adopting the existing login if there is none. The lock is the
-/// caller's to have taken — this is the half of adoption that writes.
-fn load_or_adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<Registry> {
-    match registry::load(host)? {
-        Some(registry) => Ok(registry),
-        None => adopt(host, perch),
+fn load_or_adopt(host: &dyn Host, held: &mut crate::lock::Held<'_>) -> Result<Registry> {
+    if let Some(registry) = registry::load(host)? {
+        return Ok(registry);
     }
-}
-
-fn adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<Registry> {
-    let findings = match probe::probe(host, holdings::the_default_profile(host)?)? {
-        Verdict::Recognized(findings) => findings,
-        Verdict::NoLogin { version, .. } => {
-            // Nothing to adopt, and nothing worth writing: an empty Profile
-            // would only be a second thing to explain later.
-            return Err(PerchError::NotFound(format!(
-                "No Claude Code login found (Claude Code {version}). Run `claude` \
-                 and log in, then run Perch again."
-            )));
+    let mut registry = Registry::default();
+    let mut profiles = Vec::new();
+    let mut notices = Vec::new();
+    let result: Result<()> = (|| {
+        for provider in catalog() {
+            let configured = provider.configured(host)?;
+            if !configured.enabled() {
+                continue;
+            }
+            let installation = match configured.installation(host) {
+                Ok(installation) => installation,
+                Err(PerchError::NotFound(_)) => continue,
+                Err(error) => return Err(error),
+            };
+            let Some(authenticated) = installation.discover(host)? else {
+                continue;
+            };
+            let account = Account {
+                storage_key: None,
+                provider: provider.id(),
+                provider_identity: authenticated.subject().clone(),
+                identity: authenticated.identity().clone(),
+                plan: authenticated.plan().clone(),
+                disabled: false,
+                quarantine: None,
+                group: None,
+                utilization: None,
+            };
+            let applied = provider.install(
+                host,
+                &account.profile(host)?,
+                &authenticated,
+                InstallMode::New,
+            )?;
+            registry.select_provider(provider.id());
+            registry.settle(Some(account.key().to_string()));
+            notices.push(format!(
+                "Adopted the {} login as {}.",
+                provider.name(),
+                say::described(
+                    &account.identity.email,
+                    account.identity.organization_name.as_deref(),
+                    account.plan.as_deref()
+                ),
+            ));
+            registry.upsert(account);
+            profiles.push(applied);
         }
-    };
-
-    let registry = store_as_first_profile(host, perch, &findings)?;
-    report(host, &findings);
-    Ok(registry)
-}
-
-fn store_as_first_profile(
-    host: &dyn Host,
-    perch: &mut crate::lock::Held<'_>,
-    findings: &Findings,
-) -> Result<Registry> {
-    let dir = holdings::profile_dir_for(host, &findings.identity.email)?;
-    let identity_file = carried_identity_block(host, findings);
-    let placed = profile::place(
-        host,
-        &dir,
-        Some(findings.credential.as_str()),
-        identity_file.as_ref().map(|contents| contents.as_str()),
-        profile::IfItFails::TakeBack,
-    )?;
-
-    // Undone if it fails, because a Profile nothing records is worse than none:
-    // it holds a copy of the live Credential that no Registry names and that
-    // `reap_abandoned` never walks, since that only walks `pending/`.
-    let made = (|| {
-        let mut registry = Registry::default();
-        registry.upsert(Account {
-            identity: findings.identity.clone(),
-            plan: findings.credential.subscription_type.clone(),
-            disabled: false,
-            quarantine: None,
-            group: None,
-            utilization: None,
-        });
-        registry.settle(Some(findings.identity.email.clone()));
-
-        registry::save(host, perch, &mut registry)?;
-        Ok(registry)
+        if !registry.accounts.is_empty() {
+            registry::save(host, held, &mut registry)?;
+        }
+        Ok(())
     })();
-
-    if made.is_err() {
-        placed.take_back(host);
+    if let Err(error) = result {
+        let mut cleanup = crate::providers::provider::Cleanup::default();
+        for applied in profiles.into_iter().rev() {
+            cleanup.record(applied.rollback());
+        }
+        return Err(match cleanup.result() {
+            Ok(()) => error,
+            Err(cleanup) => error.with_note(&cleanup.to_string()),
+        });
     }
-    made
-}
-
-/// The `oauthAccount` block Claude Code wrote for the adopted Account, as the
-/// `.claude.json` its own Profile keeps: without it, the Account everybody
-/// starts with is the one a Switch describes by the four fields Perch records
-/// rather than in Claude Code's own terms.
-fn carried_identity_block(
-    host: &dyn Host,
-    findings: &Findings,
-) -> Option<zeroize::Zeroizing<String>> {
-    // A file that has gone away underneath the probe, or holds no block, is no
-    // reason to stop: adoption still holds the Credential, which is the part
-    // that cannot be reconstructed.
-    let contents = zeroize::Zeroizing::new(host.read_file(&findings.store.identity_file).ok()?);
-    let block = probe::oauth_account_block(&contents)?;
-    Some(zeroize::Zeroizing::new(probe::fresh_identity_file(block)))
-}
-
-/// Says what was adopted, so somebody can confirm Perch picked up the right
-/// Account before trusting it with anything.
-///
-/// A remark rather than output: this is news about the machine, and two of the
-/// callers that reach adoption render JSON on the stream it would land on.
-fn report(host: &dyn Host, findings: &Findings) {
-    let description = say::described(
-        &findings.identity.email,
-        findings.identity.organization_name.as_deref(),
-        findings.credential.subscription_type.as_deref(),
-    );
-
-    // One remark rather than two: that the Profile is the first and that it is
-    // active are the same piece of news about the same machine.
-    host.note(&format!("Adopted the Claude Code login as {description}."));
-    // Once, here: adoption is the one moment Perch knows the person is new.
-    host.note(
-        "`perch wizard` walks you through adding Accounts, Groups, Settings and the Watcher.",
-    );
+    if !registry.accounts.is_empty() {
+        for applied in profiles {
+            applied.commit();
+        }
+        for notice in notices {
+            host.note(&notice);
+        }
+        // Once, here: adoption is the one moment Perch knows the person is new.
+        host.note(
+            "`perch wizard` walks you through adding Accounts, Groups, Settings and the Watcher.",
+        );
+    }
+    registry.select_provider(Default::default());
+    Ok(registry)
 }

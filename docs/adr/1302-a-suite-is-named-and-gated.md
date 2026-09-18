@@ -47,7 +47,7 @@ operating system still answers about a process the way the Marker's evidence
 needs; `publication` asks whether the site still matches the repository that
 publishes it (ADR one-thing-renders-the-site); `citation` asks whether every
 citation in the tree still names a document in `docs/adr/`; `your_machine` asks
-whether the probe's beliefs still match the installed Claude Code
+whether each client still behaves as the Provider that reads it believes
 (ADR an-assumption-is-probed). These assert a relationship, not a behavior, and
 none of them drives a command against a fake.
 

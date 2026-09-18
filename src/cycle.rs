@@ -26,66 +26,69 @@ fn strategy(registry: &Registry, scope: &Scope) -> Strategy {
     registry.settings(scope).strategy
 }
 
-/// The weekly window a Fable request is metered under, as the reply's own scope
-/// names it. What `prefer-fable` keys on, so a reply that stops naming it is a
-/// preference matching nothing — which is said rather than silently ranked past
-/// (ADR fable-is-spent-first).
-pub const THE_FABLE_WINDOW: &str = "7-day-fable";
-
-/// How a Scope measures its Accounts: Headroom alone, or Fable First — the
-/// Accounts that can serve Fable now ahead of every one that cannot.
+/// How a Scope measures its Accounts: Headroom alone, or Preferred First — the
+/// Accounts that can serve the preferred workload now ahead of every one that
+/// cannot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Measure {
     /// The worst Quota Window, whatever it meters.
     Worst,
-    /// Two tiers. First the Accounts none of whose Fable-metering windows is
-    /// full, ordered by the Fable weekly; then the rest, ordered by their
-    /// fullest window that is not Fable's. A Strategy orders within a tier and
-    /// never across one.
-    FableFirst,
+    /// Two tiers. First the Accounts none of whose windows metering the
+    /// workload is full, ordered by its Ranking window; then the rest, ordered
+    /// by their fullest window that is not the Ranking one. A Strategy orders
+    /// within a tier and never across one. Which window plays which role is
+    /// the provider's to say.
+    Preferred(&'static str),
 }
 
-/// The Measure a Scope ranks by. `prefer-fable` matching no observed window
-/// falls back to Headroom alone — the ranking [`fable_unmatched`] says it fell
+/// The Measure a Scope ranks by. `preferred-workload` matching no observed window
+/// falls back to Headroom alone — the ranking [`preference_unmatched`] says it fell
 /// back to — because tiers keyed on a window nobody reports order nothing.
 pub fn measure_of(registry: &Registry, scope: &Scope) -> Measure {
-    match registry.settings(scope).prefer_fable && !unmatched(registry, scope) {
-        true => Measure::FableFirst,
-        false => Measure::Worst,
+    match preferred_workload(registry, scope) {
+        Some(workload) if !unmatched(registry, scope, workload) => Measure::Preferred(workload),
+        _ => Measure::Worst,
     }
 }
 
-/// Whether `prefer-fable` would key on a window no observed Account reports.
-/// Nothing observed at all is not a mismatch: there is no reply to disagree with.
-fn unmatched(registry: &Registry, scope: &Scope) -> bool {
+fn preferred_workload(registry: &Registry, scope: &Scope) -> Option<&'static str> {
+    let settings = match scope {
+        Scope::Ungrouped => &registry.ungrouped.settings,
+        Scope::Group(name) => registry.group(name)?,
+    };
+    let provider = registry.selected_provider();
+    provider
+        .adapter()
+        .configured_workload(&settings.providers.get(&provider)?.options)
+}
+
+fn unmatched(registry: &Registry, scope: &Scope, workload: &str) -> bool {
     let observed: Vec<_> = scope
         .accounts(registry)
-        .iter()
+        .into_iter()
+        .filter(|account| account.provider() == registry.selected_provider())
         .filter_map(|account| account.observed_utilization())
         .collect();
     !observed.is_empty()
         && !observed.iter().any(|cached| {
-            cached
-                .windows
-                .iter()
-                .any(|window| window.window == THE_FABLE_WINDOW)
+            cached.windows.iter().any(|window| {
+                registry
+                    .selected_provider()
+                    .adapter()
+                    .window_role(workload, window)
+                    == crate::providers::provider::WindowRole::Ranking
+            })
         })
 }
 
-/// The sentence a Scope preferring Fable is owed when the preference matches
-/// nothing, or `None` where it matches. Loud rather than quiet, because a
+/// The sentence a Scope with a preferred workload is owed when the preference
+/// matches nothing, or `None` where it matches. Loud rather than quiet, because a
 /// Setting that silently stops meaning anything is the failure no refusal is
 /// left to catch.
-pub fn fable_unmatched(registry: &Registry, scope: &Scope) -> Option<String> {
-    (registry.settings(scope).prefer_fable && unmatched(registry, scope)).then(|| {
-        format!(
-            "`prefer-fable` is on for {}, and no observed Account reports a \
-             `{THE_FABLE_WINDOW}` window, so Accounts are ranked on Headroom \
-             alone. Anthropic may have renamed the window; a newer Perch would \
-             know the new name.",
-            scope.mentioned(),
-        )
-    })
+pub fn preference_unmatched(registry: &Registry, scope: &Scope) -> Option<String> {
+    let workload = preferred_workload(registry, scope)?;
+    unmatched(registry, scope, workload).then(|| format!(
+        "The preferred workload `{workload}` for {} has no matching observed Quota Window, so Accounts are ranked on Headroom alone.", scope.mentioned()))
 }
 
 /// Where a bare `perch switch` may look, given the Account it would be leaving.
@@ -102,8 +105,8 @@ pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
              interchangeable.\n\
              `perch group move {} <group>` puts it in one, or `perch config set \
              ungrouped interchangeable true` declares them.",
-            registry.named_for_the_user(leaving.email()),
-            leaving.email(),
+            registry.named_for_the_user(leaving.key()),
+            registry.target_of(leaving.key()),
         ))),
     }
 }
@@ -238,8 +241,8 @@ pub fn worth_reading(
     now: DateTime<Utc>,
 ) -> Vec<String> {
     // Under `soonest-reset` the order is a reset time rather than room, and
-    // under Fable First it is the Fable weekly — either way a bound on room
-    // excludes nothing and every stale candidate is read.
+    // under Preferred First it is the Ranking window — either way a bound on
+    // room excludes nothing and every stale candidate is read.
     let on_room = !matches!(strategy(registry, scope), Strategy::SoonestReset)
         && matches!(measure_of(registry, scope), Measure::Worst);
     let sharers = registry::Sharers::across(registry);
@@ -247,12 +250,12 @@ pub fn worth_reading(
         .accounts(registry)
         .into_iter()
         .filter(|account| is_a_candidate(&sharers, account))
-        .filter(|account| !leaving.is_some_and(|email| name::same_name(account.email(), email)))
+        .filter(|account| !leaving.is_some_and(|email| name::same_name(account.key(), email)))
         // A rival inside the same window that makes the Account being left
         // worth trusting is worth trusting too, and reading it buys nothing.
         .filter(|account| trusted(account, now).is_none())
         .filter(|account| !on_room || to_beat.is_none_or(|floor| best_case(account, now) > floor))
-        .map(|account| account.email().to_string())
+        .map(|account| account.key().to_string())
         .collect()
 }
 
@@ -267,17 +270,21 @@ pub fn fullest_window_of(account: &Account) -> Option<&WindowUtilization> {
         .and_then(|cached| fullest_of(&cached.windows, |_| true))
 }
 
-/// The Quota Window a Measure judges a *candidate's* fullness by — under Fable
-/// First, the windows its tier ranks on, so a fall-through candidate is not
-/// set aside for a Fable weekly its tier never reads.
+/// The Quota Window a Measure judges a *candidate's* fullness by — under
+/// Preferred First, the windows its tier ranks on, so a fall-through candidate
+/// is not set aside for a Ranking window its tier never reads.
 pub fn measured_fullest_of(account: &Account, measure: Measure) -> Option<&WindowUtilization> {
     match measure {
         Measure::Worst => fullest_window_of(account),
-        Measure::FableFirst => {
+        Measure::Preferred(workload) => {
             let cached = account.observed_utilization()?;
-            match serves_fable(cached) {
-                true => fullest_of(&cached.windows, meters_fable),
-                false => fullest_of(&cached.windows, |window| window.window != THE_FABLE_WINDOW),
+            match serves_preferred(account, cached, workload) {
+                true => fullest_of(&cached.windows, |window| {
+                    role(account, workload, window) != WindowRole::Other
+                }),
+                false => fullest_of(&cached.windows, |window| {
+                    role(account, workload, window) != WindowRole::Ranking
+                }),
             }
         }
     }
@@ -355,20 +362,18 @@ fn frees_at(
     last
 }
 
-/// Whether this window meters a Fable request. Another model's weekly is the
-/// one kind that does not; the five-hour, the seven-day and Fable's own weekly
-/// all fill under one.
-fn meters_fable(window: &WindowUtilization) -> bool {
-    !window.window.starts_with("7-day-") || window.window == THE_FABLE_WINDOW
+use crate::providers::provider::WindowRole;
+/// By the Account's own provider, so a Measure only holds within one provider's
+/// Accounts: another's never reports a Ranking window and would rank Unobserved
+/// however fresh its figure. Every caller filters to one provider before ranking.
+fn role(account: &Account, workload: &str, window: &WindowUtilization) -> WindowRole {
+    account.provider().adapter().window_role(workload, window)
 }
-
-/// Whether the Account can serve a Fable request now: no window that meters one
-/// is full.
-fn serves_fable(cached: &CachedUtilization) -> bool {
+fn serves_preferred(account: &Account, cached: &CachedUtilization, workload: &str) -> bool {
     cached
         .windows
         .iter()
-        .filter(|window| meters_fable(window))
+        .filter(|window| role(account, workload, window) != WindowRole::Other)
         .all(|window| window.used_percent < 100.0)
 }
 
@@ -389,14 +394,14 @@ pub fn measured_of(account: &Account, measure: Measure) -> Measured<'_> {
             tier: 0,
             headroom: headroom_of(account),
         },
-        Measure::FableFirst => fable_first_of(account),
+        Measure::Preferred(workload) => preferred_first_of(account, workload),
     }
 }
 
-/// "No figure" and "no Fable window" rank alike: in the first tier, below every
-/// Account with known Fable room and above every full one — either read as good
-/// or bad news would be a fact Perch invented.
-fn fable_first_of(account: &Account) -> Measured<'_> {
+/// "No figure" and "no Ranking window" rank alike: in the first tier, below
+/// every Account with known room for the workload and above every full one —
+/// either read as good or bad news would be a fact Perch invented.
+fn preferred_first_of<'a>(account: &'a Account, workload: &str) -> Measured<'a> {
     let unobserved = Measured {
         tier: 1,
         headroom: Headroom::Unobserved,
@@ -404,29 +409,31 @@ fn fable_first_of(account: &Account) -> Measured<'_> {
     let Some(cached) = account.observed_utilization() else {
         return unobserved;
     };
-    let Some(fable) = cached
+    let Some(preferred) = cached
         .windows
         .iter()
-        .find(|window| window.window == THE_FABLE_WINDOW)
+        .find(|window| role(account, workload, window) == WindowRole::Ranking)
     else {
         return unobserved;
     };
-    match serves_fable(cached) {
-        // The Fable weekly orders the tier, not the worst of the three: while
-        // Fable's is the only per-model window those coincide, and a Setting
-        // whose only effect is its endgame reads as broken.
+    match serves_preferred(account, cached, workload) {
+        // The Ranking window orders the tier, not the worst of the three: while
+        // it is the only per-model window those coincide, and a Setting whose
+        // only effect is its last resort reads as broken.
         true => Measured {
             tier: 1,
             headroom: Headroom::Room {
-                percent: 100.0 - fable.used_percent,
-                fullest_window: &fable.window,
-                resets_at: fable.resets_at,
+                percent: 100.0 - preferred.used_percent,
+                fullest_window: &preferred.window,
+                resets_at: preferred.resets_at,
                 observed_at: cached.observed_at,
             },
         },
         false => Measured {
             tier: 0,
-            headroom: headroom_over(cached, |window| window.window != THE_FABLE_WINDOW),
+            headroom: headroom_over(cached, |window| {
+                role(account, workload, window) != WindowRole::Ranking
+            }),
         },
     }
 }
@@ -499,9 +506,10 @@ pub enum Basis {
     /// Of the Accounts with room, the one whose fullest window comes back
     /// soonest, so perishable quota is spent rather than wasted.
     SoonestReset,
-    /// Of the Accounts that can serve Fable, the one with the most of its Fable
-    /// weekly left — what a Scope preferring Fable ranks its first tier on.
-    MostFable,
+    /// Of the Accounts that can serve the preferred workload, the one with the
+    /// most of its Ranking window left — what such a Scope ranks its first tier
+    /// on.
+    MostPreferred,
     /// Nothing has ever been observed of this Account, so it was compared with
     /// nothing.
     Unranked,
@@ -517,7 +525,7 @@ impl Basis {
         let basis = match self {
             Basis::MostRoom => "the most room",
             Basis::SoonestReset => "the soonest reset",
-            Basis::MostFable => "the most Fable left",
+            Basis::MostPreferred => "the most preferred workload left",
             Basis::Unranked => "nothing observed to rank on",
         };
         format!("{basis} in {}", scope.place())
@@ -548,7 +556,11 @@ pub fn choose(
 ) -> Result<Choice> {
     let strategy = strategy(registry, scope);
     let measure = measure_of(registry, scope);
-    let accounts = scope.accounts(registry);
+    let accounts: Vec<_> = scope
+        .accounts(registry)
+        .into_iter()
+        .filter(|account| account.provider() == registry.selected_provider())
+        .collect();
     if accounts.is_empty() {
         return Err(PerchError::NoCandidate(format!(
             "{} holds no Accounts, so there is nowhere to Cycle to.",
@@ -587,9 +599,8 @@ pub fn choose(
         )));
     }
 
-    let is_leaving = |ranked: &Ranked| {
-        leaving.is_some_and(|email| name::same_name(ranked.account.email(), email))
-    };
+    let is_leaving =
+        |ranked: &Ranked| leaving.is_some_and(|email| name::same_name(ranked.account.key(), email));
     let here = ranked.iter().find(|ranked| is_leaving(ranked));
     let landable: Vec<&Ranked> = ranked
         .iter()
@@ -598,7 +609,7 @@ pub fn choose(
     let elsewhere: Vec<&Ranked> = landable
         .iter()
         .copied()
-        .filter(|ranked| !set_aside.holds(ranked.account.email()))
+        .filter(|ranked| !set_aside.holds(ranked.account.key()))
         .collect();
 
     // The caller's policy is the only thing in the way, so its sentence is the
@@ -636,7 +647,7 @@ pub fn choose(
         let alone = here.expect("something unexhausted is here or elsewhere");
         return Err(PerchError::NothingToDo(format!(
             "{} is the only Account in {} not exhausted, and it has no figure. {}",
-            registry.named_for_the_user(alone.account.email()),
+            registry.named_for_the_user(alone.account.key()),
             scope.place(),
             how_to_get_figures(scope),
         )));
@@ -679,7 +690,11 @@ fn worth_leaving_for(
 pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
     let strategy = strategy(registry, scope);
     let measure = measure_of(registry, scope);
-    let accounts = scope.accounts(registry);
+    let accounts: Vec<_> = scope
+        .accounts(registry)
+        .into_iter()
+        .filter(|account| account.provider() == registry.selected_provider())
+        .collect();
     // The Account a Cycle would be leaving, measured exactly as `choose`
     // measures it, and only where it is a candidate carrying a figure.
     let sharers = registry::Sharers::across(registry);
@@ -688,7 +703,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
         .and_then(|active| {
             accounts
                 .iter()
-                .find(|account| name::same_name(account.email(), active))
+                .find(|account| name::same_name(account.key(), active))
         })
         .filter(|account| is_a_candidate(&sharers, account))
         .map(|account| measured_of(account, measure));
@@ -730,7 +745,7 @@ fn place(
     let measured = measured_of(account, measure);
     // Asked only of a candidate, which is the only set `choose` asks it of: it
     // drops the non-candidates before looking for the one being left.
-    let staying = candidate && leaving.is_some_and(|email| name::same_name(account.email(), email));
+    let staying = candidate && leaving.is_some_and(|email| name::same_name(account.key(), email));
     // Exhausted asked outright rather than left to `worth_leaving_for`, whose
     // `here` is `None` both for an unobserved active Account and for an
     // exhausted one — so `is_none_or` would pass every exhausted candidate.
@@ -749,7 +764,10 @@ fn place(
 /// One predicate, because what a Cycle may choose, what a Scope has left to draw
 /// on ([`crate::reserve`]) and what a Remove lands on are one set of Accounts.
 pub fn is_a_candidate(sharers: &registry::Sharers, account: &Account) -> bool {
-    !account.disabled && !account.quarantined() && !sharers.hold(account.email())
+    account.provider().adapter().capabilities().live_switch
+        && !account.disabled
+        && !account.quarantined()
+        && !sharers.hold(account.key())
 }
 
 /// Whether anything has declared the Accounts in this Scope interchangeable.
@@ -809,7 +827,7 @@ pub fn out_of_the_running(sharers: &registry::Sharers, accounts: &[&Account]) ->
         .count();
     let sharing = accounts
         .iter()
-        .filter(|a| !a.disabled && !a.quarantined() && sharers.hold(a.email()))
+        .filter(|a| !a.disabled && !a.quarantined() && sharers.hold(a.key()))
         .count();
     let mut out = Vec::new();
     if disabled > 0 {
@@ -859,9 +877,9 @@ fn chosen_basis(best: &Ranked, strategy: Strategy, now: DateTime<Utc>) -> Basis 
     let headroom = &best.measured.headroom;
     match (headroom, headroom.ranked_on_reset(strategy, now)) {
         (Headroom::Room { .. }, Some(_)) => Basis::SoonestReset,
-        // Room in the first tier exists only under Fable First, where its
-        // figure is the Fable weekly's.
-        (Headroom::Room { .. }, None) if best.measured.tier == 1 => Basis::MostFable,
+        // Room in the first tier exists only under Preferred First, where its
+        // figure is the Ranking window's.
+        (Headroom::Room { .. }, None) if best.measured.tier == 1 => Basis::MostPreferred,
         (Headroom::Room { .. }, None) => Basis::MostRoom,
         // Never observed. An exhausted Account cannot get here: everything
         // exhausted is answered above, and an unknown outranks a full window.
@@ -923,7 +941,7 @@ fn everyone_is_exhausted(
     let mut waiting = match soonest {
         Some((at, account)) => format!(
             "{} frees up soonest, at {}.",
-            registry.named_for_the_user(account.email()),
+            registry.named_for_the_user(account.key()),
             utilization::reset_phrase(at, now),
         ),
         // Every cached reset has come and gone, so the figures are what is old
@@ -985,7 +1003,7 @@ fn already_the_best(
     strategy: Strategy,
     now: DateTime<Utc>,
 ) -> String {
-    let named = registry.named_for_the_user(here.account.email());
+    let named = registry.named_for_the_user(here.account.key());
     let scope = scope.place();
     // Said of the comparison Perch actually made: under `soonest-reset` it has
     // only compared Accounts whose figures carry a reset time.
@@ -1005,7 +1023,7 @@ fn already_the_best(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::probe::Identity;
+    use crate::domain::Identity;
     use crate::registry::Quarantine;
     use chrono::TimeZone;
 
@@ -1053,6 +1071,9 @@ pub(crate) mod tests {
 
     pub(crate) fn account(email: &str, windows: Vec<WindowUtilization>) -> Account {
         Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: email.to_string(),
                 account_uuid: None,
@@ -1072,6 +1093,7 @@ pub(crate) mod tests {
 
     pub(crate) fn window(name: &str, used_percent: f64) -> WindowUtilization {
         WindowUtilization {
+            group: None,
             window: name.to_string(),
             used_percent,
             resets_at: None,
@@ -1080,6 +1102,7 @@ pub(crate) mod tests {
 
     pub(crate) fn resetting(name: &str, used_percent: f64, hours: i64) -> WindowUtilization {
         WindowUtilization {
+            group: None,
             resets_at: Some(now() + chrono::Duration::hours(hours)),
             ..window(name, used_percent)
         }
@@ -1277,7 +1300,7 @@ pub(crate) mod tests {
     pub(crate) fn holding(accounts: Vec<Account>) -> Registry {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
-        registry.settle(accounts.first().map(|first| first.email().to_string()));
+        registry.settle(accounts.first().map(|first| first.key().to_string()));
         for account in accounts {
             registry.upsert(account);
         }
@@ -1289,7 +1312,12 @@ pub(crate) mod tests {
         mut registry: Registry,
         strategy: crate::config::Strategy,
     ) -> Registry {
-        registry.groups.get_mut("work").expect("declared").strategy = strategy;
+        registry
+            .groups
+            .get_mut("work")
+            .expect("declared")
+            .cycle
+            .strategy = Some(strategy);
         registry
     }
 
@@ -1299,7 +1327,11 @@ pub(crate) mod tests {
             .groups
             .get_mut("work")
             .expect("declared")
-            .prefer_fable = true;
+            .providers
+            .entry(crate::providers::provider::Id::Claude)
+            .or_default()
+            .options
+            .insert("preferred_workload".into(), "fable".into());
         registry
     }
 
@@ -1316,7 +1348,14 @@ pub(crate) mod tests {
     fn standing(interchangeable: bool, granted: bool) -> (Registry, Scope) {
         let mut registry = holding(vec![account("one@example.com", vec![])]);
         registry.ungrouped.interchangeable = interchangeable;
-        registry.ungrouped.settings.watcher_may_act = granted;
+        registry
+            .ungrouped
+            .settings
+            .providers
+            .entry(crate::providers::provider::Id::Claude)
+            .or_default()
+            .watcher
+            .enabled = granted;
         (registry, Scope::Ungrouped)
     }
 
@@ -1365,7 +1404,7 @@ pub(crate) mod tests {
     fn ranked_emails(registry: &Registry) -> Vec<&str> {
         ranked(registry, &work(), now())
             .into_iter()
-            .map(Account::email)
+            .map(Account::key)
             .collect()
     }
 
@@ -1385,7 +1424,7 @@ pub(crate) mod tests {
             cycle(&registry)
                 .expect("there is somewhere to go")
                 .account
-                .email(),
+                .key(),
             "there@example.com",
             "and it is the one the choice makes, which is the whole point"
         );
@@ -1456,7 +1495,7 @@ pub(crate) mod tests {
             ]
         );
         assert_eq!(
-            cycle(&registry).expect("somewhere to go").account.email(),
+            cycle(&registry).expect("somewhere to go").account.key(),
             "fresh@example.com",
             "the top of the listing is where the Cycle goes",
         );
@@ -1624,7 +1663,7 @@ pub(crate) mod tests {
             cycle(&over_a_figure)
                 .expect("there is somewhere to go")
                 .account
-                .email(),
+                .key(),
             "nearly-full@example.com",
             "1% of room that Perch has seen beats an unknown it has not"
         );
@@ -1638,7 +1677,7 @@ pub(crate) mod tests {
             cycle(&over_a_full_window)
                 .expect("there is somewhere to go")
                 .account
-                .email(),
+                .key(),
             "unobserved@example.com",
             "an unknown beats a window that is certainly full"
         );
@@ -1660,7 +1699,7 @@ pub(crate) mod tests {
             cycle(&unobserved)
                 .expect("nothing observed is no reason to stay")
                 .account
-                .email(),
+                .key(),
             "there@example.com",
         );
     }
@@ -1688,18 +1727,18 @@ pub(crate) mod tests {
             cycle(&holding(accounts()))
                 .expect("there is room")
                 .account
-                .email(),
+                .key(),
             "fuller@example.com",
             "off, the worst window decides"
         );
 
         let choice = cycle(&preferring_fable(holding(accounts()))).expect("there is room");
         assert_eq!(
-            choice.account.email(),
+            choice.account.key(),
             "draining@example.com",
             "on, the most Fable weekly left decides"
         );
-        assert_eq!(choice.basis, Basis::MostFable);
+        assert_eq!(choice.basis, Basis::MostPreferred);
     }
 
     #[test]
@@ -1728,7 +1767,7 @@ pub(crate) mod tests {
 
         let choice = cycle(&preferring_fable(holding(accounts())))
             .expect("a full Fable weekly alone does not exhaust the fall-through tier");
-        assert_eq!(choice.account.email(), "spare@example.com");
+        assert_eq!(choice.account.key(), "spare@example.com");
         assert_eq!(choice.basis, Basis::MostRoom);
     }
 
@@ -1750,7 +1789,7 @@ pub(crate) mod tests {
         ]));
 
         assert_eq!(
-            cycle(&registry).expect("there is room").account.email(),
+            cycle(&registry).expect("there is room").account.key(),
             "serving@example.com",
             "an Account that cannot serve a Fable request now is no Fable candidate"
         );
@@ -1816,7 +1855,7 @@ pub(crate) mod tests {
         );
 
         assert_eq!(
-            cycle(&registry).expect("there is room").account.email(),
+            cycle(&registry).expect("there is room").account.key(),
             "serving@example.com",
             "soonest-reset orders the Fable tier and never promotes one out of \
              the fall-through"
@@ -1844,7 +1883,7 @@ pub(crate) mod tests {
             cycle(&registry)
                 .expect("a Fable request never spends from another model's weekly")
                 .account
-                .email(),
+                .key(),
             "opus-spent@example.com",
         );
     }
@@ -1856,16 +1895,16 @@ pub(crate) mod tests {
             account("roomy@example.com", vec![window("5-hour", 10.0)]),
         ]));
 
-        let said =
-            fable_unmatched(&registry, &work()).expect("observed, and nothing reports the window");
-        assert!(said.contains(THE_FABLE_WINDOW), "{said}");
+        let said = preference_unmatched(&registry, &work())
+            .expect("observed, and nothing reports the window");
+        assert!(said.contains("preferred workload"), "{said}");
         assert_eq!(
             measure_of(&registry, &work()),
             Measure::Worst,
             "tiers keyed on a window nobody reports order nothing"
         );
         assert_eq!(
-            cycle(&registry).expect("there is room").account.email(),
+            cycle(&registry).expect("there is room").account.key(),
             "roomy@example.com",
         );
 
@@ -1874,14 +1913,14 @@ pub(crate) mod tests {
             account("new@example.com", vec![]),
         ]));
         assert_eq!(
-            fable_unmatched(&unobserved, &work()),
+            preference_unmatched(&unobserved, &work()),
             None,
             "nothing observed is not a mismatch"
         );
         assert_eq!(
-            fable_unmatched(&holding(vec![account("here@example.com", vec![])]), &work()),
+            preference_unmatched(&holding(vec![account("here@example.com", vec![])]), &work()),
             None,
-            "and neither is a Scope that never said `prefer-fable`"
+            "and neither is a Scope that never said `preferred-workload`"
         );
     }
 
@@ -1928,7 +1967,7 @@ pub(crate) mod tests {
         let registry = holding(accounts);
 
         assert_eq!(
-            cycle(&registry).expect("there is room").account.email(),
+            cycle(&registry).expect("there is room").account.key(),
             "roomiest@example.com",
             "the default Strategy prefers the most room"
         );
@@ -1937,7 +1976,7 @@ pub(crate) mod tests {
         let choice = cycle(&soonest).expect("there is room");
 
         assert_eq!(
-            choice.account.email(),
+            choice.account.key(),
             "soonest@example.com",
             "quota an hour from being thrown away costs nothing to spend"
         );
@@ -1961,7 +2000,7 @@ pub(crate) mod tests {
         let choice = cycle(&registry).expect("an Account with room is right there");
 
         assert_eq!(
-            choice.account.email(),
+            choice.account.key(),
             "spare@example.com",
             "5% full and four hours off beats 95% full and an hour off, whatever \
              the Group prefers among the places it could go"
@@ -1981,7 +2020,7 @@ pub(crate) mod tests {
         let choice = cycle(&registry).expect("there is room in both");
 
         assert_eq!(
-            choice.account.email(),
+            choice.account.key(),
             "perishing@example.com",
             "the same room in both, so the one about to be thrown away is the \
              one to spend"
@@ -2015,7 +2054,7 @@ pub(crate) mod tests {
 
         let choice = cycle(&registry).expect("there is room");
         assert_eq!(
-            choice.account.email(),
+            choice.account.key(),
             "soonest@example.com",
             "so it is ranked on that window's reset rather than on no reset at all"
         );
@@ -2045,7 +2084,7 @@ pub(crate) mod tests {
         let choice = cycle(&registry).expect("there is room");
 
         assert_eq!(
-            choice.account.email(),
+            choice.account.key(),
             "fresh@example.com",
             "an elapsed reset is not a claim about when an Account comes back"
         );
@@ -2076,7 +2115,7 @@ pub(crate) mod tests {
 
         let choice = cycle(&registry).expect("there is room");
 
-        assert_eq!(choice.account.email(), "emptier@example.com");
+        assert_eq!(choice.account.key(), "emptier@example.com");
         assert_eq!(
             choice.basis,
             Basis::MostRoom,
@@ -2134,7 +2173,7 @@ pub(crate) mod tests {
             cycle(&registry)
                 .expect("there is room to move to")
                 .account
-                .email(),
+                .key(),
             "roomiest@example.com",
             "the Accounts worth going to are the ones that broke the veto, and \
              the Strategy picks among those — not among every candidate there is"
@@ -2166,7 +2205,7 @@ pub(crate) mod tests {
 
             assert_eq!(
                 *top,
-                chosen.account.email(),
+                chosen.account.key(),
                 "{strategy:?}: the highest Account the listing offers to land on \
                  has to be the one a bare `perch switch` lands on, or the \
                  ranking the listing exists to make visible is not the one \
@@ -2241,7 +2280,7 @@ pub(crate) mod tests {
         );
 
         assert_eq!(
-            cycle(&registry).expect("there is room").account.email(),
+            cycle(&registry).expect("there is room").account.key(),
             "says@example.com",
             "an unknown reset is not evidence of an imminent one"
         );
@@ -2261,7 +2300,7 @@ pub(crate) mod tests {
         let choice = cycle(&registry).expect("there is room to move to");
 
         assert_eq!(
-            choice.account.email(),
+            choice.account.key(),
             "roomiest@example.com",
             "a Strategy says which figure to prefer, not which figures to \
              invent: with no reset time to rank on, switching on the order the \
@@ -2307,7 +2346,7 @@ pub(crate) mod tests {
         );
 
         assert_eq!(
-            cycle(&registry).expect("there is room").account.email(),
+            cycle(&registry).expect("there is room").account.key(),
             "soonest@example.com",
             "the Strategy prefers the quota about to be thrown away"
         );
@@ -2320,7 +2359,7 @@ pub(crate) mod tests {
             setting_aside(&registry, &set_aside)
                 .expect("there is still somewhere to go")
                 .account
-                .email(),
+                .key(),
             "emptiest@example.com",
             "and it still prefers among what it was left",
         );
@@ -2414,6 +2453,70 @@ pub(crate) mod tests {
         assert_eq!(error.exit_code(), crate::error::EXIT_NO_CANDIDATE);
         assert!(error.to_string().contains("2 disabled"), "{error}");
         assert!(error.to_string().contains("1 Quarantined"), "{error}");
+    }
+
+    /// Two of the three answers are not numbers, and neither of them is nought:
+    /// a script reading `percent` alone would take an exhausted Account and one
+    /// never observed for an Account with everything left.
+    #[test]
+    fn the_headroom_a_document_carries_says_which_of_the_three_answers_it_is() {
+        assert_eq!(
+            headroom_document(&account("room@example.com", vec![window("5-hour", 30.0)])),
+            serde_json::json!({"state": "room", "percent": 70.0})
+        );
+        assert_eq!(
+            headroom_document(&account("full@example.com", vec![window("5-hour", 100.0)])),
+            serde_json::json!({"state": "exhausted", "percent": null})
+        );
+        assert_eq!(
+            headroom_document(&account("new@example.com", vec![])),
+            serde_json::json!({"state": "never-observed", "percent": null})
+        );
+    }
+
+    #[test]
+    fn every_basis_says_what_was_won_on_and_where_it_was_won() {
+        let scope = Scope::Group("work".to_string());
+        for (basis, won_on) in [
+            (Basis::MostRoom, "the most room"),
+            (Basis::SoonestReset, "the soonest reset"),
+            (Basis::MostPreferred, "the most preferred workload left"),
+            (Basis::Unranked, "nothing observed to rank on"),
+        ] {
+            let clause = basis.in_the(&scope);
+            assert!(clause.starts_with(won_on), "{clause}");
+            assert!(clause.ends_with(&scope.place()), "{clause}");
+        }
+    }
+
+    #[test]
+    fn a_preferred_workload_reads_no_figure_and_no_ranking_window_as_one_answer() {
+        let nothing_read = account("new@example.com", vec![]);
+        let read_without_one = account("other@example.com", vec![window("5-hour", 30.0)]);
+
+        let unobserved = measured_of(&nothing_read, Measure::Preferred("fable"));
+        let unranked = measured_of(&read_without_one, Measure::Preferred("fable"));
+
+        assert_eq!(unobserved, unranked);
+        assert_eq!(unobserved.headroom, Headroom::Unobserved);
+        assert_eq!(unobserved.tier, 1);
+    }
+
+    /// The one narrowing that can leave nothing to measure: an Account whose
+    /// only window is the Ranking one and it is spent falls to the lower tier,
+    /// where what is ranked is every window but that one.
+    #[test]
+    fn an_account_whose_only_window_is_a_spent_ranking_one_is_ranked_on_no_figure() {
+        let spent = account("spent@example.com", vec![window("7-day-fable", 100.0)]);
+
+        let measured = measured_of(&spent, Measure::Preferred("fable"));
+
+        assert_eq!(measured.tier, 0, "it cannot serve the workload now");
+        assert_eq!(
+            measured.headroom,
+            Headroom::Unobserved,
+            "and nothing is left to say how much room it has"
+        );
     }
 }
 
@@ -2538,7 +2641,7 @@ mod properties {
                 assert!(
                     winning.0 > theirs.0 || (winning.0 == theirs.0 && winning.1 >= theirs.1),
                     "{} won at {winning:?}, beaten by {theirs:?}\n{}",
-                    won.email(),
+                    won.key(),
                     arrangement.described,
                 );
             }
@@ -2552,12 +2655,12 @@ mod properties {
                 .registry
                 .accounts
                 .first()
-                .map(|first| first.email().to_string());
+                .map(|first| first.key().to_string());
             let Some(won) = chosen(&arrangement, leaving.as_deref()) else {
                 continue;
             };
             assert_ne!(
-                Some(won.email()),
+                Some(won.key()),
                 leaving.as_deref(),
                 "{}",
                 arrangement.described
@@ -2584,7 +2687,7 @@ mod properties {
             let Headroom::Room { .. } = here else {
                 continue;
             };
-            let leaving = leaving.email().to_string();
+            let leaving = leaving.key().to_string();
             let Some(won) = chosen(&arrangement, Some(&leaving)) else {
                 continue;
             };
@@ -2597,7 +2700,7 @@ mod properties {
                 "left {leaving} at {:?}/{:?} for {} at {:?}/{:?}, which is worse on both\n{}",
                 here.ranking(arrangement.strategy, now()),
                 here.by_room(),
-                won.email(),
+                won.key(),
                 theirs.ranking(arrangement.strategy, now()),
                 theirs.by_room(),
                 arrangement.described,
@@ -2608,8 +2711,8 @@ mod properties {
     #[test]
     fn the_same_arrangement_always_chooses_the_same_account() {
         for arrangement in cases() {
-            let once = chosen(&arrangement, None).map(|won| won.email().to_string());
-            let twice = chosen(&arrangement, None).map(|won| won.email().to_string());
+            let once = chosen(&arrangement, None).map(|won| won.key().to_string());
+            let twice = chosen(&arrangement, None).map(|won| won.key().to_string());
             assert_eq!(once, twice, "{}", arrangement.described);
         }
     }

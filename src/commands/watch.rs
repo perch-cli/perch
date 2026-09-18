@@ -9,6 +9,8 @@
 //! Code's locks — which is what makes a stop safe. The exception is the watcher lock,
 //! held for the whole process and renewed as it goes.
 
+use crate::providers::provider::Id;
+use std::collections::BTreeMap;
 use std::io::Write;
 
 use chrono::{DateTime, Utc};
@@ -20,7 +22,6 @@ use crate::holdings;
 use crate::host::{Host, Waited};
 use crate::lock;
 use crate::observe;
-use crate::probe;
 use crate::registry;
 use crate::round::{self, Verdict};
 use crate::say;
@@ -52,38 +53,50 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     };
     let mut watching_alone = Watch::taken(host, watching_alone);
 
-    // Nothing carried in: the cooldown comes off the Registry inside the round, and a
-    // back-off or a rest would pace a loop this process does not have.
-    let verdict = match one_round(
-        host,
-        Watcher::Check,
-        &mut Pacing::none(),
-        &mut watching_alone,
-    ) {
-        Ok(verdict) => verdict,
-        // Another `perch` holding the Registry is ordinary, so it is a held round
-        // rather than a raise, which would reach a cron mailbox by way of standard
-        // error.
-        Err(PerchError::Busy(why)) => {
-            voice.held(out, &why, None, host.now())?;
-            return Ok(crate::error::EXIT_HELD);
+    let providers = watched_providers(host)?;
+    let mut codes = Vec::new();
+    let mut failures = Vec::new();
+    for provider in &providers {
+        let mut voice = Voice::quiet();
+        let verdict = one_round(
+            host,
+            Watcher::Check,
+            *provider,
+            &mut Pacing::none(),
+            &mut watching_alone,
+        );
+        if providers.len() > 1 {
+            say::line(out, &format!("{}:", provider.word()))?;
         }
-        Err(other) => return Err(other),
-    };
-    // A Check exits on a machine that is not arranged for watching, where the loop
-    // holds: a scheduler has to be told.
-    let round = match verdict {
-        Verdict::Decided(round) => round,
-        Verdict::NotArranged(why) => return Err(why),
-        // Said and exited rather than raised: a Check that was interrupted read no
-        // figure, and `20` is what tells a scheduler to come back.
-        Verdict::Lost(lost) => {
-            voice.lost(out, lost, host.now())?;
-            return Ok(crate::error::EXIT_HELD);
+        match verdict {
+            Ok(Verdict::Decided(round)) => {
+                voice.round(out, &round, host.now())?;
+                codes.push(round.outcome.exit_code());
+            }
+            Ok(Verdict::Lost(lost)) => {
+                voice.lost(out, lost, host.now())?;
+                return Ok(crate::error::EXIT_HELD);
+            }
+            Ok(Verdict::NotArranged(why)) | Err(why) => {
+                if matches!(why, PerchError::Busy(_)) {
+                    voice.held(out, &why.to_string(), None, host.now())?;
+                    codes.push(crate::error::EXIT_HELD);
+                } else {
+                    if providers.len() > 1 {
+                        voice.held(out, &why.to_string(), None, host.now())?;
+                    }
+                    failures.push(why);
+                }
+            }
         }
-    };
-    voice.round(out, &round, host.now())?;
-    Ok(round.outcome.exit_code())
+    }
+    if let Some(error) = failures.into_iter().next() {
+        return Err(error);
+    }
+    Ok(codes
+        .into_iter()
+        .max()
+        .unwrap_or(crate::error::EXIT_NOTHING_TO_DO))
 }
 
 /// The loop, for the person who typed it or the Service running it for them.
@@ -96,7 +109,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // The two things carried from one round to the next, both in memory and nowhere
     // else: what the loop is waiting out and what it has already said belong to the
     // loop. What paces a Switch does not — it is read off the Registry each round.
-    let mut pacing = Pacing::none();
+    let mut providers: BTreeMap<Id, ProviderWatch> = BTreeMap::new();
     let mut voice = Voice::quiet();
 
     // Exactly one Watcher per person per machine. Kept by name rather than dropped into
@@ -115,25 +128,48 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             return voice.left(out, lost);
         }
 
-        let waiting_for = match one_round(host, Watcher::Loop, &mut pacing, &mut watching_alone) {
-            Ok(Verdict::Decided(round)) => {
-                voice.round(out, &round, host.now())?;
-                round.waiting_for()
+        let configured = watched_providers(host)?;
+        providers.retain(|id, _| configured.contains(id));
+        for id in &configured {
+            let state = providers.entry(*id).or_insert_with(ProviderWatch::new);
+            if state.due_at > host.now().timestamp_millis() {
+                continue;
             }
-            // The machine is not arranged for watching, which the loop holds on.
-            // Nothing is charged to the back-off: this round asked the Registry rather
-            // than Anthropic.
-            Ok(Verdict::NotArranged(why)) => {
-                held_before_a_round(out, &mut voice, &why.to_string(), host.now())?
+            let verdict = one_round(
+                host,
+                Watcher::Loop,
+                *id,
+                &mut state.pacing,
+                &mut watching_alone,
+            );
+            if configured.len() > 1 {
+                say::line(out, &format!("{}:", id.word()))?;
             }
-            // Out at once rather than round the loop to the ask at the top: this round
-            // asked it already, and the answer to a sticky question does not change.
-            Ok(Verdict::Lost(lost)) => return voice.left(out, lost),
-            // Held like any other round that could not read. Ending the watcher over a
-            // contended Registry would let a `perch status --refresh` stop it silently.
-            Err(PerchError::Busy(why)) => held_before_a_round(out, &mut voice, &why, host.now())?,
-            Err(other) => return Err(other),
-        };
+            let waiting_for = match verdict {
+                Ok(Verdict::Decided(round)) => {
+                    state.voice.round(out, &round, host.now())?;
+                    round.waiting_for()
+                }
+                Ok(Verdict::NotArranged(why)) => {
+                    held_before_a_round(out, &mut state.voice, &why.to_string(), host.now())?
+                }
+                Ok(Verdict::Lost(lost)) => return voice.left(out, lost),
+                Err(PerchError::Busy(why)) => {
+                    held_before_a_round(out, &mut state.voice, &why, host.now())?
+                }
+                Err(other) => return Err(other),
+            };
+            state.due_at = host
+                .now()
+                .timestamp_millis()
+                .saturating_add(waiting_for as i64);
+        }
+        let now = host.now().timestamp_millis();
+        let waiting_for = providers
+            .values()
+            .map(|state| state.due_at.saturating_sub(now).max(0) as u64)
+            .min()
+            .unwrap_or(watch::REFRESH_INTERVAL_MILLIS);
 
         // The other half, here because the round's own work is over: everything above
         // may have waited on Claude Code's locks or on a keychain that stopped to ask.
@@ -207,7 +243,7 @@ fn opening(host: &dyn Host) -> Result<String> {
         let watching = registry::nothing_in_flight(&registry)
             .and_then(|settled| round::permitted(&registry, &settled).ok())?;
         Some((
-            registry.named_for_the_user(watching.account.email()),
+            registry.named_for_the_user(watching.account.key()),
             watching,
         ))
     });
@@ -233,6 +269,7 @@ fn opening(host: &dyn Host) -> Result<String> {
 fn one_round<'h>(
     host: &'h dyn Host,
     watcher: Watcher,
+    provider: Id,
     pacing: &mut Pacing,
     watching_alone: &mut Watch<'h>,
 ) -> Result<Verdict> {
@@ -244,6 +281,8 @@ fn one_round<'h>(
         Err(busy @ PerchError::Busy(_)) => return Err(busy),
         Err(not_arranged) => return Ok(Verdict::NotArranged(not_arranged)),
     };
+
+    registry.select_provider(provider);
 
     // A Switch path, so it resolves a Landing first. Where it refuses, nobody is there
     // to answer, so it travels as the same "not arranged for watching".
@@ -268,15 +307,12 @@ fn one_round<'h>(
         Ok(watching) => watching,
         Err(not_arranged) => return Ok(Verdict::NotArranged(not_arranged)),
     };
-    let email = watching.account.email().to_string();
+    let email = watching.account.key().to_string();
 
     // Read under the lock, so the cooldown a round is held by is the one that was on
     // record when it decided — and read every round rather than carried, because a
     // Watcher this Service restarts would otherwise come back owing nobody a wait.
     let recently = Recently::recorded(registry.checked(watching.scope.word()), host.now());
-
-    // Once per round, and handed to everything in it that wants one.
-    let installed = probe::Installed::for_every_round(host);
 
     // The one Account Refreshed, and nearly all of the network this loop spends.
     // Renewed either side of it, as the loop renews either side of the wait: up to six
@@ -286,7 +322,6 @@ fn one_round<'h>(
         &mut perch,
         &mut registry,
         std::slice::from_ref(&email),
-        &installed,
         observe::Spending::ItsOwn {
             still_ours: &mut || watching_alone.goes_on(),
         },
@@ -324,7 +359,6 @@ fn one_round<'h>(
                     perch: &mut perch,
                     registry: &mut registry,
                     watching: &watching,
-                    probed: &installed,
                     watching_alone,
                 },
                 cooled,
@@ -338,4 +372,39 @@ fn one_round<'h>(
         trail::acted(host, &moved);
     }
     Ok(Verdict::Decided(decided))
+}
+
+struct ProviderWatch {
+    pacing: Pacing,
+    voice: Voice,
+    due_at: i64,
+}
+impl ProviderWatch {
+    fn new() -> Self {
+        Self {
+            pacing: Pacing::none(),
+            voice: Voice::quiet(),
+            due_at: i64::MIN,
+        }
+    }
+}
+
+fn watched_providers(host: &dyn Host) -> Result<Vec<Id>> {
+    let registry = registry::load(host)?.unwrap_or_default();
+    let providers: std::collections::BTreeSet<_> = registry
+        .accounts
+        .iter()
+        .map(|account| account.provider())
+        .filter(|id| {
+            registry
+                .provider_settings
+                .get(id)
+                .is_none_or(|settings| settings.enabled)
+        })
+        .collect();
+    Ok(if providers.is_empty() {
+        vec![registry.run_provider]
+    } else {
+        providers.into_iter().collect()
+    })
 }

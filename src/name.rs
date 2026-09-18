@@ -1,8 +1,8 @@
 //! The namespace an Alias and a Group name share, and what may be typed as one.
 //!
 //! Below the Registry that stores them rather than beside it: a name rule names
-//! nothing above `host`, and the migration reads the same rules this build
-//! enforces (ADR code-lives-where-it-reaches).
+//! nothing above `host`, so everything asking what a name may be asks one row
+//! (ADR code-lives-where-it-reaches).
 
 use crate::error::{PerchError, Result};
 
@@ -106,7 +106,7 @@ pub fn offerable_name(from: &str) -> Option<String> {
     Some(joined)
 }
 
-/// One reason a name is refused, and what a version of the rules is made of.
+/// One reason a name is refused, and what a row of the rules is made of.
 ///
 /// A rule joining this build is a variant joining here, which every `match` over
 /// it reports. Each carries the set or the words it refuses against, so a row is
@@ -115,10 +115,10 @@ pub fn offerable_name(from: &str) -> Option<String> {
 pub enum Rule {
     /// Nothing, or nothing but whitespace.
     Empty,
-    /// A character the terminal acts on rather than draws, from the set this
-    /// version held. Frozen per version below the current one: the live set
-    /// grows, and a set that grew under a version that did not is a name that
-    /// version accepted and no command can now repair.
+    /// A character the terminal acts on rather than draws, from the set the row
+    /// carries rather than from the live one. Carried because the set grows: a
+    /// row that read the live set would refuse, later, a name it had itself
+    /// accepted.
     Unshowable(&'static [(char, char)]),
     /// A character outside the allow-list a name is made of.
     NotAnIdentifier,
@@ -155,39 +155,6 @@ impl Rule {
             Rule::OpensWrong => 6,
             Rule::AddressesTheUngrouped(_) => 7,
             Rule::MeansEveryScope(_) => 8,
-        }
-    }
-
-    /// Whether the rule lets a character sit inside a name. `None` where it is
-    /// about the whole name rather than any one character. No catch-all arm, so
-    /// a rule joining the enum has to answer here before it builds.
-    fn keeps(self, c: char) -> Option<bool> {
-        match self {
-            Rule::Unshowable(set) => Some(!crate::host::within(set, c)),
-            Rule::NotAnIdentifier => Some(a_name_may_carry(c)),
-            Rule::Whitespace => Some(!c.is_whitespace()),
-            Rule::LikeAnAddress => Some(c != '@'),
-            Rule::Empty
-            | Rule::OpensWrong
-            | Rule::LeadingDash
-            | Rule::AddressesTheUngrouped(_)
-            | Rule::MeansEveryScope(_) => None,
-        }
-    }
-
-    /// Whether the rule lets a character open a name. `None` where it says
-    /// nothing about the first character in particular.
-    fn opens(self, c: char) -> Option<bool> {
-        match self {
-            Rule::OpensWrong => Some(a_name_may_open_with(c)),
-            Rule::LeadingDash => Some(c != '-'),
-            Rule::Empty
-            | Rule::Unshowable(_)
-            | Rule::NotAnIdentifier
-            | Rule::Whitespace
-            | Rule::LikeAnAddress
-            | Rule::AddressesTheUngrouped(_)
-            | Rule::MeansEveryScope(_) => None,
         }
     }
 
@@ -315,148 +282,33 @@ fn one_sigma(name: &str) -> impl Iterator<Item = char> + '_ {
         .map(|c| if c == 'ς' { 'σ' } else { c })
 }
 
-/// The rules one version of Perch enforced, and the fold it told names apart by.
+/// A row of rules, and the fold it tells two names apart by.
 ///
-/// A row below the newest names nothing this build can change: it is what a
-/// published Perch did, and a predicate reading live code answers for what this
-/// build does instead (ADR a-registry-comes-forward).
+/// A value rather than free functions, because a row is the unit that moves: a
+/// rule joining or leaving is a row that differs, and the Registry version moves
+/// with it.
 #[derive(Debug)]
 pub struct Rules {
     rules: &'static [Rule],
     fold: Fold,
 }
 
-/// The two words that address the Accounts in no Group, as version 2 reserved
-/// them. Version 1 reserved only [`NO_GROUP`].
 const THE_UNGROUPED_WORDS: &[&str] = &[UNGROUPED, NO_GROUP];
 
-/// The set version 3 refused, frozen. Identical to [`crate::host::UNSHOWABLE`]
-/// today and deliberately not shared with it: the live set grows, and version 3
-/// is what a published Perch enforced rather than what this one does.
-const UNSHOWABLE_V3: &[(char, char)] = &[
-    ('\u{0000}', '\u{001F}'),
-    ('\u{007F}', '\u{009F}'),
-    ('\u{00AD}', '\u{00AD}'),
-    ('\u{034F}', '\u{034F}'),
-    ('\u{061C}', '\u{061C}'),
-    ('\u{115F}', '\u{1160}'),
-    ('\u{17B4}', '\u{17B5}'),
-    ('\u{180B}', '\u{180F}'),
-    ('\u{200B}', '\u{200F}'),
-    ('\u{202A}', '\u{202E}'),
-    ('\u{2060}', '\u{206F}'),
-    ('\u{3164}', '\u{3164}'),
-    ('\u{FE00}', '\u{FE0F}'),
-    ('\u{FEFF}', '\u{FEFF}'),
-    ('\u{FFA0}', '\u{FFA0}'),
-    ('\u{FFF0}', '\u{FFF8}'),
-    ('\u{1BCA0}', '\u{1BCA3}'),
-    ('\u{1D173}', '\u{1D17A}'),
-    ('\u{E0000}', '\u{E0FFF}'),
-];
+const CURRENT_RULES: Rules = Rules {
+    rules: &[
+        Rule::Empty,
+        Rule::Unshowable(crate::host::UNSHOWABLE),
+        Rule::NotAnIdentifier,
+        Rule::OpensWrong,
+        Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
+        Rule::MeansEveryScope(&[GLOBAL]),
+    ],
+    fold: Fold::OneSigma,
+};
 
-/// One row per Registry version, in order, so the count is the newest version.
-/// Each below the last is stated at the loosest of the builds that stamped that
-/// version, a rule joining part way through one being a rule that version did
-/// not have for all its life.
-pub const ROWS: &[Rules] = &[
-    // Version 1, at the loosest of the three published builds. Unreleased ones
-    // stamped it too and refused less; a name only those accepted predates the
-    // first release, and is named at `load` rather than renamed.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Whitespace,
-            Rule::LikeAnAddress,
-            Rule::AddressesTheUngrouped(&[NO_GROUP]),
-        ],
-        fold: Fold::Lowercase,
-    },
-    // Version 2, at the loosest of the builds that stamped it: a character rule
-    // joined part way through its life and the version did not move with it, so
-    // this is the earlier shape, which refused no character at all.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Whitespace,
-            Rule::LikeAnAddress,
-            Rule::LeadingDash,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::Lowercase,
-    },
-    // Version 3, which refused the whole unshowable set and had no allow-list.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Whitespace,
-            Rule::Unshowable(UNSHOWABLE_V3),
-            Rule::LikeAnAddress,
-            Rule::LeadingDash,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::Lowercase,
-    },
-    // Version 4. The live unshowable set, because "current" is whatever this
-    // build does — and the allow-list, which subsumes whitespace, the `@` and
-    // the leading `-` the three rows above name one at a time.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Unshowable(crate::host::UNSHOWABLE),
-            Rule::NotAnIdentifier,
-            Rule::OpensWrong,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::OneSigma,
-    },
-    // Version 5. Version 4's rules, because the shape that moved was
-    // a Setting rather than a name — written out rather than aliased, or the
-    // next divergence would be an edit to two versions.
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Unshowable(crate::host::UNSHOWABLE),
-            Rule::NotAnIdentifier,
-            Rule::OpensWrong,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::OneSigma,
-    },
-    // Version 6, this build. Version 5's rules: the shape that moved was again a
-    // Setting, `prefer-fable` (ADR fable-is-spent-first).
-    Rules {
-        rules: &[
-            Rule::Empty,
-            Rule::Unshowable(crate::host::UNSHOWABLE),
-            Rule::NotAnIdentifier,
-            Rule::OpensWrong,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ],
-        fold: Fold::OneSigma,
-    },
-];
-
-/// The rules a Perch that stamped this version enforced.
-///
-/// The newest row for a number no row names, which is every number at or above
-/// this build's: those are the narrowest rules there are, so a name they accept
-/// is one every earlier build accepted too.
-pub fn rules_for(version: u64) -> &'static Rules {
-    let at = usize::try_from(version)
-        .unwrap_or(usize::MAX)
-        .saturating_sub(1);
-    ROWS.get(at).unwrap_or(current())
-}
-
-/// The rules this build enforces, which is the last row.
 pub fn current() -> &'static Rules {
-    ROWS.last().expect("the table is never empty")
+    &CURRENT_RULES
 }
 
 impl Rules {
@@ -478,28 +330,9 @@ impl Rules {
         }
     }
 
-    /// Whether a Perch of this version would have accepted the name — the
-    /// question the rename pass asks of a Registry it is bringing forward.
-    pub fn accepts(&self, name: &str) -> bool {
-        !self
-            .rules
-            .iter()
-            .any(|rule| rule.broken_by(name, self.fold))
-    }
-
     /// Whether two names are one name to a Perch of this version.
     pub fn one_name(&self, one: &str, other: &str) -> bool {
         self.fold.one_name(one, other)
-    }
-
-    /// Whether every rule that has a view lets the character sit in a name.
-    fn keeps(&self, c: char) -> bool {
-        self.rules.iter().all(|rule| rule.keeps(c).unwrap_or(true))
-    }
-
-    /// The same, of the first character.
-    fn opens(&self, c: char) -> bool {
-        self.rules.iter().all(|rule| rule.opens(c).unwrap_or(true))
     }
 }
 
@@ -507,42 +340,6 @@ impl Rules {
 pub fn validate(kind: NameKind, name: &str) -> Result<()> {
     current().validate(kind, name)
 }
-
-/// The nearest name to this one that this build accepts and nothing else in the
-/// namespace answers to. `None` leaves the name as it is, for the refusal at
-/// `load` to describe. Here rather than in the migration that asks for it: what
-/// a name may be is this module's, and `taken` is all the caller brings.
-pub fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
-    let row = current();
-    // The per-character rules are per character, and no suffix rescues one, so a
-    // name breaking one loses the character rather than gaining a number; the
-    // reserved words are whole words and take one.
-    let kept: String = name.chars().filter(|c| row.keeps(*c)).collect();
-    // What is left may still open with something that may only follow: a `-`, a
-    // combining mark, a digit of another script.
-    let opened = kept.trim_start_matches(|c| !row.opens(c));
-    let base = match opened.is_empty() {
-        true => match kind {
-            NameKind::Group => "group",
-            NameKind::Alias => "alias",
-        },
-        false => opened,
-    };
-    (0..ENOUGH_SUFFIXES)
-        .map(|at| match at {
-            0 => base.to_string(),
-            _ => format!("{base}-{at}"),
-        })
-        .find(|candidate| {
-            current().accepts(candidate) && !taken.iter().any(|held| same_name(held, candidate))
-        })
-}
-
-/// How many spellings of a name are tried before the rename gives up.
-///
-/// Bounded rather than open, so a name no suffix rescues is a refusal at `load`
-/// rather than a command that never returns.
-const ENOUGH_SUFFIXES: u32 = 100;
 
 /// Whether a character may open a name.
 ///
@@ -793,5 +590,44 @@ mod tests {
                  to offer either"
             );
         }
+    }
+
+    /// The three rules the current row does not hold, each asked of a row of its
+    /// own: a rule is a rule, and one returning to the current row would
+    /// otherwise arrive without the sentence it refuses in.
+    #[test]
+    fn a_rule_no_current_row_holds_still_refuses_in_its_own_words() {
+        let row = Rules {
+            rules: &[Rule::Whitespace, Rule::LikeAnAddress, Rule::LeadingDash],
+            fold: Fold::Lowercase,
+        };
+
+        for (name, said) in [
+            ("my work", "carry no whitespace"),
+            ("someone@example.com", "carries `@`"),
+            ("-dev", "opens with `-`"),
+        ] {
+            let refused = row
+                .validate(NameKind::Group, name)
+                .expect_err("the row refuses this name");
+            assert!(refused.to_string().contains(said), "{refused}");
+        }
+        assert!(
+            row.validate(NameKind::Group, "dev.ops").is_ok(),
+            "and no rule here is the allow-list, which is the current row's"
+        );
+    }
+
+    /// The other fold, kept as a live alternative. It is `str::to_lowercase`'s,
+    /// which applies Greek's final-sigma rule — an orthographic rule about
+    /// rendering Greek text, where a name is something somebody typed.
+    #[test]
+    fn the_other_fold_holds_two_spellings_of_a_greek_name_as_two_names() {
+        assert!(!Fold::Lowercase.one_name("ΟΔΟΣ", "οδοσ"));
+        assert!(Fold::OneSigma.one_name("ΟΔΟΣ", "οδοσ"));
+        assert!(
+            Fold::Lowercase.one_name("CAFÉ", "café"),
+            "and away from the sigma the two agree"
+        );
     }
 }

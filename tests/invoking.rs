@@ -14,11 +14,11 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use perch::config::{SETTINGS, Settings};
+use perch::domain::Identity;
 use perch::error::{
     EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_UNDERSTOOD, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
-use perch::probe::Identity;
-use perch::registry::{Account, CURRENT_VERSION, Registry};
+use perch::registry::{Account, Registry};
 
 /// The Account every scratch machine holds, and the Group declared beside it.
 const SOMEONE: &str = "someone@example.com";
@@ -90,6 +90,9 @@ impl Scratch {
 
         let mut registry = Registry::default();
         registry.upsert(Account {
+            storage_key: None,
+            provider: perch::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: SOMEONE.to_string(),
                 account_uuid: None,
@@ -105,14 +108,26 @@ impl Scratch {
         registry.settle(Some(SOMEONE.to_string()));
         registry
             .groups
-            .insert(GROUP.to_string(), Settings::default());
+            .insert(GROUP.to_string(), Settings::default().into());
 
-        fs::create_dir_all(machine.home()).expect("a scratch home can be made");
-        fs::write(
-            machine.home().join("registry.json"),
-            serde_json::to_string(&registry).expect("a registry is a document"),
-        )
-        .expect("the registry can be written");
+        use perch::host::Files;
+        let fake = perch::host::FakeHost::new().with_env("PERCH_HOME", "/fixture");
+        let mut held = perch::holdings::lock(&fake).unwrap();
+        perch::registry::save(&fake, &mut held, &mut registry).unwrap();
+        for file in [
+            "config.json",
+            "providers/claude/state.json",
+            "providers/codex/state.json",
+        ] {
+            let destination = machine.home().join(file);
+            fs::create_dir_all(destination.parent().unwrap()).unwrap();
+            fs::write(
+                destination,
+                fake.read_file(&PathBuf::from("/fixture").join(file))
+                    .unwrap(),
+            )
+            .unwrap();
+        }
         machine
     }
 
@@ -131,7 +146,12 @@ impl Scratch {
     }
 
     fn registry(&self) -> String {
-        fs::read_to_string(self.home().join("registry.json")).expect("the registry is there")
+        fs::read_to_string(if self.home().join("config.json").exists() {
+            self.home().join("config.json")
+        } else {
+            self.home().join("registry.json")
+        })
+        .expect("the registry is there")
     }
 
     fn home(&self) -> PathBuf {
@@ -216,7 +236,7 @@ fn asking_what_is_installed_leaves_an_older_registry_where_it_was() {
 
     let listing = perch(&machine, &["list"]);
     assert!(
-        listing.err.contains("brought forward"),
+        listing.err.contains("fresh installation"),
         "which the next command pays: {:?}",
         listing.err
     );
@@ -380,6 +400,27 @@ fn a_machine_perch_holds_nothing_on_has_nothing_to_purge() {
         !machine.home().exists(),
         "a Purge that made a home to report there was none took away nothing"
     );
+}
+
+/// The other two verbs under the noun, told apart by the command each names
+/// when it meets a pipe instead of a terminal. Neither reads the path first, so
+/// an arm wired to its neighbor would refuse in the neighbor's words.
+#[test]
+fn the_export_and_import_arms_reach_their_own_commands() {
+    let machine = Scratch::holding_an_account("holdings");
+    let at = machine.home().join("perch.age");
+    let at = at.to_str().expect("a scratch path is text");
+
+    for verb in ["export", "import"] {
+        let ran = perch(&machine, &["holdings", verb, at]);
+
+        assert_eq!(ran.code, EXIT_INVALID, "{verb}: {}{}", ran.out, ran.err);
+        assert!(
+            ran.err.contains(&format!("perch holdings {verb}")),
+            "`perch holdings {verb}` is answered by its own command:\n{}",
+            ran.err
+        );
+    }
 }
 
 /// Asserted at the process, where the two streams are genuinely separate file
@@ -723,44 +764,17 @@ fn row_for<'a>(listing: &'a str, email: &str) -> &'a str {
         .unwrap_or_else(|| panic!("`{email}` is listed:\n{listing}"))
 }
 
-/// End to end, through the process: the wound this repairs was that every
-/// Registry any published Perch wrote came back as serde's words about an
-/// unknown field. A listing is the cheapest command that proves one is read, and
-/// the file left behind is the proof the step is paid once
-/// (ADR a-registry-comes-forward).
 #[test]
-fn a_registry_a_published_perch_wrote_is_read_and_written_forward() {
+fn a_registry_a_published_perch_wrote_is_refused_without_changing_it() {
     let machine = Scratch::holding_what_v0_2_0_wrote("older-registry");
-
-    let ran = perch(&machine, &["list"]);
-
-    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
-    assert!(ran.out.contains("work@example.com"), "{}", ran.out);
-    assert!(
-        ran.out.contains("disabled"),
-        "the Account it had disabled still is: {}",
-        ran.out
-    );
-    assert!(
-        ran.err.contains("brought forward"),
-        "and the rewrite is said on stderr rather than in the listing: {:?}",
-        ran.err
-    );
-
-    let written = machine.registry();
-    assert!(
-        written.contains(&format!("\"version\": {CURRENT_VERSION}")),
-        "{written}"
-    );
-    assert!(!written.contains("\"global\""), "{written}");
-
-    let again = perch(&machine, &["list"]);
-    assert_eq!(again.code, EXIT_OK, "{}", again.err);
-    assert!(
-        again.err.is_empty(),
-        "and the next run has nothing to say: {:?}",
-        again.err
-    );
+    let before = machine.registry();
+    for _ in 0..2 {
+        let ran = perch(&machine, &["list"]);
+        assert_eq!(ran.code, perch::error::EXIT_INVALID);
+        assert!(ran.err.contains("fresh installation"), "{}", ran.err);
+        assert_eq!(machine.registry(), before);
+        assert!(!machine.home().join("config.json").exists());
+    }
 }
 
 #[test]

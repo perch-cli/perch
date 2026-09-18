@@ -4,8 +4,8 @@ sidebar:
   order: 2
 ---
 
-An Account is one Claude login Perch holds. Gain one, name one, keep one out
-of Cycling, repair one, give one up.
+An Account is one provider login Perch holds, a Claude Code login or a Codex
+one. Gain one, name one, keep one out of Cycling, repair one, give one up.
 
 ## Adopting the login you already have
 
@@ -19,9 +19,11 @@ Utilization   never observed
 ```
 
 The first command you run takes the Claude Code login already on the machine as
-your first Account. Nothing is logged into again. That Account is in no Group,
-so a bare `perch switch` has nothing to Cycle to until you put it in one, or
-declare the ungrouped Accounts interchangeable.
+your first Account, and a Codex login the same way: `Adopted the Codex login as
+you@example.com (plus).` Nothing is logged into again. That Account is in no
+Group, so a bare `perch switch` has nothing to Cycle to until you put it in
+one, or declare the ungrouped Accounts interchangeable. A Codex login kept in
+the keyring, or made with an API key, is left where it is and not adopted.
 
 ## Adding an Account
 
@@ -39,6 +41,7 @@ Group `work` now holds 2 Accounts, and nothing Cycles between them unasked: `per
 A browser opens for the login. Log in as the new Account, then quit Claude Code
 to come back. The Account you were on stays active in every terminal.
 
+A bare `perch add` adds a Claude Account; `--codex` adds a Codex one, below.
 `--group <name>` puts the new Account in a Group, and `--no-group` puts it in
 none. Without either, Perch offers the Account's organization as the Group and
 asks you to confirm. `--alias <name>` names the Account at the same time.
@@ -53,6 +56,25 @@ Group:  none
 ```
 
 In a script, pass one of the two flags, or the Add is refused.
+
+## Adding a Codex Account
+
+```
+$ perch add --codex --alias personal --no-group
+Logging in to a new Profile.
+
+Added person@example.com (plus).
+Alias:  personal
+Group:  none
+```
+
+`--codex` logs in with the Codex CLI instead, and the login returns on its own.
+A Codex Account carries no organization name, because its Workspace is a UUID.
+Each Codex Workspace is its own Account, so one email can be held twice, once
+per Workspace: give each an Alias, since the shared email then names neither.
+Codex support is experimental. A Switch to a Codex Account changes the login
+the next `codex` starts with; one already open keeps its Account until it is
+restarted.
 
 ## Naming an Account
 
@@ -90,7 +112,7 @@ Enabling does not repair a Quarantined Account:
 
 ```
 $ perch enable spare
-spare@example.com (as `spare`) was already enabled. It is Quarantined: Anthropic would not renew its Credential. `perch relogin spare@example.com` repairs it.
+spare@example.com (as `spare`) was already enabled. It is Quarantined: the provider would not renew its Credential. `perch relogin spare@example.com` repairs it.
 ```
 
 ## When an Account breaks
@@ -100,7 +122,7 @@ $ perch status
 Account       you@example.com
 Organization  Acme
 Plan          pro
-Quarantine    Anthropic would not renew its Credential. `perch relogin you@example.com` repairs it.
+Quarantine    the provider would not renew its Credential. `perch relogin you@example.com` repairs it.
 Utilization   never observed
 ```
 
@@ -150,7 +172,7 @@ The Alias `work-main` is free to use again.
 It lands on an Account in the same Group where there is one, never on a
 disabled or Quarantined Account, and never ranked by Headroom. `perch switch
 <target>` first if you want a different landing. Removing the last Account is
-allowed and confirmed the same way, and does not log Claude Code out.
+allowed and confirmed the same way, and logs neither Claude Code nor Codex out.
 
 `--yes` agrees in advance. Without a terminal and without the flag, a removal
 that would have asked is refused instead, and end of input is a no.

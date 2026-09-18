@@ -10,7 +10,7 @@ sidebar:
 | ------- | ------------ |
 | `perch status [--refresh] [--json]` | the active Account and how full it is |
 | `perch list [<scope>] [--refresh] [--json]` | every Account, its Alias, Group, state, Headroom and Utilization, in the order a Cycle ranks them, or one Scope's with its Reserve |
-| `perch add [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
+| `perch add [--claude\|--codex] [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
 | `perch alias <target> <name>` / `perch alias <target> --unset` | name an Account, or free the name |
 | `perch switch <target>` | make an Account active everywhere |
 | `perch switch [<group>] [--no-refresh]` | Cycle to the best Account in a Group |
@@ -18,9 +18,9 @@ sidebar:
 | `perch watcher check` | take one round for cron or a systemd timer, saying what it decided in the exit code |
 | `perch watcher install\|uninstall` | have the machine run the watcher for you, starting at login, or take that unit back |
 | `perch watcher status [--json]` | whether a Service is installed, whether it is running, and whether a Watcher holds the lock right now |
-| `perch run <target> [-- <command>]` | launch Claude Code as an Account, in this terminal alone |
+| `perch run [--claude\|--codex] <target> [-- <command>]` | launch Claude Code or Codex as an Account, in this terminal alone |
 | `perch group add\|move\|rename\|remove\|list` | declare Groups and move Accounts between them |
-| `perch config set\|get` | the rules Perch chooses Accounts by, one Scope at a time |
+| `perch config set\|get [--global\|--defaults\|--provider <name>]` | the rules Perch chooses Accounts by, one Scope at a time, and the globals |
 | `perch disable <target>` / `perch enable <target>` | keep an Account out of Cycling, or put it back |
 | `perch relogin <target>` | repair an Account whose Credential stopped working |
 | `perch remove <target> [--yes]` | give up an Account |
@@ -28,14 +28,15 @@ sidebar:
 | `perch holdings purge [--yes]` | give the machine back the state it had before Perch |
 | `perch upgrade [--release <tag>] [--check] [--json] [--channel <name>] [--yes]` | replace this Perch with a newer Release, through the Channel that installed it |
 | `perch version` | which Perch is installed, and a line more when a newer Release exists |
-| `perch wizard` | organize what Perch holds one question at a time: Accounts, Groups, Settings and the Watcher |
+| `perch wizard` | organize what Perch holds one question at a time: Accounts, Groups, Settings, the provider a bare `perch run` uses, and the Watcher |
 | `perch probe [--json] [--raw]` | everything Perch can see of this machine, for pasting into a bug report |
-| `perch triage [--model <name>] [--raw]` | hand that to Claude Code, and let it investigate this machine and help you file the issue |
+| `perch triage [--model <name>] [--raw]` | hand that to Claude Code or Codex, and let it investigate this machine and help you file the issue |
 
 ## Reporting something broken
 
 `perch probe` gathers what a report needs, and `perch triage` hands it to Claude
-Code. Both are in [troubleshooting](troubleshooting.md).
+Code, or to Codex where `run-provider` is `codex`. Both are in
+[troubleshooting](troubleshooting.md).
 
 ## Exit codes
 
@@ -44,7 +45,7 @@ Code. Both are in [troubleshooting](troubleshooting.md).
 | 0 | fine |
 | 1 | something else went wrong |
 | 2 | the command line was not understood |
-| 10 | refused: an assumption about the installed Claude Code failed |
+| 10 | refused: an assumption about the installed Claude Code or Codex failed |
 | 11 | the keychain is locked, denied, or unavailable |
 | 12 | there is no such thing: no login, no such Account, no such Group |
 | 13 | it collides with something that is already there: an Account added twice, a name already spoken for, a path an Export would have written over, an Import onto a Perch that already holds an Account |
@@ -68,7 +69,9 @@ so, and exits 0.
 
 ## Where things are
 
-- `~/.config/perch/registry.json` is Perch's own state, versioned.
+- `~/.config/perch/config.json` is Perch's own state, versioned. Each
+  provider's active Account and cached figures are in
+  `~/.config/perch/providers/<provider>/state.json`.
 - `~/.config/perch/.watch.lock` is held for as long as a Watcher runs. A second
   Watcher says who holds it and waits.
 - `~/.config/perch/trail.log`, and `trail.log.1` once the first has grown past
@@ -81,13 +84,14 @@ so, and exits 0.
   `~/.config/systemd/user/perch-watch.service` on Linux, and a Scheduled Task
   named `Perch\Watch` on Windows. `perch watcher uninstall` removes it, and so
   does `perch holdings purge`.
-- `~/.config/perch/profiles/<account>/` is one directory per Account, and
-  gives that Account its private Credential Store.
+- `~/.config/perch/providers/<provider>/profiles/<key>/` is one directory per
+  Account, named by the Account's stable key rather than its email, and gives
+  that Account its private Credential Store.
 - `$PERCH_HOME` overrides `~/.config/perch`, on every platform. Home is
   `$USERPROFILE` on Windows and `$HOME` elsewhere.
-- `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it Perch walks
-  `PATH`, and `PATHEXT` on Windows. `perch watcher install` writes the answer
-  into the unit.
+- `$PERCH_CLAUDE_BIN` overrides where `claude` is found, and `$PERCH_CODEX_BIN`
+  where `codex` is. Without one Perch walks `PATH`, and `PATHEXT` on Windows.
+  `perch watcher install` writes the answer into the unit, one per provider.
 - `$PERCH_NO_UPGRADE_CHECK` stops `perch version` asking whether a newer
   Release exists. Nothing else in Perch looks.
 - `$PERCH_INSTALL_DIR` is where the installer script puts the binary, in place
@@ -96,8 +100,15 @@ so, and exits 0.
 - `$PERCH_VERSION` holds the installer script to one Release. `perch upgrade
   --release` sets it for you.
 
-A Credential lives wherever the installed Claude Code would put it: the
+A Claude Credential lives wherever the installed Claude Code would put it: the
 keychain on macOS, and a `.credentials.json` inside the Profile everywhere
-else, readable by its owner alone. Perch reaches Anthropic through `curl` at
-`/usr/bin/curl`, or `%SystemRoot%\System32\curl.exe` on Windows, with the
-token on standard input rather than on the command line.
+else, readable by its owner alone. A Codex Credential is the `auth.json` of
+Codex's own file store, inside the Profile, on every platform; a Default that
+`cli_auth_credentials_store` sends to another store is refused rather than
+written under.
+
+Perch reaches Anthropic through `curl` at `/usr/bin/curl`, or
+`%SystemRoot%\System32\curl.exe` on Windows, with the token on standard input
+rather than on the command line. Codex Utilization comes from the installed
+`codex` itself, over its `app-server` protocol, so Perch makes no OpenAI
+request of its own.

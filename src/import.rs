@@ -9,17 +9,11 @@
 //!
 //! An Import does not merge, and it is all or nothing.
 
-use std::collections::BTreeMap;
-use zeroize::Zeroizing;
-
 use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::holdings;
 use crate::host::Host;
-use crate::live;
 use crate::name;
-use crate::probe::{self, Installed};
-use crate::profile;
 use crate::registry::{self, Registry};
 use crate::say;
 
@@ -35,7 +29,11 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
     let accounts = registry.accounts.len();
     let groups = registry.groups.len();
     let ungrouped_says_something = registry.ungrouped != crate::config::UngroupedConfig::default();
-    if accounts == 0 && groups == 0 && !ungrouped_says_something {
+    if accounts == 0
+        && groups == 0
+        && !ungrouped_says_something
+        && registry.run_provider == crate::providers::provider::Id::Claude
+    {
         return Ok(());
     }
 
@@ -54,7 +52,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
 ///
 /// Nothing arrives active and nothing arrives having just been checked: being
 /// active is a claim about *this* machine's Default Profile, and
-/// [`Registry::checks`] is a claim about a watcher that has not run here.
+/// `ProviderState::checks` is a claim about a watcher that has not run here.
 pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     // Both versions are read in `export::unseal`, off a shape that is only the
     // versions and before the document is read as an Export — so nothing reaches
@@ -65,7 +63,7 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     // transition of its own (ADR a-switch-is-written-down-first).
     let mut restored = export.registry.clone();
     restored.settle(None);
-    restored.checks = BTreeMap::new();
+    restored.runtime.clear();
 
     // Cleared before it is judged rather than after, so what is asked about is
     // what will be written rather than what arrived.
@@ -73,22 +71,12 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
         .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))
 }
 
-/// What an Import leaves behind when it will not write: nothing at all, an
-/// Import being whole or not having happened.
-const NOTHING_WAS_IMPORTED: live::Consequence = live::Consequence {
-    nothing_happened: Some("Nothing was imported."),
-    quit_it: "Quit it and run this again.",
-};
-
 /// Puts every Credential the Export holds into the Profile of the Account it
 /// belongs to, wherever this machine keeps one, then runs `save` — the caller's
-/// Registry write — and takes everything back out where that refuses, so an
-/// Import that does not finish cannot leave a Credential behind. Through
-/// [`profile::place`], for the read-back guard and the ledger of the taking-back.
+/// Registry write — and rolls back every prepared restoration if that refuses.
 pub fn place(
     host: &dyn Host,
     export: &Export,
-    installed: &Installed,
     _fresh: &crate::wait::Fresh,
     save: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
@@ -98,7 +86,7 @@ pub fn place(
         .registry
         .accounts
         .iter()
-        .map(|account| name::folded(account.email()))
+        .map(|account| name::folded(account.key()))
         .collect();
 
     // Every Credential in the file belongs to an Account the file lists, or this
@@ -122,7 +110,7 @@ pub fn place(
     }
 
     // Two keys in either map that fold to one address, refused for the reason
-    // above and by the same fold: `credential_for` answers with the first match,
+    // above and by the same fold: `profile_for` answers with the first match,
     // so only one of the two is ever placed, under a report saying it was whole.
     for (what, keys) in export.payloads() {
         let mut held: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
@@ -147,11 +135,11 @@ pub fn place(
     // Registry an Import requires to be empty — so it points at a file the
     // Account it is about is never in.
     for account in &export.registry.accounts {
-        if holdings::slug(account.email()).is_empty() {
+        if holdings::slug(account.key()).is_empty() {
             return Err(PerchError::Invalid(format!(
                 "The Export holds `{}`, which no Profile directory can be named \
                  after. Remove it where it is held and export again.",
-                account.email(),
+                account.key(),
             )));
         }
     }
@@ -162,94 +150,56 @@ pub fn place(
     let mut landing: std::collections::HashMap<String, &registry::Account> =
         std::collections::HashMap::new();
     for account in &export.registry.accounts {
-        if let Some(clash) = landing.insert(holdings::slug(account.email()), account) {
+        if let Some(clash) = landing.insert(
+            format!(
+                "{}:{}",
+                account.provider().word(),
+                holdings::slug(account.key())
+            ),
+            account,
+        ) {
             return Err(PerchError::Conflict(format!(
                 "{} and {} would share one Profile.\n\
                  Remove one on a machine that holds it and take the Export again.",
-                clash.email(),
-                account.email(),
+                clash.key(),
+                account.key(),
             )));
         }
     }
 
-    let mut placements = Vec::new();
+    let mut restores = Vec::new();
     for account in &export.registry.accounts {
-        let store = account.store(host)?;
-        // Keyed the way the guard above asked the question: `credential_for`
-        // folds case and a `BTreeMap` lookup does not, so a key spelled
-        // `ONE@example.com` is listed by the one and missed by the other.
-        let credential = export.credential_for(account.email());
-        let carried = export.identity_file_for(account.email());
-        // Either one is a Profile to make. A Quarantined Account travels with no
-        // Credential and with the `.claude.json` naming it, and dropping that
-        // makes the next Export smaller than the one that fed this Import.
-        if credential.is_none() && carried.is_none() {
-            continue;
-        }
-        // Verbatim where the Export carries one, because Claude Code's
-        // `oauthAccount` block holds fields the Registry does not record and a
-        // Switch prefers it (ADR everything-but-the-account).
-
-        // `Zeroizing` because `Export::drop` wipes `identity_files` and this
-        // clones out from under it: a `.claude.json` routinely carries an API
-        // key in an MCP server's `env` block. Both arms, so one type does.
-        let identity_file = Zeroizing::new(carried.cloned().unwrap_or_else(|| {
-            probe::fresh_identity_file(&account.identity.oauth_account_block())
-        }));
-        placements.push((
-            account.email().to_string(),
-            store,
-            credential,
-            identity_file,
-        ));
-    }
-
-    // A Profile something is running against is one nothing writes into, which
-    // `profile::store_credential` names as the obligation it cannot check for
-    // itself. Asked over every placement before the first of them is written.
-    let places: Vec<live::Place> = placements
-        .iter()
-        .map(|(email, store, _, _)| {
-            live::Place::new(
-                format!("{email}'s Profile at {}", store.config_dir.display()),
-                &store.config_dir,
-            )
-        })
-        .collect();
-    if let live::Answer::NotIdle(not_idle) = live::ask(host, &places) {
-        return Err(not_idle.refusal(installed, &NOTHING_WAS_IMPORTED));
-    }
-
-    let mut placed: Vec<profile::Placed> = Vec::new();
-    for (email, store, credential, identity_file) in placements {
-        // A Quarantined Account travels with no Credential and with the
-        // `.claude.json` that names it, so the Profile is made for the file
-        // alone: dropped, it is a re-Export smaller than the one that made it.
-        match profile::place(
+        restores.push(account.provider().adapter().prepare_restore(
             host,
-            &store.config_dir,
-            credential.map(String::as_str),
-            Some(&identity_file),
-            profile::IfItFails::TakeBack,
-        ) {
-            Ok(one) => placed.push(one),
-            Err(error) => {
-                for earlier in &placed {
-                    earlier.take_back(host);
-                }
-                return Err(error.with_note(&format!(
-                    "Nothing was imported: {email}'s Credential could not be stored."
-                )));
-            }
-        }
+            crate::providers::provider::RestoreRequest {
+                profile: account.profile(host)?,
+                bundle: export.profile_for(account.key()),
+            },
+        )?);
     }
-    // The save is this Import's to run: held outside, the taking-back was an
-    // ordering one caller remembered in prose.
-    if let Err(error) = save() {
-        for earlier in &placed {
-            earlier.take_back(host);
+    let mut written = false;
+    let result = (|| {
+        for restore in &mut restores {
+            restore.write()?;
         }
-        return Err(error.with_note("Nothing was imported. Run `perch holdings import` again."));
+        written = true;
+        save()
+    })();
+    if let Err(error) = result {
+        let mut cleanup = crate::providers::provider::Cleanup::default();
+        for restore in restores.iter_mut().rev() {
+            cleanup.record(restore.rollback());
+        }
+        return Err(match cleanup.result() {
+            Ok(()) if written => {
+                error.with_note("Nothing was imported. Run `perch holdings import` again.")
+            }
+            Ok(()) => error,
+            Err(cleanup) => error.with_note(&cleanup.to_string()),
+        });
+    }
+    for restore in &mut restores {
+        restore.commit();
     }
     Ok(())
 }
@@ -258,12 +208,13 @@ pub fn place(
 mod tests {
     use super::*;
     use crate::config::Settings;
-    use crate::export::CURRENT_VERSION;
+    use crate::domain::Identity;
+    use crate::export::{CURRENT_VERSION, fixtures::fixture_bundle};
     use crate::host::Refusing;
     use crate::host::prelude::*;
-    use crate::probe::Identity;
     use crate::registry::Active;
     use crate::registry::{Account, Quarantine};
+    use crate::test_support::AccountStoreFixture as _;
     use std::collections::BTreeMap;
 
     /// What the refusal counts, on each of the three ways a machine can be
@@ -307,6 +258,9 @@ mod tests {
 
     fn account(email: &str) -> Account {
         Account {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
             identity: Identity {
                 email: email.into(),
                 account_uuid: None,
@@ -339,8 +293,10 @@ mod tests {
         Export {
             version: CURRENT_VERSION,
             registry,
-            credentials: BTreeMap::from([("one@example.com".to_string(), "held".to_string())]),
-            identity_files: BTreeMap::new(),
+            profiles: BTreeMap::from([(
+                "one@example.com".to_string(),
+                fixture_bundle(Some("held"), None),
+            )]),
         }
     }
 
@@ -352,9 +308,12 @@ mod tests {
     fn a_claude_json_for_an_account_carrying_no_credential_is_placed_all_the_same() {
         let host = crate::host::FakeHost::new();
         let mut export = an_export();
-        export.identity_files.insert(
+        export.profiles.insert(
             "two@example.com".to_string(),
-            r#"{"oauthAccount":{"emailAddress":"two@example.com"},"projects":{}}"#.to_string(),
+            fixture_bundle(
+                None,
+                Some(r#"{"oauthAccount":{"emailAddress":"two@example.com"},"projects":{}}"#),
+            ),
         );
         let store = export
             .registry
@@ -363,14 +322,8 @@ mod tests {
             .store(&host)
             .unwrap();
 
-        place(
-            &host,
-            &export,
-            &Installed::unknown("2.1.221"),
-            &crate::wait::Fresh::for_a_test(),
-            saves,
-        )
-        .expect("the Profiles can be made");
+        place(&host, &export, &crate::wait::Fresh::for_a_test(), saves)
+            .expect("the Profiles can be made");
 
         assert_eq!(
             host.read_file(&store.identity_file).ok().as_deref(),
@@ -378,7 +331,9 @@ mod tests {
             "the Quarantined Account's file came back as it went out"
         );
         assert!(
-            crate::credentials::read(&host, &store).unwrap().is_none(),
+            crate::claude_fixture::read(&host, &store)
+                .unwrap()
+                .is_none(),
             "and no Credential was invented to carry it"
         );
     }
@@ -394,13 +349,9 @@ mod tests {
             .store(&host)
             .unwrap();
 
-        let refused = place(
-            &host,
-            &export,
-            &Installed::unknown("2.1.221"),
-            &crate::wait::Fresh::for_a_test(),
-            || Err(PerchError::Other("the disk filled".to_string())),
-        )
+        let refused = place(&host, &export, &crate::wait::Fresh::for_a_test(), || {
+            Err(PerchError::Other("the disk filled".to_string()))
+        })
         .expect_err("the registry could not be written");
 
         assert!(
@@ -425,29 +376,23 @@ mod tests {
             .unwrap();
 
         let mut saved = 0;
-        place(
-            &host,
-            &export,
-            &Installed::unknown("2.1.221"),
-            &crate::wait::Fresh::for_a_test(),
-            || {
-                saved += 1;
-                // The Credential is already in its store when the save runs, so the
-                // Registry never records an Account whose Credential is not there.
-                assert!(
-                    crate::credentials::read(&host, &store)
-                        .expect("the store answers")
-                        .is_some(),
-                    "the Credential lands before the registry says it did"
-                );
-                Ok(())
-            },
-        )
+        place(&host, &export, &crate::wait::Fresh::for_a_test(), || {
+            saved += 1;
+            // The Credential is already in its store when the save runs, so the
+            // Registry never records an Account whose Credential is not there.
+            assert!(
+                crate::claude_fixture::read(&host, &store)
+                    .expect("the store answers")
+                    .is_some(),
+                "the Credential lands before the registry says it did"
+            );
+            Ok(())
+        })
         .expect("the ordinary Import");
 
         assert_eq!(saved, 1);
         assert!(
-            crate::credentials::read(&host, &store)
+            crate::claude_fixture::read(&host, &store)
                 .expect("the store answers")
                 .is_some(),
             "and it stays"
@@ -528,7 +473,8 @@ mod tests {
             Settings {
                 watcher_threshold_percent: 101,
                 ..Settings::default()
-            },
+            }
+            .into(),
         );
 
         let refused = restored(&export, std::path::Path::new(REGISTRY))
@@ -550,7 +496,7 @@ mod tests {
         named_badly
             .registry
             .groups
-            .insert("my work".to_string(), Settings::default());
+            .insert("my work".to_string(), Settings::default().into());
         let refused = restored(&named_badly, std::path::Path::new(REGISTRY))
             .expect_err("no later command could read that");
         assert!(
@@ -589,28 +535,29 @@ mod tests {
                 .store(&host)
                 .unwrap();
 
-            place(
-                &host,
-                &export,
-                &Installed::unknown("2.1.221"),
-                &crate::wait::Fresh::for_a_test(),
-                saves,
-            )
-            .expect("the one Profile can be made");
+            place(&host, &export, &crate::wait::Fresh::for_a_test(), saves)
+                .expect("the one Profile can be made");
 
             assert!(
                 host.path_exists(&store.config_dir),
                 "the one Profile the Export holds a Credential for was made"
             );
             assert_eq!(
-                crate::credentials::read(&host, &store)
+                crate::claude_fixture::read(&host, &store)
                     .unwrap()
                     .map(|held| held.credential.to_string()),
                 Some("held".to_string()),
                 "{platform:?}"
             );
             assert!(
-                !host.path_exists(&holdings::profile_dir_for(&host, "two@example.com").unwrap()),
+                !host.path_exists(
+                    &holdings::profile_dir_for(
+                        crate::providers::provider::Id::Claude,
+                        &host,
+                        "two@example.com"
+                    )
+                    .unwrap()
+                ),
                 "an Account the Export holds no Credential for gets no Profile"
             );
         }
@@ -621,29 +568,35 @@ mod tests {
     #[test]
     fn a_credential_that_cannot_be_stored_takes_back_the_ones_that_were() {
         let host = crate::host::FakeHost::new().with_platform(crate::host::Platform::Other);
-        let second = holdings::profile_dir_for(&host, "two@example.com")
-            .unwrap()
-            .join(".credentials.json");
+        let second = holdings::profile_dir_for(
+            crate::providers::provider::Id::Claude,
+            &host,
+            "two@example.com",
+        )
+        .unwrap()
+        .join(".credentials.json");
         let host = host.with_a_path_refusing(&second, Refusing::Write, "No space left on device");
         let mut export = an_export();
-        export
-            .credentials
-            .insert("two@example.com".to_string(), "also held".to_string());
+        export.profiles.insert(
+            "two@example.com".to_string(),
+            fixture_bundle(Some("also held"), None),
+        );
 
-        let refused = place(
-            &host,
-            &export,
-            &Installed::unknown("2.1.221"),
-            &crate::wait::Fresh::for_a_test(),
-            saves,
-        )
-        .expect_err("the second store will not take it");
+        let refused = place(&host, &export, &crate::wait::Fresh::for_a_test(), saves)
+            .expect_err("the second store will not take it");
 
         assert!(
-            refused.to_string().contains("Nothing was imported"),
+            refused
+                .to_string()
+                .contains("Credential could not be stored"),
             "{refused}"
         );
-        let first = holdings::profile_dir_for(&host, "one@example.com").unwrap();
+        let first = holdings::profile_dir_for(
+            crate::providers::provider::Id::Claude,
+            &host,
+            "one@example.com",
+        )
+        .unwrap();
         assert!(
             !host.path_exists(&first),
             "the Profile made for the first Account is gone with it"
@@ -659,14 +612,8 @@ mod tests {
         let mut export = an_export();
         export.registry.upsert(account("@"));
 
-        let refused = place(
-            &host,
-            &export,
-            &Installed::unknown("2.1.221"),
-            &crate::wait::Fresh::for_a_test(),
-            saves,
-        )
-        .expect_err("`@` names no directory");
+        let refused = place(&host, &export, &crate::wait::Fresh::for_a_test(), saves)
+            .expect_err("`@` names no directory");
 
         let said = refused.to_string();
         assert!(said.contains('@'), "{said}");
@@ -681,7 +628,14 @@ mod tests {
             "and not one this machine is required not to have: {said}"
         );
         assert!(
-            !host.path_exists(&holdings::profile_dir_for(&host, "one@example.com").unwrap()),
+            !host.path_exists(
+                &holdings::profile_dir_for(
+                    crate::providers::provider::Id::Claude,
+                    &host,
+                    "one@example.com"
+                )
+                .unwrap()
+            ),
             "and the Profile of the Account listed before it was never made"
         );
     }
@@ -691,23 +645,18 @@ mod tests {
     /// was not whole.
     #[test]
     fn a_file_for_an_account_the_export_does_not_list_is_refused() {
-        for what in ["a Credential", "a `.claude.json`"] {
+        {
+            let what = "a Profile";
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
             let mut export = an_export();
-            let map = match what {
-                "a Credential" => &mut export.credentials,
-                _ => &mut export.identity_files,
-            };
-            map.insert("nobody@example.com".to_string(), "held".to_string());
+            let map = &mut export.profiles;
+            map.insert(
+                "nobody@example.com".to_string(),
+                fixture_bundle(Some("held"), None),
+            );
 
-            let refused = place(
-                &host,
-                &export,
-                &Installed::unknown("2.1.221"),
-                &crate::wait::Fresh::for_a_test(),
-                saves,
-            )
-            .expect_err("that file belongs to nothing");
+            let refused = place(&host, &export, &crate::wait::Fresh::for_a_test(), saves)
+                .expect_err("that file belongs to nothing");
 
             let said = refused.to_string();
             assert!(
@@ -716,38 +665,29 @@ mod tests {
             );
             assert!(
                 said.contains(what),
-                "and says which of the two maps holds it: {said}"
+                "and identifies the Profile payload: {said}"
             );
         }
     }
 
-    /// The `unlisted` guard folds case, so both keys name a listed Account and
-    /// both pass it, and `credential_for` folds case too and answers with the
-    /// *first* — so the second is never placed, mentioned or counted. A
-    /// hand-written Export (`age -a -p`) is where two spellings of one address
-    /// come from.
+    /// Case-folded Profile keys must be unique or one payload would be dropped.
     #[test]
     fn an_export_holding_one_address_under_two_spellings_is_refused() {
-        for (what, mut export) in [
-            ("a Credential", an_export()),
-            ("a `.claude.json`", an_export()),
-        ] {
+        {
+            let (what, mut export) = ("a Profile", an_export());
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
-            let map = match what {
-                "a Credential" => &mut export.credentials,
-                _ => &mut export.identity_files,
-            };
-            map.insert("one@example.com".to_string(), "held".to_string());
-            map.insert("ONE@example.com".to_string(), "also held".to_string());
+            let map = &mut export.profiles;
+            map.insert(
+                "one@example.com".to_string(),
+                fixture_bundle(Some("held"), None),
+            );
+            map.insert(
+                "ONE@example.com".to_string(),
+                fixture_bundle(Some("also held"), None),
+            );
 
-            let refused = place(
-                &host,
-                &export,
-                &Installed::unknown("2.1.221"),
-                &crate::wait::Fresh::for_a_test(),
-                saves,
-            )
-            .expect_err("only one of the two would land");
+            let refused = place(&host, &export, &crate::wait::Fresh::for_a_test(), saves)
+                .expect_err("only one of the two would land");
 
             let said = refused.to_string();
             assert!(
@@ -756,7 +696,7 @@ mod tests {
             );
             assert!(
                 said.contains(what),
-                "and says which of the two maps holds them: {said}"
+                "and identifies the Profile payloads: {said}"
             );
             assert!(
                 host.effects().is_empty(),
@@ -777,20 +717,17 @@ mod tests {
         export.registry.upsert(account("user+work@example.com"));
         export.registry.upsert(account("user.work@example.com"));
         for email in ["user+work@example.com", "user.work@example.com"] {
-            export.credentials.insert(
+            export.profiles.insert(
                 email.to_string(),
-                r#"{"claudeAiOauth":{"refreshToken":"sk-ant-ort01-other"}}"#.to_string(),
+                fixture_bundle(
+                    Some(r#"{"claudeAiOauth":{"refreshToken":"sk-ant-ort01-other"}}"#),
+                    None,
+                ),
             );
         }
 
-        let refused = place(
-            &host,
-            &export,
-            &Installed::unknown("2.1.221"),
-            &crate::wait::Fresh::for_a_test(),
-            saves,
-        )
-        .expect_err("both would land in one Profile");
+        let refused = place(&host, &export, &crate::wait::Fresh::for_a_test(), saves)
+            .expect_err("both would land in one Profile");
 
         assert!(
             refused.to_string().contains("user+work@example.com")

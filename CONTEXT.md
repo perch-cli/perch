@@ -1,15 +1,26 @@
 # Perch
 
-Perch runs Claude Code as whichever Claude account you want, without going
-through the login flow again. This context covers what an account is, how Perch
-holds one locally, and what it means to make one active.
+Perch chooses which Account a coding tool uses without repeating login. This
+context includes provider selection, isolated Runs, and provider-specific Defaults.
 
 ## Accounts
 
+**Provider**:
+A coding tool integration that owns authentication, Profiles, Utilization reads,
+and the operations its client supports. Each Provider has its own Default.
+_Avoid_: vendor, backend, engine
+
 **Account**:
-A single login you hold with Anthropic. Perch does not create or authenticate
-these — it only chooses between ones you have already logged into.
+A provider identity in the Workspace it accesses, held as one selectable entry.
+One OpenAI login used in personal and company Workspaces can therefore yield two
+Accounts in Perch, without being two OpenAI logins.
 _Avoid_: user, login, session
+
+**Workspace**:
+The provider-owned context in which an Account has access, such as personal or
+company access. Distinct from a Group, which is Perch's declaration of which
+Accounts may substitute for each other.
+_Avoid_: group, profile
 
 **Credential**:
 The OAuth secret that proves the caller is a given Account. Held in a Credential
@@ -17,8 +28,9 @@ Store, never by Perch, and never rendered or logged.
 _Avoid_: token, key, secret
 
 **Identity**:
-The non-secret description of an Account — its email address, organization, and
-plan. What Claude Code displays to say who you are.
+The non-secret description of an Account: its provider, provider identifiers,
+Workspace, email address where available, and plan. Email and display names can
+change without making another Account (ADR an-account-has-a-workspace).
 _Avoid_: profile, metadata, account info
 
 **Alias**:
@@ -34,16 +46,15 @@ neither half can shadow the other — and a word already addressing something, l
 `ungrouped` or `global`, is in it too and so may be neither. What a Name may be
 is what somebody can type at a shell prompt on a second machine months later:
 identifier characters in any alphabet, which is a rule rather than an alphabet.
-Recorded per Registry version, because a rule that joined later is one the
-Registry written before it did not have, and a migration that forgets that is a
-machine with no working command.
+The rules are one row, and the Registry version moves when the row does, because
+a rule that joined later is one a Registry written before it did not have.
 _Avoid_: identifier, key, string, label
 
 **Adoption**:
-The Claude Code login already on the machine becoming the first Account Perch
-holds, on whichever command is run first — bar an Import and a Purge, which
-would each be making an Account on the way to giving one up. Not a step somebody
-takes: Perch asks for no login it does not need
+A provider's login already on the machine becoming an Account Perch holds, one
+per provider, on whichever command is run first — bar an Import and a Purge,
+which would each be making an Account on the way to giving one up. Not a step
+somebody takes: Perch asks for no login it does not need
 (ADR a-login-perch-does-not-need), so the Account arrives without ever being
 added. What separates it from adding one is that nothing was logged into: the
 Credential was already there, and Adoption copies it into a Profile of its own.
@@ -63,20 +74,14 @@ Everything Perch holds on this machine: every Profile, every Credential Perch
 holds, the Registry naming them and what each Group carries. The counterpart to
 an Installation, which is what a Channel left. What an Export writes, an Import
 puts back and a Purge gives up, and the reason none of the three takes a Target.
-Where each piece sits is derived rather than recorded — from `$PERCH_HOME`, and
-under it from the address the Registry already keys on — so nothing has to agree
-with a second statement of it.
+Where each piece sits follows its stable storage identity under `$PERCH_HOME`.
+An Account's displayed email or Workspace name does not relocate its Profile.
 _Avoid_: state, data, footprint, registry
 
 **Registry**:
-The one file naming what Perch holds — every Account with its Alias, its Group,
-whether Cycling may choose it, and each Scope's Settings — at `registry.json`
-under `$PERCH_HOME`, and versioned, because what it names exists nowhere else
-and starting over means logging in to every Account. An older Perch's Registry
-is brought forward on the first run that finds it; a newer one's is refused,
-naming the Perch that wrote it. One of the Holdings rather than a name for them
-all: a Credential lives in its Profile's Credential Store, never here.
-_Avoid_: database, config, state, index
+The Accounts Perch holds and the Aliases that name them. Credentials belong to
+Profiles, and user preferences belong to Config.
+_Avoid_: database, config, state
 
 **Purge**:
 Giving the machine back the Holdings: every Profile, every Credential Perch
@@ -91,7 +96,7 @@ _Avoid_: uninstall, reset, wipe, remove
 The Holdings, written to one file: the whole Registry — every Account, its
 Alias, its Group, whether Cycling may choose it, why it is Quarantined where it
 is, and what each Group carries — alongside every Credential and each Profile's
-own `.claude.json`. Takes no Target, because a selective one is a partial
+native configuration. Takes no Target, because a selective one is a partial
 restore, which is the failure it exists to prevent. Encrypted with a passphrase
 that is required rather than offered, and in a format something other than Perch
 maintains, so a backup meant to outlive the machine does not depend on Perch
@@ -103,44 +108,47 @@ _Avoid_: dump, snapshot, archive
 Putting the Holdings back from an Export, onto a machine that holds no Account.
 The exact inverse of a Purge, and refuses rather than merging — the same Account
 on two machines one Rotation apart has no answer to which Credential is live.
-Credentials land wherever this machine's Claude Code keeps one, whatever store
-the file was written from. Nothing arrives active. A restore is what one is
-*for*, and the word is fine for that; the act itself is an Import.
+Credentials land wherever this machine's client for that provider keeps one,
+whatever store the file was written from. Nothing arrives active. A restore is
+what one is *for*, and the word is fine for that; the act itself is an Import.
 _Avoid_: merge, load, adopt
 
 **Target**:
 What a command is told to act on — an Alias, an Account's email address, or a
-Group name, resolved in that order. Every command that acts on one thing takes
-exactly one, and because the shared namespace makes a collision impossible it
-has exactly one meaning. Which kind matched is said when the command acts.
+Group name, resolved in that order. Provider selection narrows email matches;
+an email still naming multiple Accounts is refused with instructions to use an
+Alias. An Alias or Group name remains unique across Perch.
 _Avoid_: selector, subject, handle
 
 ## Profiles
 
 **Profile**:
-Perch's local handle on one Account: a directory Claude Code would treat as its
-whole configuration. Because a Credential Store is derived from the directory, a
-Profile is what lets a stored Credential live where Claude Code would put it
+Perch's local handle on one Account: a directory the Account's client would
+treat as its whole configuration, named to that client by `CLAUDE_CONFIG_DIR` or
+by `CODEX_HOME`. Because a Credential Store is derived from the directory, a
+Profile is what lets a stored Credential live where that client would put it
 rather than in a file Perch invented.
 _Avoid_: slot, vault entry, workspace
 
 **Credential Store**:
-Where the installed Claude Code keeps one Profile's Credential — the operating
-system's keychain, or a file inside the Profile. Which one is the platform's
-answer rather than Perch's, and a Profile's Credential is held in exactly one at
-a time.
+Where the installed client keeps one Profile's Credential — the operating
+system's keychain, or a file inside the Profile. Which one is the platform's and
+the provider's answer rather than Perch's, and a Profile's Credential is held in
+exactly one at a time. Codex's is the file store on every platform, and a
+Default whose configuration names another store is refused rather than written
+under.
 _Avoid_: keychain, vault, backend
 
 **Default Profile**:
-The Profile Claude Code falls back to when it is told nothing. The Account whose
-Credential is written here is the active one, for every client.
+The Profile a tool falls back to when it is told nothing. Each provider has its
+own, and the Account whose Credential it holds is that provider's active Account.
 _Avoid_: global, main, root
 
 **Group**:
-A set of Accounts you have declared interchangeable, such as several
-subscriptions belonging to the same person. Perch only ever Cycles within one
-Scope — a Group, or Ungrouped once it is declared interchangeable — and a Group
-carries the settings that govern when it may do so unasked.
+A set of Accounts you have declared interchangeable within each provider, such
+as work subscriptions for both Claude and Codex. Cycling stays within one Scope
+and one provider, so a Claude Account never substitutes for a Codex Account.
+A Group carries the Settings that govern when Cycling may happen unasked.
 _Avoid_: flock, team, org, pool
 
 **Rename**:
@@ -157,12 +165,14 @@ _Avoid_: move, retitle, relabel, re-declare
 **Shared State**:
 Everything in a configuration directory that belongs to the person rather than
 to the Account: memory, settings, plugins, past work, plans, and whatever the
-next Claude Code release adds. Said as everything-but rather than as a list,
-because the list grows on Claude Code's schedule and one written down here goes
-quietly out of date — what it is not is the Credential, the file naming the
-Account, and the directory of Markers, which belongs to the configuration
-directory itself. A Switch leaves it untouched, so it follows you across
-Accounts without effort; only the Run path has to work to reach it.
+next release of the client adds. A capability a Provider declares: Claude Code
+declares it, Codex does not, and a Run that asks for it of a Provider that has
+not declared it is refused before any native effect. Said as everything-but
+rather than as a list, because the list grows on the client's schedule and one
+written down here goes quietly out of date — what it is not is the Credential,
+the file naming the Account, and the directory of Markers, which belongs to the
+configuration directory itself. A Switch leaves it untouched, so it follows you
+across Accounts without effort; only the Run path has to work to reach it.
 _Avoid_: common config, global config
 
 **Reconcile**:
@@ -179,22 +189,25 @@ _Avoid_: sync, merge, heal
 
 **Carry**:
 The pass Perch makes before a Run over the one file Reconcile cannot link —
-`.claude.json`, which holds the Account as well as the person — copying the
-named keys that belong to the person into the Profile it is launching: onboarding,
-tips, notifications, and the current directory's entry of `projects`. Named
-rather than everything-but, which is the opposite direction from Reconcile and
-deliberate: the same file holds figures read for one Account, and those must
-never appear under another's name. Bounded to those keys, from the most recently
-used Profile in the same Group, and only where nothing is running against the
-Profile. Nothing here is load-bearing — a key that does not cross costs a dialog.
+Claude Code's `.claude.json`, which holds the Account as well as the person —
+copying the named keys that belong to the person into the Profile it is
+launching: onboarding, tips, notifications, and the current directory's entry of
+`projects`. Named rather than everything-but, which is the opposite direction
+from Reconcile and deliberate: the same file holds figures read for one Account,
+and those must never appear under another's name. Bounded to those keys, from
+the most recently used Profile in the same Group, and only where nothing is
+running against the Profile. Nothing here is load-bearing — a key that does not
+cross costs a dialog.
 _Avoid_: copy, merge, seed, sync
 
 ## Quota
 
 **Quota Window**:
-A rolling period Anthropic meters an Account's usage over. An Account has
-several at once — a five-hour and a seven-day window, and for some models a
-weekly window of its own — and is limited by whichever fills first.
+A rolling period the provider meters an Account's usage over. An Account has
+several at once — for a Claude Account a five-hour and a seven-day window, and
+for some models a weekly window of its own — and is limited by whichever fills
+first. What the windows are called is the provider's: Perch records each under
+the name it was given rather than mapping them onto one set.
 _Avoid_: limit, budget, allowance
 
 **Utilization**:
@@ -229,22 +242,24 @@ somebody has declared them interchangeable.
 _Avoid_: total, pool, aggregate, group quota
 
 **Rotation**:
-Anthropic replacing an Account's refresh token with a new one, retiring the old
-one. Reserved for this sense only: moving from one Account to the next is a
+The provider replacing an Account's refresh token with a new one, retiring the
+old one. Reserved for this sense only: moving from one Account to the next is a
 Cycle, never a rotation, and buying a fresh access token is a Renewal, which
 only sometimes Rotates anything.
 _Avoid_: refresh, renewal
 
 **Renewal**:
 Exchanging an Account's refresh token for a working access token, so Perch can
-ask Anthropic a question as that Account. Only permitted where no client is
-running against the Profile, because a Renewal may Rotate.
+ask the provider a question as that Account. Only permitted where no client is
+running against the Profile, because a Renewal may Rotate. Whose work it is, is
+the Provider's: Perch renews a Claude Credential itself, and leaves a Codex
+Credential to the `codex` it asks (ADR codex-owns-its-renewal).
 _Avoid_: refresh, token refresh
 
 **Refresh**:
-Reading an Account's Utilization from Anthropic instead of from cache — what
+Reading an Account's Utilization from the provider instead of from cache — what
 `perch status --refresh` does, and the only thing that spends network budget.
-Said of a figure and never of a token: a token is Renewed, and what Anthropic
+Said of a figure and never of a token: a token is Renewed, and what the provider
 does to it is a Rotation.
 _Avoid_: fetch, update, poll
 
@@ -264,9 +279,10 @@ _Avoid_: fix, restore, re-add, reauth
 ## Making an account active
 
 **Switch**:
-Making an Account active everywhere, by capturing the outgoing Credential,
-writing the incoming one to the Default Profile, and patching the Identity to
-match. Every client picks it up, so only one Account is ever switched to.
+Making an Account active for its provider by Capturing the outgoing Credential
+and placing the incoming one in that provider's Default Profile. Other providers
+and isolated Runs are unaffected; when a running client adopts the change is
+that client's behavior (ADR each-provider-has-a-default).
 _Avoid_: swap, projection, activate
 
 **Capture**:
@@ -289,8 +305,8 @@ _Avoid_: result, outcome, attempt
 
 **Cycle**:
 Choosing which Account to Switch to rather than being told — by Utilization,
-within one Scope. What Perch does when you name no target, and what the Watcher
-does on your behalf.
+within one Scope and one provider. What Perch does when you name no target, and
+what the Watcher does on your behalf.
 _Avoid_: rotate, next, advance
 
 **Disabled**:
@@ -368,8 +384,9 @@ Account is both full enough to leave and clear enough to arrive at.
 _Avoid_: buffer, hysteresis, gap, slack
 
 **Cooldown**:
-The least wall-clock the Watcher leaves between one Switch and the next,
-whatever the figures do in between. Recorded against the Scope it paces, in the
+The least wall-clock the Watcher leaves between one Switch and the next for a
+provider, whatever the figures do in between. Recorded against the Scope and
+provider it paces, in the
 same save as the Switch that started it, and read back at the top of every
 round — because a Watcher is a process its own Service restarts, and a Cooldown
 a restart clears is no Cooldown.
@@ -385,10 +402,10 @@ _Avoid_: cooldown, retry delay, throttle
 **Run**:
 Launching a program against a chosen Profile without changing which Account is
 active. Scoped to the one invocation, so several Accounts can be running at once
-in different terminals. Claude Code unless something else is named after `--`,
-which is mandatory before anything is: a flag typed without it could belong to
-either program, and guessing is the one thing a Run will not do. A Run makes the
-Profile it launches a Live Profile for as long as it lasts.
+in different terminals. The tool is selected explicitly or by the application's
+provider preference and installed clients; a named program is also permitted.
+A Run stays pinned to its Account and makes its Profile Live for as long as it
+lasts.
 _Avoid_: use, session, launch
 
 **Live Profile**:
@@ -405,14 +422,15 @@ _Avoid_: active, running, in-use
 **Marker**:
 The file a running client leaves in a Profile's directory of them, naming its
 process and when the session began. Claude Code's invention rather than Perch's:
-Perch reads the ones it finds, and writes its own in the shape it reads, because
-it makes Profiles Live too — a Run does, for as long as it lasts, and so does a
-login, so that nothing reaps an Account somebody is midway through logging in.
-Evidence rather than a claim — a pid alone would not be, since the operating
-system hands pids out again, so a Marker holds only while the process it names
-began no later than the session it records (ADR a-profile-is-live-by-evidence).
-One a client left behind when it died therefore names nothing, and nobody has to
-remove it for that to be true.
+Perch reads the ones it finds, writes its own in the shape it reads for
+whichever Provider's Profile it drives, and where the client writes none reads
+only its own, because it makes Profiles Live too — a Run does, for as long as it
+lasts, and so does a login, so that nothing reaps an Account somebody is midway
+through logging in. Evidence rather than a claim — a pid alone would not be,
+since the operating system hands pids out again, so a Marker holds only while
+the process it names began no later than the session it records
+(ADR a-profile-is-live-by-evidence). One a client left behind when it died
+therefore names nothing, and nobody has to remove it for that to be true.
 _Avoid_: lock, pid file, session file, heartbeat, sentinel
 
 ## Configuration
@@ -431,10 +449,12 @@ set anything in it.
 _Avoid_: preferences, options, prefs, settings file
 
 **Scope**:
-A Group, or the Accounts in no Group taken together. The only levels at which a
-Setting means anything — an Account never carries one, because every Setting
-there is describes how Perch chooses *between* Accounts, and a rule for choosing
-has nothing to say to a set of one.
+A Group, or the Accounts in no Group taken together. Owns the Settings governing
+Cycling between its Accounts, separately for each Provider. Shared Scope defaults
+supply policy where a Scope has no override; a Provider can carry a more specific
+policy within that Scope. Watcher permission is explicit for each Scope and
+Provider. Application Settings govern commands as a whole; an Account carries
+no selection policy.
 _Avoid_: level, tier, context, namespace
 
 **Ungrouped**:
@@ -568,14 +588,15 @@ _Avoid_: functional test, end-to-end test, feature test, acceptance test
 
 **Probe**:
 What Perch can see of this machine, gathered in one place: which Perch and which
-Claude Code, what the Holdings hold, which of Perch's assumptions still hold, and
-the Trail's recent lines. Judges only where Perch already has grounds to — every
-finding traces to a refusal Perch would actually make, and carries the exit code
-it would refuse with — so a Probe never asserts a rule that exists nowhere else.
-Takes no Target, reaches no network, and touches nothing: it brings no Registry
-forward and adds no line to the Trail: what repairs the machine it is describing
-destroys what it was asked to describe. A Triage captures one twice — as it
-stands, and redacted — because the two readings go to different readers.
+client of each Provider, what the Holdings hold, which of Perch's assumptions
+still hold, and the Trail's recent lines. Judges only where Perch already has
+grounds to — every finding traces to a refusal Perch would actually make, and
+carries the exit code it would refuse with — so a Probe never asserts a rule
+that exists nowhere else. Takes no Target, reaches no network, and touches
+nothing: it brings no Registry forward and adds no line to the Trail: what
+repairs the machine it is describing destroys what it was asked to describe. A
+Triage captures one twice — as it stands, and redacted — because the two
+readings go to different readers.
 _Avoid_: doctor, diagnostic, health check, debug
 
 **Trail**:
@@ -591,17 +612,18 @@ _Avoid_: log, history, audit log, journal
 **Triage**:
 A session in which somebody's own coding agent investigates this machine and, if
 what it finds is Perch's, helps them file an issue about it. Perch gathers a
-Probe, writes the playbook the agent follows, and hands the terminal to Claude
-Code — and does no more than that: it neither investigates nor files, so what it
-owns is the evidence handed over and the redaction applied to it. Redaction is
-Perch's rather than the agent's, so what reaches a public issue is placeholders
-whether or not the agent was careful (ADR a-triage-hands-over-evidence). Never a
-fix to Perch's own source, and never a change to the Holdings nobody approved.
-Evidence rather than one of the Holdings, like the Trail it hands over. Shares a
-word with the `needs-triage` label deliberately and knowingly: that one is a
-maintainer sorting an issue that has arrived, this is somebody's machine
-producing one, and they sit at opposite ends of the same pipe. The label
-vocabulary lives in `docs/agents/` and is tooling rather than Perch's own
-language, so the collision is settled rather than open. A **Diagnosis** is one
-field of what a Triage files, and never the Triage.
+Probe, writes the playbook the agent follows, and hands the terminal to the
+client the Run preference names — and does no more than that: it neither
+investigates nor files, so what it owns is the evidence handed over and the
+redaction applied to it. Redaction is Perch's rather than the agent's, so what
+reaches a public issue is placeholders whether or not the agent was careful
+(ADR a-triage-hands-over-evidence). Never a fix to Perch's own source, and never
+a change to the Holdings nobody approved. Evidence rather than one of the
+Holdings, like the Trail it hands over. Shares a word with the `needs-triage`
+label deliberately and knowingly: that one is a maintainer sorting an issue that
+has arrived, this is somebody's machine producing one, and they sit at opposite
+ends of the same pipe. The label vocabulary lives in `docs/agents/` and is
+tooling rather than Perch's own language, so the collision is settled rather
+than open. A **Diagnosis** is one field of what a Triage files, and never the
+Triage.
 _Avoid_: doctor, support, debug, bug report
