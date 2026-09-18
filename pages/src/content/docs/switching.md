@@ -20,13 +20,13 @@ Utilization   5-hour  12%  (as of 4m ago)
 Every terminal, the editor extension and the desktop app are now on that
 Account, with no login flow. The figures under it are the cached ones, with
 their age. Your memory, settings, plugins and project history are Shared State
-and follow you across the Switch untouched.
+and follow you across the Switch untouched. Shared State is Claude Code's; a
+Codex Account keeps its own configuration and history in its own `CODEX_HOME`.
 
-A Switch never renews a token a running Claude Code is holding, and is
-refused while a client is running against the Profile of the Account you are
-leaving. Switching to the Account already active does nothing. A Switch that
-fails part way says which Account is active now, and running it again finishes
-the job.
+A Switch never renews a token a running client is holding, and is refused while
+a client is running against the Profile of the Account you are leaving.
+Switching to the Account already active does nothing. A Switch that fails part
+way says which Account is active now, and running it again finishes the job.
 
 A login made outside Perch, sitting in the live store when you Switch, is
 replaced, and a `Note:` line under the verdict says whose it was. `perch add`

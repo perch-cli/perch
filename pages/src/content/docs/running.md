@@ -23,7 +23,8 @@ State. Where a link cannot be made, the Run is refused and names the entry.
 
 Trust and tool approvals for the repository you are standing in are carried
 over from the most recently used Profile in the same Group, so the first Run of
-a new Account does not ask for trust again mid-task.
+a new Account does not ask for trust again mid-task. Both passes are Claude
+Code's: a Codex Run links nothing and carries nothing.
 
 The client's exit code is Perch's, so `perch run` stands in a script wherever
 `claude` would.

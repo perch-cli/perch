@@ -1,7 +1,7 @@
 # Contributing to Perch
 
-Perch is for one person moving between Claude logins they already hold, on their
-own machine. It creates no accounts and authenticates nobody. A change that
+Perch is for one person moving between logins they already hold, on their own
+machine. It creates no accounts and authenticates nobody. A change that
 makes it a way to share one subscription between people is out of scope, and so
 is anything that needs Perch to hold an account of its own.
 
@@ -12,7 +12,7 @@ week; expect a fix to take longer than that.
 
 - **A bug.** Open an issue with the bug report form. It asks you to run
   `perch probe` and paste it, which gathers the version, the platform, the
-  installed Claude Code and what Perch holds, with names and paths replaced by
+  installed clients and what Perch holds, with names and paths replaced by
   placeholders.
 - **An idea.** [Discussions](https://github.com/perch-cli/perch/discussions/categories/ideas),
   not an issue. Say what you were trying to get done, not which flag you want.
@@ -36,15 +36,15 @@ cargo test --locked
 dependency set nobody has committed.
 
 Most of the suite drives the real command code against a fake machine, so it
-needs no Claude Code, no keychain and no network. One suite does need your
+needs no client installed, no keychain and no network. One suite does need your
 machine, and is held back behind a feature for that reason:
 
 ```sh
 cargo test --locked --features your-machine --test your_machine -- --nocapture
 ```
 
-It touches state you own and did not offer: the real keychain, the real
-`claude` on your `PATH`. Read the case for gating it before you run it
+It touches state you own and did not offer: the real keychain, and the real
+`claude` and `codex` on your `PATH`. Read the case for gating it before you run it
 (ADR a-suite-is-named-and-gated), or leave it to CI, which runs it on a machine
 that exists to be written to.
 

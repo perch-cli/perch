@@ -1,8 +1,8 @@
 //! The namespace an Alias and a Group name share, and what may be typed as one.
 //!
 //! Below the Registry that stores them rather than beside it: a name rule names
-//! nothing above `host`, and the migration reads the same rules this build
-//! enforces (ADR code-lives-where-it-reaches).
+//! nothing above `host`, so everything asking what a name may be asks one row
+//! (ADR code-lives-where-it-reaches).
 
 use crate::error::{PerchError, Result};
 
@@ -106,7 +106,7 @@ pub fn offerable_name(from: &str) -> Option<String> {
     Some(joined)
 }
 
-/// One reason a name is refused, and what a version of the rules is made of.
+/// One reason a name is refused, and what a row of the rules is made of.
 ///
 /// A rule joining this build is a variant joining here, which every `match` over
 /// it reports. Each carries the set or the words it refuses against, so a row is
@@ -115,10 +115,10 @@ pub fn offerable_name(from: &str) -> Option<String> {
 pub enum Rule {
     /// Nothing, or nothing but whitespace.
     Empty,
-    /// A character the terminal acts on rather than draws, from the set this
-    /// version held. Frozen per version below the current one: the live set
-    /// grows, and a set that grew under a version that did not is a name that
-    /// version accepted and no command can now repair.
+    /// A character the terminal acts on rather than draws, from the set the row
+    /// carries rather than from the live one. Carried because the set grows: a
+    /// row that read the live set would refuse, later, a name it had itself
+    /// accepted.
     Unshowable(&'static [(char, char)]),
     /// A character outside the allow-list a name is made of.
     NotAnIdentifier,
@@ -155,39 +155,6 @@ impl Rule {
             Rule::OpensWrong => 6,
             Rule::AddressesTheUngrouped(_) => 7,
             Rule::MeansEveryScope(_) => 8,
-        }
-    }
-
-    /// Whether the rule lets a character sit inside a name. `None` where it is
-    /// about the whole name rather than any one character. No catch-all arm, so
-    /// a rule joining the enum has to answer here before it builds.
-    fn keeps(self, c: char) -> Option<bool> {
-        match self {
-            Rule::Unshowable(set) => Some(!crate::host::within(set, c)),
-            Rule::NotAnIdentifier => Some(a_name_may_carry(c)),
-            Rule::Whitespace => Some(!c.is_whitespace()),
-            Rule::LikeAnAddress => Some(c != '@'),
-            Rule::Empty
-            | Rule::OpensWrong
-            | Rule::LeadingDash
-            | Rule::AddressesTheUngrouped(_)
-            | Rule::MeansEveryScope(_) => None,
-        }
-    }
-
-    /// Whether the rule lets a character open a name. `None` where it says
-    /// nothing about the first character in particular.
-    fn opens(self, c: char) -> Option<bool> {
-        match self {
-            Rule::OpensWrong => Some(a_name_may_open_with(c)),
-            Rule::LeadingDash => Some(c != '-'),
-            Rule::Empty
-            | Rule::Unshowable(_)
-            | Rule::NotAnIdentifier
-            | Rule::Whitespace
-            | Rule::LikeAnAddress
-            | Rule::AddressesTheUngrouped(_)
-            | Rule::MeansEveryScope(_) => None,
         }
     }
 
@@ -315,11 +282,11 @@ fn one_sigma(name: &str) -> impl Iterator<Item = char> + '_ {
         .map(|c| if c == 'ς' { 'σ' } else { c })
 }
 
-/// The rules one version of Perch enforced, and the fold it told names apart by.
+/// A row of rules, and the fold it tells two names apart by.
 ///
-/// A row below the newest names nothing this build can change: it is what a
-/// published Perch did, and a predicate reading live code answers for what this
-/// build does instead (ADR a-registry-comes-forward).
+/// A value rather than free functions, because a row is the unit that moves: a
+/// rule joining or leaving is a row that differs, and the Registry version moves
+/// with it.
 #[derive(Debug)]
 pub struct Rules {
     rules: &'static [Rule],
@@ -363,28 +330,9 @@ impl Rules {
         }
     }
 
-    /// Whether a Perch of this version would have accepted the name — the
-    /// question the rename pass asks of a Registry it is bringing forward.
-    pub fn accepts(&self, name: &str) -> bool {
-        !self
-            .rules
-            .iter()
-            .any(|rule| rule.broken_by(name, self.fold))
-    }
-
     /// Whether two names are one name to a Perch of this version.
     pub fn one_name(&self, one: &str, other: &str) -> bool {
         self.fold.one_name(one, other)
-    }
-
-    /// Whether every rule that has a view lets the character sit in a name.
-    fn keeps(&self, c: char) -> bool {
-        self.rules.iter().all(|rule| rule.keeps(c).unwrap_or(true))
-    }
-
-    /// The same, of the first character.
-    fn opens(&self, c: char) -> bool {
-        self.rules.iter().all(|rule| rule.opens(c).unwrap_or(true))
     }
 }
 
@@ -392,42 +340,6 @@ impl Rules {
 pub fn validate(kind: NameKind, name: &str) -> Result<()> {
     current().validate(kind, name)
 }
-
-/// The nearest name to this one that this build accepts and nothing else in the
-/// namespace answers to. `None` leaves the name as it is, for the refusal at
-/// `load` to describe. Here rather than in the migration that asks for it: what
-/// a name may be is this module's, and `taken` is all the caller brings.
-pub fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
-    let row = current();
-    // The per-character rules are per character, and no suffix rescues one, so a
-    // name breaking one loses the character rather than gaining a number; the
-    // reserved words are whole words and take one.
-    let kept: String = name.chars().filter(|c| row.keeps(*c)).collect();
-    // What is left may still open with something that may only follow: a `-`, a
-    // combining mark, a digit of another script.
-    let opened = kept.trim_start_matches(|c| !row.opens(c));
-    let base = match opened.is_empty() {
-        true => match kind {
-            NameKind::Group => "group",
-            NameKind::Alias => "alias",
-        },
-        false => opened,
-    };
-    (0..ENOUGH_SUFFIXES)
-        .map(|at| match at {
-            0 => base.to_string(),
-            _ => format!("{base}-{at}"),
-        })
-        .find(|candidate| {
-            current().accepts(candidate) && !taken.iter().any(|held| same_name(held, candidate))
-        })
-}
-
-/// How many spellings of a name are tried before the rename gives up.
-///
-/// Bounded rather than open, so a name no suffix rescues is a refusal at `load`
-/// rather than a command that never returns.
-const ENOUGH_SUFFIXES: u32 = 100;
 
 /// Whether a character may open a name.
 ///
@@ -701,7 +613,7 @@ mod tests {
             assert!(refused.to_string().contains(said), "{refused}");
         }
         assert!(
-            row.accepts("dev.ops"),
+            row.validate(NameKind::Group, "dev.ops").is_ok(),
             "and no rule here is the allow-list, which is the current row's"
         );
     }
@@ -716,76 +628,6 @@ mod tests {
         assert!(
             Fold::Lowercase.one_name("CAFÉ", "café"),
             "and away from the sigma the two agree"
-        );
-    }
-
-    /// What [`acceptable`] rests on: a rule about one character answers about a
-    /// character, and a rule about the whole name answers nothing rather than
-    /// `false` — which the `unwrap_or(true)` reading it would take for a refusal
-    /// of every character there is.
-    #[test]
-    fn a_rule_answers_about_one_character_exactly_where_it_is_about_one() {
-        for rule in [
-            Rule::Empty,
-            Rule::AddressesTheUngrouped(THE_UNGROUPED_WORDS),
-            Rule::MeansEveryScope(&[GLOBAL]),
-        ] {
-            assert_eq!(rule.keeps('a'), None, "{rule:?}");
-            assert_eq!(rule.opens('a'), None, "{rule:?}");
-        }
-
-        for (rule, refused) in [
-            (Rule::Unshowable(crate::host::UNSHOWABLE), '\u{200B}'),
-            (Rule::NotAnIdentifier, '.'),
-            (Rule::Whitespace, ' '),
-            (Rule::LikeAnAddress, '@'),
-        ] {
-            assert_eq!(rule.keeps(refused), Some(false), "{rule:?}");
-            assert_eq!(rule.keeps('a'), Some(true), "{rule:?}");
-            assert_eq!(rule.opens(refused), None, "{rule:?}");
-        }
-
-        for (rule, refused) in [(Rule::OpensWrong, '-'), (Rule::LeadingDash, '-')] {
-            assert_eq!(rule.opens(refused), Some(false), "{rule:?}");
-            assert_eq!(rule.opens('a'), Some(true), "{rule:?}");
-            assert_eq!(rule.keeps(refused), None, "{rule:?}");
-        }
-    }
-
-    /// The nearest name this build would hold. A character no rule keeps goes,
-    /// because no suffix rescues one; a reserved word is whole and takes a
-    /// number instead; and a name with nothing left is named for its kind.
-    #[test]
-    fn an_unacceptable_name_is_brought_to_the_nearest_one_perch_would_hold() {
-        let free: &[String] = &[];
-
-        assert_eq!(
-            acceptable(NameKind::Group, "dev.ops", free).as_deref(),
-            Some("devops")
-        );
-        assert_eq!(
-            acceptable(NameKind::Group, "-dev", free).as_deref(),
-            Some("dev"),
-            "a character that may only follow is trimmed rather than kept"
-        );
-        assert_eq!(
-            acceptable(NameKind::Group, "...", free).as_deref(),
-            Some("group")
-        );
-        assert_eq!(
-            acceptable(NameKind::Alias, "...", free).as_deref(),
-            Some("alias"),
-            "and which kind it is names it"
-        );
-        assert_eq!(
-            acceptable(NameKind::Group, "none", free).as_deref(),
-            Some("none-1"),
-            "a reserved word is a whole word, so it gains a number"
-        );
-        assert_eq!(
-            acceptable(NameKind::Group, "dev.ops", &["DEVOPS".to_string()]).as_deref(),
-            Some("devops-1"),
-            "and so does one something in the namespace already answers to"
         );
     }
 }

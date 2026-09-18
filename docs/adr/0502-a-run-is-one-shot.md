@@ -1,14 +1,13 @@
 # A Run is one shot
 
-The multiple-provider design extends tool selection and permits provider flags
-before the separator (ADR run-has-a-provider-preference). The pinned invocation
-and arbitrary-program behavior remain the contracts described here.
-
-`perch run <target>` launches Claude Code against a chosen Account by setting
-`CLAUDE_CONFIG_DIR` for that process alone, leaving the active Account and every
-other terminal untouched. `perch run <target> -- <args>` forwards everything
-after the separator, so any command can be run under an Account, not just Claude
-Code.
+`perch run <target>` launches the Account's own client against that Account by
+setting the variable that client reads as its whole configuration —
+`CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for Codex — for that process
+alone, leaving the active Account and every other terminal untouched.
+`perch run <target> -- <args>` forwards everything after the separator, so any
+command can be run under an Account, not just the client. Which client a bare
+`perch run` reaches, and where the provider flags stand, is
+ADR run-has-a-provider-preference's.
 
 A subshell form — spawning `$SHELL` with the environment set, so a terminal
 stays pinned to an Account — is refused. It is a second way to do the same thing,
@@ -26,21 +25,23 @@ what the person needs to be told, and it exits with the parser's own code (2)
 either way.
 
 After `--`, the first word decides what runs, and decides totally: a word
-beginning with `-` is an argument for Claude Code, and anything else is the
+beginning with `-` is an argument for the client, and anything else is the
 program to launch with the rest as its arguments. Nothing is guessed, because
 nothing beginning with `-` can name a program the operating system would find —
 `PATH` is searched for names, a path is written with a `/`, and a file called
-`-resume` is reached as `./-resume`. So `perch run dev -- --resume` resumes
-Claude Code and `perch run dev -- npm test` runs `npm`, and only Claude Code is
-looked for by the probe: a Run of `npm` on a machine with no client installed is
-still a Run of `npm`.
+`-resume` is reached as `./-resume`. So `perch run dev -- --resume` resumes the
+client and `perch run dev -- npm test` runs `npm`, and only the client is looked
+for by the probe: a Run of `npm` on a machine with no client installed is still
+a Run of `npm`.
 
 ## A Run makes its Profile Live, and writes that evidence itself
 
 A Profile with a Run against it is a Live Profile, and Perch already refuses to
 write into one (ADR a-profile-is-live-by-evidence). What produces the evidence is
-the Run: without it, a Run is protected only where Claude Code happens to write a
+the Run: without it, a Run is protected only where the client happens to write a
 Marker of its own, and `perch run <target> -- npm test` is protected not at all.
+Claude Code writes one; Codex writes none, so there Perch's own Marker is the
+whole of the evidence and the only kind read back.
 
 Perch writes `sessions/<pid>.json` into the Profile before the launch and
 removes it after, naming **its own** process and recording `startedAt` as the
@@ -69,7 +70,9 @@ This is the only path where Profiles are used as live config directories rather
 than as storage. It is therefore the only path that has to Reconcile — linking
 memory, settings and plugins into the Profile before launch — and the only path
 that copies a project entry across Profiles
-(ADR everything-but-the-account). A Switch needs neither.
+(ADR everything-but-the-account). A Switch needs neither, and neither does a
+Provider that declares no Shared State: Codex's Profile is its whole
+configuration and has nothing to reach out of.
 
 `Host` grows one primitive, this process's pid, which is the smallest thing a Run
 needs in order to name itself.

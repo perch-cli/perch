@@ -144,12 +144,13 @@ watcher-paused: true
 | `run-fallback` | `installed`, `disabled` | `installed` |
 | `watcher-paused` | `true`, `false` | `false` |
 
-`run-provider` is the CLI a `perch run` or `perch triage` with no `--claude` or
-`--codex` reaches. `perch add` without a flag adds a Claude Account. With `run-fallback` at `installed`, a bare
-command whose preferred CLI is missing runs the other enabled one; an explicit
-flag never falls back. `watcher-paused` holds every provider's unattended
-Switching, and clearing it leaves every grant as it was. `perch config get
---global` reads the three back.
+`run-provider` is the CLI a `perch run` with no `--claude` or `--codex` reaches,
+and the one `perch triage` hands the session to; `triage` takes no provider flag
+of its own. `perch add` without a flag adds a Claude Account. With
+`run-fallback` at `installed`, a bare command whose preferred CLI is missing
+runs the other enabled one; an explicit flag never falls back. `watcher-paused`
+holds every provider's unattended Switching, and clearing it leaves every grant
+as it was. `perch config get --global` reads the three back.
 
 ## Provider installation
 

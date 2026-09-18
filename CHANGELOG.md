@@ -49,6 +49,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [**breaking**] Account JSON includes `id`, `provider`, and `workspace`. Switch accepts
   provider flags and refuses an ambiguous Cycle when Codex Accounts are held.
 
+- The gated `your_machine` suite asks the installed Codex what it has always
+  asked the installed Claude Code: whether `codex --version` carries a version,
+  whether the four documents an observation sends are still methods it has, and
+  whether `cli_auth_credentials_store` still names the `file` store a Switch
+  pins. Logged out is enough for all three, which is what lets a runner ask
+  them: a method that has gone answers `unknown variant` where one that is
+  there answers about authentication, and an unknown `-c` key is taken in
+  silence where a bad value for a real one is refused naming its variants. CI
+  installs `codex` beside Claude Code and floats both versions, so the weekly
+  run catches a rename in either.
+
+### Removed
+
+- `name::acceptable`, the pass that brought a name a published Perch accepted
+  forward to one this build holds, and the per-character predicates only it
+  asked for. Nothing has called it since the layout stopped migrating
+  (ADR a-fresh-provider-layout); it was `pub`, so no dead-code warning ever
+  said so.
+
 ### Fixed
 
 - A refusal for no active Account counts the selected provider's Accounts
@@ -60,6 +79,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Every document Perch ships reads as a tool for two providers rather than one.
+  The README and the site are headed "Run Claude Code or Codex", the Guide's
+  Claude-only claims about adoption, backups, paths and exit codes name both
+  clients, `CONTEXT.md` defines Adoption, Profile, Credential Store, Shared
+  State, Quota Window, Rotation, Renewal, Refresh, Marker, Probe and Triage in
+  the Provider's terms, and the decision records state each general rule once
+  and name what each Provider supplies. Codex support is still called
+  experimental where it was. Two sentences Perch itself prints moved with them:
+  a Purge says both clients go on running as whatever they are logged in as, and
+  `perch triage --help` names both. No command, flag, exit code or `--json`
+  document changes.
 - Every sentence the provider redesign added says the verdict and the next
   command: provider refusals name the `perch config set --provider` or
   `perch run --codex` form to type, `perch config set --help` is its Setting

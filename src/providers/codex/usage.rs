@@ -8,13 +8,25 @@ use crate::providers::provider::{ConfiguredProvider, DefaultRelation, Observatio
 use crate::{Host, PerchError, Result};
 use serde_json::{Value, json};
 
-const ARGS: &[&str] = &[
+pub(super) const ARGS: &[&str] = &[
     "app-server",
     "-c",
     "cli_auth_credentials_store=\"file\"",
     "-c",
     "forced_login_method=\"chatgpt\"",
 ];
+
+/// The exchange, in the order it goes out. One function, because the gated
+/// suite asks the installed `codex` these exact documents rather than a
+/// restatement of them (ADR a-suite-is-named-and-gated).
+pub(super) fn requests() -> [String; 4] {
+    [
+        json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"perch","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":false}}}).to_string(),
+        json!({"method":"initialized","params":{}}).to_string(),
+        json!({"id":2,"method":"account/read","params":{"refreshToken":false}}).to_string(),
+        json!({"id":3,"method":"account/rateLimits/read","params":{}}).to_string(),
+    ]
+}
 
 pub(super) fn read_limits(
     host: &dyn Host,
@@ -98,12 +110,7 @@ fn read(
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
-    let requests = [
-        json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"perch","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":false}}}).to_string(),
-        json!({"method":"initialized","params":{}}).to_string(),
-        json!({"id":2,"method":"account/read","params":{"refreshToken":false}}).to_string(),
-        json!({"id":3,"method":"account/rateLimits/read","params":{}}).to_string(),
-    ];
+    let requests = requests();
     checkpoint()?;
     *spent = true;
     let mut interrupted = None;

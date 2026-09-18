@@ -245,7 +245,7 @@ fn what_will_go(
         "Perch holds {}: {}.\n\
          A Purge deletes their Profiles, their Credentials, and {} itself. \
          {NOTHING_UNDOES_IT}\n\
-         Claude Code goes on running as whatever it is logged in as.\
+         Claude Code and Codex go on running as whatever they are logged in as.\
          {and_the_service}",
         say::accounts(accounts.len()),
         accounts.join(", "),
