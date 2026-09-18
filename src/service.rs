@@ -894,6 +894,24 @@ mod tests {
         );
     }
 
+    /// A unit whose `ExecStart` Perch could not read names no binary, and every
+    /// other answer about the Service still reads.
+    #[test]
+    fn a_service_naming_no_binary_says_the_rest_and_nothing_about_one() {
+        let standing = Standing {
+            binary: None,
+            binary_is_there: None,
+            ..a_standing()
+        };
+
+        let said = said(&standing);
+
+        assert!(said.contains("A Service is installed"), "{said}");
+        assert!(said.contains("Its decisions go to"), "{said}");
+        assert!(!said.contains("It runs"), "{said}");
+        assert_eq!(standing.document()["binary"], serde_json::Value::Null);
+    }
+
     #[test]
     fn a_granted_service_is_told_nothing_about_grants() {
         assert!(!said(&a_standing()).contains("watcher-may-act"));

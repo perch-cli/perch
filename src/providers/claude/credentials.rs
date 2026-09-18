@@ -377,6 +377,54 @@ mod tests {
         assert!(error.to_string().contains("Permission denied"), "{error}");
     }
 
+    /// The keychain is primary on macOS, so a lock there and a file nobody may
+    /// read is both stores refusing at once.
+    #[test]
+    fn where_neither_store_will_answer_the_primarys_failure_is_the_one_reported() {
+        let host = FakeHost::new();
+        let store = profile_store(&host);
+        let host =
+            host.with_a_path_refusing(&store.credentials_file, Refusing::Read, "Permission denied");
+        host.set_keychain_item(&store.keychain_service, &store.keychain_account, CREDENTIAL);
+        host.set_file(&store.credentials_file, CREDENTIAL);
+        host.lock_keychain("User interaction is not allowed");
+
+        let error = read(&host, &store).unwrap_err();
+
+        assert!(
+            matches!(error, PerchError::KeychainUnavailable(_)),
+            "the store this machine reads first is the half to look at: {error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("User interaction is not allowed"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_stored_credential_names_its_store_and_its_size_and_never_its_bytes() {
+        let host = FakeHost::new();
+        let store = profile_store(&host);
+        let [primary, _] = stores_for(&host, &store);
+
+        let shown = format!(
+            "{:?}",
+            StoredCredential {
+                kept_in: primary,
+                credential: Zeroizing::new(CREDENTIAL.to_string()),
+            }
+        );
+
+        assert!(shown.contains("Keychain"), "{shown}");
+        assert!(
+            shown.contains(&format!("<{} bytes>", CREDENTIAL.len())),
+            "{shown}"
+        );
+        assert!(!shown.contains("sk-ant-oat01-test"), "{shown}");
+    }
+
     #[test]
     fn forgetting_a_store_that_holds_nothing_is_not_a_failure() {
         let host = FakeHost::new();

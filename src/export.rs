@@ -676,6 +676,39 @@ mod tests {
         );
     }
 
+    /// Every other way `age` can refuse: named as what it is, so nobody retypes
+    /// a passphrase that was never the problem.
+    #[test]
+    fn a_refusal_perch_has_no_reading_for_says_the_file_is_not_one_it_can_read() {
+        let said = would_not_open(age::DecryptError::InvalidHeader).to_string();
+
+        assert!(said.contains("not an `age` file Perch can read"), "{said}");
+        assert!(!said.contains("not the passphrase"), "{said}");
+    }
+
+    /// The guard reads two numbers off a shape that is only the numbers, so
+    /// anything it cannot parse at all is left to the reader that parses the
+    /// document properly and says what is wrong with it.
+    #[test]
+    fn a_plaintext_that_is_not_json_is_left_to_the_reader_that_parses_it() {
+        refuse_a_newer_perch(b"not JSON at all").expect("the version guard reads only versions");
+    }
+
+    /// An Export can be written by hand with `age -a -p`, and a version below the
+    /// earliest one names no shape this build knows how to restore.
+    #[test]
+    fn an_export_below_the_earliest_version_names_the_version_that_wrote_it() {
+        let said = refuse_a_newer_perch(br#"{"version": 1}"#)
+            .expect_err("version 1 names no shape")
+            .to_string();
+
+        assert!(said.contains("export version 1"), "{said}");
+        assert!(
+            said.contains("Nothing was imported"),
+            "and what it left behind: {said}"
+        );
+    }
+
     /// The Alias, the Group, whether Cycling may choose it and the reason it is
     /// Quarantined are what make a restore arrive with the setup the user had
     /// rather than a pile of nameless logins.

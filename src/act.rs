@@ -666,6 +666,43 @@ mod tests {
         );
     }
 
+    /// The burst is bounded by nothing but the network, so it can outlast the
+    /// watch: the spare's two requests go out, and the loss lands on the ask made
+    /// before the one irreversible thing a round does.
+    #[test]
+    fn a_watch_lost_between_the_burst_and_the_switch_switches_nothing() {
+        let host = host_where_the_spare_reads(5.0).with_interrupt_after_requests(2);
+        host.listen_for_interrupts();
+        let mut registry = watching_a_pair(5.0);
+        credentialed(&host, &registry, SPARE);
+
+        let outcome =
+            run_the_act(&host, &mut registry).expect("a lost watch is an outcome, not a raise");
+
+        assert!(matches!(outcome, Outcome::Stopped { .. }), "{outcome:?}");
+        assert_eq!(
+            host.sent_to("https://api.anthropic.com/api/oauth/usage")
+                .len(),
+            1,
+            "the burst read the spare before the watch went"
+        );
+        assert!(still_on(&registry, WATCHED), "the Credential never moved");
+    }
+
+    /// One line says both where the round went and what it never saw, because a
+    /// Watcher's decision line is the only sentence about those Accounts there is.
+    #[test]
+    fn what_could_not_be_read_follows_the_sentence_rather_than_taking_one_of_its_own() {
+        assert_eq!(also("Nowhere to go.".to_string(), &[]), "Nowhere to go.");
+        assert_eq!(
+            also(
+                "Nowhere to go.".to_string(),
+                &["spare@example.com: no token.".to_string()]
+            ),
+            "Nowhere to go. spare@example.com: no token."
+        );
+    }
+
     #[test]
     fn a_switch_turned_away_by_a_held_lock_is_refused_as_contended() {
         let host = host_where_the_spare_reads(5.0);

@@ -348,6 +348,73 @@ fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {
     );
 }
 
+/// A Registry that could not be written and a Profile that will not give its
+/// Credential up. Both travel: the second is what the first was the undo for.
+#[test]
+fn an_adoption_that_could_not_be_taken_back_says_that_beside_what_stopped_it() {
+    let host = logged_in_machine().with_a_path_refusing(
+        REGISTRY_PATH,
+        Refusing::Write,
+        "no space left on device",
+    );
+    let dir = perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, &host, KEY)
+        .expect("home is known");
+    let store = common::claude_fixture::store_for_profile(&host, &dir).expect("USER is set");
+    let host = host.with_a_path_refusing(
+        &store.credentials_file,
+        Refusing::Delete,
+        "Permission denied (os error 13)",
+    );
+
+    let (result, _) = run_status(&host, false);
+
+    let said = result
+        .expect_err("the registry could not be written")
+        .to_string();
+    assert!(said.contains("no space left on device"), "{said}");
+    assert!(said.contains("Rollback incomplete"), "{said}");
+    assert!(said.contains("perch holdings purge"), "{said}");
+}
+
+/// Adoption copies the Credential into the Profile before it copies the
+/// `.claude.json` beside it, so a Profile that will not take the second is one
+/// holding a live refresh token no Registry names.
+#[test]
+fn an_adoption_that_could_not_finish_the_profile_leaves_no_credential_behind() {
+    let host = logged_in_machine();
+    let dir = perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, &host, KEY)
+        .expect("home is known");
+    let store = common::claude_fixture::store_for_profile(&host, &dir).expect("USER is set");
+    let host = host.with_a_path_refusing(
+        &store.identity_file,
+        Refusing::Write,
+        "no space left on device",
+    );
+
+    let (result, _) = run_status(&host, false);
+
+    let error = result.expect_err("the Profile could not be finished");
+    assert!(
+        error.to_string().contains("no space left on device"),
+        "{error}"
+    );
+    assert!(
+        host.file(REGISTRY_PATH).is_none(),
+        "nothing records the Account"
+    );
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME),
+        None,
+        "and nothing holds its Credential"
+    );
+    assert!(!host.path_exists(&dir), "nor is a Profile left over");
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(CREDENTIAL),
+        "whatever Claude Code is logged in as is untouched"
+    );
+}
+
 /// The column writers ask, and a sentence is not a column: an Account's plan
 /// comes out of `subscriptionType` in a Credential file, and the very first
 /// command anyone runs writes it into a remark on stderr, raw. `perch status`

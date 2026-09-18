@@ -2211,6 +2211,36 @@ mod tests {
         );
     }
 
+    /// A Switch that was turned away rests for the cooldown a burst that found
+    /// nowhere rests for, and every round inside the rest says so as the refusal
+    /// it was rather than as a lock to come straight back for.
+    #[test]
+    fn a_burst_whose_switch_was_refused_rests_and_is_not_reported_as_a_contention() {
+        let mut burst = Burst::none();
+        burst.refused(
+            now(),
+            &spare(),
+            "A client is running against spare@example.com.",
+        );
+
+        let Some(Outcome::Refused { why, contended }) =
+            burst.resting(now() + Duration::minutes(2), &spare())
+        else {
+            panic!("two minutes into a fifteen minute rest");
+        };
+
+        assert!(
+            why.starts_with("A client is running against spare@example.com. The candidates"),
+            "the burst's reason still opens the line: {why}"
+        );
+        assert!(why.contains("another 13 minutes"), "{why}");
+        assert!(
+            !contended,
+            "nothing here is a lock somebody else is holding"
+        );
+        assert_eq!(burst.resting(now() + Duration::minutes(15), &spare()), None);
+    }
+
     #[test]
     fn a_burst_nobody_answered_backs_off_and_the_first_that_reads_drops_it() {
         let mut burst = Burst::none();

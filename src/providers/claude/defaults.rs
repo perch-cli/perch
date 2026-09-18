@@ -585,6 +585,30 @@ mod tests {
             .unwrap()
     }
 
+    /// Asked again once the native locks are taken, because a Watcher told to
+    /// stop between the ask outside them and this one reads nothing further.
+    #[test]
+    fn a_landing_resolved_after_the_watch_went_reads_no_store() {
+        use crate::providers::provider::DefaultObservation;
+        let host = a_home();
+        write_live(&host, &credential_json("live", None));
+        let mut perch = crate::holdings::lock(&host).expect("nobody holds it");
+        let mut inspection = inspect(&host).expect("nobody holds the native locks");
+
+        let stopped = inspection
+            .resolve(&mut perch, &[], None, INCOMING, &mut || false)
+            .expect("a stop is an answer rather than a failure");
+        let went_on = inspection
+            .resolve(&mut perch, &[], None, INCOMING, &mut || true)
+            .expect("the same machine, asked to go on");
+
+        assert!(matches!(stopped, DefaultObservation::Stopped));
+        assert!(
+            matches!(went_on, DefaultObservation::Unknown),
+            "the live store holds a Credential no Profile here accounts for"
+        );
+    }
+
     #[test]
     fn a_copy_supersedes_only_where_both_expiries_are_said_and_the_held_is_later() {
         let earlier = understood(&credential_json("live", Some(1_000)));

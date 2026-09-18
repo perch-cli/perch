@@ -700,6 +700,155 @@ mod tests {
         }
     }
 
+    /// The slug flattens everything that is not alphanumeric, so
+    /// `user+work@example.com` and `user.work@example.com` derive one Profile and
+    /// therefore one Credential Store.
+    #[test]
+    fn a_renewal_of_a_credential_two_accounts_share_is_refused_before_it_spends_one() {
+        let dir = std::path::PathBuf::from("/Users/someone/.claude");
+        let host = FakeHost::new()
+            .with_env("USER", "someone")
+            .with_env("HOME", "/Users/someone");
+        let asked = Asked {
+            store: crate::providers::claude::probe::store_for_profile(&host, &dir)
+                .expect("USER is set"),
+            its_own_profile: true,
+            arriving_in_a_landing: false,
+            in_use_from: vec![dir],
+            shares_its_profile_with: Some("user.work@example.com".to_string()),
+        };
+        let installed = Installed::unknown("2.1.221");
+        let account = crate::cycle::tests::account("user+work@example.com", vec![])
+            .profile(&host)
+            .unwrap();
+        let mut perch = crate::holdings::lock(&host).expect("nobody holds it");
+        let turn = Turn {
+            host: &host,
+            installed: &installed,
+            account: &account,
+            asked,
+        };
+
+        for (because, paced) in [
+            (Because::ItSaysItRanOut, false),
+            (Because::AnthropicRefusedIt, true),
+        ] {
+            let clause = because.clause();
+            let refused = turn
+                .renew_under_the_lock(&mut perch, because, &mut || Ok(()))
+                .err();
+
+            assert!(
+                matches!(&refused, Some(Outcome::Failed { why, spent })
+                    if *spent == paced && why.contains("user.work@example.com")),
+                "\"{clause}\" spends {paced} and names the other Account: {refused:?}"
+            );
+        }
+        assert!(
+            host.http_calls().is_empty(),
+            "and the refusal is made before the first request"
+        );
+    }
+
+    /// What the ownership check rests on when Anthropic stops answering it, for
+    /// an Account with no stable subject to confirm: an Account's own Profile is
+    /// a directory only Perch writes into, so the Credential in it is that
+    /// Account's whatever the endpoint has started replying.
+    #[test]
+    fn drift_in_a_profile_reply_leaves_the_question_to_the_profile_the_credential_came_from() {
+        let dir = std::path::PathBuf::from("/Users/someone/.config/perch/profiles/someone");
+        let host = FakeHost::new()
+            .with_env("USER", "someone")
+            .with_env("HOME", "/Users/someone");
+        host.reply(
+            anthropic::PROFILE_URL,
+            Some("sk-ant-oat01-live"),
+            200,
+            "<html>hello</html>",
+        );
+        let installed = Installed::unknown("2.1.221");
+        let account = crate::cycle::tests::account("someone@example.com", vec![])
+            .profile(&host)
+            .unwrap();
+        let store =
+            crate::providers::claude::probe::store_for_profile(&host, &dir).expect("USER is set");
+        let its_own = Turn {
+            host: &host,
+            installed: &installed,
+            account: &account,
+            asked: Asked {
+                store: store.clone(),
+                its_own_profile: true,
+                arriving_in_a_landing: false,
+                in_use_from: vec![dir.clone()],
+                shares_its_profile_with: None,
+            },
+        };
+
+        assert!(
+            its_own.confirm("sk-ant-oat01-live", &mut || Ok(())).is_ok(),
+            "nobody but Perch writes into an Account's own Profile"
+        );
+
+        let notes = host.notes();
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("Anthropic answered something Perch does not understand")),
+            "and the drift is said once rather than swallowed: {notes:?}"
+        );
+    }
+
+    /// The Default Profile is not a directory only Perch writes into, so there
+    /// the Identity beside the Credential is the local evidence. An Account whose
+    /// Profile holds no Identity naming it has none.
+    #[test]
+    fn drift_records_nothing_where_the_profile_the_credential_came_from_names_nobody() {
+        let dir = std::path::PathBuf::from("/Users/someone/.claude");
+        let host = FakeHost::new()
+            .with_env("USER", "someone")
+            .with_env("HOME", "/Users/someone");
+        host.reply(
+            anthropic::PROFILE_URL,
+            Some("sk-ant-oat01-live"),
+            200,
+            "<html>hello</html>",
+        );
+        let installed = Installed::unknown("2.1.221");
+        let account = crate::cycle::tests::account("someone@example.com", vec![])
+            .profile(&host)
+            .unwrap();
+        let live = Turn {
+            host: &host,
+            installed: &installed,
+            account: &account,
+            asked: Asked {
+                store: crate::providers::claude::probe::store_for_profile(&host, &dir)
+                    .expect("USER is set"),
+                its_own_profile: false,
+                arriving_in_a_landing: false,
+                in_use_from: vec![dir],
+                shares_its_profile_with: None,
+            },
+        };
+
+        let Err(Turned::Settled(Outcome::Failed { why, spent })) =
+            live.confirm("sk-ant-oat01-live", &mut || Ok(()))
+        else {
+            panic!("the live Credential may belong to a login made outside Perch");
+        };
+
+        assert!(spent, "the request went out and came back");
+        assert!(
+            why.contains("no longer says whose an access token is"),
+            "{why}"
+        );
+        assert!(
+            why.contains("perch switch someone@example.com"),
+            "and the line says what puts this Account's own Credential back: {why}"
+        );
+    }
+
     #[test]
     fn a_renewal_that_hands_back_a_different_refresh_token_rotated() {
         assert!(rotated_away(

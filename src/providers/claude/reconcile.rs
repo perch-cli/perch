@@ -376,6 +376,31 @@ mod tests {
         }
     }
 
+    /// The sweep is for links into a Default Profile entry that has gone, so a
+    /// Profile that is not there at all holds none of them.
+    #[test]
+    fn a_profile_that_is_not_there_holds_no_dangling_link_to_clear() {
+        let host = crate::host::FakeHost::new();
+
+        sweep(
+            &host,
+            Path::new("/Users/someone/.claude"),
+            Path::new("/Users/someone/.config/perch/providers/claude/profiles/gone"),
+        )
+        .expect("a Profile that was never made is not a failure");
+    }
+
+    /// A path that is not text keeps every byte it has: stripping a prefix off
+    /// one means reading it as text first.
+    #[cfg(unix)]
+    #[test]
+    fn a_target_that_is_not_text_is_the_path_it_already_was() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = Path::new(std::ffi::OsStr::from_bytes(b"/Users/someone/\xff\xfe"));
+
+        assert_eq!(plain(raw), raw);
+    }
+
     #[test]
     fn a_junctions_verbatim_target_is_the_path_it_names() {
         assert!(points_to(

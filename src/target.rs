@@ -319,6 +319,57 @@ fn within_provider(
 mod tests {
     use super::*;
 
+    /// A Registry holding one Account, one Alias for it, and one Group: the
+    /// three kinds of name a Target can be, so every branch of the order is
+    /// there to be taken.
+    fn holding() -> Registry {
+        let mut registry = Registry::default();
+        registry.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
+        registry
+            .declare_group("work")
+            .expect("`work` is a usable Group name");
+        registry
+            .aliases
+            .insert("mine".to_string(), registry.accounts[0].key().to_string());
+        registry
+    }
+
+    #[test]
+    fn a_target_says_which_of_the_three_kinds_of_name_it_turned_out_to_be() {
+        let registry = holding();
+
+        assert_eq!(
+            resolve(&registry, "mine")
+                .expect("the Alias names it")
+                .matched(),
+            format!("`mine` is an Alias for {}.", registry.accounts[0].key())
+        );
+        assert_eq!(
+            resolve(&registry, "someone@example.com")
+                .expect("the address names it")
+                .matched(),
+            format!("`{}` is an Account.", registry.accounts[0].key())
+        );
+        assert_eq!(
+            resolve(&registry, "work")
+                .expect("the Group is declared")
+                .matched(),
+            "`work` is a Group."
+        );
+    }
+
+    #[test]
+    fn a_name_nothing_holds_is_refused_with_every_name_a_target_could_have_been() {
+        let refused = resolve(&holding(), "wrok").expect_err("nothing is called that");
+
+        let said = refused.to_string();
+        assert!(said.contains("work"), "the Group is a candidate: {said}");
+        assert!(
+            said.contains("wrok"),
+            "and the refusal quotes what was typed: {said}"
+        );
+    }
+
     #[test]
     fn a_distance_is_the_number_of_single_character_mistakes() {
         assert_eq!(edit_distance("work", "work"), 0);

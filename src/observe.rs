@@ -653,6 +653,61 @@ mod tests {
         }
     }
 
+    /// The `detail` is how, and the reason is what happened. Both travel, with
+    /// the raw address as the Target to type.
+    #[test]
+    fn a_quarantined_account_names_itself_the_reason_and_the_command_that_ends_it() {
+        let quarantined = attempt(
+            "someone@example.com",
+            Outcome::Quarantined {
+                why: Quarantine::RenewalRejected,
+                detail: Some("Anthropic did not accept the Credential".to_string()),
+            },
+        );
+
+        let said = quarantined.note().expect("a Quarantine is worth saying");
+
+        assert!(said.contains("someone@example.com"), "{said}");
+        assert!(
+            said.contains("Anthropic did not accept the Credential"),
+            "{said}"
+        );
+        assert!(said.contains("perch relogin"), "{said}");
+    }
+
+    #[test]
+    fn a_failure_away_from_anthropic_spent_nothing_and_says_what_that_failure_said() {
+        let outcome = Outcome::from(PerchError::Other("the keychain is locked".to_string()));
+
+        assert_eq!(
+            outcome,
+            Outcome::Failed {
+                why: "the keychain is locked".to_string(),
+                spent: false,
+            }
+        );
+    }
+
+    /// The Scope a command draws is read before the Registry lock is taken, so
+    /// an address in it may name an Account a `perch remove` has since taken out.
+    #[test]
+    fn an_address_the_registry_no_longer_holds_is_passed_over_rather_than_read() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut registry = Registry::default();
+        let mut perch = holdings::lock(&host).expect("nobody holds it");
+
+        let report = refresh(
+            &host,
+            &mut perch,
+            &mut registry,
+            &["gone@example.com".to_string()],
+            Spending::BesideTheWatcher,
+        );
+
+        assert!(report.attempts.is_empty(), "{:?}", report.attempts);
+        assert!(host.http_calls().is_empty());
+    }
+
     #[test]
     fn a_figure_that_was_read_needs_no_line_about_it() {
         let report = Report {

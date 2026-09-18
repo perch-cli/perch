@@ -453,6 +453,25 @@ mod tests {
         );
     }
 
+    /// Two clients against one Profile: the reader has to quit a Profile rather
+    /// than read the same name twice.
+    #[test]
+    fn clients_in_one_place_are_named_once_with_every_pid_after_it() {
+        let client = |pid, whose: &str| Client {
+            pid,
+            whose: whose.to_string(),
+        };
+
+        assert_eq!(
+            clause(&[
+                client(4242, "someone@example.com"),
+                client(4343, "someone@example.com"),
+                client(4444, "overflow@example.com"),
+            ]),
+            "someone@example.com (pid 4242, 4343), overflow@example.com (pid 4444)"
+        );
+    }
+
     /// A machine with no boot to read dismisses nothing, which is the platform
     /// Perch has no way to ask and the refusal that was there before.
     #[test]

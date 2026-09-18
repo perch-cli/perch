@@ -309,3 +309,48 @@ impl super::provider::ProfileRef {
         crate::providers::claude::probe::store_for_profile(host, self.directory())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::provider::{Id, OptionScope};
+    use serde_json::{Value, json};
+
+    fn option(key: &str, value: Value) -> std::collections::BTreeMap<String, Value> {
+        std::collections::BTreeMap::from([(key.to_string(), value)])
+    }
+
+    #[test]
+    fn claude_takes_one_option_and_refuses_every_other_key_value_and_scope() {
+        let claude = Id::Claude.adapter();
+
+        claude
+            .validate_options(
+                &option("preferred_workload", json!("fable")),
+                OptionScope::Policy,
+            )
+            .expect("that is the one option Claude has");
+
+        for (options, scope) in [
+            (
+                option("preferred_workload", json!("opus")),
+                OptionScope::Policy,
+            ),
+            (
+                option("cli_path", json!("/usr/bin/claude")),
+                OptionScope::Policy,
+            ),
+            (
+                option("preferred_workload", json!("fable")),
+                OptionScope::Installation,
+            ),
+        ] {
+            let refused = claude
+                .validate_options(&options, scope)
+                .expect_err("Claude has no other option to set");
+            assert!(
+                refused.to_string().contains("preferred_workload=fable"),
+                "and the refusal names the one it does have: {refused}"
+            );
+        }
+    }
+}

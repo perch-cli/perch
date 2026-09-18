@@ -926,6 +926,23 @@ mod tests {
     }
     use crate::host::{Execution, FakeHost, Platform};
 
+    /// A file a write was cut off part way through is the ordinary way a
+    /// Credential Store is damaged, and it is not a file that was never JSON.
+    #[test]
+    fn a_document_that_stops_early_is_told_from_one_that_is_not_json_at_all() {
+        let cut = where_it_is_wrong(
+            &serde_json::from_str::<serde_json::Value>(r#"{"claudeAiOauth":"#)
+                .expect_err("it ends before it is finished"),
+        );
+        let nonsense = where_it_is_wrong(
+            &serde_json::from_str::<serde_json::Value>("not JSON")
+                .expect_err("that was never JSON"),
+        );
+
+        assert!(cut.contains("ends before it is finished"), "{cut}");
+        assert!(nonsense.contains("not JSON"), "{nonsense}");
+    }
+
     /// Every derivation here reads the path as text — `short_hash` hashes it into
     /// the keychain service name, `locks_for` pushes `.lock` onto it — so a
     /// trailing separator is the same directory with a different Credential Store

@@ -1447,6 +1447,105 @@ mod tests {
     }
 
     #[test]
+    fn a_scope_spelled_as_a_bare_name_still_names_its_window() {
+        let document: Value = serde_json::from_str(
+            r#"{"limits": [
+                {"kind": "session", "group": "session", "percent": 2},
+                {"kind": "weekly_all", "group": "weekly", "percent": 10},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 5,
+                 "scope": {"model": "Fable (1M context)"}}
+            ]}"#,
+        )
+        .unwrap();
+
+        let named = named(windows_of(&document).expect("every limit answers"));
+
+        assert_eq!(
+            named,
+            vec!["5-hour", "7-day", "7-day-fable-1m-context"],
+            "a run of punctuation is one hyphen, and the name ends on a character"
+        );
+    }
+
+    #[test]
+    fn every_refusal_says_which_one_it_is() {
+        assert_eq!(Refused::Throttled.to_string(), THROTTLED);
+        assert_eq!(Refused::Rejected.to_string(), REJECTED);
+        assert_eq!(Refused::Stopped(Lost::Stopped).to_string(), STOPPED);
+        assert!(
+            Refused::Unrecognized("no window at all".into())
+                .to_string()
+                .contains("no window at all")
+        );
+        assert!(Refused::Failed(503).to_string().contains("503"));
+        assert!(
+            Refused::Unreachable("dns lookup failed".into())
+                .to_string()
+                .contains("dns lookup failed")
+        );
+    }
+
+    #[test]
+    fn a_renewal_prints_neither_the_token_it_gives_nor_the_one_it_rotated_in() {
+        let shown = format!(
+            "{:?}",
+            Fresh {
+                access_token: Zeroizing::new("sk-ant-oat01-new".to_string()),
+                refresh_token: Some(Zeroizing::new("sk-ant-ort01-rotated".to_string())),
+                expires_at: Some(1_785_000_000_000),
+            }
+        );
+
+        assert!(!shown.contains("sk-ant-"), "{shown}");
+        assert_eq!(shown.matches("<redacted>").count(), 2, "{shown}");
+        assert!(
+            shown.contains("1785000000000"),
+            "when a token expires is not a secret: {shown}"
+        );
+    }
+
+    /// The remark is a fact about the shape of Anthropic's replies, so it is made
+    /// where the windows are handed on and not where they are refused.
+    #[test]
+    fn a_reset_time_perch_could_not_read_is_remarked_on_where_the_windows_are_handed_on() {
+        let host = crate::host::FakeHost::new();
+        host.reply(
+            USAGE_URL,
+            Some("sk-ant-oat01-live"),
+            200,
+            r#"{"five_hour": {"utilization": 42, "resets_at": "in about two hours"},
+                "seven_day": {"utilization": 18}}"#,
+        );
+
+        let windows = utilization(&host, "sk-ant-oat01-live", &mut || Ok(()))
+            .expect("both windows say how full they are");
+
+        let notes = host.notes();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("5-hour"), "{notes:?}");
+        assert!(notes[0].contains("soonest-reset"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_usage_reply_naming_no_window_is_refused_rather_than_read_as_an_empty_one() {
+        let host = crate::host::FakeHost::new();
+        host.reply(
+            USAGE_URL,
+            Some("sk-ant-oat01-live"),
+            200,
+            r#"{"limits": []}"#,
+        );
+
+        assert_eq!(
+            utilization(&host, "sk-ant-oat01-live", &mut || Ok(())),
+            Err(Refused::Unrecognized(
+                "the usage endpoint named no Quota Window".to_string()
+            ))
+        );
+    }
+
+    #[test]
     fn a_limit_scoped_to_something_that_is_not_a_model_is_named_from_that() {
         let document: Value = serde_json::from_str(
             r#"{"limits": [

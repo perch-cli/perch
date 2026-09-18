@@ -129,3 +129,254 @@ fn a_superseded_copy_that_is_already_gone_is_noted_and_not_refused() {
         host.notes()
     );
 }
+
+/// An adoption may find no identity block to carry, and the Profile is made for
+/// the Credential alone rather than for an Identity Perch invented.
+#[test]
+fn a_placement_carrying_no_identity_writes_the_credential_and_nothing_beside_it() {
+    let host = FakeHost::new();
+    let store = store_of(&host, EMAIL);
+
+    super::place(
+        &host,
+        &store.config_dir,
+        Some(CREDENTIAL),
+        None,
+        super::IfItFails::TakeBack,
+    )
+    .expect("a Credential is enough to make a Profile for");
+
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .as_deref(),
+        Some(CREDENTIAL)
+    );
+    assert_eq!(host.file(&store.identity_file), None);
+}
+
+/// The keychain namespace of a Profile is derived from the login name, so a
+/// machine that will not say what that is has no Store to write into.
+#[test]
+fn a_placement_that_cannot_name_a_store_takes_back_the_directory_it_made() {
+    let host = FakeHost::new().without_env("USER").without_env("USERNAME");
+    let dir = std::path::Path::new("/profiles/someone-example-com");
+
+    let refused = super::place(
+        &host,
+        dir,
+        Some(CREDENTIAL),
+        None,
+        super::IfItFails::TakeBack,
+    )
+    .expect_err("no keychain account name can be derived");
+
+    assert!(refused.to_string().contains("USER"), "{refused}");
+    assert!(
+        !host.path_exists(dir),
+        "and the empty directory it made on the way is gone"
+    );
+}
+
+#[test]
+fn a_directory_that_will_not_go_after_that_is_named_beside_the_refusal() {
+    let dir = "/profiles/someone-example-com";
+    let host = FakeHost::new()
+        .without_env("USER")
+        .without_env("USERNAME")
+        .with_a_path_refusing(dir, Refusing::Delete, "Permission denied (os error 13)");
+
+    let refused = super::place(
+        &host,
+        std::path::Path::new(dir),
+        Some(CREDENTIAL),
+        None,
+        super::IfItFails::TakeBack,
+    )
+    .expect_err("no keychain account name can be derived");
+
+    let said = refused.to_string();
+    assert!(said.contains("USER"), "{said}");
+    assert!(said.contains("Rollback incomplete"), "{said}");
+    assert!(said.contains(dir), "{said}");
+}
+
+/// The Profile is new and the write that would have justified it did not land,
+/// so there is nothing for the policy to keep.
+#[test]
+fn a_placement_that_keeps_what_landed_still_takes_back_a_profile_nothing_landed_in() {
+    let host = FakeHost::new();
+    let store = store_of(&host, EMAIL);
+    let host = host.with_a_path_refusing(
+        &store.identity_file,
+        Refusing::Write,
+        "no space left on device",
+    );
+
+    let refused = super::place(
+        &host,
+        &store.config_dir,
+        None,
+        Some("{}"),
+        super::IfItFails::KeepWhatLanded,
+    )
+    .expect_err("the Identity could not be written");
+
+    assert!(refused.to_string().contains("no space left on device"));
+    assert!(
+        !host.path_exists(&store.config_dir),
+        "a Profile holding nothing is nobody's"
+    );
+}
+
+#[test]
+fn a_placement_that_keeps_what_landed_leaves_the_credential_that_did() {
+    let host = FakeHost::new();
+    let store = store_of(&host, EMAIL);
+    let host = host.with_a_path_refusing(
+        &store.identity_file,
+        Refusing::Write,
+        "no space left on device",
+    );
+
+    let refused = super::place(
+        &host,
+        &store.config_dir,
+        Some(CREDENTIAL),
+        Some("{}"),
+        super::IfItFails::KeepWhatLanded,
+    )
+    .expect_err("the Identity could not be written");
+
+    assert!(refused.to_string().contains("no space left on device"));
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .as_deref(),
+        Some(CREDENTIAL),
+        "the write went over whatever the Profile held before, so taking it \
+         back would leave less than the caller started with"
+    );
+}
+
+#[test]
+fn a_placement_that_could_not_be_taken_back_says_that_beside_what_stopped_it() {
+    let host = FakeHost::new();
+    let store = store_of(&host, EMAIL);
+    let host = host
+        .with_a_path_refusing(
+            &store.identity_file,
+            Refusing::Write,
+            "no space left on device",
+        )
+        .with_a_path_refusing(
+            &store.credentials_file,
+            Refusing::Delete,
+            "Permission denied (os error 13)",
+        );
+
+    let refused = super::place(
+        &host,
+        &store.config_dir,
+        Some(CREDENTIAL),
+        Some("{}"),
+        super::IfItFails::TakeBack,
+    )
+    .expect_err("the Identity could not be written");
+
+    let said = refused.to_string();
+    assert!(said.contains("no space left on device"), "{said}");
+    assert!(said.contains("Rollback incomplete"), "{said}");
+    assert!(said.contains("perch holdings purge"), "{said}");
+}
+
+/// The keychain is the store written on macOS, so the file beside it is where a
+/// superseded copy would be left.
+#[test]
+fn a_superseded_copy_the_second_store_will_not_give_up_is_noted_and_not_refused() {
+    let host = FakeHost::new();
+    let store = store_of(&host, EMAIL);
+    let host = host.with_a_path_refusing(
+        &store.credentials_file,
+        Refusing::Delete,
+        "Permission denied (os error 13)",
+    );
+    super::make_dir(&host, &store.config_dir).expect("the Profile can be made");
+
+    super::store_credential(&host, &store, CREDENTIAL).expect("the keychain took it");
+
+    let notes = host.notes();
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("A superseded copy of a Credential could not be removed")),
+        "{notes:?}"
+    );
+}
+
+/// Off macOS the file is written first, so a file that takes the bytes and then
+/// will not be read is the store whose answer is missing.
+#[test]
+fn a_store_that_takes_a_credential_and_then_says_nothing_is_left_to_the_other_one() {
+    let host = logged_in_machine_off_macos().with_keychain_off_macos();
+    let store = store_of(&host, EMAIL);
+    super::make_dir(&host, &store.config_dir).expect("the Profile can be made");
+    let host = host.with_a_path_refusing(
+        &store.credentials_file,
+        Refusing::Read,
+        "Permission denied (os error 13)",
+    );
+
+    super::store_credential(&host, &store, CREDENTIAL).expect("the keychain took it instead");
+
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .as_deref(),
+        Some(CREDENTIAL),
+        "the Credential is in the store that answered"
+    );
+    let notes = host.notes();
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("could not be written to")),
+        "{notes:?}"
+    );
+}
+
+/// Both stores take the Credential and hand back something else: the file is
+/// arranged to corrupt what it is given, and the keychain to keep four bytes of
+/// it, which is `security -i` overrunning its stdin buffer.
+#[test]
+fn a_bad_copy_that_cannot_be_taken_out_is_said_rather_than_left_unmentioned() {
+    let host = logged_in_machine_off_macos().with_keychain_off_macos();
+    let store = store_of(&host, EMAIL);
+    super::make_dir(&host, &store.config_dir).expect("the Profile can be made");
+    let host = host
+        .with_file_corrupting_writes(&store.credentials_file)
+        .with_a_path_refusing(
+            &store.credentials_file,
+            Refusing::Delete,
+            "Permission denied (os error 13)",
+        )
+        .with_keychain_truncating_after(4);
+    host.forget_notes();
+
+    let refused = super::store_credential(&host, &store, CREDENTIAL)
+        .expect_err("neither store holds what it was handed");
+
+    assert!(
+        refused.to_string().contains("did not read back intact"),
+        "the store this machine reads first is the one reported: {refused}"
+    );
+    let notes = host.notes();
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("That copy could not be removed from")),
+        "{notes:?}"
+    );
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME),
+        None,
+        "and the copy that could be taken out was"
+    );
+}

@@ -614,6 +614,50 @@ fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mo
     );
 }
 
+#[test]
+fn a_default_profile_that_will_not_say_what_it_holds_refuses_the_run() {
+    let host =
+        machine().with_a_path_refusing(SHARED, Refusing::List, "Permission denied (os error 13)");
+
+    let said = run_reconcile(&host)
+        .expect_err("what crosses is read now rather than believed from a list")
+        .to_string();
+
+    assert!(said.contains("Permission denied"), "{said}");
+    assert!(said.contains(SHARED), "{said}");
+}
+
+/// The sweep clears links at entries that have gone, so a Profile that will not
+/// be walked leaves them: refused rather than passed over.
+#[test]
+fn a_profile_that_will_not_say_what_it_holds_refuses_the_run_too() {
+    let host =
+        machine().with_a_path_refusing(PROFILE, Refusing::List, "Permission denied (os error 13)");
+
+    let said = run_reconcile(&host)
+        .expect_err("a Profile that will not be read is not one holding nothing")
+        .to_string();
+
+    assert!(said.contains("Permission denied"), "{said}");
+    assert!(said.contains(PROFILE), "{said}");
+}
+
+/// A share of an ordinary entry, made by an earlier Run and left pointing at
+/// nothing when the person deleted what it named.
+#[test]
+fn a_share_of_an_entry_the_default_profile_no_longer_holds_is_taken_away() {
+    let host = machine().with_link(Link::Symbolic, shared("gone.md"), profile("gone.md"));
+
+    run_reconcile(&host).expect("everything still there can be linked");
+
+    let entries = entries_of(&host);
+    assert!(!entries.contains(&"gone.md".to_string()), "{entries:?}");
+    assert!(
+        entries.contains(&"CLAUDE.md".to_string()),
+        "and what the Default Profile does hold is untouched: {entries:?}"
+    );
+}
+
 /// Both platforms, because they fail differently and only one of them says so:
 /// everywhere else the Run is refused naming the person's own file as the
 /// obstruction, and a Windows share is routinely a hard link, so `in_the_way`
