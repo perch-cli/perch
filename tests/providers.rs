@@ -1166,11 +1166,9 @@ fn claude_usage_requires_the_remote_subject_and_workspace_even_when_email_matche
             json!({"account":{"uuid":"account-uuid-1","email":common::EMAIL},"organization":{"uuid":" "}}),
             false,
         ),
-        // No email is a reply Perch does not recognize, which is drift rather
-        // than evidence, and the Credential came from the Account's own Profile.
         (
             json!({"account":{"uuid":"account-uuid-1"},"organization":{"uuid":"organization-uuid-1"}}),
-            true,
+            false,
         ),
     ];
     for (reply, allowed) in replies {
