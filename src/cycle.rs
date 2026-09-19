@@ -250,6 +250,7 @@ pub fn worth_reading(
         .accounts(registry)
         .into_iter()
         .filter(|account| is_a_candidate(&sharers, account))
+        .filter(|account| account.provider() == registry.selected_provider())
         .filter(|account| !leaving.is_some_and(|email| name::same_name(account.key(), email)))
         // A rival inside the same window that makes the Account being left
         // worth trusting is worth trusting too, and reading it buys nothing.

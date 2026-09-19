@@ -342,6 +342,18 @@ fn a_claude_cycle_never_selects_a_codex_account_in_the_same_group() {
             .iter()
             .all(|account| account.provider() == Id::Claude)
     );
+    let read = perch::cycle::worth_reading(
+        &registry,
+        &perch::config::Scope::Group("work".into()),
+        None,
+        None,
+        host.now(),
+    );
+    assert!(
+        read.iter()
+            .all(|key| registry.held(key).unwrap().provider() == Id::Claude),
+        "and no Codex read is spent on an Account the Cycle then drops: {read:?}"
+    );
 }
 
 #[test]
