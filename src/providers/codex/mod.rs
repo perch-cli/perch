@@ -215,10 +215,20 @@ impl super::provider::Adapter for Codex {
         host: &dyn Host,
         context: &super::provider::ProfileContext,
     ) -> Result<super::provider::ProfileBundle> {
-        use super::provider::{ArtifactPurpose, ProfileBundle};
+        use super::provider::{ArtifactPurpose, DefaultRelation, ProfileBundle};
         let account = &context.profile;
         let mut bundle = ProfileBundle::default();
-        if let Some(credential) = credential(host, account)? {
+        // The live copy first for the active Account: Codex renews that one in
+        // place, and its Profile copy is refreshed only by the next Switch.
+        let live = match context.default {
+            DefaultRelation::Active => defaults::live_credential_of(host, account)?,
+            _ => None,
+        };
+        let held = match live {
+            Some(live) => Some(live),
+            None => credential(host, account)?,
+        };
+        if let Some(credential) = held {
             bundle.insert(
                 AUTH_FILE,
                 ArtifactPurpose::Credential,
