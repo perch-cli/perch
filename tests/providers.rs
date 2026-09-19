@@ -2137,6 +2137,20 @@ fn an_export_of_the_active_codex_account_carries_the_credential_codex_renewed() 
 }
 
 #[test]
+fn a_codex_switch_whose_credential_will_not_land_leaves_no_pin_behind() {
+    let host = two_codex_workspaces().with_a_disk_that_fills_writing(DEFAULT_AUTH);
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    let refused = result.unwrap_err().to_string();
+    assert!(refused.contains("Nothing was switched"), "{refused}");
+    assert!(
+        host.file("/Users/someone/.codex/config.toml").is_none(),
+        "the pin written for a Credential that never landed is taken back"
+    );
+}
+
+#[test]
 fn a_codex_default_kept_in_the_keyring_is_refused_and_the_pin_is_named() {
     let host = two_codex_workspaces().with_file(
         "/Users/someone/.codex/config.toml",

@@ -127,6 +127,7 @@ impl DefaultChange for Edit<'_> {
     fn apply(&mut self, _perch: &mut lock::Held<'_>) -> std::result::Result<(), DefaultFailure> {
         let path = self.home.join(AUTH_FILE);
         let config = self.home.join(layout::CONFIG_FILE);
+        let mut pinned_here = false;
         let written = self
             .host
             .create_private_dir_all(&self.home)
@@ -138,12 +139,19 @@ impl DefaultChange for Edit<'_> {
                     return Ok(());
                 }
                 host::write_atomically(self.host, &config, &format!("{}\n", layout::PIN))
-                    .map_err(|error| PerchError::file_write(&config, error))
+                    .map_err(|error| PerchError::file_write(&config, error))?;
+                pinned_here = true;
+                Ok(())
             })
             .and_then(|()| {
                 host::write_atomically(self.host, &path, &self.credential)
                     .map_err(|error| PerchError::file_write(&path, error))
             });
+        // "Nothing was switched" has to be true of the home too: a pin Perch
+        // put there for a Credential that never landed is taken back.
+        if written.is_err() && pinned_here {
+            let _ = self.host.remove_file(&config);
+        }
         written.map_err(|error| DefaultFailure {
             error,
             moved: false,
