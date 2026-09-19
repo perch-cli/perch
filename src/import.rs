@@ -742,4 +742,16 @@ mod tests {
             host.effects()
         );
     }
+
+    #[test]
+    fn a_machine_holding_nothing_but_a_changed_setting_is_refused_as_holding_settings() {
+        assert!(refuse_a_machine_that_is_not_empty(Some(&Registry::default())).is_ok());
+
+        let mut registry = Registry::default();
+        registry.run_provider = crate::providers::provider::Id::Codex;
+        let refused = refuse_a_machine_that_is_not_empty(Some(&registry)).unwrap_err();
+
+        assert!(refused.to_string().contains("holds Settings"), "{refused}");
+        assert!(!refused.to_string().contains("0 Groups"), "{refused}");
+    }
 }
