@@ -1398,6 +1398,41 @@ fn a_grant_to_a_codex_scope_reads_back_as_granted() {
     assert_eq!(printed.trim(), "true");
 }
 
+/// Codex names no workload to prefer, and the refusal says so rather than the
+/// Setting landing under Claude, whose Accounts the Scope does not hold.
+#[test]
+fn a_preferred_workload_on_a_codex_scope_is_refused_rather_than_written_under_claude() {
+    let host = a_codex_account_in_no_group();
+
+    let refusal = config_set(&host, &["ungrouped", "preferred-workload", "true"])
+        .0
+        .expect_err("Codex has no workload to prefer");
+
+    assert!(
+        refusal
+            .to_string()
+            .contains("This provider has no preferred workload"),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn a_preferred_workload_within_a_scope_holding_both_providers_has_to_name_whose_it_is() {
+    let host = a_group_holding_both_providers();
+
+    let refusal = config_set(&host, &["work", "preferred-workload", "true"])
+        .0
+        .expect_err("said about two providers at once, it says nothing about either");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains(
+            "`perch config set work --provider <claude|codex> preferred-workload <value>`"
+        ),
+        "{refusal}"
+    );
+}
+
 #[test]
 fn a_grant_within_a_scope_holding_both_providers_has_to_name_whose_it_is() {
     let host = a_group_holding_both_providers();

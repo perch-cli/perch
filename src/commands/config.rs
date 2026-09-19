@@ -201,23 +201,6 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                 return Ok(vec![format!("{} {key}: inherited", scope.word())]);
             }
             let key = Setting::parse(key, &scope)?;
-            if key == Setting::WatcherMayAct {
-                let providers: std::collections::BTreeSet<_> = registry
-                    .accounts
-                    .iter()
-                    .filter(|account| registry.scope_of(account) == scope)
-                    .map(|account| account.provider())
-                    .collect();
-                if providers.len() > 1 {
-                    return Err(PerchError::Invalid(format!(
-                        "{} holds both providers' Accounts, so the grant names one: `perch \
-                         config set {} --provider <claude|codex> watcher-may-act <value>`.",
-                        scope.described(),
-                        scope.word()
-                    )));
-                }
-                registry.select_provider(providers.into_iter().next().unwrap_or_default());
-            }
             let was = key.of(registry, &scope);
 
             key.write(registry, &scope, value)?;

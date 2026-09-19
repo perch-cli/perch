@@ -172,7 +172,23 @@ impl Setting {
         }
 
         let mut changed = registry.clone();
-        let provider = changed.selected_provider();
+        let provider = match provider_held_by(&changed, scope) {
+            Some(only) => only,
+            None if scope.accounts(&changed).is_empty() => changed.selected_provider(),
+            // A per-provider Setting said about two providers at once says
+            // nothing about either.
+            None if matches!(self, Setting::PreferredWorkload | Setting::WatcherMayAct) => {
+                return Err(PerchError::Invalid(format!(
+                    "{} holds both providers' Accounts, so `{}` names one: `perch config set \
+                     {} --provider <claude|codex> {} <value>`.",
+                    scope.described(),
+                    self.as_str(),
+                    scope.word(),
+                    self.as_str()
+                )));
+            }
+            None => changed.selected_provider(),
+        };
         if self == Setting::Interchangeable {
             changed.ungrouped.interchangeable = yes_or_no(self.as_str(), value)?;
         } else {
