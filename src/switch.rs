@@ -321,7 +321,10 @@ fn perform<'a>(
         let captured = prepared
             .capture(perch)
             .map_err(|error| error.with_note(NOTHING_SWITCHED))?;
-        write_it_down(host, perch, registry, &leaving, incoming)
+        prepared
+            .around_a_registry_write(perch, &mut |perch| {
+                write_it_down(host, perch, registry, &leaving, incoming)
+            })
             .map_err(|error| error.with_note(NOTHING_SWITCHED))?;
         wrote_it_down = true;
         lease = Some(prepared);
