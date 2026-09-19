@@ -37,7 +37,7 @@ pub(super) fn credential(
 ///
 /// On the evidence [`crate::switch::capture`] wants before it copies that same
 /// Credential anywhere (ADR a-switch-is-written-down-first): an Identity naming
-/// this Account. A stable subject requires matching native identity evidence.
+/// this Account, or naming nobody. Somebody else's is not this one's to export.
 fn the_live_store(
     host: &dyn Host,
     context: &ProfileContext,
@@ -51,15 +51,13 @@ fn the_live_store(
         return Ok(None);
     }
     let live = crate::providers::claude::layout::default_profile(host)?;
-    let identity = crate::providers::claude::probe::read_identity(host, &live, installed)
-        .ok()
-        .flatten();
-    let belongs = identity
-        .as_ref()
-        .map_or(account.provider_identity.is_none(), |identity| {
-            super::identity::names(identity, account)
-        });
-    Ok(belongs.then_some(live))
+    // An Identity that is absent, or that will not be read, is not evidence
+    // against — only one naming somebody else is.
+    let somebody_else = matches!(
+        crate::providers::claude::probe::read_identity(host, &live, installed),
+        Ok(Some(identity)) if !super::identity::names(&identity, account)
+    );
+    Ok((!somebody_else).then_some(live))
 }
 
 fn read_from(

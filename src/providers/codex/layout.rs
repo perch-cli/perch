@@ -27,7 +27,7 @@ pub(super) fn default_home(host: &dyn Host) -> Result<PathBuf> {
 /// rather than written under. Unset is the file: that is Codex's own default,
 /// and it outranks nothing on disk either way.
 pub(super) fn refuse_unless_file_backed(host: &dyn Host, home: &Path) -> Result<()> {
-    match store_setting(host, home) {
+    match store_setting(host, home)? {
         None => Ok(()),
         Some(store) if store == "file" => Ok(()),
         Some(store) => Err(PerchError::Invalid(format!(
@@ -42,8 +42,15 @@ pub(super) const CONFIG_FILE: &str = "config.toml";
 /// The line that makes a Default file-backed, as Codex spells it.
 pub(super) const PIN: &str = "cli_auth_credentials_store = \"file\"";
 
-fn store_setting(host: &dyn Host, home: &Path) -> Option<String> {
-    store_named(&host.read_file(&home.join(CONFIG_FILE)).ok()?)
+/// A `config.toml` that will not be read is refused rather than read as unset:
+/// it may name the store this guard exists to refuse.
+fn store_setting(host: &dyn Host, home: &Path) -> Result<Option<String>> {
+    let path = home.join(CONFIG_FILE);
+    match host.read_file(&path) {
+        Ok(config) => Ok(store_named(&config)),
+        Err(crate::host::HostError::NotFound { .. }) => Ok(None),
+        Err(error) => Err(PerchError::file_read(path, error)),
+    }
 }
 
 /// The top-level `cli_auth_credentials_store` a `config.toml` sets, if any.
@@ -145,5 +152,18 @@ mod tests {
             refuse_unless_file_backed(&in_a_profile, home).is_ok(),
             "a profile's store is not the Default's"
         );
+    }
+
+    #[test]
+    fn a_config_that_will_not_be_read_is_refused_rather_than_read_as_unset() {
+        let home = Path::new("/Users/someone/.codex");
+        let unreadable =
+            a_home().with_a_file_that_will_not_open(home.join("config.toml"), "permission denied");
+
+        let refused = refuse_unless_file_backed(&unreadable, home)
+            .unwrap_err()
+            .to_string();
+
+        assert!(refused.contains("config.toml"), "{refused}");
     }
 }

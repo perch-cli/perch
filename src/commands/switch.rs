@@ -63,8 +63,18 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     let selected = match selected {
         Some(provider) => provider,
         None => {
+            // Counted within the Scope named, where one was: a Group holding one
+            // provider's Accounts is not mixed because another Group holds the other's.
+            let within: Vec<&Account> = match args
+                .target
+                .as_deref()
+                .and_then(|target| crate::config::Scope::named(&registry, target).ok())
+            {
+                Some(scope) => scope.accounts(&registry),
+                None => registry.accounts.iter().collect(),
+            };
             let providers: std::collections::BTreeSet<_> =
-                registry.accounts.iter().map(Account::provider).collect();
+                within.into_iter().map(Account::provider).collect();
             if providers.len() > 1 {
                 return Err(PerchError::Invalid(
                     "Choose --provider <name> for a Cycle containing multiple providers".into(),

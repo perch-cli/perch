@@ -135,25 +135,28 @@ fn adding_the_same_workspace_twice_refuses_without_replacing_the_held_credential
     );
 }
 
+/// `run-provider` is Claude and `claude` is on PATH, and neither says which
+/// CLI a Codex Account runs under.
 #[test]
-fn run_falls_back_only_when_the_preferred_cli_is_absent() {
+fn run_reaches_the_cli_of_the_account_it_names_whichever_cli_is_preferred() {
     let host = machine("personal");
     add_account(&host, "personal");
     assert_eq!(launch(&host, Selection::default(), &[]).unwrap(), 0);
     let host = host.with_file("/usr/bin/claude", "");
-    let error = launch(&host, Selection::default(), &[]).unwrap_err();
-    assert!(error.to_string().contains("`--codex` selects it"));
+    assert_eq!(launch(&host, Selection::default(), &[]).unwrap(), 0);
+    let error = launch(
+        &host,
+        Selection {
+            provider: None,
+            codex: false,
+            claude: true,
+        },
+        &[],
+    )
+    .unwrap_err();
     assert!(
-        launch(
-            &host,
-            Selection {
-                provider: None,
-                codex: true,
-                claude: false
-            },
-            &[]
-        )
-        .is_ok()
+        error.to_string().contains("`--codex` selects it"),
+        "an explicit flag still refuses the other provider's Account: {error}"
     );
 }
 
@@ -342,6 +345,34 @@ fn a_claude_cycle_never_selects_a_codex_account_in_the_same_group() {
             .iter()
             .all(|account| account.provider() == Id::Claude)
     );
+    let read = perch::cycle::worth_reading(
+        &registry,
+        &perch::config::Scope::Group("work".into()),
+        None,
+        None,
+        host.now(),
+    );
+    assert!(
+        read.iter()
+            .all(|key| registry.held(key).unwrap().provider() == Id::Claude),
+        "and no Codex read is spent on an Account the Cycle then drops: {read:?}"
+    );
+}
+
+#[test]
+fn a_group_holding_one_providers_accounts_is_switched_within_without_a_flag() {
+    let host = common::three_accounts_in_one_group();
+    let document = credential("personal", EMAIL);
+    let host = host.with_file(CODEX, "").with_login(move |host, at| {
+        host.set_file(at.join("auth.json"), &document);
+        0
+    });
+    add_account(&host, "personal");
+
+    let (switched, printed) = common::run_switch(&host, "work");
+
+    switched.expect("`work` holds only Claude Accounts, so nothing is ambiguous");
+    assert!(printed.contains("Switched"), "{printed}");
 }
 
 #[test]
@@ -1060,7 +1091,11 @@ fn claude_defaults_and_backups_attribute_stable_subjects_instead_of_email() {
     }
     host.remove_file(std::path::Path::new(common::IDENTITY_PATH))
         .unwrap();
-    assert_eq!(snapshot(), common::SECOND_CREDENTIAL);
+    assert_eq!(
+        snapshot(),
+        common::CREDENTIAL,
+        "an Identity that is absent is not evidence against the live store"
+    );
 }
 
 #[test]
@@ -2078,6 +2113,38 @@ fn a_codex_switch_captures_the_renewed_live_credential_into_the_outgoing_profile
     assert_eq!(
         host.file(DEFAULT_AUTH).as_deref(),
         Some(credential("work", EMAIL).as_str())
+    );
+}
+
+#[test]
+fn an_export_of_the_active_codex_account_carries_the_credential_codex_renewed() {
+    let host = two_codex_workspaces();
+    common::run_switch(&host, "personal").0.unwrap();
+    host.set_file(DEFAULT_AUTH, &rotated("personal"));
+    let registry = registry::load(&host).unwrap().unwrap();
+
+    let personal = exported_credential(&host, &registry, &held(&host, "personal")).unwrap();
+    let work = exported_credential(&host, &registry, &held(&host, "work")).unwrap();
+
+    assert_eq!(personal.as_deref(), Some(rotated("personal").as_str()));
+    assert_eq!(
+        work.as_deref(),
+        Some(credential("work", EMAIL).as_str()),
+        "a parked Account's Credential is the copy its Profile holds"
+    );
+}
+
+#[test]
+fn a_codex_switch_whose_credential_will_not_land_leaves_no_pin_behind() {
+    let host = two_codex_workspaces().with_a_disk_that_fills_writing(DEFAULT_AUTH);
+
+    let (result, _) = common::run_switch(&host, "work");
+
+    let refused = result.unwrap_err().to_string();
+    assert!(refused.contains("Nothing was switched"), "{refused}");
+    assert!(
+        host.file("/Users/someone/.codex/config.toml").is_none(),
+        "the pin written for a Credential that never landed is taken back"
     );
 }
 

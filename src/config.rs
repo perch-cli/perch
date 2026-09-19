@@ -42,6 +42,24 @@ pub const SETTINGS: [Setting; 6] = [
     Setting::WatcherMarginPercent,
 ];
 
+/// The provider a per-provider Setting on this Scope is about: the one whose
+/// Accounts the Scope holds. `None` where it holds both, or none yet, and the
+/// caller says what that means.
+pub fn provider_held_by(
+    registry: &Registry,
+    scope: &Scope,
+) -> Option<crate::providers::provider::Id> {
+    let mut held: std::collections::BTreeSet<_> = scope
+        .accounts(registry)
+        .iter()
+        .map(|account| account.provider())
+        .collect();
+    match (held.pop_first(), held.is_empty()) {
+        (Some(only), true) => Some(only),
+        _ => None,
+    }
+}
+
 impl Setting {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -119,7 +137,8 @@ impl Setting {
     /// The value this Scope holds, as `get` prints it and `set` would take it
     /// back.
     pub fn of(self, registry: &Registry, scope: &Scope) -> String {
-        self.of_provider(registry, scope, registry.selected_provider())
+        let provider = provider_held_by(registry, scope).unwrap_or(registry.selected_provider());
+        self.of_provider(registry, scope, provider)
     }
 
     /// The same, resolved for one named provider rather than the selected one.
@@ -153,7 +172,23 @@ impl Setting {
         }
 
         let mut changed = registry.clone();
-        let provider = changed.selected_provider();
+        let provider = match provider_held_by(&changed, scope) {
+            Some(only) => only,
+            None if scope.accounts(&changed).is_empty() => changed.selected_provider(),
+            // A per-provider Setting said about two providers at once says
+            // nothing about either.
+            None if matches!(self, Setting::PreferredWorkload | Setting::WatcherMayAct) => {
+                return Err(PerchError::Invalid(format!(
+                    "{} holds both providers' Accounts, so `{}` names one: `perch config set \
+                     {} --provider <claude|codex> {} <value>`.",
+                    scope.described(),
+                    self.as_str(),
+                    scope.word(),
+                    self.as_str()
+                )));
+            }
+            None => changed.selected_provider(),
+        };
         if self == Setting::Interchangeable {
             changed.ungrouped.interchangeable = yes_or_no(self.as_str(), value)?;
         } else {

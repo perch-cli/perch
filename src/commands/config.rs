@@ -201,23 +201,6 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                 return Ok(vec![format!("{} {key}: inherited", scope.word())]);
             }
             let key = Setting::parse(key, &scope)?;
-            if key == Setting::WatcherMayAct {
-                let providers: std::collections::BTreeSet<_> = registry
-                    .accounts
-                    .iter()
-                    .filter(|account| registry.scope_of(account) == scope)
-                    .map(|account| account.provider())
-                    .collect();
-                if providers.len() > 1 {
-                    return Err(PerchError::Invalid(format!(
-                        "{} holds both providers' Accounts, so the grant names one: `perch \
-                         config set {} --provider <claude|codex> watcher-may-act <value>`.",
-                        scope.described(),
-                        scope.word()
-                    )));
-                }
-                registry.select_provider(providers.into_iter().next().unwrap_or_default());
-            }
             let was = key.of(registry, &scope);
 
             key.write(registry, &scope, value)?;
@@ -305,13 +288,11 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
         && selector == "--provider"
     {
         let scope = addressed(registry, scope)?;
-        let mut contextual = registry.clone();
-        contextual.select_provider(crate::providers::provider::Id::parse(provider)?);
+        let provider = crate::providers::provider::Id::parse(provider)?;
         return match rest {
-            [] => Ok(page(&contextual, &scope)),
+            [] => Ok(page_for(registry, &scope, provider)),
             [key] if key.starts_with("option.") => {
-                let provider = contextual.selected_provider();
-                let option = contextual
+                let option = registry
                     .scope_settings(&scope)
                     .and_then(|settings| settings.providers.get(&provider))
                     .and_then(|settings| settings.options.get(key.trim_start_matches("option.")));
@@ -326,7 +307,9 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
                         .unwrap_or_else(|| "inherit".into()),
                 ])
             }
-            [key] => Ok(vec![Setting::parse(key, &scope)?.of(&contextual, &scope)]),
+            [key] => Ok(vec![
+                Setting::parse(key, &scope)?.of_provider(registry, &scope, provider),
+            ]),
             _ => Err(PerchError::Invalid(
                 "`perch config get <scope> [<key>]` takes one Setting at most.".into(),
             )),
@@ -449,11 +432,27 @@ fn everything(registry: &Registry) -> Vec<String> {
 /// word `set` takes and the value is the one it would take back, so the page
 /// still reads as the vocabulary that writes it.
 fn page(registry: &Registry, scope: &Scope) -> Vec<String> {
+    let provider =
+        crate::config::provider_held_by(registry, scope).unwrap_or(registry.selected_provider());
+    page_for(registry, scope, provider)
+}
+
+/// The same page, read for one named provider.
+fn page_for(
+    registry: &Registry,
+    scope: &Scope,
+    provider: crate::providers::provider::Id,
+) -> Vec<String> {
     let column = key_column(0);
     SETTINGS
         .into_iter()
         .filter(|key| key.carried_by(scope))
-        .map(|key| column.row(key.as_str(), &Shown::of(&key.of(registry, scope))))
+        .map(|key| {
+            column.row(
+                key.as_str(),
+                &Shown::of(&key.of_provider(registry, scope, provider)),
+            )
+        })
         .collect()
 }
 

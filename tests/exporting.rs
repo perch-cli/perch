@@ -657,6 +657,25 @@ fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
     );
 }
 
+/// `claude /logout` empties the Identity and a `sudo claude` leaves it
+/// unreadable; neither says the live Credential is somebody else's.
+#[test]
+fn an_identity_that_is_absent_is_not_evidence_against_the_active_accounts_live_credential() {
+    let host = machine_with_three_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    host.remove_file(std::path::Path::new(IDENTITY_PATH))
+        .expect("the identity file is gone");
+    let host = typing_the_passphrase(host);
+
+    run_export(&host, AT).0.expect("the export is written");
+
+    assert_eq!(
+        exported_artifact(&opened(&host, AT), EMAIL, "oauth").as_deref(),
+        Some(ROTATED),
+        "the active Account travels as the live Credential it is on"
+    );
+}
+
 /// A Registry holding a **Landing** answers "who is active" with the Account
 /// being *left*, and the live Credential during one may be either's — so one
 /// refresh token would go into the file under two addresses.
