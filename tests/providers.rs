@@ -1072,7 +1072,11 @@ fn claude_defaults_and_backups_attribute_stable_subjects_instead_of_email() {
     }
     host.remove_file(std::path::Path::new(common::IDENTITY_PATH))
         .unwrap();
-    assert_eq!(snapshot(), common::SECOND_CREDENTIAL);
+    assert_eq!(
+        snapshot(),
+        common::CREDENTIAL,
+        "an Identity that is absent is not evidence against the live store"
+    );
 }
 
 #[test]
@@ -1143,9 +1147,11 @@ fn claude_usage_requires_the_remote_subject_and_workspace_even_when_email_matche
             json!({"account":{"uuid":"account-uuid-1","email":common::EMAIL},"organization":{"uuid":" "}}),
             false,
         ),
+        // No email is a reply Perch does not recognize, which is drift rather
+        // than evidence, and the Credential came from the Account's own Profile.
         (
             json!({"account":{"uuid":"account-uuid-1"},"organization":{"uuid":"organization-uuid-1"}}),
-            false,
+            true,
         ),
     ];
     for (reply, allowed) in replies {
