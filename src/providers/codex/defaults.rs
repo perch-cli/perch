@@ -127,6 +127,7 @@ impl DefaultChange for Edit<'_> {
     fn apply(&mut self, _perch: &mut lock::Held<'_>) -> std::result::Result<(), DefaultFailure> {
         let path = self.home.join(AUTH_FILE);
         let config = self.home.join(layout::CONFIG_FILE);
+        let mut pinned_here = false;
         let written = self
             .host
             .create_private_dir_all(&self.home)
@@ -138,12 +139,19 @@ impl DefaultChange for Edit<'_> {
                     return Ok(());
                 }
                 host::write_atomically(self.host, &config, &format!("{}\n", layout::PIN))
-                    .map_err(|error| PerchError::file_write(&config, error))
+                    .map_err(|error| PerchError::file_write(&config, error))?;
+                pinned_here = true;
+                Ok(())
             })
             .and_then(|()| {
                 host::write_atomically(self.host, &path, &self.credential)
                     .map_err(|error| PerchError::file_write(&path, error))
             });
+        // "Nothing was switched" has to be true of the home too: a pin Perch
+        // put there for a Credential that never landed is taken back.
+        if written.is_err() && pinned_here {
+            let _ = self.host.remove_file(&config);
+        }
         written.map_err(|error| DefaultFailure {
             error,
             moved: false,
@@ -179,16 +187,29 @@ fn read_live(host: &dyn Host, home: &Path) -> Result<Option<Zeroizing<String>>> 
     }
 }
 
-/// Whether the Default already carries this Account's login, whichever Rotation
-/// of it. Not the bytes: a Codex that Renewed since a Switch still displays
-/// the Account the Switch landed on.
-pub(super) fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
-    let Some(live) = read_live(host, &layout::default_home(host)?)? else {
-        return Ok(false);
+/// The live Credential where it is this Account's login, whichever Rotation of
+/// it. Not the bytes: a Codex that Renewed since a Switch still displays the
+/// Account the Switch landed on. `None` where Codex is logged out, logged in as
+/// somebody else, or keeps its login in a store Perch does not read.
+pub(super) fn live_credential_of(
+    host: &dyn Host,
+    account: &Account,
+) -> Result<Option<Zeroizing<String>>> {
+    let home = layout::default_home(host)?;
+    if layout::refuse_unless_file_backed(host, &home).is_err() {
+        return Ok(None);
+    }
+    let Some(live) = read_live(host, &home)? else {
+        return Ok(None);
     };
-    Ok(identity(&live)
+    let theirs = identity(&live)
         .ok()
-        .is_some_and(|(found, _, _)| account.provider_identity.as_ref() == Some(&found)))
+        .is_some_and(|(found, _, _)| account.provider_identity.as_ref() == Some(&found));
+    Ok(theirs.then_some(live))
+}
+
+pub(super) fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
+    Ok(live_credential_of(host, account)?.is_some())
 }
 
 pub(super) fn inspect(host: &dyn Host) -> Result<Box<dyn DefaultInspection + '_>> {

@@ -75,6 +75,13 @@ impl DefaultChange for Edit<'_> {
             )
         })
     }
+    fn around_a_registry_write(
+        &mut self,
+        perch: &mut lock::Held<'_>,
+        write: &mut dyn FnMut(&mut lock::Held<'_>) -> Result<()>,
+    ) -> Result<()> {
+        lock::Holds::of(&mut self.native, perch).around_a_registry_write(|perch| write(perch))
+    }
     fn apply(&mut self, perch: &mut lock::Held<'_>) -> std::result::Result<(), DefaultFailure> {
         let mut holds = lock::Holds::of(&mut self.native, perch);
         holds

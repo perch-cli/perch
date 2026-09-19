@@ -1358,6 +1358,81 @@ fn a_provider_page_asked_about_more_than_one_setting_names_the_form_it_takes() {
     );
 }
 
+/// The Codex Account is the only one in no Group, so the Ungrouped Scope is
+/// Codex's, whatever provider the command loaded the Registry under.
+fn a_codex_account_in_no_group() -> FakeHost {
+    let document = codex_credential("person@example.com");
+    let host = three_accounts_in_one_group()
+        .with_file("/usr/bin/codex", "")
+        .with_login(move |host, at| {
+            host.set_file(at.join("auth.json"), &document);
+            0
+        });
+    perch::commands::add::run(
+        &host,
+        perch::commands::add::AddArgs {
+            provider: perch::commands::selection::Selection {
+                codex: true,
+                ..Default::default()
+            },
+            alias: Some("personal".into()),
+            no_group: true,
+            ..Default::default()
+        },
+        &mut Vec::new(),
+    )
+    .expect("the Codex Account is added into no Group");
+    host
+}
+
+#[test]
+fn a_grant_to_a_codex_scope_reads_back_as_granted() {
+    let host = a_codex_account_in_no_group();
+    config_set(&host, &["ungrouped", "watcher-may-act", "true"])
+        .0
+        .expect("the grant lands under the Scope's own provider");
+
+    let (result, printed) = config_get(&host, &["ungrouped", "watcher-may-act"]);
+
+    result.unwrap();
+    assert_eq!(printed.trim(), "true");
+}
+
+/// Codex names no workload to prefer, and the refusal says so rather than the
+/// Setting landing under Claude, whose Accounts the Scope does not hold.
+#[test]
+fn a_preferred_workload_on_a_codex_scope_is_refused_rather_than_written_under_claude() {
+    let host = a_codex_account_in_no_group();
+
+    let refusal = config_set(&host, &["ungrouped", "preferred-workload", "true"])
+        .0
+        .expect_err("Codex has no workload to prefer");
+
+    assert!(
+        refusal
+            .to_string()
+            .contains("This provider has no preferred workload"),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn a_preferred_workload_within_a_scope_holding_both_providers_has_to_name_whose_it_is() {
+    let host = a_group_holding_both_providers();
+
+    let refusal = config_set(&host, &["work", "preferred-workload", "true"])
+        .0
+        .expect_err("said about two providers at once, it says nothing about either");
+
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains(
+            "`perch config set work --provider <claude|codex> preferred-workload <value>`"
+        ),
+        "{refusal}"
+    );
+}
+
 #[test]
 fn a_grant_within_a_scope_holding_both_providers_has_to_name_whose_it_is() {
     let host = a_group_holding_both_providers();

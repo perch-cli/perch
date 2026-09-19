@@ -1,7 +1,6 @@
-//! Provider flags and installed-provider fallback belong to command policy.
+//! Provider flags belong to command policy.
 
-use crate::providers::provider::{Id, Installation, catalog};
-use crate::{Host, PerchError, Result};
+use crate::providers::provider::Id;
 
 #[derive(Debug, Default, Clone, Copy, clap::Args)]
 pub struct Selection {
@@ -25,29 +24,6 @@ impl Selection {
             (false, true) => Some(Id::Codex),
             _ => None,
         })
-    }
-
-    pub fn installed(self, host: &dyn Host, preferred: Id) -> Result<Installation> {
-        if let Some(provider) = self.explicit() {
-            return provider.adapter().configured(host)?.installation(host);
-        }
-        for provider in std::iter::once(preferred).chain(
-            catalog()
-                .iter()
-                .map(|adapter| adapter.id())
-                .filter(|id| *id != preferred),
-        ) {
-            let configured = provider.adapter().configured(host)?;
-            if !configured.enabled() {
-                continue;
-            }
-            match configured.installation(host) {
-                Ok(installation) => return Ok(installation),
-                Err(PerchError::NotFound(_)) => {}
-                Err(other) => return Err(other),
-            }
-        }
-        Err(PerchError::NotFound("No enabled provider CLI was found. `perch config set --provider <name> cli-path <path>` names one.".into()))
     }
 }
 

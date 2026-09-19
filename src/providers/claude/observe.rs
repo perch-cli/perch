@@ -571,6 +571,8 @@ impl Turn<'_> {
                 // asks this question of the machine for ever after, and silence makes
                 // that indistinguishable from Anthropic answering. `note` says it once.
                 self.host.note(&Refused::Unrecognized(drift).to_string());
+                // A stable subject is confirmed by Anthropic or not at all: the
+                // Profile says whose the file is, not whose the token is now.
                 if self.account.provider_identity.is_some() {
                     return Err(Turned::Settled(Outcome::Failed {
                         why: "Claude's profile response does not establish this Account's stable subject and Workspace, so no figure was recorded.".into(),

@@ -179,19 +179,19 @@ fn owner_in(document: &Value) -> Result<TokenOwner, Refused> {
                 .to_string(),
         )
     })?;
+    // The Workspace is optional, as the subject an Account is added under has
+    // it: a subject demanding one would never confirm an Account added without.
     let subject = document
         .pointer("/account/uuid")
         .and_then(Value::as_str)
-        .zip(
-            document
-                .pointer("/organization/uuid")
-                .and_then(Value::as_str),
-        )
-        .and_then(|(user, workspace)| {
-            super::super::provider::AccountIdentity::new(
+        .and_then(|user| {
+            super::super::provider::AccountIdentity::from_subject(
                 super::super::provider::Id::Claude,
                 user.into(),
-                workspace.into(),
+                document
+                    .pointer("/organization/uuid")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             )
             .ok()
         });
@@ -1483,6 +1483,18 @@ mod tests {
                 .to_string()
                 .contains("dns lookup failed")
         );
+    }
+
+    #[test]
+    fn a_profile_reply_without_an_organization_still_names_a_subject() {
+        let owner = owner_in(&json!({
+            "account": { "uuid": "user-1", "email_address": "someone@example.com" }
+        }))
+        .unwrap();
+
+        let subject = owner.subject.expect("the account uuid alone is a subject");
+        assert_eq!(subject.user_id, "user-1");
+        assert_eq!(subject.workspace_id, None);
     }
 
     #[test]

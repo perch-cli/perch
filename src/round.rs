@@ -370,6 +370,9 @@ impl Candidates {
                     !name::same_name(account.key(), watching.account.key())
                         && cycle::is_a_candidate(&sharers, account)
                 })
+                // Another provider's Account is one this round cannot Switch to, so
+                // reading it spends a request the ranking then drops.
+                .filter(|account| account.provider() == registry.selected_provider())
                 .map(|account| Candidate {
                     email: account.key().to_string(),
                     named: registry.named_for_the_user(account.key()),
@@ -896,6 +899,24 @@ mod tests {
     #[test]
     fn the_account_being_watched_is_never_among_its_own_candidates() {
         let (_, candidates) = walked();
+
+        assert_eq!(candidates.addresses(), vec!["spare@example.com"]);
+    }
+
+    #[test]
+    fn another_providers_account_is_not_a_candidate_the_round_reads() {
+        let mut registry = granted(declared(watching_one()));
+        let mut codex = ungrouped("codex@example.com", 10.0);
+        codex.provider = crate::providers::provider::Id::Codex;
+        registry.upsert(codex);
+        registry.upsert(ungrouped("spare@example.com", 10.0));
+        let watching = asking(&registry).expect("declared and granted");
+        let (crossed, idle) = witnesses(&watching.account);
+        let cooled = crossed
+            .cooled(&Recently::nothing(), now())
+            .expect("nothing has Switched, so nothing is cooling");
+
+        let candidates = Candidates::of(&registry, &watching, &cooled, &idle);
 
         assert_eq!(candidates.addresses(), vec!["spare@example.com"]);
     }

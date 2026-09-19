@@ -144,11 +144,12 @@ watcher-paused: true
 | `run-fallback` | `installed`, `disabled` | `installed` |
 | `watcher-paused` | `true`, `false` | `false` |
 
-`run-provider` is the CLI a `perch run` with no `--claude` or `--codex` reaches,
-and the one `perch triage` hands the session to; `triage` takes no provider flag
-of its own. `perch add` without a flag adds a Claude Account. With
-`run-fallback` at `installed`, a bare command whose preferred CLI is missing
-runs the other enabled one; an explicit flag never falls back. `watcher-paused`
+`perch run` reaches the CLI of the Account it names. `run-provider` breaks the
+tie when one email address is held under both providers and no `--claude` or
+`--codex` says which, and is the CLI `perch triage` hands the session to;
+`triage` takes no provider flag of its own. `perch add` without a flag adds a
+Claude Account. `run-fallback` is kept for the file and changes nothing a Run
+does. `watcher-paused`
 holds every provider's unattended Switching, and clearing it leaves every grant
 as it was. `perch config get --global` reads the three back.
 

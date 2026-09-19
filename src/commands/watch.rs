@@ -93,10 +93,21 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     if let Some(error) = failures.into_iter().next() {
         return Err(error);
     }
-    Ok(codes
-        .into_iter()
+    Ok(exit_code_over(&codes))
+}
+
+/// One code for a round over several providers: a Switch by any of them is the
+/// round's answer, since that is what a scheduler branching on it acts on; with
+/// none, the most demanding of the rest.
+fn exit_code_over(codes: &[i32]) -> i32 {
+    if codes.contains(&crate::error::EXIT_OK) {
+        return crate::error::EXIT_OK;
+    }
+    codes
+        .iter()
+        .copied()
         .max()
-        .unwrap_or(crate::error::EXIT_NOTHING_TO_DO))
+        .unwrap_or(crate::error::EXIT_NOTHING_TO_DO)
 }
 
 /// The loop, for the person who typed it or the Service running it for them.
@@ -407,4 +418,17 @@ fn watched_providers(host: &dyn Host) -> Result<Vec<Id>> {
     } else {
         providers.into_iter().collect()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::{EXIT_HELD, EXIT_NOTHING_TO_DO, EXIT_OK};
+
+    #[test]
+    fn a_switch_by_one_provider_is_the_rounds_exit_code() {
+        assert_eq!(exit_code_over(&[EXIT_OK, EXIT_NOTHING_TO_DO]), EXIT_OK);
+        assert_eq!(exit_code_over(&[EXIT_NOTHING_TO_DO, EXIT_HELD]), EXIT_HELD);
+        assert_eq!(exit_code_over(&[]), EXIT_NOTHING_TO_DO);
+    }
 }

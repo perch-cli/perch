@@ -28,16 +28,18 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
     };
     let accounts = registry.accounts.len();
     let groups = registry.groups.len();
-    let ungrouped_says_something = registry.ungrouped != crate::config::UngroupedConfig::default();
-    if accounts == 0
-        && groups == 0
-        && !ungrouped_says_something
-        && registry.run_provider == crate::providers::provider::Id::Claude
-    {
+    let settings_say_something = registry.ungrouped != crate::config::UngroupedConfig::default()
+        || registry.scope_defaults != crate::config::PolicyDefaults::default()
+        || registry.provider_settings != crate::storage::provider_defaults()
+        || registry.run_provider != crate::providers::provider::Id::default()
+        || !registry.run_fallback
+        || registry.watcher_paused;
+    if accounts == 0 && groups == 0 && !settings_say_something {
         return Ok(());
     }
 
     let holding = match (accounts, groups) {
+        (0, 0) => "Settings".to_string(),
         (0, declared) => format!("no Account but {}", say::groups(declared)),
         (held, 0) => say::accounts(held),
         (held, declared) => format!("{} and {}", say::accounts(held), say::groups(declared)),
@@ -739,5 +741,19 @@ mod tests {
             "and nothing was written on the way to finding out: {:?}",
             host.effects()
         );
+    }
+
+    #[test]
+    fn a_machine_holding_nothing_but_a_changed_setting_is_refused_as_holding_settings() {
+        assert!(refuse_a_machine_that_is_not_empty(Some(&Registry::default())).is_ok());
+
+        let registry = Registry {
+            run_provider: crate::providers::provider::Id::Codex,
+            ..Registry::default()
+        };
+        let refused = refuse_a_machine_that_is_not_empty(Some(&registry)).unwrap_err();
+
+        assert!(refused.to_string().contains("holds Settings"), "{refused}");
+        assert!(!refused.to_string().contains("0 Groups"), "{refused}");
     }
 }

@@ -250,6 +250,7 @@ pub fn worth_reading(
         .accounts(registry)
         .into_iter()
         .filter(|account| is_a_candidate(&sharers, account))
+        .filter(|account| account.provider() == registry.selected_provider())
         .filter(|account| !leaving.is_some_and(|email| name::same_name(account.key(), email)))
         // A rival inside the same window that makes the Account being left
         // worth trusting is worth trusting too, and reading it buys nothing.
@@ -400,7 +401,9 @@ pub fn measured_of(account: &Account, measure: Measure) -> Measured<'_> {
 
 /// "No figure" and "no Ranking window" rank alike: in the first tier, below
 /// every Account with known room for the workload and above every full one —
-/// either read as good or bad news would be a fact Perch invented.
+/// either read as good or bad news would be a fact Perch invented. An Account
+/// whose other windows are full is not unknown but Exhausted, whatever it says
+/// about the workload, so it falls to the lower tier where that is read.
 fn preferred_first_of<'a>(account: &'a Account, workload: &str) -> Measured<'a> {
     let unobserved = Measured {
         tier: 1,
@@ -414,7 +417,13 @@ fn preferred_first_of<'a>(account: &'a Account, workload: &str) -> Measured<'a> 
         .iter()
         .find(|window| role(account, workload, window) == WindowRole::Ranking)
     else {
-        return unobserved;
+        return match headroom_over(cached, |_| true) {
+            exhausted @ Headroom::Exhausted { .. } => Measured {
+                tier: 0,
+                headroom: exhausted,
+            },
+            _ => unobserved,
+        };
     };
     match serves_preferred(account, cached, workload) {
         // The Ranking window orders the tier, not the worst of the three: while
@@ -2500,6 +2509,27 @@ pub(crate) mod tests {
         assert_eq!(unobserved, unranked);
         assert_eq!(unobserved.headroom, Headroom::Unobserved);
         assert_eq!(unobserved.tier, 1);
+    }
+
+    #[test]
+    fn a_preferred_workload_reads_a_spent_account_without_a_ranking_window_as_exhausted() {
+        let spent = account("spent@example.com", vec![window("5-hour", 100.0)]);
+        let room = account(
+            "room@example.com",
+            vec![window("5-hour", 50.0), window("7-day-fable", 100.0)],
+        );
+
+        let measured = measured_of(&spent, Measure::Preferred("fable"));
+
+        assert_eq!(
+            measured.tier, 0,
+            "a full 5-hour window blocks every workload"
+        );
+        assert!(measured.is_exhausted());
+        assert!(
+            measured_of(&room, Measure::Preferred("fable")).by_room() > measured.by_room(),
+            "the candidate with room outranks it"
+        );
     }
 
     /// The one narrowing that can leave nothing to measure: an Account whose

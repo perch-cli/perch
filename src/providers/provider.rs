@@ -1013,6 +1013,16 @@ pub struct DefaultFailure {
 /// A native lock guard spans Capture, the shared Landing journal, and application.
 pub trait DefaultChange {
     fn capture(&mut self, held: &mut crate::lock::Held<'_>) -> Result<Captured>;
+    /// The Registry write between `capture` and `apply`, run with whatever
+    /// native hold this change keeps renewed either side of it. A provider that
+    /// holds nothing of its own runs the write as it is.
+    fn around_a_registry_write(
+        &mut self,
+        held: &mut crate::lock::Held<'_>,
+        write: &mut dyn FnMut(&mut crate::lock::Held<'_>) -> Result<()>,
+    ) -> Result<()> {
+        write(held)
+    }
     fn apply(
         &mut self,
         held: &mut crate::lock::Held<'_>,
