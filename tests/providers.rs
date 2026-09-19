@@ -135,25 +135,28 @@ fn adding_the_same_workspace_twice_refuses_without_replacing_the_held_credential
     );
 }
 
+/// `run-provider` is Claude and `claude` is on PATH, and neither says which
+/// CLI a Codex Account runs under.
 #[test]
-fn run_falls_back_only_when_the_preferred_cli_is_absent() {
+fn run_reaches_the_cli_of_the_account_it_names_whichever_cli_is_preferred() {
     let host = machine("personal");
     add_account(&host, "personal");
     assert_eq!(launch(&host, Selection::default(), &[]).unwrap(), 0);
     let host = host.with_file("/usr/bin/claude", "");
-    let error = launch(&host, Selection::default(), &[]).unwrap_err();
-    assert!(error.to_string().contains("`--codex` selects it"));
+    assert_eq!(launch(&host, Selection::default(), &[]).unwrap(), 0);
+    let error = launch(
+        &host,
+        Selection {
+            provider: None,
+            codex: false,
+            claude: true,
+        },
+        &[],
+    )
+    .unwrap_err();
     assert!(
-        launch(
-            &host,
-            Selection {
-                provider: None,
-                codex: true,
-                claude: false
-            },
-            &[]
-        )
-        .is_ok()
+        error.to_string().contains("`--codex` selects it"),
+        "an explicit flag still refuses the other provider's Account: {error}"
     );
 }
 

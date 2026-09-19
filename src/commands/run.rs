@@ -43,25 +43,30 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
         .command
         .first()
         .is_some_and(|word| !word.is_empty() && !word.starts_with('-'));
+    // The Account decides the CLI, not the other way round: a Target names one
+    // Account, and that Account has one provider. `run-provider` only breaks
+    // the tie an address held under both providers leaves.
+    let explicit = args.provider.explicit();
+    let found = match target::resolve_for(&registry, &args.target, explicit) {
+        Ok(found) => found,
+        Err(ambiguous) if explicit.is_none() => {
+            target::resolve_for(&registry, &args.target, Some(registry.run_provider))
+                .map_err(|_| ambiguous)?
+        }
+        Err(refused) => return Err(refused),
+    };
+    let account = registry.held(&found.email)?;
     let installation = if custom {
         None
-    } else if !registry.run_fallback && args.provider.explicit().is_none() {
+    } else {
         Some(
-            registry
-                .run_provider
+            account
+                .provider()
                 .adapter()
                 .configured(host)?
                 .installation(host)?,
         )
-    } else {
-        Some(args.provider.installed(host, registry.run_provider)?)
     };
-    let selected = installation
-        .as_ref()
-        .map(|installed| installed.provider())
-        .or(args.provider.explicit());
-    let found = target::resolve_for(&registry, &args.target, selected)?;
-    let account = registry.held(&found.email)?;
     refuse_a_quarantined_account(&registry, account.key())?;
     let held = crate::holdings::lock(host)?;
     let latest = registry::load(host)?.ok_or_else(|| {
