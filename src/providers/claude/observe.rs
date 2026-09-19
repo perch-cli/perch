@@ -571,6 +571,12 @@ impl Turn<'_> {
                 // asks this question of the machine for ever after, and silence makes
                 // that indistinguishable from Anthropic answering. `note` says it once.
                 self.host.note(&Refused::Unrecognized(drift).to_string());
+                if self.account.provider_identity.is_some() {
+                    return Err(Turned::Settled(Outcome::Failed {
+                        why: "Claude's profile response does not establish this Account's stable subject and Workspace, so no figure was recorded.".into(),
+                        spent: true,
+                    }));
+                }
                 if self.theirs_by_what_is_here() {
                     return Ok(());
                 }
@@ -744,11 +750,10 @@ mod tests {
         );
     }
 
-    /// What the ownership check rests on when Anthropic stops answering it: an
-    /// Account's own Profile is a directory only Perch writes into, so the
-    /// Credential in it is that Account's whatever the endpoint has started
-    /// replying. The fixture carries a stable subject, which every Account
-    /// added by this build has.
+    /// What the ownership check rests on when Anthropic stops answering it, for
+    /// an Account with no stable subject to confirm: an Account's own Profile is
+    /// a directory only Perch writes into, so the Credential in it is that
+    /// Account's whatever the endpoint has started replying.
     #[test]
     fn drift_in_a_profile_reply_leaves_the_question_to_the_profile_the_credential_came_from() {
         let dir = std::path::PathBuf::from("/Users/someone/.config/perch/profiles/someone");
@@ -762,17 +767,9 @@ mod tests {
             "<html>hello</html>",
         );
         let installed = Installed::unknown("2.1.221");
-        let mut account = crate::cycle::tests::account("someone@example.com", vec![])
+        let account = crate::cycle::tests::account("someone@example.com", vec![])
             .profile(&host)
             .unwrap();
-        account.provider_identity = Some(
-            crate::providers::provider::AccountIdentity::new(
-                crate::providers::provider::Id::Claude,
-                "user-1".into(),
-                "org-1".into(),
-            )
-            .unwrap(),
-        );
         let store =
             crate::providers::claude::probe::store_for_profile(&host, &dir).expect("USER is set");
         let its_own = Turn {
