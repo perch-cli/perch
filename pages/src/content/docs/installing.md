@@ -6,8 +6,8 @@ sidebar:
 
 Perch is pre-1.0: the command line may still change between releases, and the
 changelog marks every change that breaks something. macOS, Linux and Windows, on both Arm and Intel except Windows,
-which is x64 only. Claude Code has to be installed for Perch to have anything
-to switch between.
+which is x64 only. Claude Code or Codex has to be installed for Perch to have
+anything to switch between.
 
 ## Homebrew
 
@@ -176,8 +176,8 @@ The tests, if you want to run them first:
 # back by a feature rather than by a list somebody has to maintain
 cargo test
 
-# reads and writes state you own — your login keychain, your ~/.claude, the
-# Claude Code you have installed — so it wants Claude Code installed
+# reads and writes state you own: your login keychain, your ~/.claude, and the
+# clients you have installed, so it wants Claude Code or Codex there
 cargo test --features your-machine --test your_machine
 
 # both
@@ -203,7 +203,7 @@ Utilization   never observed
 ```
 
 The first command you run adopts the Claude Code login already on the machine
-as your first Account.
+as your first Account, and a Codex login the same way.
 [Accounts](accounts.md#adopting-the-login-you-already-have) picks up from
 there.
 
@@ -228,7 +228,7 @@ Moved overflow@example.com into `work`.
   perch group move overflow@example.com work
 
 `strategy` within Group `work` [most-headroom] (Enter keeps; `most-headroom` or `soonest-reset`):
-`prefer-fable` within Group `work` [false] (Enter keeps; `true` or `false`):
+`preferred-workload` within Group `work` [false] (Enter keeps; `true` or `false`):
 The Watcher only observes within Group `work` until `watcher-may-act` is true. Most people turn it on.
 `watcher-may-act` within Group `work` [false] (Enter keeps; `true` or `false`): true
 `watcher-may-act` on Group `work` is now true.
@@ -244,6 +244,13 @@ Account's Group, each Scope's Settings, and the Watcher as a Service. Enter
 keeps what is there, so answering Enter to everything changes nothing. A step
 that changed something prints the command that does the same thing on its
 own, indented under it.
+
+With both Claude Code and Codex installed, the add step first asks which
+provider the login is for, and Enter keeps `claude`. Once Accounts of both
+providers are held, the Settings step opens by asking `run-provider`, the CLI
+a bare `perch run` uses. In a Group holding both, `watcher-may-act` is asked
+once per provider and written as `perch config set work --provider claude
+watcher-may-act true`, since each provider's grant is its own.
 
 Run it again whenever you want to reorganize. Ctrl-C keeps every step you
 answered. Without a terminal it refuses and lists the five commands instead.

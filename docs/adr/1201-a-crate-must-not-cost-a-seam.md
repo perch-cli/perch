@@ -16,8 +16,8 @@ individual answers come from: **a crate is taken unless it would sit on the
 wrong side of a seam.** Perch has two seams that matter. The Host port is one —
 every effect goes through `&dyn Host` so behavior tests drive real command code
 against a fake, including a Windows `.cmd` and an unset `HOME` on whatever
-machine the tests happen to run on. Fidelity to what Claude Code actually does
-is the other: Perch shares files, keychain items and locks with a program it does
+machine the tests happen to run on. Fidelity to what each client actually does
+is the other: Perch shares files, keychain items and locks with programs it does
 not control, and a crate that is *nearly* compatible is worse than code that is
 exactly compatible.
 

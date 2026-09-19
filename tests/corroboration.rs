@@ -9,10 +9,12 @@
 //! because every process read here is one of these tests' own and the only
 //! marker written goes into `temp_dir` (ADR a-suite-is-named-and-gated).
 
+#[path = "fixtures/sessions.rs"]
+mod session_fixture;
+
 use perch::host::RealHost;
 use perch::host::prelude::*;
 use perch::live;
-use perch::probe;
 
 #[test]
 fn the_operating_system_says_when_a_running_process_began() {
@@ -56,16 +58,26 @@ fn a_process_that_has_exited_has_no_start_to_read() {
 fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
     let host = RealHost::new();
     let dir = std::env::temp_dir().join(format!("perch-live-{}", std::process::id()));
-    host.create_dir_all(&probe::sessions_dir(&dir))
+    host.create_dir_all(&session_fixture::sessions_dir(&dir))
         .expect("a directory of our own");
 
     let me = host.process_id();
     assert_eq!(me, std::process::id());
-    let marker = probe::session_marker_at(&dir, me);
-    host.create_file_with_mode(&marker, &probe::session_marker(me, host.now()), 0o600)
-        .expect("the marker is written");
+    let marker = session_fixture::session_marker_at(&dir, me);
+    host.create_file_with_mode(
+        &marker,
+        &session_fixture::session_marker(me, host.now()),
+        0o600,
+    )
+    .expect("the marker is written");
 
-    let running = pids(live::ask(&host, &[live::Place::at(&dir)]));
+    let running = pids(live::ask(
+        &host,
+        &[live::Place::at(
+            perch::providers::provider::Id::Claude,
+            &dir,
+        )],
+    ));
     assert_eq!(
         running,
         vec![me],
@@ -75,7 +87,14 @@ fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
 
     host.remove_file(&marker).expect("the marker is taken away");
     assert!(
-        pids(live::ask(&host, &[live::Place::at(&dir)])).is_empty(),
+        pids(live::ask(
+            &host,
+            &[live::Place::at(
+                perch::providers::provider::Id::Claude,
+                &dir
+            )]
+        ))
+        .is_empty(),
         "and the Profile stops being Live when the Run ends"
     );
     let _ = host.remove_dir_all(&dir);
@@ -90,10 +109,7 @@ fn pids(answer: live::Answer) -> Vec<u32> {
             clients.iter().map(|client| client.pid).collect()
         }
         live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => {
-            panic!(
-                "{}",
-                unsure.refusal(&probe::Installed::unknown("this machine"))
-            )
+            panic!("{}", unsure.refusal())
         }
     }
 }

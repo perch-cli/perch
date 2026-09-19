@@ -19,6 +19,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
+use common::claude_fixture as probe;
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{
@@ -28,15 +29,14 @@ use perch::error::{
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
 use perch::host::{FakeHost, Refusing};
-use perch::probe;
 use perch::registry::{Active, Quarantine};
 
 const REFRESH_LOCK: &str = "/Users/someone/.claude/.oauth_refresh.lock";
 const LEGACY_LOCK: &str = "/Users/someone/.claude.lock";
 const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
 
-const FIRST_PROFILE: &str = "/Users/someone/.config/perch/profiles/someone-example-com";
-const SECOND_PROFILE: &str = "/Users/someone/.config/perch/profiles/overflow-example-com";
+const FIRST_PROFILE: &str = "/Users/someone/.config/perch/providers/claude/profiles/claude-17a9e82e199f9341793949dfee4b65fa3f875bc724112bdc0218fa39715c529b";
+const SECOND_PROFILE: &str = "/Users/someone/.config/perch/providers/claude/profiles/claude-47eac9e96f33685e0f33306fad5a523356d2f7e5d4e4933bb04ce707e6f570b9";
 
 /// The keychain namespace of an Account's Profile, derived the way every
 /// command derives it. The spelling of the directory decides the hash, and a
@@ -75,7 +75,7 @@ fn assert_the_switch_captured_and_landed(host: &FakeHost, why: &str) {
         Some(SECOND_CREDENTIAL),
         "and the incoming Credential is the live one: {why}"
     );
-    assert_eq!(registry_of(host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(host).active().whose(), Some(SECOND_KEY));
 }
 
 fn stored_credential(host: &FakeHost, email: &str) -> Option<String> {
@@ -134,9 +134,8 @@ fn trace(host: &FakeHost) -> Vec<String> {
 }
 
 #[test]
-fn a_switch_asks_which_claude_code_is_installed_once() {
+fn a_successful_switch_does_not_launch_a_version_probe() {
     let host = machine_with_two_accounts();
-    // The fixture logs two Accounts in, and each login asks for itself.
     host.forget_effects();
 
     run_switch(&host, SECOND_EMAIL).0.expect("it switches");
@@ -146,7 +145,7 @@ fn a_switch_asks_which_claude_code_is_installed_once() {
         .iter()
         .filter(|effect| matches!(effect, Effect::Exec { args, .. } if args == &["--version"]))
         .count();
-    assert_eq!(asked, 1, "{:?}", host.effects());
+    assert_eq!(asked, 0, "{:?}", host.effects());
 }
 
 #[test]
@@ -162,7 +161,7 @@ fn a_switch_that_cannot_place_the_default_profile_changes_nothing() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing moved: the Account that was active still is"
     );
     assert!(
@@ -184,9 +183,9 @@ fn switching_by_email_makes_that_account_the_one_every_client_reads() {
         "the incoming Credential is the live one"
     );
     assert!(identity_file(&host).contains(SECOND_EMAIL));
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
     assert!(
-        printed.contains(&format!("Switched to {SECOND_EMAIL}")),
+        printed.contains(&format!("Switched to {SECOND_LABEL}")),
         "{printed}"
     );
 }
@@ -200,7 +199,7 @@ fn switching_by_alias_lands_on_the_account_the_name_reaches() {
 
     result.expect("the Switch runs");
     assert!(
-        printed.contains(&format!("Switched to {SECOND_EMAIL} (as `overflow`).")),
+        printed.contains(&format!("Switched to {SECOND_LABEL} (as `overflow`).")),
         "{printed}"
     );
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
@@ -314,6 +313,84 @@ fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
     );
 }
 
+/// A bare Switch picks for itself, and two providers is two sets rather than one
+/// wider one: nothing has declared an Account of one interchangeable with an
+/// Account of the other, so the pick is somebody else's to make.
+#[test]
+fn a_cycle_over_accounts_of_two_providers_asks_which_one_rather_than_picking() {
+    use perch::providers::provider::{AccountIdentity, Id};
+
+    let host = machine_with_two_accounts();
+    let key = fixture_key(&host, SECOND_EMAIL);
+    let mut registry = registry_of(&host);
+    let held = registry.account_mut(&key).expect("an Account Perch holds");
+    held.provider = Id::Codex;
+    held.provider_identity =
+        Some(AccountIdentity::new(Id::Codex, "user-2".into(), "work".into()).expect("a Workspace"));
+    held.identity.account_uuid = Some("user-2".to_string());
+    held.identity.organization_uuid = Some("work".to_string());
+    save_registry(&host, &registry);
+
+    let (result, printed) = run_cycle(&host);
+
+    let refused = result.expect_err("two providers are not one set to Cycle within");
+    assert!(
+        refused.to_string().contains("--provider"),
+        "the refusal names the flag that answers it: {refused}"
+    );
+    assert!(
+        printed.is_empty(),
+        "and nothing was said about a landing: {printed}"
+    );
+}
+
+/// A Switch is over by the time it says where it landed, and neither of the two
+/// lines it says is wrapped in a note: what a terminal that will not take one
+/// owes a script is a non-zero exit over a Switch that happened.
+#[test]
+fn a_switch_that_landed_fails_when_either_of_its_lines_cannot_be_written() {
+    /// A stdout that takes everything but the one line named.
+    struct RefusingTheLine(&'static str);
+
+    impl std::io::Write for RefusingTheLine {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains(self.0) {
+                true => Err(std::io::Error::other("No space left on device")),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    for refused_at in ["Switched to ", "made outside Perch"] {
+        let host = machine_with_two_accounts();
+        host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, THIRD_CREDENTIAL);
+        host.set_file(IDENTITY_PATH, THIRD_IDENTITY_FILE);
+
+        perch::commands::switch::run(
+            &host,
+            perch::commands::switch::SwitchArgs {
+                provider: Default::default(),
+                target: Some(SECOND_EMAIL.to_string()),
+                no_refresh: true,
+            },
+            &mut RefusingTheLine(refused_at),
+        )
+        .expect_err("that line could not be written");
+
+        let landed = fixture_key(&host, SECOND_EMAIL);
+        let registry = registry_of(&host);
+        assert_eq!(
+            registry.active().whose(),
+            Some(landed.as_str()),
+            "{refused_at}: the Switch itself landed"
+        );
+    }
+}
+
 #[test]
 fn a_rotation_is_not_lost_to_an_identity_perch_itself_failed_to_patch() {
     // Three, because the Switch that loses the Rotation is the one to a *third*
@@ -351,24 +428,20 @@ fn a_rotation_is_not_lost_to_an_identity_perch_itself_failed_to_patch() {
 }
 
 #[test]
-fn a_live_credential_with_no_identity_beside_it_is_captured_rather_than_left() {
+fn an_unknown_rotation_without_identity_is_not_captured_into_a_stable_account() {
     let host = machine_with_two_accounts();
     let rotated = CREDENTIAL.replace("sk-ant-ort01-test", "sk-ant-ort01-rotated");
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, &rotated);
-    host.remove_file(Path::new(IDENTITY_PATH))
-        .expect("the identity file was there to remove");
-
-    run_switch(&host, SECOND_EMAIL).0.expect("the Switch runs");
-
-    assert_eq!(
-        stored_credential(&host, EMAIL).as_deref(),
-        Some(rotated.as_str()),
-        "a Rotation is lost if an absent Identity is read as evidence against"
+    host.remove_file(Path::new(IDENTITY_PATH)).unwrap();
+    let error = run_switch(&host, SECOND_EMAIL).0.unwrap_err();
+    assert!(
+        error.to_string().contains("no readable identity"),
+        "{error}"
     );
+    assert_eq!(stored_credential(&host, EMAIL).as_deref(), Some(CREDENTIAL));
+    assert_eq!(live_credential(&host).as_deref(), Some(rotated.as_str()));
 }
 
-/// An identity file either side of its `oauthAccount` block — the whole of it
-/// that does not belong to the Account.
 fn around_the_block(text: &str) -> (String, String) {
     let block = probe::oauth_account_block(text).expect("there is a block");
     let (before, after) = text.split_once(block).expect("the block is in the file");
@@ -512,7 +585,7 @@ fn the_switch_reports_where_it_landed_and_what_the_cache_says_about_it() {
     let (_, printed) = run_switch(&host, SECOND_EMAIL);
 
     assert!(
-        printed.contains(&format!("Switched to {SECOND_EMAIL}.")),
+        printed.contains(&format!("Switched to {SECOND_LABEL}.")),
         "an Account somebody named was not chosen, so nothing is said about \
          choosing it: {printed}"
     );
@@ -558,7 +631,7 @@ fn a_sessions_directory_that_will_not_be_read_stops_the_switch_rather_than_readi
         Some(CREDENTIAL),
         "and nothing was written, because the doubt is resolved towards Live"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 #[test]
@@ -568,7 +641,7 @@ fn a_profile_that_never_ran_a_client_has_no_sessions_directory_and_switches() {
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
     result.expect("nowhere to look is not the same as something to worry about");
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -581,13 +654,13 @@ fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
     let error = result.expect_err("the outgoing Profile is Live");
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
     assert!(error.to_string().contains("77"), "{error}");
-    assert!(error.to_string().contains(EMAIL), "{error}");
+    assert!(error.to_string().contains(KEY), "{error}");
     assert_eq!(
         live_credential(&host).as_deref(),
         Some(CREDENTIAL),
         "nothing was written"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 #[test]
@@ -628,7 +701,7 @@ fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account
         Some(SECOND_CREDENTIAL),
         "{printed}"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
@@ -649,7 +722,7 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
         "it says which step stopped: {error}"
     );
     assert!(
-        error.to_string().contains(EMAIL),
+        error.to_string().contains(KEY),
         "and names the Account whose Credential it may be: {error}"
     );
     host.no_longer_refusing(CREDENTIALS_PATH, Refusing::Read);
@@ -660,7 +733,7 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing moved"
     );
 }
@@ -699,7 +772,7 @@ fn switching_onto_a_profile_a_client_is_running_against_lands() {
         Some(SECOND_CREDENTIAL),
         "the incoming Account's Credential is the live one"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -923,7 +996,7 @@ fn a_live_process_whose_start_cannot_be_read_is_a_refusal_naming_the_assumption(
     assert!(
         error
             .to_string()
-            .contains(probe::assumption::SESSION_MARKER),
+            .contains("a session marker names its process and when the session started"),
         "{error}"
     );
     assert_eq!(
@@ -962,7 +1035,7 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     let error = result.expect_err("the Identity could not be patched");
     let message = error.to_string();
     assert!(
-        message.contains(SECOND_EMAIL) && message.contains(EMAIL),
+        message.contains(SECOND_KEY) && message.contains(KEY),
         "{message}"
     );
     assert!(
@@ -975,7 +1048,7 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     // only measure that matters — whose Credential a client would read.
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
     assert_eq!(stored_credential(&host, EMAIL).as_deref(), Some(CREDENTIAL));
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
     assert_eq!(
         host.file(perch::host::temp_beside(&host, Path::new(IDENTITY_PATH))),
         None,
@@ -1179,7 +1252,7 @@ fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_cl
         !said.contains("quit it"),
         "and does not send somebody looking for a Claude Code to quit: {said}"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 #[test]
@@ -1195,7 +1268,7 @@ fn a_lock_abandoned_on_the_last_attempt_is_taken_rather_than_reported_as_held() 
         .0
         .expect("the lock was free by the time the last attempt asked");
 
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -1215,7 +1288,7 @@ fn a_lock_somebody_is_holding_stops_the_switch_without_changing_anything() {
     );
     assert!(error.to_string().contains("Nothing was changed"), "{error}");
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
     assert!(
         host.effects()
             .iter()
@@ -1259,7 +1332,7 @@ fn an_account_whose_credential_perch_no_longer_holds_is_quarantined_rather_than_
          Account is broken rather than discovering it again"
     );
     assert!(
-        registry_of(&host).account(SECOND_EMAIL).is_some(),
+        registry_of(&host).account(SECOND_KEY).is_some(),
         "and the Account is still held: one that vanished would read as data loss"
     );
 }
@@ -1329,7 +1402,7 @@ fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "{printed}"
     );
 }
@@ -1350,7 +1423,7 @@ fn switching_with_no_active_account_recorded_says_nothing_about_the_capture() {
         Some(SECOND_CREDENTIAL),
         "and the Switch itself still happened"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -1373,7 +1446,7 @@ fn switching_from_a_logged_out_claude_code_says_nothing_about_the_capture() {
 #[test]
 fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
     let host = machine_with_two_accounts().with_a_path_refusing(
-        REGISTRY_PATH,
+        "/Users/someone/.config/perch/providers/claude/state.json",
         Refusing::Write,
         "read-only",
     );
@@ -1394,7 +1467,7 @@ fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "and Perch is on the Account it was on"
     );
 }
@@ -1412,7 +1485,7 @@ fn a_switch_that_moves_nothing_takes_its_landing_back() {
     result.expect_err("the Default Profile could not be written");
     assert_eq!(
         *registry_of(&host).active(),
-        Active::Settled(EMAIL.to_string()),
+        Active::Settled(KEY.to_string()),
         "nothing moved, so Perch is settled on the Account it was on rather \
          than in flight"
     );
@@ -1429,6 +1502,7 @@ fn two_accounts_off_macos() -> FakeHost {
     run_add(
         &host,
         perch::commands::add::AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..Default::default()
         },
@@ -1460,7 +1534,7 @@ fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
         Some(CREDENTIAL),
         "the live Credential is the outgoing Account's, untouched"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 #[test]
@@ -1505,7 +1579,7 @@ fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_switched() {
     assert!(!said.contains("Captured"), "{said}");
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "the machine never moved"
     );
 }
@@ -1547,7 +1621,7 @@ fn an_identity_that_cannot_be_patched_with_nothing_active_still_says_what_to_run
         "with nobody recorded, the file names an Account Perch cannot name: {said}"
     );
     assert!(
-        said.contains(&format!("perch switch {SECOND_EMAIL}")),
+        said.contains(&format!("perch switch {SECOND_KEY}")),
         "it still names the way out: {said}"
     );
     assert_eq!(
@@ -1568,7 +1642,7 @@ fn an_identity_file_that_is_not_json_leaves_a_switch_that_says_how_to_finish_it(
         .expect_err("the Identity could not be patched")
         .to_string();
     assert!(
-        said.contains(&format!("perch switch {SECOND_EMAIL}")),
+        said.contains(&format!("perch switch {SECOND_KEY}")),
         "{said}"
     );
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
@@ -1654,14 +1728,17 @@ fn a_stored_credential_that_cannot_be_understood_stops_the_switch_before_it_writ
         Some(CREDENTIAL),
         "nothing was written: the Credential is read before the first write"
     );
-    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(KEY));
 }
 
 #[test]
 fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs() {
-    let inside_a_run =
-        perch::holdings::profile_dir_for(&machine_with_three_accounts(), SECOND_EMAIL)
-            .expect("home is known");
+    let inside_a_run = perch::holdings::profile_dir_for(
+        perch::providers::provider::Id::Claude,
+        &machine_with_three_accounts(),
+        SECOND_EMAIL,
+    )
+    .expect("home is known");
     let host = machine_with_three_accounts()
         .with_env("CLAUDE_CONFIG_DIR", &inside_a_run.to_string_lossy());
 
@@ -1687,7 +1764,12 @@ fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs
 #[test]
 fn a_switch_typed_inside_a_login_lands_on_the_default_profile_rather_than_the_pending_one() {
     let host = machine_with_two_accounts();
-    let pending = perch::holdings::pending_login_dir(&host, host.now()).expect("home is known");
+    let pending = perch::holdings::pending_login_dir(
+        perch::providers::provider::Id::Claude,
+        &host,
+        host.now(),
+    )
+    .expect("home is known");
     let host =
         machine_with_two_accounts().with_env("CLAUDE_CONFIG_DIR", &pending.to_string_lossy());
 
@@ -1705,7 +1787,7 @@ fn a_switch_typed_inside_a_login_lands_on_the_default_profile_rather_than_the_pe
         "and the outgoing Account was Captured back into its own Profile"
     );
     assert!(
-        perch::credentials::read(
+        common::claude_fixture::read(
             &host,
             &probe::store_for_profile(&host, &pending).expect("USER is set")
         )
@@ -1724,7 +1806,7 @@ fn a_configuration_directory_that_is_not_a_profile_is_where_a_switch_lands() {
 
     let store = probe::store_for_profile(&host, moved).expect("USER is set");
     assert_eq!(
-        perch::credentials::read(&host, &store)
+        common::claude_fixture::read(&host, &store)
             .expect("the store could be consulted")
             .map(|held| held.credential.to_string())
             .as_deref(),
@@ -1765,6 +1847,7 @@ fn a_machine_on_an_accented_account() -> FakeHost {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             ..AddArgs::default()
         },
@@ -1777,7 +1860,8 @@ fn a_machine_on_an_accented_account() -> FakeHost {
 #[test]
 fn a_rotation_is_captured_however_the_identity_file_cases_a_non_ascii_address() {
     let host = a_machine_on_an_accented_account();
-    assert_eq!(registry_of(&host).active().whose(), Some(ACCENTED));
+    let key = fixture_key(&host, ACCENTED);
+    assert_eq!(registry_of(&host).active().whose(), Some(key.as_str()));
     // Claude Code renewed, Rotated, and rewrote its own file with the other
     // spelling of the same address.
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
@@ -1816,7 +1900,7 @@ fn a_landing_left_behind_by_a_death_does_not_cost_the_outgoing_account_its_crede
     // What a Perch killed between step two and its own record leaves behind: the
     // Landing, the incoming Credential live, and `.claude.json` still naming the
     // Account that Switch was leaving.
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_CREDENTIAL);
 
     let (result, printed) = run_switch(&host, THIRD_EMAIL);
@@ -1840,7 +1924,7 @@ fn a_landing_left_behind_by_a_death_does_not_cost_the_outgoing_account_its_crede
     );
     assert_eq!(
         *registry_of(&host).active(),
-        Active::Settled(THIRD_EMAIL.to_string()),
+        Active::Settled(THIRD_KEY.to_string()),
         "and nothing is left in flight"
     );
 }
@@ -1885,7 +1969,7 @@ fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
 
     for case in cases {
         let host = machine_with_three_accounts();
-        a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+        a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
         match case.live {
             Some(credential) => host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, credential),
             None => host
@@ -1905,7 +1989,7 @@ fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
 
         assert_eq!(
             *registry_of(&host).active(),
-            Active::Settled(case.settles_on.to_string()),
+            Active::Settled(fixture_key(&host, case.settles_on)),
             "{}: the Landing is settled rather than left in flight",
             case.what
         );
@@ -1915,7 +1999,7 @@ fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
 #[test]
 fn a_landing_is_resolved_with_claude_codes_locks_held() {
     let host = machine_with_three_accounts();
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_CREDENTIAL);
     host.forget_effects();
 
@@ -1952,7 +2036,7 @@ fn a_landing_is_resolved_with_claude_codes_locks_held() {
 #[test]
 fn a_live_store_that_will_not_answer_resolves_no_landing() {
     let host = two_accounts_off_macos();
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     host.now_refusing(CREDENTIALS_PATH, Refusing::Read, "Permission denied");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
@@ -1997,7 +2081,7 @@ fn a_landing_that_left_nobody_behind_is_refused_without_naming_one() {
     assert_eq!(error.exit_code(), EXIT_CONFLICT, "{said}");
     assert!(said.contains("none Perch holds"), "{said}");
     assert!(
-        said.contains(&format!("perch relogin {SECOND_EMAIL}")),
+        said.contains(&format!("perch relogin {SECOND_KEY}")),
         "and names the one way through: {said}"
     );
     assert_eq!(
@@ -2010,7 +2094,7 @@ fn a_landing_that_left_nobody_behind_is_refused_without_naming_one() {
 #[test]
 fn a_landing_nothing_accounts_for_is_refused_naming_both_readings() {
     let host = machine_with_two_accounts();
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
     // A Rotation made after the interruption, by whichever of the two the
     // machine was actually acting as.
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
@@ -2020,10 +2104,7 @@ fn a_landing_nothing_accounts_for_is_refused_naming_both_readings() {
     let error = result.expect_err("Perch cannot tell whose that Credential is");
     let said = error.to_string();
     assert_eq!(error.exit_code(), EXIT_CONFLICT, "{said}");
-    assert!(
-        said.contains(EMAIL) && said.contains(SECOND_EMAIL),
-        "{said}"
-    );
+    assert!(said.contains(KEY) && said.contains(SECOND_KEY), "{said}");
     assert!(
         said.contains("perch relogin"),
         "it says the way through: {said}"
@@ -2057,7 +2138,7 @@ fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_s
         .expect_err("the Identity could not be patched");
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "the incoming Account is live, so Perch records it as active"
     );
     // The user carries on working, and Claude Code Rotates.
@@ -2128,12 +2209,12 @@ fn a_live_credential_nothing_accounts_for_names_the_repair_that_clears_it() {
     assert_eq!(error.exit_code(), EXIT_CONFLICT, "{error}");
     let said = error.to_string();
     assert!(
-        said.contains(&format!("perch relogin {EMAIL}")),
+        said.contains(&format!("perch relogin {KEY}")),
         "the repair named is the one that lands in the Default Profile — the \
          Account Perch is on, which is the one a Capture files under: {said}"
     );
     assert!(
-        !said.contains(&format!("perch switch {SECOND_EMAIL}")),
+        !said.contains(&format!("perch switch {SECOND_KEY}")),
         "and not a Switch, which re-enters this same refusal: {said}"
     );
     assert_eq!(
@@ -2155,7 +2236,10 @@ fn a_switch_off_an_account_that_shares_a_profile_is_refused_before_the_capture()
     let mut registry = registry_of(&host);
     for email in ["some-one@example.com", "some.one@example.com"] {
         registry.upsert(perch::registry::Account {
-            identity: probe::Identity {
+            storage_key: None,
+            provider: perch::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: perch::domain::Identity {
                 email: email.to_string(),
                 account_uuid: None,
                 organization_name: None,
@@ -2202,7 +2286,10 @@ fn a_switch_onto_an_account_that_shares_a_profile_is_refused() {
     let mut registry = registry_of(&host);
     for email in ["some-one@example.com", "some.one@example.com"] {
         registry.upsert(perch::registry::Account {
-            identity: probe::Identity {
+            storage_key: None,
+            provider: perch::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: perch::domain::Identity {
                 email: email.to_string(),
                 account_uuid: None,
                 organization_name: None,
@@ -2232,7 +2319,7 @@ fn a_switch_onto_an_account_that_shares_a_profile_is_refused() {
     );
     assert_eq!(
         registry_of(&host).active().whose(),
-        Some(EMAIL),
+        Some(KEY),
         "and the machine is exactly as it was: {printed}"
     );
     assert_eq!(

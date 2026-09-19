@@ -204,10 +204,10 @@ for half of who is typing it. `perch version` takes no `--json` for the same
 reason: `--check` already has one, and a second document saying a subset of the
 first is a second contract that can never quietly move.
 
-`perch version` also comes before `migration::bring_forward` rather than after
+`perch version` also comes before the Registry is read at all rather than after
 it, so asking what is installed reads and writes nothing on the machine. It is
-what somebody runs when the machine is already misbehaving, and a migration is a
-write.
+what somebody runs when the machine is already misbehaving, and bringing a
+Registry forward is a write.
 
 The check uses `curl` through the existing `Host::http`, and no HTTP client crate
 was taken for it. That was considered and deferred: `Host::http` is exactly the

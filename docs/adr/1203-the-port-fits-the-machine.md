@@ -26,6 +26,13 @@ methods and proposes eight traits to make somebody's signature smaller.
 The two files that narrow at all cut across the concern lines rather than along
 them. A cluster having one consumer is not a consumer needing one cluster.
 
+The file names in that table predate the provider split, and the count is what
+was measured rather than something re-derived since. `anthropic.rs`, `probe.rs`,
+`reconcile.rs`, `carry.rs`, `credentials.rs`, `login.rs` and `profile.rs` now
+sit inside `providers/claude/`, which moved the consumers without moving the
+argument: a port shaped to one caller's cluster is still a port shaped to one
+caller.
+
 Segmenting the interface also removes nothing from the fake. `fake.rs` states
 the multiplier and what it is made of: a Host method arrives with the builders a
 test needs to set it up, so `process_started_at` costs ten lines of trait,

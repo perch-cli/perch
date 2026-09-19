@@ -4,10 +4,14 @@
 Account is the subject of the product. Every other noun is written, at depth
 two.**
 
-`CONTEXT.md` opens "Perch runs Claude Code as whichever Claude account you want",
-so an Account command that named its noun would be naming it in every command.
-That elision is the rule rather than an accident of it: the surface is
-noun-then-verb throughout, with one noun so pervasive it goes unwritten.
+`CONTEXT.md` opens "Perch chooses which Account a coding tool uses without
+repeating login", so an Account command that named its noun would be naming it
+in every command. That elision is the rule rather than an accident of it: the
+surface is noun-then-verb throughout, with one noun so pervasive it goes
+unwritten. The provider is elided for a different reason and only where it can
+be: it is a flag rather than a noun in the path, because one Account belongs to
+exactly one provider and naming the Account has already named it
+(ADR run-has-a-provider-preference).
 
 | | |
 | --- | --- |

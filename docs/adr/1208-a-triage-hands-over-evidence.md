@@ -8,16 +8,16 @@ who has closed the terminal doing several careful things in the right order.
 
 A coding agent on that machine would do them. It can ask what went wrong, read
 the Trail, notice which assumption `broke`, search the existing issues and write
-the report — and the user is running Perch precisely because they use Claude
-Code, so the agent is already installed. The pattern is
+the report — and the user is running Perch precisely because they use a coding
+agent, so one is already installed. The pattern is
 [`t3 triage`](https://github.com/pingdotgg/t3code)'s, and this document is about
 the three places Perch's version departs from it.
 
 ## The rule
 
 > **`perch triage` gathers a Probe, writes the playbook, and hands the terminal
-> to Claude Code. It does not investigate and it does not file. What Perch owns
-> is the evidence and the redaction on it.**
+> to the client the Run preference names. It does not investigate and it does
+> not file. What Perch owns is the evidence and the redaction on it.**
 
 ## Redaction is Perch's, not the agent's
 
@@ -82,18 +82,20 @@ which would also need a Rust toolchain the user has no reason to have.
 
 ## Bare, and not through a Run
 
-Perch already launches Claude Code: `perch run` points one process at one
+Perch already launches a client: `perch run` points one process at one
 Profile. Reaching for it here would be a mistake. A Run Reconciles, Carries,
 writes a Marker and resolves a Target through the Registry
 (ADR a-run-is-one-shot), and on a machine worth triaging every one of those is a
 suspect. A triage that will not start on the machines that need it is worthless.
 
-So Claude Code is launched from `PATH` with no `CLAUDE_CONFIG_DIR`, exactly as
-the user would have launched it. The agent's exit code passes through, joining
-`run` and `upgrade`.
+So the client is launched from `PATH` with none of its configuration variables
+set, exactly as the user would have launched it. The launch arguments and the
+environment are the Provider's, so Perch neither spells another tool's flags nor
+guesses at its idiom. The agent's exit code passes through, joining `run` and
+`upgrade`.
 
 That leaves one hole, and Perch fills it from the Probe it has just written. If
-Claude Code is not installed, or the live Credential will not read, or the active
+the client is not installed, or the live Credential will not read, or the active
 Account is Quarantined, the session would open at a login prompt rather than at a
 triage. Perch does not launch it, says which of those it found, and names the
 three files it wrote. A command that explains itself beats one that hands off to
@@ -115,18 +117,17 @@ fix beside the one after it.
 
 ## What is rejected
 
-**A second agent, so a broken Claude Code is not fatal.** `t3 triage` offers
-`codex` as well, and the argument for copying that is real: a Perch worth
-triaging is often one whose Claude Code login is broken. It is refused because
-Perch is a tool for running Claude Code, and a second agent CLI is a second thing
-to detect, a second launch idiom, a picker when both are installed, and a refusal
-when neither stream is a terminal — bought for a case the withheld launch already
-handles honestly. The files are on disk, and they paste into anything.
+**A picker when both clients are installed.** A Triage goes to whichever client
+`run-provider` already names, and takes no provider flag of its own. Asking
+would be a second question at the one moment somebody has a broken machine and a
+report to write, and Perch has an answer to that question already. The client it
+names being the broken thing is the case the withheld launch handles: the files
+are on disk, and they paste into anything.
 
 **A default `--model`.** A model named in a released binary goes out of date on
-Anthropic's schedule rather than Perch's, which is why `probe::Installed` quotes
-the Claude Code version it read and never compares it. `--model` is passed
-through untouched and nothing is passed by default.
+its vendor's schedule rather than Perch's, which is why a Probe quotes the
+client version it read and never compares it. `--model` is passed through
+untouched and nothing is passed by default.
 
 **A `--json` shape.** The output of a Triage is somebody's interactive session.
 

@@ -14,7 +14,6 @@ use crate::host::Host;
 use crate::live;
 use crate::lock::{self, Lost};
 use crate::observe;
-use crate::probe;
 use crate::registry::Registry;
 use crate::round::{self, Watching};
 use crate::switch::{self, NotSwitched};
@@ -67,8 +66,6 @@ pub struct Acting<'a, 'h> {
     pub perch: &'a mut lock::Held<'h>,
     pub registry: &'a mut Registry,
     pub watching: &'a Watching,
-    /// What the round already asked the machine and this Act must not ask again.
-    pub probed: &'a probe::Installed<'h>,
     pub watching_alone: &'a mut Watch<'h>,
 }
 
@@ -83,19 +80,12 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
         perch,
         registry,
         watching,
-        probed,
         watching_alone,
     } = acting;
     let scope = watching.scope.clone();
     let outgoing = watching.account.clone();
 
-    // Not reachable: a round reaches this only on a figure it read, and a figure
-    // is read only where the probe answered. Handed on rather than asserted,
-    // because what runs this is a Service nobody is watching.
-    if let Some(why) = probed.absent() {
-        return Err(PerchError::Other(why.to_string()));
-    }
-    let installed = probed;
+    outgoing.provider().executable(host)?;
 
     // Asked before the candidates are read: the burst spends an hourly allowance that
     // does not refill early, one read per candidate, and a `perch run` held open in
@@ -104,7 +94,7 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
     let idle = match live::ask(host, &places) {
         live::Answer::Idle(idle) => idle,
         live::Answer::NotIdle(not_idle) => {
-            return watch::refused_or_raised(not_idle, installed);
+            return watch::refused_or_raised(not_idle);
         }
     };
 
@@ -127,7 +117,6 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
         perch,
         registry,
         &addresses,
-        probed,
         observe::Spending::ItsOwn {
             still_ours: &mut || watching_alone.goes_on(),
         },
@@ -171,7 +160,7 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
     let choice = match cycle::choose(
         registry,
         &scope,
-        Some(outgoing.email()),
+        Some(outgoing.key()),
         &set_aside,
         host.now(),
     ) {
@@ -206,7 +195,6 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
         host,
         perch,
         registry,
-        installed,
         &choice.account,
         switch::Departure::Capturing(Some(&outgoing)),
         switch::Reason::Unasked {
@@ -222,7 +210,7 @@ pub fn run(acting: Acting<'_, '_>, cooled: &Cooled<'_>, pacing: &mut Pacing) -> 
         Ok(_switched) => {
             pacing.burst.read();
             Ok(Outcome::Switched {
-                to: registry.named_for_the_user(choice.account.email()),
+                to: registry.named_for_the_user(choice.account.key()),
                 unread,
             })
         }
@@ -266,6 +254,7 @@ fn also(said: String, notes: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::AccountStoreFixture as _;
 
     use crate::holdings;
     use crate::host::FakeHost;
@@ -288,6 +277,8 @@ mod tests {
 
     fn host() -> FakeHost {
         FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "")
             .with_env("HOME", "/Users/someone")
             .with_env("USER", "someone")
     }
@@ -297,13 +288,13 @@ mod tests {
     fn host_where_the_spare_reads(used_percent: f64) -> FakeHost {
         host()
             .with_reply_to(
-                crate::anthropic::PROFILE_URL,
+                "https://api.anthropic.com/api/oauth/profile",
                 SPARE_TOKEN,
                 200,
                 &format!(r#"{{"account": {{"email_address": "{SPARE}"}}}}"#),
             )
             .with_reply_to(
-                crate::anthropic::USAGE_URL,
+                "https://api.anthropic.com/api/oauth/usage",
                 SPARE_TOKEN,
                 200,
                 &format!(
@@ -324,7 +315,7 @@ mod tests {
             .expect("it was just added")
             .store(host)
             .expect("home is known");
-        let [primary, _] = crate::credentials::stores_for(host, &store);
+        let [primary, _] = crate::claude_fixture::stores_for(host, &store);
         primary.write(host, credential).expect("the store takes it");
     }
 
@@ -332,6 +323,7 @@ mod tests {
         crate::cycle::tests::account(
             email,
             vec![WindowUtilization {
+                group: None,
                 window: "5-hour".to_string(),
                 used_percent,
                 resets_at: None,
@@ -375,21 +367,12 @@ mod tests {
 
     /// Drives [`run`] with the watch taken and the Registry held, as a round would.
     fn run_the_act(host: &FakeHost, registry: &mut Registry) -> Result<Outcome> {
-        run_the_act_probed(host, registry, probe::Installed::unknown("2.1.221"))
-    }
-
-    fn run_the_act_probed(
-        host: &FakeHost,
-        registry: &mut Registry,
-        probed: probe::Installed,
-    ) -> Result<Outcome> {
-        run_the_act_paced(host, registry, probed, &mut Pacing::none())
+        run_the_act_paced(host, registry, &mut Pacing::none())
     }
 
     fn run_the_act_paced(
         host: &FakeHost,
         registry: &mut Registry,
-        probed: probe::Installed,
         pacing: &mut Pacing,
     ) -> Result<Outcome> {
         let watching = watching(registry);
@@ -410,7 +393,6 @@ mod tests {
                 perch: &mut perch,
                 registry,
                 watching: &watching,
-                probed: &probed,
                 watching_alone: &mut watching_alone,
             },
             &cooled,
@@ -420,10 +402,12 @@ mod tests {
 
     /// Marks `email`'s Profile Live, the way a running client would.
     fn make_live(host: &FakeHost, email: &str) {
-        let dir = holdings::profile_dir_for(host, email).expect("home is known");
+        let dir = holdings::profile_dir_for(crate::providers::provider::Id::Claude, host, email)
+            .expect("home is known");
         host.set_file(
-            probe::session_marker_at(&dir, THIS_PROCESS),
-            &probe::session_marker(THIS_PROCESS, host.now()),
+            dir.join(format!("sessions/{THIS_PROCESS}.json")),
+            &serde_json::json!({"startedAt": host.now().timestamp_millis(), "writtenBy": "perch"})
+                .to_string(),
         );
     }
 
@@ -438,19 +422,10 @@ mod tests {
         let host = host();
         let mut registry = watching_a_pair(5.0);
 
-        let raised = run_the_act_probed(
-            &host,
-            &mut registry,
-            probe::Installed::Absent {
-                why: "no Claude Code here".to_string(),
-            },
-        )
-        .expect_err("what runs this is a Service nobody is watching");
-
-        assert!(
-            raised.to_string().contains("no Claude Code here"),
-            "{raised}"
-        );
+        host.remove_file(std::path::Path::new("/usr/bin/claude"))
+            .unwrap();
+        let raised = run_the_act(&host, &mut registry).expect_err("the Account's CLI is missing");
+        assert_eq!(raised.exit_code(), crate::error::EXIT_NOT_FOUND);
         assert!(still_on(&registry, WATCHED), "and nothing was switched");
     }
 
@@ -474,7 +449,8 @@ mod tests {
             "nothing was spent finding out where it would have gone: {outcome:?}"
         );
         assert!(
-            host.sent_to(crate::anthropic::USAGE_URL).is_empty(),
+            host.sent_to("https://api.anthropic.com/api/oauth/usage")
+                .is_empty(),
             "the burst never started"
         );
     }
@@ -527,13 +503,8 @@ mod tests {
         barely_credentialed(&host, &registry, SPARE);
         let mut pacing = Pacing::none();
 
-        let outcome = run_the_act_paced(
-            &host,
-            &mut registry,
-            probe::Installed::unknown("2.1.221"),
-            &mut pacing,
-        )
-        .expect("a candidate that could not be read is a hold, not a raise");
+        let outcome = run_the_act_paced(&host, &mut registry, &mut pacing)
+            .expect("a candidate that could not be read is a hold, not a raise");
 
         let Outcome::Held { why, retrying_in } = outcome else {
             panic!("nothing was read to decide on: {outcome:?}");
@@ -571,20 +542,16 @@ mod tests {
             "Nothing in Group `work` is worth Switching to yet.",
         );
 
-        let outcome = run_the_act_paced(
-            &host,
-            &mut registry,
-            probe::Installed::unknown("2.1.221"),
-            &mut pacing,
-        )
-        .expect("a resting burst is an outcome");
+        let outcome = run_the_act_paced(&host, &mut registry, &mut pacing)
+            .expect("a resting burst is an outcome");
 
         let Outcome::Nowhere { why } = outcome else {
             panic!("the last burst's answer stands: {outcome:?}");
         };
         assert!(why.contains("not asked again"), "{why}");
         assert!(
-            host.sent_to(crate::anthropic::USAGE_URL).is_empty(),
+            host.sent_to("https://api.anthropic.com/api/oauth/usage")
+                .is_empty(),
             "and nothing was read"
         );
     }
@@ -602,13 +569,8 @@ mod tests {
         barely_credentialed(&host, &registry, THIRD);
         let mut pacing = Pacing::none();
 
-        let outcome = run_the_act_paced(
-            &host,
-            &mut registry,
-            probe::Installed::unknown("2.1.221"),
-            &mut pacing,
-        )
-        .expect("nowhere to go is an outcome, not a raise");
+        let outcome = run_the_act_paced(&host, &mut registry, &mut pacing)
+            .expect("nowhere to go is an outcome, not a raise");
 
         let Outcome::Nowhere { why } = outcome else {
             panic!("75 is over the ceiling and the third was not read: {outcome:?}");
@@ -639,13 +601,8 @@ mod tests {
         credentialed(&host, &registry, SPARE);
         let mut pacing = Pacing::none();
 
-        let outcome = run_the_act_paced(
-            &host,
-            &mut registry,
-            probe::Installed::unknown("2.1.221"),
-            &mut pacing,
-        )
-        .expect("nowhere to go is an outcome, not a raise");
+        let outcome = run_the_act_paced(&host, &mut registry, &mut pacing)
+            .expect("nowhere to go is an outcome, not a raise");
 
         let Outcome::Nowhere { why } = outcome else {
             panic!("the spare was read at 75, over the ceiling of 70: {outcome:?}");
@@ -660,7 +617,7 @@ mod tests {
         );
     }
 
-    /// The endgame `prefer-fable` promises: every Fable weekly is spent, and
+    /// The endgame `preferred-workload` promises: every Fable weekly is spent, and
     /// the round still lands on the best of what remains rather than setting
     /// every candidate aside for a window its tier never reads.
     #[test]
@@ -673,11 +630,13 @@ mod tests {
                 email,
                 vec![
                     WindowUtilization {
+                        group: None,
                         window: "5-hour".to_string(),
                         used_percent: five_hour,
                         resets_at: None,
                     },
                     WindowUtilization {
+                        group: None,
                         window: "7-day-fable".to_string(),
                         used_percent: 100.0,
                         resets_at: None,
@@ -692,7 +651,11 @@ mod tests {
             .groups
             .get_mut("work")
             .expect("declared")
-            .prefer_fable = true;
+            .providers
+            .entry(crate::providers::provider::Id::Claude)
+            .or_default()
+            .options
+            .insert("preferred_workload".into(), "fable".into());
         credentialed(&host, &registry, SPARE);
 
         let outcome = run_the_act(&host, &mut registry).expect("somewhere remains");
@@ -703,6 +666,43 @@ mod tests {
         );
     }
 
+    /// The burst is bounded by nothing but the network, so it can outlast the
+    /// watch: the spare's two requests go out, and the loss lands on the ask made
+    /// before the one irreversible thing a round does.
+    #[test]
+    fn a_watch_lost_between_the_burst_and_the_switch_switches_nothing() {
+        let host = host_where_the_spare_reads(5.0).with_interrupt_after_requests(2);
+        host.listen_for_interrupts();
+        let mut registry = watching_a_pair(5.0);
+        credentialed(&host, &registry, SPARE);
+
+        let outcome =
+            run_the_act(&host, &mut registry).expect("a lost watch is an outcome, not a raise");
+
+        assert!(matches!(outcome, Outcome::Stopped { .. }), "{outcome:?}");
+        assert_eq!(
+            host.sent_to("https://api.anthropic.com/api/oauth/usage")
+                .len(),
+            1,
+            "the burst read the spare before the watch went"
+        );
+        assert!(still_on(&registry, WATCHED), "the Credential never moved");
+    }
+
+    /// One line says both where the round went and what it never saw, because a
+    /// Watcher's decision line is the only sentence about those Accounts there is.
+    #[test]
+    fn what_could_not_be_read_follows_the_sentence_rather_than_taking_one_of_its_own() {
+        assert_eq!(also("Nowhere to go.".to_string(), &[]), "Nowhere to go.");
+        assert_eq!(
+            also(
+                "Nowhere to go.".to_string(),
+                &["spare@example.com: no token.".to_string()]
+            ),
+            "Nowhere to go. spare@example.com: no token."
+        );
+    }
+
     #[test]
     fn a_switch_turned_away_by_a_held_lock_is_refused_as_contended() {
         let host = host_where_the_spare_reads(5.0);
@@ -710,8 +710,10 @@ mod tests {
         credentialed(&host, &registry, SPARE);
         // Somebody else is mid-write on the Default Profile, which is where the
         // Switch would land the Credential.
-        let store = holdings::the_default_profile(&host).expect("home is known");
-        let _held = store.seized(&host).expect("nobody holds them yet");
+        let _held = crate::providers::provider::Id::Claude
+            .adapter()
+            .inspect_default(&host)
+            .expect("nobody holds the native locks yet");
 
         let outcome =
             run_the_act(&host, &mut registry).expect("a held lock is an outcome, not a raise");

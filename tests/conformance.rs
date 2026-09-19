@@ -1164,7 +1164,7 @@ const CASES: &[Case] = &[
     Case {
         named: "making a directory at a link uses what it points at",
         asserts: |host, root, adapter, _now| {
-            // `probe::claim` does `create_dir_all` on a Profile's `sessions`,
+            // A provider claim creates a Profile's `sessions` directory,
             // so this decides where the Marker lands; a directory *shadowing*
             // the link is a third behavior no filesystem has.
             let elsewhere = root.join("another-profile-sessions");
@@ -1485,6 +1485,24 @@ const WHOLE_HOST_CASES: &[WholeHostCase] = &[
                  reporting a success nothing had"
             );
             assert!(
+                host.exec_interactive_under(nowhere, &[], &[]).is_err(),
+                "{adapter}: an absent program cannot run under a clean environment"
+            );
+            assert!(
+                host.rpc(
+                    nowhere,
+                    &[],
+                    &[],
+                    &[],
+                    perch::host::RpcControl {
+                        timeout: std::time::Duration::from_secs(30),
+                        checkpoint: &mut || Ok(())
+                    }
+                )
+                .is_err(),
+                "{adapter}: an absent RPC server cannot answer"
+            );
+            assert!(
                 host.exec_under(nowhere, &[], &[]).is_err(),
                 "{adapter}: {nowhere} is not a program under any environment, \
                  so a rehearsal of it is a failure and not a status"
@@ -1558,7 +1576,7 @@ const WHOLE_HOST_CASES: &[WholeHostCase] = &[
     WholeHostCase {
         named: "where this process is, and where it came from, are rooted",
         asserts: |host, adapter| {
-            // Through `probe::rooted` rather than `Path::is_absolute`, which reads
+            // Through `host::programs::rooted` rather than `Path::is_absolute`, which reads
             // the separator of the platform this build runs on: a fake claiming
             // Windows answers the paths a test wrote, and `/a/b` is a root there.
             let on_windows = host.platform() == Platform::Windows;
@@ -1571,7 +1589,7 @@ const WHOLE_HOST_CASES: &[WholeHostCase] = &[
                 ("current_exe", host.current_exe().expect("a binary")),
             ] {
                 assert!(
-                    perch::probe::rooted(&path.to_string_lossy(), on_windows),
+                    perch::host::programs::rooted(&path.to_string_lossy(), on_windows),
                     "{adapter}: {what} answered {path:?}, and every path Perch \
                      joins onto is joined onto from somewhere other than where \
                      the command happened to be run"
@@ -1593,6 +1611,14 @@ const WHOLE_HOST_CASES: &[WholeHostCase] = &[
     WholeHostCase {
         named: "a variable nothing set is not there",
         asserts: |host, adapter| {
+            for (key, value) in host.inherited_env() {
+                if !value.is_empty() {
+                    assert!(
+                        host.env_var(&key).as_deref() == Some(value.as_str()),
+                        "{adapter}: environment enumeration agrees with lookup"
+                    );
+                }
+            }
             // Named as no machine names one: the fake is asked the same
             // question as the real host, which reads this process's own
             // environment.

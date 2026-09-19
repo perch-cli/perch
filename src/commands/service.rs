@@ -15,7 +15,7 @@ use crate::cycle;
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::holdings;
 use crate::host::{Host, Platform};
-use crate::probe;
+use crate::providers::provider::{Provider, ServiceSetup, catalog};
 use crate::say;
 use crate::service::{self, Driven, Manager, Standing, Unit};
 use crate::{registry, upgrade};
@@ -29,7 +29,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     refuse_as_root(host)?;
     let manager = Manager::of(host);
 
-    let (unit, claude) = describe(host)?;
+    let (unit, providers) = describe(host)?;
     // Before the machine is asked anything and before anything is written: a value no
     // format can hold is a refusal about the Unit rather than a half-finished install,
     // and `is_installed` below runs `schtasks` on Windows.
@@ -72,8 +72,10 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             crate::watch::REFRESH_INTERVAL_MILLIS / 1000,
         ),
     )?;
-    if let Some(note) = said_about_claude(&claude) {
-        say::line(out, &note)?;
+    for (provider, resolved) in &providers {
+        if let Some(note) = said_about_provider(*provider, resolved) {
+            say::line(out, &note)?;
+        }
     }
 
     if any_scope_may_act(host) == Some(false) {
@@ -289,18 +291,20 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
         return None;
     }
 
-    let refreshed = describe(host).and_then(|(unit, claude)| {
+    let refreshed = describe(host).and_then(|(unit, providers)| {
         let at = Manager::of(host).unit_path(host)?;
         write_and_start(host, &unit, at.as_deref())?;
-        Ok((unit.binary, claude))
+        Ok((unit.binary, providers))
     });
 
     Some(match refreshed {
-        Ok((_, claude)) => {
+        Ok((_, providers)) => {
             let mut said = "The Service was restarted.".to_string();
-            if let Some(note) = said_about_claude(&claude) {
-                said.push('\n');
-                said.push_str(&note);
+            for (provider, resolved) in &providers {
+                if let Some(note) = said_about_provider(*provider, resolved) {
+                    said.push('\n');
+                    said.push_str(&note);
+                }
             }
             said
         }
@@ -313,82 +317,85 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
     })
 }
 
-/// Everything a unit would be written from, as this machine stands now —
-/// Claude Code included, carried under [`probe::CLAUDE_BIN_VAR`] — and which
-/// `claude` that is, for the sentence that says so.
-fn describe(host: &dyn Host) -> Result<(Unit, ResolvedClaude)> {
+fn describe(host: &dyn Host) -> Result<(Unit, Vec<(Provider, ResolvedExecutable)>)> {
     let exe = host
         .current_exe()
         .map_err(|err| PerchError::Other(format!("could not find Perch's own binary: {err}")))?;
-
-    let carried: Vec<(String, String)> = service::CARRIED
+    let mut carried: Vec<(String, String)> = service::CARRIED
         .iter()
         .filter_map(|key| host.env_var(key).map(|value| (key.to_string(), value)))
         .collect();
-    let claude = resolved_claude(host, Manager::of(host), &carried);
+    let setups = catalog()
+        .iter()
+        .map(|provider| provider.service_setup(host).map(|setup| (*provider, setup)))
+        .collect::<Result<Vec<_>>>()?;
+    for (_, setup) in &setups {
+        if let Some(setup) = setup {
+            carried.extend(setup.environment.iter().cloned());
+        }
+    }
+    let mut providers = Vec::new();
+    for (provider, setup) in setups {
+        let Some(setup) = setup else { continue };
+        let resolved = resolved_executable(host, Manager::of(host), &carried, &setup);
+        if let ResolvedExecutable::Carried { at, .. } = &resolved {
+            carried.push((setup.override_key, at.to_string_lossy().into_owned()));
+        }
+        providers.push((provider, resolved));
+    }
 
     let unit = Unit {
         binary: service::binary_for_the_unit(&exe, upgrade::channel(host)?.as_ref()),
-        environment: carried
-            .into_iter()
-            .chain(match &claude {
-                ResolvedClaude::Carried { at } => Some((
-                    probe::CLAUDE_BIN_VAR.to_string(),
-                    at.to_string_lossy().into_owned(),
-                )),
-                _ => None,
-            })
-            .collect(),
+        environment: carried,
         log: Manager::of(host).log_path(host)?,
         user_id: host.user_id(),
         // Off the machine, because `schtasks` has no notation for "whoever is running
         // this": `%USERNAME%` is `cmd.exe`'s, expanded by a shell that is not there.
         user_name: host.env_var("USERNAME"),
     };
-    Ok((unit, claude))
+    Ok((unit, providers))
 }
 
-/// Which Claude Code the unit carries, and why that one
+/// Discovered executables must run under the service manager's environment
 /// (ADR carried-means-rehearsed).
-enum ResolvedClaude {
+enum ResolvedExecutable {
     /// Runs where the Service will run it, so the unit carries it.
-    Carried { at: PathBuf },
-    /// Nothing on the shell's PATH answers to the name. Not a refusal: Claude
-    /// Code arriving later is ordinary, and `install` says the Service will hold.
+    Carried {
+        at: PathBuf,
+    },
+    /// Nothing on the shell's PATH answers to the name. Not a refusal: the
+    /// executable arriving later is ordinary, and `install` says the Service will hold.
     NoneFound,
-    /// Everything on the shell's PATH fails where the Service would run it, so
-    /// the unit carries none rather than a path that cannot work.
-    NoneRuns { at: PathBuf, status: i32 },
+    NoneRuns {
+        at: PathBuf,
+        status: i32,
+    },
 }
 
-/// Rehearses each `claude` on this shell's PATH where the Service will run it,
-/// and carries the first that answers. An override passes through verbatim, as
-/// it does everywhere else — it is somebody's word, and it is also the repair
-/// this command names.
-fn resolved_claude(
+fn resolved_executable(
     host: &dyn Host,
     manager: Manager,
     carried: &[(String, String)],
-) -> ResolvedClaude {
-    if let Some(overridden) = host.env_var(probe::CLAUDE_BIN_VAR) {
-        return ResolvedClaude::Carried {
-            at: PathBuf::from(overridden),
+    setup: &ServiceSetup,
+) -> ResolvedExecutable {
+    if let Some(overridden) = &setup.explicit_path {
+        return ResolvedExecutable::Carried {
+            at: overridden.clone(),
         };
     }
-
-    let candidates = probe::all_on_path(host, "claude");
+    let candidates = &setup.candidates;
     let Some(first) = candidates.first() else {
-        return ResolvedClaude::NoneFound;
+        return ResolvedExecutable::NoneFound;
     };
     let Some(path) = manager.path_for_services() else {
-        return ResolvedClaude::Carried { at: first.clone() };
+        return ResolvedExecutable::Carried { at: first.clone() };
     };
 
     let mut passed_over = None;
-    for candidate in &candidates {
-        match rehearsed(host, candidate, path, carried) {
+    for candidate in candidates {
+        match rehearsed(host, candidate, path, carried, setup.probe_args) {
             Ok(()) => {
-                return ResolvedClaude::Carried {
+                return ResolvedExecutable::Carried {
                     at: candidate.clone(),
                 };
             }
@@ -398,7 +405,7 @@ fn resolved_claude(
         }
     }
     let (at, status) = passed_over.expect("every candidate failed, and there was at least one");
-    ResolvedClaude::NoneRuns { at, status }
+    ResolvedExecutable::NoneRuns { at, status }
 }
 
 /// Runs a candidate exactly as the unit will: its absolute path, the unit's
@@ -409,6 +416,7 @@ fn rehearsed(
     candidate: &Path,
     service_path: &str,
     carried: &[(String, String)],
+    probe_args: &[&str],
 ) -> std::result::Result<(), i32> {
     let candidate = candidate.to_string_lossy();
     let home = host.home_dir().ok();
@@ -423,7 +431,7 @@ fn rehearsed(
             .map(|(key, value)| (key.as_str(), value.as_str())),
     );
 
-    match host.exec_under(&candidate, &["--version"], &env) {
+    match host.exec_under(&candidate, probe_args, &env) {
         Ok(ran) if ran.succeeded() => Ok(()),
         Ok(ran) => Err(ran.status),
         // Could not even be spawned there, said with `Execution`'s own
@@ -432,24 +440,24 @@ fn rehearsed(
     }
 }
 
-/// The note an install owes about Claude Code, where it owes one: a carried
-/// `claude` is the ordinary case, and one passed over changes nothing the
+/// The note an install owes about a provider's executable, where it owes one: a
+/// carried one is the ordinary case, and one passed over changes nothing the
 /// person will do.
-fn said_about_claude(claude: &ResolvedClaude) -> Option<String> {
-    match claude {
-        ResolvedClaude::Carried { .. } => None,
-        ResolvedClaude::NoneRuns { at, status } => Some(format!(
-            "Note: {} exits {} under the Service, so it holds. Point \
-             PERCH_CLAUDE_BIN at a Claude Code that runs, then `perch watcher \
-             install` again.",
+fn said_about_provider(provider: Provider, resolved: &ResolvedExecutable) -> Option<String> {
+    let name = provider.name();
+    let executable = provider.executable_name();
+    let override_key = provider.id().executable_override();
+    match resolved {
+        ResolvedExecutable::Carried { .. } => None,
+        ResolvedExecutable::NoneRuns { at, status } => Some(format!(
+            "Note: {} exits {status} under the Service, so {name} holds. Point \
+             {override_key} at a {name} that runs, then `perch watcher install` again.",
             at.display(),
-            status,
         )),
-        ResolvedClaude::NoneFound => Some(
-            "Note: no `claude` was found, so the Service holds. `perch watcher \
-             install` again once Claude Code is installed."
-                .to_string(),
-        ),
+        ResolvedExecutable::NoneFound => Some(format!(
+            "Note: no `{executable}` was found, so {name} holds. `perch watcher \
+             install` again once {name} is installed."
+        )),
     }
 }
 

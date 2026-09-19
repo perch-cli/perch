@@ -162,7 +162,7 @@ impl<'a> Reserve<'a> {
             // Headroom, which is a state rather than nought room. Unrounded,
             // like every percentage in a document.
             "best": self.best().map(|(account, percent)| json!({
-                "email": account.email(),
+                "email": account.key(),
                 "percent": percent,
                 "observed_at": self.best_read_at().map(|at| at.to_rfc3339()),
             })),

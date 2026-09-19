@@ -1,24 +1,17 @@
-//! Perch runs Claude Code as whichever Claude account you want, without going
-//! through the login flow again.
+//! Perch manages provider Accounts, isolated client Runs, and quota-aware Cycling.
 //!
-//! The layout follows the seams the design calls for: [`host`] is the only way
-//! out of the process, [`probe`] is the only place that knows anything about
-//! Claude Code's internals, [`keychain`] is the only place that knows about
-//! `/usr/bin/security`, [`credentials`] is the only place that knows a
-//! Credential can be in more than one kind of store, [`anthropic`] is the only
-//! place that knows an endpoint, [`registry`] is Perch's own state and
-//! [`holdings`] is the only place that says where it sits.
+//! Commands own workflows; providers own native tool behavior through
+//! [`providers::provider`]. [`host`] owns effects, [`registry`] owns Account and
+//! Scope policy, and [`storage`] persists the configuration and provider runtime.
 
 pub mod act;
 pub mod adopt;
-pub mod anthropic;
 pub mod ask;
-pub mod carry;
 pub mod column;
 pub mod commands;
 pub mod config;
-pub mod credentials;
 pub mod cycle;
+pub mod domain;
 pub mod error;
 pub mod export;
 pub mod holdings;
@@ -29,14 +22,10 @@ pub mod keychain;
 pub mod listing;
 pub mod live;
 pub mod lock;
-pub mod login;
-pub mod migration;
 pub mod name;
 pub mod observe;
-pub mod probe;
-pub mod profile;
+pub mod providers;
 pub mod purge;
-pub mod reconcile;
 pub mod redact;
 pub mod registry;
 pub mod report;
@@ -45,8 +34,11 @@ pub mod round;
 pub mod say;
 pub mod secret;
 pub mod service;
+pub mod storage;
 pub mod switch;
 pub mod target;
+#[cfg(test)]
+mod test_support;
 pub mod trail;
 pub mod upgrade;
 pub mod utilization;
@@ -55,3 +47,9 @@ pub mod watch;
 
 pub use error::{PerchError, Result};
 pub use host::Host;
+
+#[cfg(test)]
+use crate as fixture_crate;
+#[cfg(test)]
+#[path = "../tests/fixtures/claude.rs"]
+mod claude_fixture;

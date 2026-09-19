@@ -6,7 +6,7 @@ use chrono::{TimeZone, Utc};
 use common::*;
 use perch::error::EXIT_NOT_FOUND;
 use perch::host::FakeHost;
-use perch::registry::{Active, CURRENT_VERSION};
+use perch::registry::Active;
 
 /// A machine where Perch has already adopted the login, with whatever
 /// Utilization the test wants in the cache.
@@ -14,26 +14,20 @@ use perch::registry::{Active, CURRENT_VERSION};
 /// Its version is read from the build rather than typed: a document whose
 /// number belies its shape is believed (ADR a-registry-comes-forward).
 fn adopted_machine(utilization: &str) -> FakeHost {
-    let registry = format!(
-        r#"{{
-  "version": {CURRENT_VERSION},
-  "active": {{"settled": "someone@example.com"}},
-  "accounts": [
-    {{
-      "identity": {{
-        "email": "someone@example.com",
-        "account_uuid": "account-uuid-1",
-        "organization_name": "Acme"
-      }},
-      "plan": "pro"{utilization}
-    }}
-  ],
-  "aliases": {{}}
-}}"#
-    );
-    logged_in_machine()
-        .with_file(REGISTRY_PATH, &registry)
-        .with_now(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap())
+    let host = logged_in_machine().with_now(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap());
+    run_status(&host, false).0.unwrap();
+    let mut registry = registry_of(&host);
+    let value: serde_json::Value = serde_json::from_str(&format!(
+        "{{{} }}",
+        utilization.trim_start_matches(',').trim()
+    ))
+    .unwrap();
+    registry.accounts[0].utilization = value
+        .get("utilization")
+        .map(|value| serde_json::from_value(value.clone()).unwrap());
+    save_registry(&host, &registry);
+    host.forget_effects();
+    host
 }
 
 const OBSERVED_THREE_MINUTES_AGO: &str = r#",
@@ -138,7 +132,7 @@ fn json_carries_an_observation_time_on_every_utilization_figure() {
 #[test]
 fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
     let host = machine_with_two_accounts();
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
 
     let (result, printed) = run_status(&host, false);
 
@@ -148,7 +142,7 @@ fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
         "{printed}"
     );
     assert!(
-        printed.contains(EMAIL) && printed.contains(SECOND_EMAIL),
+        printed.contains(KEY) && printed.contains(SECOND_KEY),
         "it names both Accounts the live Credential could belong to: {printed}"
     );
 
@@ -156,8 +150,8 @@ fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
 
     result.expect("and the same in --json");
     let document: serde_json::Value = serde_json::from_str(&as_json).expect("valid JSON");
-    assert_eq!(document["landing"]["leaving"], EMAIL, "{as_json}");
-    assert_eq!(document["landing"]["arriving"], SECOND_EMAIL, "{as_json}");
+    assert_eq!(document["landing"]["leaving"], KEY, "{as_json}");
+    assert_eq!(document["landing"]["arriving"], SECOND_KEY, "{as_json}");
 }
 
 /// A Landing that left nobody behind is the one shape with no Account under it
@@ -185,7 +179,7 @@ fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
     result.expect("and the same in --json");
     let document: serde_json::Value = serde_json::from_str(&as_json).expect("valid JSON");
     assert!(document["landing"]["leaving"].is_null(), "{as_json}");
-    assert_eq!(document["landing"]["arriving"], SECOND_EMAIL, "{as_json}");
+    assert_eq!(document["landing"]["arriving"], SECOND_KEY, "{as_json}");
     assert!(
         document["active"].is_null(),
         "there is no Account established to describe: {as_json}"
@@ -224,7 +218,7 @@ fn a_registry_on_nobody_still_answers_json_with_the_shape_a_script_reads() {
 #[test]
 fn a_switch_in_flight_is_said_by_the_listing_at_every_breadth() {
     let host = machine_with_two_accounts();
-    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    a_switch_died_mid_flight(&host, Some(KEY), SECOND_EMAIL);
 
     for (what, printed, as_json) in [
         ("list", run_list(&host, false), run_list(&host, true)),
@@ -244,9 +238,9 @@ fn a_switch_in_flight_is_said_by_the_listing_at_every_breadth() {
         let (result, as_json) = as_json;
         result.unwrap_or_else(|error| panic!("{what} --json: {error}"));
         let document: serde_json::Value = serde_json::from_str(&as_json).expect("valid JSON");
-        assert_eq!(document["landing"]["leaving"], EMAIL, "{what}: {as_json}");
+        assert_eq!(document["landing"]["leaving"], KEY, "{what}: {as_json}");
         assert_eq!(
-            document["landing"]["arriving"], SECOND_EMAIL,
+            document["landing"]["arriving"], SECOND_KEY,
             "{what}: {as_json}"
         );
     }

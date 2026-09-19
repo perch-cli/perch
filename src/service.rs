@@ -32,7 +32,7 @@ pub const UNIT_NAME: &str = "perch-watch.service";
 ///
 /// Pinned rather than inherited, because systemd allows ninety and launchd twenty. What
 /// has to fit inside it is a Capture, a Credential write and an Identity patch under
-/// Claude Code's locks.
+/// the provider's locks.
 pub const STOP_GRACE_SECONDS: u32 = 30;
 
 /// How long a start waits for a booted-out job to leave its domain, in seconds.
@@ -78,10 +78,9 @@ const _: () = assert!(
 
 /// The environment a unit carries over from the shell that installed it.
 ///
-/// Named rather than "everything that is set", which is [`crate::carry`]'s bargain
-/// about `.claude.json`: a unit that captured the whole environment would bake whatever
-/// secret the installing shell held into a file on disk.
-pub const CARRIED: [&str; 2] = ["PERCH_HOME", "CLAUDE_CONFIG_DIR"];
+/// Carrying the whole environment would persist shell secrets in the unit file.
+/// Providers declare their own additional nonsecret keys.
+pub const CARRIED: [&str; 1] = ["PERCH_HOME"];
 
 /// Which arrangement is running the Watcher: launchd's, systemd's, or the Task
 /// Scheduler's.
@@ -145,7 +144,7 @@ impl Manager {
     }
 
     /// The PATH the arrangement gives what it runs, for rehearsing a resolved
-    /// `claude` there before it is written into a unit. Fixed values rather than
+    /// executable there before it is written into a unit. Fixed values rather than
     /// asked of the machine: launchd's is pinned, systemd's is its compiled
     /// default, and a Scheduled Task inherits the user's registry environment,
     /// which no fixed value stands for (ADR carried-means-rehearsed).
@@ -412,8 +411,7 @@ pub struct Unit {
     /// The binary the service manager will run, absolute and stable.
     pub binary: PathBuf,
     /// The environment carried over from the shell that installed it: [`CARRIED`]
-    /// where actually set, then the Claude Code the install resolved as
-    /// `PERCH_CLAUDE_BIN`.
+    /// where actually set, plus each enabled provider's declared environment.
     pub environment: Vec<(String, String)>,
     /// Where standard output goes, or `None` where the service manager keeps it (which
     /// is Linux, and the journal).
@@ -558,7 +556,7 @@ impl Unit {
 
         format!(
             "[Unit]\n\
-             Description=Perch cycles the Claude account you are on when it runs low\n\
+             Description=Perch watches provider accounts and cycles eligible sessions\n\
              Documentation=https://github.com/perch-cli/perch\n\
              StartLimitIntervalSec={window}\n\
              StartLimitBurst={tries}\n\
@@ -894,6 +892,24 @@ mod tests {
             standing.document()["any_scope_may_act"],
             serde_json::json!(false)
         );
+    }
+
+    /// A unit whose `ExecStart` Perch could not read names no binary, and every
+    /// other answer about the Service still reads.
+    #[test]
+    fn a_service_naming_no_binary_says_the_rest_and_nothing_about_one() {
+        let standing = Standing {
+            binary: None,
+            binary_is_there: None,
+            ..a_standing()
+        };
+
+        let said = said(&standing);
+
+        assert!(said.contains("A Service is installed"), "{said}");
+        assert!(said.contains("Its decisions go to"), "{said}");
+        assert!(!said.contains("It runs"), "{said}");
+        assert_eq!(standing.document()["binary"], serde_json::Value::Null);
     }
 
     #[test]

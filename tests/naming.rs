@@ -23,6 +23,7 @@ fn machine_with_a_named_second_account() -> FakeHost {
     run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             alias: Some("overflow".into()),
             ..AddArgs::default()
@@ -46,7 +47,7 @@ fn an_alias_names_an_account_and_survives_a_restart() {
     );
     assert_eq!(
         registry_of(&host).aliases.get("work").map(String::as_str),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "the name is written down, not held for this command only"
     );
 }
@@ -65,7 +66,7 @@ fn an_alias_can_be_given_to_an_account_that_is_already_named() {
     let registry = registry_of(&host);
     assert_eq!(
         registry.aliases.get("work").map(String::as_str),
-        Some(SECOND_EMAIL)
+        Some(SECOND_KEY)
     );
     assert!(
         !registry.aliases.contains_key("overflow"),
@@ -141,6 +142,7 @@ fn an_alias_named_while_adding_an_account_goes_through_the_same_namespace() {
     let (result, _) = run_add(
         &host,
         AddArgs {
+            provider: Default::default(),
             no_group: true,
             alias: Some("work".into()),
             ..AddArgs::default()
@@ -193,7 +195,7 @@ fn a_name_in_any_alphabet_is_declared_and_then_reached_by_it() {
         target::resolve(&registry, "café").unwrap(),
         Target::Alias {
             name: "café".into(),
-            email: SECOND_EMAIL.into(),
+            email: SECOND_KEY.into(),
         }
     );
 }
@@ -233,13 +235,13 @@ fn a_target_resolves_as_an_alias_then_an_account_then_a_group() {
         target::resolve(&registry, "overflow").unwrap(),
         Target::Alias {
             name: "overflow".into(),
-            email: SECOND_EMAIL.into(),
+            email: SECOND_KEY.into(),
         }
     );
     assert_eq!(
         target::resolve(&registry, SECOND_EMAIL).unwrap(),
         Target::Account {
-            email: SECOND_EMAIL.into(),
+            email: SECOND_KEY.into(),
         }
     );
     assert_eq!(
@@ -351,12 +353,8 @@ fn a_name_that_differs_only_in_case_is_the_same_name() {
 
 #[test]
 fn an_alias_command_on_a_registry_with_no_aliases_finds_nothing() {
-    // Holding the Account it names: a Registry naming one it does not hold is a
-    // state `validate` refuses rather than a machine anybody has.
-    let host = logged_in_machine().with_file(
-        REGISTRY_PATH,
-        r#"{"version":2,"active":{"settled":"someone@example.com"},"accounts":[{"identity":{"email":"someone@example.com"}}]}"#,
-    );
+    let host = logged_in_machine();
+    run_list(&host, false).0.unwrap();
 
     let (result, _) = run_alias(
         &host,
@@ -392,31 +390,28 @@ fn a_name_is_reached_however_it_is_capitalized() {
         target::resolve(&registry, "OVERFLOW").expect("the Alias is reached"),
         Target::Alias {
             name: "Overflow".to_string(),
-            email: SECOND_EMAIL.to_string(),
+            email: SECOND_KEY.to_string(),
         }
     );
     assert_eq!(
         target::resolve(&registry, &EMAIL.to_uppercase()).expect("the Account is reached"),
         Target::Account {
-            email: EMAIL.to_string()
+            email: KEY.to_string()
         },
-        "an address is one address however it is typed, which is the rule \
-         `already_landed` has always compared by"
+        "email matching folds case independently of stable storage identity"
     );
 
-    // And over the whole of Unicode, not the ASCII half: `holdings::slug`
-    // lowercases everything, so `CAFÉ@` and `café@` already share one Profile
-    // and `perch add` already refuses the second as a collision.
     let mut registry = registry;
     let accented = "café@example.com";
-    let mut account = registry.account(EMAIL).expect("the Account").clone();
+    let mut account = registry.account(KEY).expect("the Account").clone();
     account.identity.email = accented.to_string();
+    account.storage_key = None;
     registry.upsert(account);
 
     assert_eq!(
         target::resolve(&registry, "CAFÉ@EXAMPLE.COM").expect("the Account is reached"),
         Target::Account {
-            email: accented.to_string()
+            email: KEY.to_string()
         },
         "the rule that two names differing only in case are one name is not an \
          ASCII rule anywhere else it is asked"
@@ -432,7 +427,7 @@ fn a_switch_accepts_the_spelling_every_other_command_accepts() {
     let (result, printed) = run_switch(&host, &SECOND_EMAIL.to_uppercase());
 
     result.expect("that is the Account, typed loudly");
-    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_KEY));
     assert!(printed.contains(SECOND_EMAIL), "{printed}");
 }
 
@@ -479,7 +474,7 @@ fn unsetting_by_email_frees_the_alias_the_account_answers_to() {
         printed.contains("overflow"),
         "the name that was freed is said, since the user never typed it:\n{printed}"
     );
-    assert_eq!(registry_of(&host).alias_of(SECOND_EMAIL), None);
+    assert_eq!(registry_of(&host).alias_of(SECOND_KEY), None);
 }
 
 /// Both arms take a Target, so both get the Group refusal the shared resolution
@@ -499,7 +494,7 @@ fn unsetting_a_group_is_refused_as_a_group_the_way_naming_one_is() {
         "the kind that did match should be said: {refusal}"
     );
     assert_eq!(
-        registry_of(&host).alias_of(SECOND_EMAIL),
+        registry_of(&host).alias_of(SECOND_KEY),
         Some("overflow"),
         "and nothing was freed"
     );
@@ -522,7 +517,7 @@ fn unsetting_an_account_that_answers_to_no_alias_is_refused() {
         "it says which Account has nothing to free: {said}"
     );
     assert_eq!(
-        registry_of(&host).alias_of(SECOND_EMAIL),
+        registry_of(&host).alias_of(SECOND_KEY),
         Some("overflow"),
         "and the Account that does answer to one still does"
     );
@@ -552,11 +547,11 @@ fn a_name_that_already_reaches_another_account_is_refused_and_says_how_to_free_i
         "it names the command that frees it: {said}"
     );
     assert_eq!(
-        registry_of(&host).alias_of(SECOND_EMAIL),
+        registry_of(&host).alias_of(SECOND_KEY),
         Some("overflow"),
         "and the Account that held it still does"
     );
-    assert_eq!(registry_of(&host).alias_of(EMAIL), None);
+    assert_eq!(registry_of(&host).alias_of(KEY), None);
 }
 
 /// The same name given back to the Account that already answers to it is not a
@@ -577,7 +572,7 @@ fn renaming_an_account_gives_up_the_name_it_answered_to_before() {
         printed.contains("`overflow` no longer does"),
         "it says which name was given up: {printed}"
     );
-    assert_eq!(registry_of(&host).alias_of(SECOND_EMAIL), Some("spare"));
+    assert_eq!(registry_of(&host).alias_of(SECOND_KEY), Some("spare"));
     assert_eq!(
         registry_of(&host).declared_alias("overflow"),
         None,

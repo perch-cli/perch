@@ -3,15 +3,15 @@
 //! Both ways an Account enters Perch end here: adoption copies the existing
 //! login in (ADR a-login-perch-does-not-need), and `add` copies in the login it
 //! just created. Neither knows where a directory keeps its Credential — that is
-//! [`crate::probe`] and [`crate::credentials`] — and both get the same
+//! [`crate::providers::claude::probe`] and [`crate::providers::claude::credentials`] — and both get the same
 //! read-back guard for free.
 
 use std::path::Path;
 
-use crate::credentials::{self, CredentialStore};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::probe::{self, Store};
+use crate::providers::claude::credentials::{self, CredentialStore};
+use crate::providers::claude::probe::{self, Store};
 
 /// Makes a Profile's directory, if it is not already there.
 ///
@@ -38,7 +38,7 @@ pub enum IfItFails {
 /// One Profile a placement has written into, and exactly what it made there:
 /// the ledger bounds the undo — take back only what this write made, and only
 /// if it made it. A Profile nothing records holds a live refresh token that
-/// `reap_abandoned` never walks, so a caller whose record fails owes this a
+/// no reaper walks, so a caller whose record fails owes this a
 /// [`Placed::take_back`].
 #[derive(Debug)]
 pub struct Placed {
@@ -76,8 +76,11 @@ pub fn place(
         Err(error) => {
             // No store to speak of yet, so the only thing to take back is a
             // directory this just made — empty, whatever the policy says.
-            if !was_already_there {
-                let _ = host.remove_dir_all(dir);
+            if !was_already_there && let Err(cleanup) = host.remove_dir_all(dir) {
+                return Err(error.with_note(&format!(
+                    "Rollback incomplete: {} could not be removed: {cleanup}",
+                    dir.display()
+                )));
             }
             return Err(error);
         }
@@ -95,15 +98,19 @@ pub fn place(
             // refuses when the store read first will not give up the copy it
             // replaces, and the Credential is in the other one by then.
             placed.wrote_a_credential = landed(host, &placed.store, credential);
-            placed.did_not_finish(host, if_it_fails);
-            return Err(error);
+            return Err(match placed.did_not_finish(host, if_it_fails) {
+                Ok(()) => error,
+                Err(cleanup) => error.with_note(&cleanup.to_string()),
+            });
         }
         placed.wrote_a_credential = true;
     }
     if let Some(contents) = identity_file {
         if let Err(error) = carry_identity_file(host, contents, &placed.store) {
-            placed.did_not_finish(host, if_it_fails);
-            return Err(error);
+            return Err(match placed.did_not_finish(host, if_it_fails) {
+                Ok(()) => error,
+                Err(cleanup) => error.with_note(&cleanup.to_string()),
+            });
         }
         placed.wrote_the_identity_file = true;
     }
@@ -111,36 +118,41 @@ pub fn place(
 }
 
 impl Placed {
-    /// The Store the Profile keeps its Credential in.
-    pub fn store(&self) -> &Store {
-        &self.store
-    }
-
-    /// Takes back what this placement *made*, best-effort.
+    /// Takes back only resources owned by this placement, reporting incomplete cleanup.
     ///
     /// Made rather than written into: a Profile directory nothing names
     /// outlives every command that would have named it — on macOS, the only
     /// name reaching a live Credential.
-    pub fn take_back(&self, host: &dyn Host) {
+    pub fn take_back(&self, host: &dyn Host) -> Result<()> {
         if !self.was_already_there {
-            discard(host, &self.store);
-            return;
+            return discard_checked(host, &self.store);
         }
         // The directory stays and neither thing written into it does: a
         // `.claude.json` holds an API key in an MCP server's `env` block, so
         // taking it back prevents as much as taking the Credential back.
+        let mut cleanup = crate::providers::provider::Cleanup::default();
         if self.wrote_a_credential {
             for kept_in in credentials::stores_for(host, &self.store) {
-                let _ = kept_in.forget(host);
+                cleanup.record(kept_in.forget(host).map(|_| ()).map_err(|error| {
+                    error.with_note(&format!(
+                        "Credential cleanup failed in {} for {}",
+                        kept_in.describe(),
+                        self.store.config_dir.display()
+                    ))
+                }));
             }
         }
         if self.wrote_the_identity_file {
-            let _ = host.remove_file(&self.store.identity_file);
+            cleanup.record(
+                host.remove_file(&self.store.identity_file)
+                    .map_err(|error| PerchError::file_write(&self.store.identity_file, error)),
+            );
         }
+        cleanup.result()
     }
 
     /// What a placement that stopped does with its ledger, per [`IfItFails`].
-    fn did_not_finish(&self, host: &dyn Host, if_it_fails: IfItFails) {
+    fn did_not_finish(&self, host: &dyn Host, if_it_fails: IfItFails) -> Result<()> {
         match if_it_fails {
             IfItFails::TakeBack => self.take_back(host),
             IfItFails::KeepWhatLanded => {
@@ -148,8 +160,9 @@ impl Placed {
                     && !self.wrote_a_credential
                     && !self.wrote_the_identity_file
                 {
-                    discard(host, &self.store);
+                    return discard_checked(host, &self.store);
                 }
+                Ok(())
             }
         }
     }
@@ -348,6 +361,12 @@ fn write_and_read_back(
 /// it is the only thing that can still name the store, so a store that refuses
 /// keeps it, and the remark says why.
 pub fn discard(host: &dyn Host, store: &Store) {
+    if let Err(error) = discard_checked(host, store) {
+        host.note(&error.to_string());
+    }
+}
+
+fn discard_checked(host: &dyn Host, store: &Store) -> Result<()> {
     let mut still_holding = Vec::new();
     for kept_in in credentials::stores_for(host, store) {
         if kept_in.forget(host).is_err() {
@@ -356,14 +375,23 @@ pub fn discard(host: &dyn Host, store: &Store) {
     }
 
     if !still_holding.is_empty() {
-        host.note(&format!(
+        let detail = format!(
             "{} would not give up the Credential it holds for {}, so it was \
              left. `perch holdings purge` empties it.",
             still_holding.join(" and "),
             store.config_dir.display(),
-        ));
-        return;
+        );
+        return Err(PerchError::Other(format!("Rollback incomplete: {detail}")));
     }
 
-    let _ = host.remove_dir_all(&store.config_dir);
+    host.remove_dir_all(&store.config_dir).map_err(|error| {
+        PerchError::Other(format!(
+            "Rollback incomplete: {} could not be removed: {error}",
+            store.config_dir.display()
+        ))
+    })
 }
+
+#[cfg(test)]
+#[path = "profile/behavior.rs"]
+mod behavior;

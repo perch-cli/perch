@@ -101,6 +101,11 @@ Registry hand-edited to name a Group `a@b` or `one two` is named at `load` now
 where it was silently renamed before, which is what every other version already
 did with a hand edit.
 
+The rename pass below is suspended with the migrations it belonged to: this
+build refuses a retired layout rather than bringing its names forward
+(ADR a-fresh-provider-layout). What survives it is the rule that a name rule
+moving moves the version, and why.
+
 Version 3 shipped in no release, and the number still moves. Both name rules
 land in one version of Perch, so anyone coming from v0.2.0 goes from 1 to 4 and
 meets version 3 only as a step. Amending 3 in place instead would put two rule

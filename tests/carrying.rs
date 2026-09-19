@@ -18,7 +18,6 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::*;
-use perch::carry;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
 use perch::host::{FakeHost, Refusing};
@@ -97,7 +96,7 @@ fn machine() -> FakeHost {
 }
 
 fn profile_of(host: &FakeHost, email: &str) -> PathBuf {
-    perch::holdings::profile_dir_for(host, email).expect("home is known")
+    store_of(host, email).config_dir
 }
 
 /// The identity file of an Account's Profile, as it stands now.
@@ -515,7 +514,12 @@ fn the_keys_that_cross_are_named_in_one_place() {
     run_run(&host, SECOND_EMAIL).0.expect("the client ran");
 
     let carried = read(&host, SECOND_EMAIL);
-    for key in carry::PERSON_KEYS {
+    for key in [
+        "hasCompletedOnboarding",
+        "lastOnboardingVersion",
+        "tipsHistory",
+        "seenNotifications",
+    ] {
         assert!(!carried[key].is_null(), "{key} did not cross: {carried}");
     }
 }
@@ -556,15 +560,12 @@ fn the_keys_of_a_project_entry_that_cross_are_named_in_one_place() {
     let entry = &carried["projects"][HERE];
     for key in ["hasTrustDialogAccepted", "allowedTools"] {
         assert!(
-            carry::PROJECT_KEYS.contains(&key) && !entry[key].is_null(),
+            !entry[key].is_null(),
             "{key} is named and crossed: {carried}"
         );
     }
     for key in ["lastCost", "lastTotalInputTokens", "lastSessionId"] {
-        assert!(
-            !carry::PROJECT_KEYS.contains(&key),
-            "{key} is not one of the names"
-        );
+        assert!(entry[key].is_null(), "{key} is not one of the names");
     }
 }
 

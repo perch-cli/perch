@@ -1,5 +1,13 @@
 # A Registry comes forward
 
+**Suspended for the prelaunch provider redesign.** Layout 9 is a fresh
+installation: a `config.json` that is not layout 9, and every retired layout
+beside it, is refused with reset instructions and its files left where they are
+(ADR a-fresh-provider-layout). No step below runs in this build. What follows is
+the decision that governs again the moment a released Perch has written a
+Registry somebody cannot convert, and the reason the version number still moves
+with the shape in the meantime.
+
 **A Registry claiming a version below this build's is brought into the shape it
 reads — in memory on every read, and written back once by the run that finds it.
 The steps chain from whichever version a document claims, and each is arithmetic

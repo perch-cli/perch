@@ -8,8 +8,8 @@
 [![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fperch-cli%2Fperch%2Fmain%2Frust-toolchain.toml&query=%24.toolchain.channel&label=rust&prefix=v)](rust-toolchain.toml)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](#license)
 
-Run Claude Code as whichever Claude account you want, without going through the
-login flow again.
+Run Claude Code or Codex as whichever account you want, without going through
+the login flow again.
 
 Perch is for one person moving between logins they already hold — their own
 accounts, on their own machine. It creates no accounts and authenticates nobody;
@@ -25,12 +25,19 @@ Utilization   5-hour    12%  (as of 4m ago)
               7-day     40%  (as of 4m ago)
 ```
 
+Claude Code and Codex are separate providers. Each has its own active Account,
+its own Settings and its own ranking, so Claude capacity never stands in for
+Codex capacity. Codex support is experimental:
+`perch add --codex --alias personal --no-group` holds an Account,
+`perch run personal` launches it, and `perch switch personal` makes it the login
+the next `codex` starts with.
+
 ## Install
 
 Perch is pre-1.0: the command line may still change between releases, and the
 changelog marks every change that breaks something. It runs on macOS, Linux and
-Windows. Claude Code has to be installed already, for Perch to have anything to
-switch between.
+Windows. Claude Code or Codex has to be installed already, for Perch to have
+anything to switch between.
 
 ```sh
 brew tap perch-cli/perch && brew install perch      # Homebrew, on macOS or Linux
@@ -49,7 +56,7 @@ macOS quarantine flag and building from source are all in
 ## Getting started
 
 **1. See where you are.** The first command you run adopts the login already on
-the machine, so nothing has to be logged into again.
+the machine, one per provider, so nothing has to be logged into again.
 
 ```
 $ perch status
@@ -61,18 +68,24 @@ Plan          pro
 Utilization   never observed
 ```
 
+A Codex login is adopted the same way, and reported as `Adopted the Codex login
+as person@example.com (plus).`
+
 **2. Add another Account.** The login runs in a Profile of its own, so the
 Account you are using stays active and its session is untouched. `--group` says
 which Accounts this one is interchangeable with, and `--alias` saves you typing
-an email address ever again.
+an email address ever again. A bare `perch add` adds a Claude Account;
+`perch add --codex` adds a Codex one.
 
 ```
 $ perch add --group work --alias overflow
 ```
 
-**3. Switch to it.** Everywhere at once — every terminal, the editor extension,
-the desktop app — with no login flow. Your memory, settings, plugins and project
-history do not move: they are yours rather than the Account's.
+**3. Switch to it.** Everywhere at once, with no login flow: every terminal, the
+editor extension, the desktop app. Your memory, settings, plugins and project
+history do not move, because they are yours rather than the Account's. A Codex
+Switch writes the login the next `codex` starts with, so a Codex already open
+keeps its Account until it is restarted.
 
 ```
 $ perch switch overflow
@@ -104,8 +117,9 @@ and hands the job over, and `perch watcher uninstall` takes it back.
 `perch wizard` asks you steps 2 to 5 one question at a time. Enter keeps
 whatever is already set, and each answer prints the command it stood for.
 
-One more worth knowing early: `perch run <target>` launches Claude Code as one
-Account in one terminal without changing which is active.
+One more worth knowing early: `perch run <target>` launches the target's own
+client, Claude Code or Codex, as one Account in one terminal without changing
+which is active.
 
 ## Commands
 
@@ -117,7 +131,7 @@ Account in one terminal without changing which is active.
 | `perch alias` | name an Account, so no command needs its email address | [guide](pages/src/content/docs/accounts.md#naming-an-account) |
 | `perch switch` | make an Account active everywhere, or Cycle within a Group | [guide](pages/src/content/docs/switching.md) |
 | `perch watcher` | Cycle automatically when the Account you are on runs low, in a terminal or as a Service | [guide](pages/src/content/docs/watching.md) |
-| `perch run` | launch Claude Code as an Account, in this terminal alone | [guide](pages/src/content/docs/running.md) |
+| `perch run` | launch Claude Code or Codex as an Account, in this terminal alone | [guide](pages/src/content/docs/running.md) |
 | `perch group` | declare which Accounts are interchangeable | [guide](pages/src/content/docs/switching.md#managing-groups) |
 | `perch config` | the rules Perch chooses Accounts by | [guide](pages/src/content/docs/configuration.md) |
 | `perch disable` / `enable` | keep an Account out of Cycling, or put it back | [guide](pages/src/content/docs/accounts.md#keeping-an-account-out-of-cycling) |
@@ -126,7 +140,7 @@ Account in one terminal without changing which is active.
 | `perch holdings export` / `import` | back up everything Perch holds to one encrypted file, and put it back | [guide](pages/src/content/docs/backup.md) |
 | `perch holdings purge` | give the machine back the state it had before Perch | [guide](pages/src/content/docs/backup.md#giving-the-machine-back) |
 | `perch probe` | everything Perch can see of this machine, redacted and ready to paste | [guide](pages/src/content/docs/troubleshooting.md) |
-| `perch triage` | hand that to Claude Code, and let it investigate and help you file the issue | [guide](pages/src/content/docs/troubleshooting.md#letting-an-agent-do-it) |
+| `perch triage` | hand that to your preferred provider to investigate and help you file the issue | [guide](pages/src/content/docs/troubleshooting.md#letting-an-agent-do-it) |
 | `perch upgrade` | replace this Perch with a newer Release, through the channel that installed it | [guide](pages/src/content/docs/installing.md#upgrading) |
 | `perch version` | which Perch is installed, and a line more when a newer Release exists | [guide](pages/src/content/docs/installing.md#being-told-about-new-releases) |
 
@@ -138,6 +152,10 @@ writes are in the [reference](pages/src/content/docs/reference.md).
 A few things are worth knowing before the details, because most of Perch follows
 from them:
 
+- **A provider's Accounts are ranked among themselves.** Claude Code and Codex
+  keep separate active Accounts, separate Settings and separate quota, so a
+  Cycle stays inside one provider and no figure from one stands in for the
+  other.
 - **Utilization is served from cache**, with the age of every figure shown.
   `--refresh` is the one thing that fetches, so both `perch status` and
   `perch list` are cheap enough to sit in a shell prompt.
@@ -147,12 +165,12 @@ from them:
 - **An Account is ranked by its worst Quota Window.** Being blocked by any
   window blocks you completely, so that is the only ranking that measures what
   actually stops you working — and there is no pooled total, anywhere.
-- **The Credential you leave is Captured first.** Anthropic retires a refresh
-  token whenever it issues a new one, so a Switch that skipped this would
-  quietly poison the Account you were leaving.
+- **The Credential you leave is Captured first.** Both providers retire a
+  refresh token whenever they issue a new one, so a Switch that skipped this
+  would quietly poison the Account you were leaving.
 - **Nothing is written into a Profile a client is running against.** Renewing a
-  Credential Claude Code is holding in memory would log that session out
-  mid-task.
+  Credential a running Claude Code or Codex is holding in memory would log that
+  session out mid-task.
 - **An Account that breaks is Quarantined, never dropped.** It stays listed and
   named with the reason, and `perch relogin` repairs it in place.
 - **Nothing is interactive.** Every command reads its arguments, does its work

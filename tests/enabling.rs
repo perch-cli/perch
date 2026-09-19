@@ -25,7 +25,7 @@ fn active(host: &FakeHost) -> Option<String> {
 
 fn is_disabled(host: &FakeHost, email: &str) -> bool {
     registry_of(host)
-        .account(email)
+        .account(&fixture_key(host, email))
         .expect("an Account Perch holds")
         .disabled
 }
@@ -51,7 +51,7 @@ fn a_disabled_account_is_excluded_from_cycling() {
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "a Cycle lands nowhere rather than on an Account that was kept back for \
          something else"
     );
@@ -91,7 +91,7 @@ fn a_disabled_account_can_still_be_switched_to_by_name() {
     let (result, printed) = run_switch(&host, "spare");
 
     result.expect("naming an Account is not Cycling to it");
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY), "{printed}");
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(SECOND_CREDENTIAL),
@@ -120,7 +120,7 @@ fn enabling_returns_an_account_to_the_cycling_pool() {
     let (cycled, cycling) = run_cycle(&host);
 
     cycled.expect("there is somewhere to go again");
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL), "{cycling}");
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY), "{cycling}");
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn disabling_the_last_candidate_in_a_group_is_allowed_and_leaves_no_candidate() 
         "the answer says why there was nobody rather than just that there was \
          nobody: {error}"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL), "and nothing moved");
+    assert_eq!(active(&host).as_deref(), Some(KEY), "and nothing moved");
 }
 
 #[test]
@@ -182,13 +182,13 @@ fn keeping_an_account_out_of_cycling_leaves_everything_else_about_it_alone() {
         .expect("taken out of Cycling");
 
     let registry = registry_of(&host);
-    let account = registry.account(SECOND_EMAIL).expect("still held");
+    let account = registry.account(SECOND_KEY).expect("still held");
     assert_eq!(
         account.group.as_deref(),
         Some("work"),
         "leaving the Cycling pool is not leaving the Group"
     );
-    assert_eq!(registry.alias_of(SECOND_EMAIL), Some("spare"));
+    assert_eq!(registry.alias_of(SECOND_KEY), Some("spare"));
     assert_eq!(
         credential_of(&host, SECOND_EMAIL),
         credential,
@@ -204,7 +204,7 @@ fn the_account_you_are_on_can_be_kept_out_of_cycling_without_switching_away_from
     let (result, printed) = disable_account(&host, EMAIL);
 
     result.expect("which Account is active and which Cycling may pick are separate facts");
-    assert_eq!(active(&host).as_deref(), Some(EMAIL), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(KEY), "{printed}");
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(CREDENTIAL),
@@ -231,7 +231,7 @@ fn enabling_a_quarantined_account_does_not_claim_to_have_repaired_it() {
     );
     assert!(
         registry_of(&host)
-            .account(SECOND_EMAIL)
+            .account(SECOND_KEY)
             .expect("still held")
             .quarantined(),
         "and enabling it did not quietly clear it"
@@ -250,12 +250,12 @@ fn disabling_a_quarantined_account_promises_no_switch_that_would_not_work() {
     // will switch to is a refusal wearing an outcome's clothes, so it keeps its
     // reason and its remedy (ADR perch-says-what-it-did).
     assert!(
-        printed.contains("It is Quarantined: Anthropic would not renew its Credential."),
+        printed.contains("It is Quarantined: the provider would not renew its Credential."),
         "the promise disabling makes about naming an Account is exactly the one \
          Quarantine breaks, so what is said here is the breakage: {printed}"
     );
     assert!(
-        printed.contains(&format!("perch relogin {SECOND_EMAIL}")),
+        printed.contains(&format!("perch relogin {SECOND_KEY}")),
         "and the repair, which is the other half of a refusal: {printed}"
     );
 }
@@ -272,7 +272,7 @@ fn a_healthy_account_is_told_what_changed_and_nothing_about_what_that_means() {
     result.expect("it leaves the pool");
     assert_eq!(
         printed.trim_end().lines().last(),
-        Some(format!("Disabled {SECOND_EMAIL}.").as_str()),
+        Some(format!("Disabled {SECOND_LABEL}.").as_str()),
         "and nothing else: {printed}"
     );
 
@@ -281,7 +281,7 @@ fn a_healthy_account_is_told_what_changed_and_nothing_about_what_that_means() {
     result.expect("it comes back");
     assert_eq!(
         printed.trim_end().lines().last(),
-        Some(format!("Enabled {SECOND_EMAIL}.").as_str()),
+        Some(format!("Enabled {SECOND_LABEL}.").as_str()),
         "nor the other way: {printed}"
     );
 }

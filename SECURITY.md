@@ -2,8 +2,8 @@
 
 ## What Perch is for
 
-One person moving between Claude logins they already hold — their own accounts,
-on their own machine. Perch creates no accounts, authenticates nobody, and
+One person moving between logins they already hold — their own accounts, on
+their own machine. Perch creates no accounts, authenticates nobody, and
 carries no credential it was not handed by a login the person made themselves.
 It is not a way to share one subscription between people, and nothing in it is
 built for that.
@@ -45,10 +45,11 @@ a fix may take longer than that — the acknowledgment will say where it stands.
 
 ## What is in scope
 
-Perch holds Claude Code credentials wherever the installed Claude Code keeps
-one — the macOS keychain, or a file inside a profile directory on Linux and
-Windows. Both stores are in scope, and the file store is the one with the least
-behind it:
+Perch holds a provider's credentials wherever that provider's installed client
+keeps one. For Claude Code that is the macOS keychain, or a file inside a
+profile directory on Linux and Windows; for Codex it is a file inside the
+profile directory on every platform. Both stores are in scope, and the file
+store is the one with the least behind it:
 
 - Reading, writing, or deleting keychain entries that are not Perch's own.
 - Anything that writes a credential to disk, a log, the terminal, or `argv`.
@@ -57,6 +58,8 @@ behind it:
 - The `security` binary invocations, and how their arguments are constructed.
 - The `curl` invocations that carry an `Authorization` header, and anything
   that could redirect or intercept one.
+- The `codex app-server` exchanges Perch drives, the environment it hands that
+  process, and anything that could point one at a credential it did not check.
 - `perch holdings export` and `perch holdings import`: the passphrase prompt,
   the encryption, and anything that could leave plaintext behind on either side.
 
@@ -65,6 +68,6 @@ behind it:
 - Anything requiring an attacker who already has your unlocked login keychain.
   At that point the credentials are readable without Perch.
 - Anything requiring an attacker who can already run arbitrary code as your user.
-- The plaintext credential file itself, on a platform whose Claude Code uses
-  one. Perch narrows it to you alone and says so when it has to, but where
-  Claude Code puts a credential is Claude Code's decision, not Perch's.
+- The plaintext credential file itself, on a platform or a provider whose
+  client uses one. Perch narrows it to you alone and says so when it has to, but
+  where a client puts a credential is that client's decision, not Perch's.

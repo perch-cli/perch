@@ -8,6 +8,11 @@ sidebar:
 them: everything Perch holds, or one Scope of it. Neither touches the network
 unless you pass `--refresh`.
 
+Each provider has its own active Account. `perch status` reports one, and
+`perch list` marks it: the provider whose Accounts you hold, or with both held
+the Run preference, unless `--claude`, `--codex` or `--provider <name>` names
+the other.
+
 ## The Account you are on
 
 ```
@@ -35,7 +40,7 @@ $ perch list
                                                                       7-day   20%  (as of 4m ago)
 
 * is the active Account.
-overflow@example.com (as `overflow`): Anthropic would not renew its Credential.
+overflow@example.com (as `overflow`): the provider would not renew its Credential.
 `perch relogin overflow@example.com` repairs it.
 ```
 
@@ -65,7 +70,7 @@ Group `work`
 * is the active Account.
 Reserve: 1 of 1 Account has Headroom, the best 58% left (as of 4m ago)
 1 Quarantined, so nothing Cycles to it.
-overflow@example.com (as `overflow`): Anthropic would not renew its Credential.
+overflow@example.com (as `overflow`): the provider would not renew its Credential.
 `perch relogin overflow@example.com` repairs it.
 ```
 
@@ -106,7 +111,10 @@ Utilization   5-hour      42%  (as of just now)
 `--refresh` reads the Accounts about to be shown and no others: `perch status
 --refresh` reads the one you are on, `perch list <scope> --refresh` that
 Scope's, and `perch list --refresh` every Account Perch holds. Every Quota
-Window Anthropic reports is recorded, with when it resets.
+Window the provider reports is recorded, with when it resets. A Claude Account's
+windows are named `5-hour`, `7-day` and the per-model weekly ones; a Codex
+Account's are named for the limit its app-server reports, as
+`codex/primary/300m`.
 
 A read that fails leaves the cached figure standing and says so above the
 table. The command still succeeds:
@@ -144,7 +152,7 @@ $ perch status --json
     },
     "organization": "Acme",
     "plan": "pro",
-    "profile_dir": "/Users/you/.config/perch/profiles/you-example-com",
+    "profile_dir": "/Users/you/.config/perch/providers/claude/profiles/claude-4206ebf7d1d5bb1f78b812321decc32809cac5786ade33037181bbdd08da2e94",
     "quarantined": null,
     "utilization": {
       "never_observed": false,

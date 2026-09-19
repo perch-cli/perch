@@ -32,7 +32,16 @@ pub struct Section<'a> {
 
 impl<'a> Section<'a> {
     pub fn of(registry: &'a Registry, scope: config::Scope, now: DateTime<Utc>) -> Section<'a> {
-        let ranked = cycle::may_cycle_within(registry, &scope);
+        // One provider's Accounts, or no ranking: quota windows are not
+        // comparable across providers (ADR each-provider-has-a-default).
+        let held = scope.accounts(registry);
+        let ranked = cycle::may_cycle_within(registry, &scope)
+            && held
+                .iter()
+                .all(|account| account.provider() == registry.selected_provider())
+            && held
+                .iter()
+                .all(|account| account.provider().adapter().capabilities().live_switch);
         let accounts = match ranked {
             true => cycle::ranked(registry, &scope, now),
             false => scope.accounts(registry),
@@ -61,12 +70,12 @@ impl<'a> Section<'a> {
         self.ranked.then(|| Reserve::of(registry, &self.scope))
     }
 
-    /// The sentence a Scope preferring Fable is owed where the preference
-    /// matches nothing. Beside the ranking, because the Listing is where the
+    /// The sentence a Scope with a preferred workload is owed where the
+    /// preference matches nothing. Beside the ranking, because the Listing is where the
     /// ranking is said (ADR fable-is-spent-first).
     pub fn preference_note(&self, registry: &Registry) -> Option<String> {
         self.ranked
-            .then(|| cycle::fable_unmatched(registry, &self.scope))
+            .then(|| cycle::preference_unmatched(registry, &self.scope))
             .flatten()
     }
 
@@ -165,16 +174,19 @@ pub fn document(
     now: DateTime<Utc>,
 ) -> serde_json::Value {
     json!({
+        "id": account.key(),
         "email": account.email(),
+        "provider": account.provider(),
+        "workspace": account.provider_identity.as_ref().map(|identity| &identity.workspace_id),
         "account_uuid": account.identity.account_uuid,
-        "alias": alias_of.account(account.email()),
+        "alias": alias_of.account(account.key()),
         "group": account.group,
         // Present on every Account, unlike the cell above it: a script made to
         // test for a key's presence to learn a bool has a worse contract rather
         // than a truer one (ADR perch-says-what-it-did).
         "disabled": account.disabled,
         "quarantined": Quarantine::document(account.quarantine),
-        "active": registry.active().is_active(account.email()),
+        "active": registry.active().is_active(account.key()),
         "organization": account.identity.organization_name,
         "plan": account.plan,
         // `ok()` rather than `?`, because an address no directory can be named
@@ -251,10 +263,10 @@ mod tests {
     }
 
     fn named(mut accounts: Vec<&Account>) -> Vec<String> {
-        accounts.sort_by_key(|account| account.email().to_string());
+        accounts.sort_by_key(|account| account.key().to_string());
         accounts
             .into_iter()
-            .map(|account| account.email().to_string())
+            .map(|account| account.key().to_string())
             .collect()
     }
 
@@ -279,7 +291,10 @@ mod tests {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
         let mut registry = Registry::default();
         registry.upsert(crate::registry::Account {
-            identity: crate::probe::Identity {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: crate::domain::Identity {
                 email: "@".to_string(),
                 account_uuid: None,
                 organization_name: None,

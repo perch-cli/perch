@@ -1,9 +1,10 @@
 # A login Perch does not need
 
-Anyone installing Perch already has an Account logged into Claude Code. Perch
-copies that Credential into a Profile of its own and records the Account as
-active, rather than asking for a login it does not need. That is Adoption, and
-it happens on whichever command is run first.
+Anyone installing Perch already has an Account logged into the client they
+installed it for. Perch copies that Credential into a Profile of its own and
+records the Account as active, rather than asking for a login it does not need.
+That is Adoption, and it happens on whichever command is run first, once for
+each Provider that has a login to take.
 
 Adoption leaves two copies of one Credential — which is exactly where every
 Switch leaves things (ADR a-switch-is-written-down-first), so it starts the
@@ -13,11 +14,11 @@ system in its steady state rather than adding a case.
 
 Every Account after the first arrives through a login, and Perch never spends
 one in the Default Profile. The login runs in a config directory Perch made for
-it, at `perch_home/pending/login-<millis>`, with `CLAUDE_CONFIG_DIR` pointing
-the launched client there; what it leaves behind is moved into the Profile
-afterwards. A Profile is named after the Account it holds and which Account that
-is only becomes knowable once the login has finished, so the directory's name
-records the moment it started instead.
+it, at `perch_home/providers/<provider>/pending/login-<millis>`, with that
+Provider's own variable pointing the launched client there; what it leaves
+behind is moved into the Profile afterwards. A Profile is named after the
+Account it holds and which Account that is only becomes knowable once the login
+has finished, so the directory's name records the moment it started instead.
 
 The active Account is never read, never written and never logged out. Gaining an
 Account and repairing one (ADR a-broken-account-is-repaired) both leave the
@@ -49,9 +50,9 @@ terminal must never be reaped out from under them.
 That second condition is the same evidence every other write asks for
 (ADR a-profile-is-live-by-evidence): a session marker naming a process that is
 still the one that wrote it. The marker is Perch's own, because Perch is waiting
-on the login exactly as a Run waits on its client. A `claude` sitting on an
-OAuth prompt in a directory it has never had a session in is the least likely
-thing to write a marker, so depending on it would be the wrong way round.
+on the login exactly as a Run waits on its client. A client sitting on an OAuth
+prompt in a directory it has never had a session in is the least likely thing to
+write a marker, so depending on it would be the wrong way round.
 
 Reaping is silent and best-effort throughout, and a directory whose age cannot
 be established is left alone: being wrong in that direction costs a stale

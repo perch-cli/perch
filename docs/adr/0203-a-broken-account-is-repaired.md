@@ -1,12 +1,12 @@
 # A broken Account is repaired
 
 ADR a-switch-is-written-down-first leaves an Account whose Credential cannot be
-recovered — a Rotation lost between two writes, a refresh token Anthropic has
+recovered — a Rotation lost between two writes, a refresh token the provider has
 retired. Perch keeps that Account rather than dropping it: an Account that
 vanishes reads as data loss, while a broken one reads as something needing
 attention. The state is a Quarantine, and it carries the reason it was raised,
-because "broken" and "broken because Anthropic would not renew it" are different
-pieces of news.
+because "broken" and "broken because the provider would not renew it" are
+different pieces of news.
 
 Only a login produces a working Credential, so the repair is a login. It runs in
 a config directory of its own, exactly as `perch add`'s does
@@ -27,12 +27,12 @@ to whoever happened to be signed into the browser is not a repair.
 The one exception. Its fresh Credential is also written to the Default Profile,
 without a Capture.
 
-Leaving it out would repair an Account into a Profile nothing reads while Claude
-Code went on using the Credential that stopped working, and the ordinary way to
-make a Credential live — `perch switch` — declines to Switch to the Account that
-is already active. Capturing first would be worse than useless: what is live is
-the very Credential the login has just replaced, so the Capture would write the
-broken copy over the fresh one.
+Leaving it out would repair an Account into a Profile nothing reads while the
+client went on using the Credential that stopped working, and the ordinary way
+to make a Credential live — `perch switch` — declines to Switch to the Account
+that is already active. Capturing first would be worse than useless: what is
+live is the very Credential the login has just replaced, so the Capture would
+write the broken copy over the fresh one.
 
 ## Consequences
 

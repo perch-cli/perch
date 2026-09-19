@@ -84,7 +84,11 @@ fn a_new_group_name_declares_the_group_and_moves_the_account_into_it() {
     assert!(result.is_ok(), "{:?}", result.err());
     let registry = registry_of(&host);
     assert_eq!(
-        registry.account(EMAIL).unwrap().group.as_deref(),
+        registry
+            .account(&fixture_key(&host, EMAIL))
+            .unwrap()
+            .group
+            .as_deref(),
         Some("work"),
         "{printed}"
     );
@@ -110,7 +114,11 @@ fn a_refused_group_name_is_asked_again_rather_than_ending_the_wizard() {
 
     assert!(result.is_ok(), "{:?}", result.err());
     assert_eq!(
-        registry_of(&host).account(EMAIL).unwrap().group.as_deref(),
+        registry_of(&host)
+            .account(&fixture_key(&host, EMAIL))
+            .unwrap()
+            .group
+            .as_deref(),
         Some("work"),
         "{printed}"
     );
@@ -128,7 +136,9 @@ fn answering_a_setting_writes_it_through_config_set_and_says_so() {
 
     assert!(result.is_ok(), "{:?}", result.err());
     assert!(
-        registry_of(&host).group("work").unwrap().watcher_may_act,
+        registry_of(&host)
+            .settings(&perch::config::Scope::Group("work".to_string()))
+            .watcher_may_act,
         "{printed}"
     );
     assert_eq!(
@@ -239,7 +249,9 @@ fn end_of_input_keeps_every_step_already_answered() {
 
     assert!(result.is_ok(), "{:?}", result.err());
     assert!(
-        registry_of(&host).account(SECOND_EMAIL).is_some(),
+        registry_of(&host)
+            .account(&fixture_key(&host, SECOND_EMAIL))
+            .is_some(),
         "the Account added in step two is kept:\n{printed}"
     );
     assert_eq!(typed_forms(&printed), vec!["  perch add"], "{printed}");
@@ -292,4 +304,478 @@ fn nobody_at_the_terminal_is_refused_with_the_steps_listed() {
         );
     }
     assert_eq!(host.file(REGISTRY_PATH).unwrap(), before);
+}
+
+/// A Codex login for the fixtures below; synthetic claims, no usable token.
+fn codex_credential(workspace: &str, email: &str) -> String {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    let payload = URL_SAFE_NO_PAD.encode(
+        serde_json::json!({
+            "email": email,
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": "user-one",
+                "chatgpt_account_id": workspace,
+                "chatgpt_plan_type": "plus"
+            }
+        })
+        .to_string(),
+    );
+    serde_json::json!({
+        "auth_mode": "chatgpt",
+        "tokens": {"id_token": format!("fake.{payload}.fake"), "account_id": workspace}
+    })
+    .to_string()
+}
+
+/// Both CLIs on the machine, and every login from here on a Codex one.
+fn with_codex_installed(host: FakeHost, workspace: &str, email: &str) -> FakeHost {
+    let document = codex_credential(workspace, email);
+    host.with_file("/usr/bin/codex", "")
+        .with_login(move |host, at| {
+            host.set_file(at.join("auth.json"), &document);
+            0
+        })
+}
+
+/// Two Claude Accounts, one in `work`, and a Codex Account beside it in `work`.
+fn one_group_holding_both_providers() -> FakeHost {
+    let host = with_codex_installed(one_grouped_one_not(), "workspace-1", "person@example.com");
+    perch::commands::add::run(
+        &host,
+        perch::commands::add::AddArgs {
+            provider: perch::commands::selection::Selection {
+                codex: true,
+                ..Default::default()
+            },
+            alias: Some("personal".into()),
+            group: Some("work".into()),
+            ..Default::default()
+        },
+        &mut Vec::new(),
+    )
+    .expect("the Codex Account is added into `work`");
+    host
+}
+
+#[test]
+fn with_both_clis_installed_the_add_step_asks_which_provider_and_types_the_flag() {
+    let mut answers = enter_throughout();
+    // Yes to adding, Codex, Enter for the new Account's Group, then no more.
+    answers[0] = "y";
+    answers[1] = "codex";
+    let host = with_codex_installed(
+        machine_with_two_accounts(),
+        "workspace-1",
+        "person@example.com",
+    )
+    .with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed
+            .contains("Provider for the new Account [claude] (Enter keeps; `claude` or `codex`): "),
+        "{printed}"
+    );
+    assert!(
+        typed_forms(&printed).contains(&"  perch add --codex"),
+        "{printed}"
+    );
+    assert!(
+        registry_of(&host)
+            .accounts
+            .iter()
+            .any(|account| account.provider() == perch::providers::provider::Id::Codex),
+        "{printed}"
+    );
+}
+
+#[test]
+fn with_one_cli_installed_no_provider_is_asked() {
+    let host = logged_in_machine()
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
+        .with_answers(&["y", "none"]);
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(
+        !printed.contains("Provider for the new Account"),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_scope_holding_both_providers_asks_the_grant_per_provider() {
+    let mut answers = enter_throughout();
+    // Add, three Groups, `run-provider`, the Ungrouped Scope's four Settings,
+    // then `work`'s Strategy and workload; Claude Code's grant is the twelfth
+    // question and Codex's the thirteenth.
+    answers[11] = "true";
+    let host = one_group_holding_both_providers().with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains("`watcher-may-act` for Claude Code within Group `work` [false]"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("`watcher-may-act` for Codex within Group `work` [false]"),
+        "{printed}"
+    );
+    assert_eq!(
+        typed_forms(&printed),
+        vec!["  perch config set work --provider claude watcher-may-act true"],
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_mixed_scope_names_its_grant_with_the_provider_before_the_service_is_offered() {
+    let host = one_group_holding_both_providers().with_answers(&enter_throughout());
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(
+        printed.contains(
+            "Group `work` does not let the Watcher act: `perch config set work \
+             --provider claude watcher-may-act true` and `perch config set work \
+             --provider codex watcher-may-act true` first."
+        ),
+        "{printed}"
+    );
+}
+
+#[test]
+fn run_provider_is_asked_once_both_providers_hold_accounts_and_written_globally() {
+    let mut answers = enter_throughout();
+    // Add and three Groups come before it.
+    answers[4] = "codex";
+    let host = one_group_holding_both_providers().with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains(
+            "`run-provider` for a bare `perch run` [claude] (Enter keeps; `claude` or `codex`): "
+        ),
+        "{printed}"
+    );
+    assert!(
+        typed_forms(&printed).contains(&"  perch config set --global run-provider codex"),
+        "{printed}"
+    );
+    assert_eq!(
+        registry_of(&host).run_provider,
+        perch::providers::provider::Id::Codex
+    );
+}
+
+#[test]
+fn run_provider_is_not_asked_while_only_one_provider_holds_accounts() {
+    let host = one_grouped_one_not().with_answers(&enter_throughout());
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(!printed.contains("`run-provider`"), "{printed}");
+}
+
+#[test]
+fn a_scope_of_codex_accounts_alone_is_asked_its_settings() {
+    let host = with_codex_installed(one_grouped_one_not(), "workspace-1", "person@example.com");
+    perch::commands::add::run(
+        &host,
+        perch::commands::add::AddArgs {
+            provider: perch::commands::selection::Selection {
+                codex: true,
+                ..Default::default()
+            },
+            alias: Some("personal".into()),
+            group: Some("codex".into()),
+            ..Default::default()
+        },
+        &mut Vec::new(),
+    )
+    .expect("the Codex Account is added into `codex`");
+    let host = host.with_answers(&enter_throughout());
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("within Group `work`"), "{printed}");
+    assert!(
+        printed.contains("`strategy` within Group `codex`"),
+        "Codex Accounts Cycle, so their Scope is asked:\n{printed}"
+    );
+}
+
+#[test]
+fn an_account_sharing_its_email_across_providers_is_asked_for_by_alias_or_key() {
+    // The Codex login carries the first Claude Account's email.
+    let host = with_codex_installed(one_grouped_one_not(), "workspace-1", EMAIL);
+    perch::commands::add::run(
+        &host,
+        perch::commands::add::AddArgs {
+            provider: perch::commands::selection::Selection {
+                codex: true,
+                ..Default::default()
+            },
+            alias: Some("personal".into()),
+            no_group: true,
+            ..Default::default()
+        },
+        &mut Vec::new(),
+    )
+    .expect("the Codex Account is added");
+    let host = host.with_answers(&enter_throughout());
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(printed.contains("Group for personal ["), "{printed}");
+    assert!(
+        printed.contains(&format!("Group for {} [", fixture_key(&host, EMAIL))),
+        "the unaliased sharer is asked for by key:\n{printed}"
+    );
+    assert!(
+        !printed.contains(&format!("Group for {EMAIL} [")),
+        "a shared email names no Account:\n{printed}"
+    );
+}
+
+#[test]
+fn nobody_at_the_provider_question_stops_the_wizard_with_nothing_added() {
+    let host = with_codex_installed(
+        machine_with_two_accounts(),
+        "workspace-1",
+        "person@example.com",
+    )
+    .with_answers(&["y"]);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains("Provider for the new Account"),
+        "{printed}"
+    );
+    assert!(printed.contains("stops here"), "{printed}");
+    assert_eq!(registry_of(&host).accounts.len(), 2, "{printed}");
+}
+
+#[test]
+fn enter_at_the_provider_question_adds_what_a_bare_add_would() {
+    let mut answers = enter_throughout();
+    answers[0] = "y";
+    let host = machine_with_two_accounts()
+        .with_file("/usr/bin/codex", "")
+        .with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE))
+        .with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        typed_forms(&printed).contains(&"  perch add"),
+        "the kept default types the bare command, with no flag on it:\n{printed}"
+    );
+    let registry = registry_of(&host);
+    assert_eq!(registry.accounts.len(), 3, "{printed}");
+    assert!(
+        registry
+            .accounts
+            .iter()
+            .all(|account| account.provider() == perch::providers::provider::Id::Claude),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_word_that_names_no_provider_is_said_and_the_question_asked_again() {
+    let mut answers = enter_throughout();
+    answers[0] = "y";
+    answers[1] = "gemini";
+    answers[2] = "codex";
+    let host = with_codex_installed(
+        machine_with_two_accounts(),
+        "workspace-1",
+        "person@example.com",
+    )
+    .with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("Unknown provider gemini"), "{printed}");
+    assert_eq!(
+        printed.matches("Provider for the new Account").count(),
+        2,
+        "asked once more after the word was turned down:\n{printed}"
+    );
+    assert!(
+        registry_of(&host)
+            .accounts
+            .iter()
+            .any(|account| account.provider() == perch::providers::provider::Id::Codex),
+        "{printed}"
+    );
+}
+
+#[test]
+fn nobody_at_the_first_group_question_stops_the_wizard() {
+    let host = machine_with_two_accounts().with_answers(&["n"]);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("Group for "), "{printed}");
+    assert!(printed.contains("stops here"), "{printed}");
+    assert!(
+        registry_of(&host)
+            .accounts
+            .iter()
+            .all(|account| account.group.is_none()),
+        "{printed}"
+    );
+}
+
+#[test]
+fn nobody_at_the_first_setting_question_stops_the_wizard_before_the_service() {
+    // No to adding, then Enter for both Accounts' Groups.
+    let host = machine_with_two_accounts().with_answers(&["n", "", ""]);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("`interchangeable`"), "{printed}");
+    assert!(printed.contains("stops here"), "{printed}");
+    assert!(!printed.contains("Install the Watcher"), "{printed}");
+    assert!(!registry_of(&host).ungrouped.interchangeable, "{printed}");
+}
+
+#[test]
+fn nobody_at_the_grant_question_stops_the_wizard_with_the_earlier_answers_kept() {
+    // No to adding, two Groups, then `interchangeable`, `strategy` and
+    // `preferred-workload` before the grant.
+    let host = machine_with_two_accounts().with_answers(&["n", "", "", "true", "", ""]);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("`watcher-may-act`"), "{printed}");
+    assert!(printed.contains("stops here"), "{printed}");
+    let registry = registry_of(&host);
+    assert!(registry.ungrouped.interchangeable, "{printed}");
+    assert!(
+        !registry
+            .settings(&perch::config::Scope::Ungrouped)
+            .watcher_may_act,
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_value_a_setting_does_not_take_is_said_and_the_question_asked_again() {
+    let mut answers = enter_throughout();
+    answers[0] = "n";
+    answers[3] = "maybe";
+    answers[4] = "true";
+    let host = machine_with_two_accounts().with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains("`maybe` is not a value `interchangeable` takes."),
+        "{printed}"
+    );
+    assert!(registry_of(&host).ungrouped.interchangeable, "{printed}");
+    assert_eq!(
+        typed_forms(&printed),
+        vec!["  perch config set ungrouped interchangeable true"],
+        "{printed}"
+    );
+}
+
+#[test]
+fn nobody_at_the_run_provider_question_stops_the_wizard_before_any_setting() {
+    // No to adding, then Enter for each of the three Accounts' Groups.
+    let host = one_group_holding_both_providers().with_answers(&["n", "", "", ""]);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("`run-provider`"), "{printed}");
+    assert!(printed.contains("stops here"), "{printed}");
+    assert!(!printed.contains("`strategy`"), "{printed}");
+}
+
+#[test]
+fn a_word_that_names_no_provider_leaves_run_provider_asked_again() {
+    let mut answers = enter_throughout();
+    answers[4] = "gemini";
+    answers[5] = "codex";
+    let host = one_group_holding_both_providers().with_answers(&answers);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("Unknown provider gemini"), "{printed}");
+    assert_eq!(
+        registry_of(&host).run_provider,
+        perch::providers::provider::Id::Codex,
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_group_holding_no_accounts_is_asked_nothing_and_gates_nothing() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "empty");
+    let host = host.with_answers(&enter_throughout());
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(!printed.contains("within Group `empty`"), "{printed}");
+    assert!(
+        !printed.contains("Group `empty` does not let the Watcher act"),
+        "a Scope with nothing in it has nothing to Cycle:\n{printed}"
+    );
+}
+
+#[test]
+fn a_scope_that_has_granted_the_watcher_is_asked_only_for_what_it_still_lacks() {
+    let host = machine_with_two_accounts();
+    config_set(&host, &["ungrouped", "watcher-may-act", "true"])
+        .0
+        .expect("the grant takes");
+    let host = host.with_answers(&enter_throughout());
+
+    let (_, printed) = run_wizard(&host);
+
+    assert!(
+        printed.contains(
+            "The Ungrouped Scope does not let the Watcher act: `perch config set ungrouped \
+             interchangeable true` first."
+        ),
+        "the grant it already made is not asked for again:\n{printed}"
+    );
+}
+
+#[test]
+fn nobody_at_the_service_question_stops_the_wizard_with_nothing_installed() {
+    // No to adding, two Groups, then the Ungrouped Scope's four Settings.
+    let host = machine_with_two_accounts()
+        .with_platform(Platform::Other)
+        .with_answers(&["n", "", "", "", "", "", ""]);
+
+    let (result, printed) = run_wizard(&host);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(printed.contains("Install the Watcher"), "{printed}");
+    assert!(printed.contains("stops here"), "{printed}");
+    assert!(!host.path_exists(std::path::Path::new(UNIT)), "{printed}");
 }

@@ -25,6 +25,9 @@ use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy, clap::Args)]
 pub struct StatusArgs {
+    #[command(flatten)]
+    pub provider: crate::commands::selection::Selection,
+
     /// Read Utilization from Anthropic first
     #[arg(long)]
     pub refresh: bool,
@@ -35,7 +38,7 @@ pub struct StatusArgs {
 }
 
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
-    let mut viewing = crate::commands::Viewing::opened(host, args.refresh)?;
+    let mut viewing = crate::commands::Viewing::opened(host, args.refresh, args.provider)?;
     // Perch on nobody *because* a Switch was in flight is the answer to why the
     // absence is there rather than an absence to report, so it exits 0
     // (ADR a-switch-is-written-down-first).
@@ -79,7 +82,7 @@ fn active_email(registry: &Registry) -> Result<String> {
         .whose()
         .and_then(|email| registry.account(email))
     {
-        Some(account) => Ok(account.email().to_string()),
+        Some(account) => Ok(account.key().to_string()),
         None => Err(registry::no_active_account(registry, "")),
     }
 }
@@ -101,7 +104,11 @@ fn render_human(
     }
 
     let labeled = column::Labeled::the_account_column();
-    labeled.write(out, "Account", &Shown::of(account.email()))?;
+    labeled.write(
+        out,
+        "Account",
+        &Shown::of(&registry.named_for_the_user(account.key())),
+    )?;
     if let Some(organization) = &account.identity.organization_name {
         labeled.write(out, "Organization", &Shown::of(organization))?;
     }
@@ -118,7 +125,7 @@ fn render_human(
             &Shown::of(&format!(
                 "{}. {}",
                 why.because(),
-                registry::how_to_repair(account.email())
+                registry::how_to_repair(account.key())
             )),
         )?;
     }

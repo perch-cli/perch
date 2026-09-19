@@ -362,6 +362,40 @@ fn indent_to_match(block: &str, indentation: usize) -> Secret {
     written
 }
 
+/// Duplicate names cannot silently discard an Account or a secret artifact.
+pub(crate) fn unique_map<'de, D, K, V>(
+    deserializer: D,
+) -> Result<std::collections::BTreeMap<K, V>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    K: serde::Deserialize<'de> + Ord,
+    V: serde::Deserialize<'de>,
+{
+    struct Unique<K, V>(std::marker::PhantomData<(K, V)>);
+    impl<'de, K: serde::Deserialize<'de> + Ord, V: serde::Deserialize<'de>> serde::de::Visitor<'de>
+        for Unique<K, V>
+    {
+        type Value = std::collections::BTreeMap<K, V>;
+        fn expecting(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            out.write_str("an object with unique names")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut entries = std::collections::BTreeMap::new();
+            while let Some(key) = map.next_key::<K>()? {
+                if entries.contains_key(&key) {
+                    return Err(serde::de::Error::custom("duplicate object name"));
+                }
+                entries.insert(key, map.next_value()?);
+            }
+            Ok(entries)
+        }
+    }
+    deserializer.deserialize_map(Unique(std::marker::PhantomData))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,6 +758,75 @@ mod tests {
             written.len(),
             "and in exactly the room they take: anything larger is a reserve \
              that was guessed, anything smaller is impossible"
+        );
+    }
+
+    /// A key is a string a `:` follows. `.claude.json` is keyed by directory and
+    /// holds strings people wrote, so a value spelled like the key is ordinary
+    /// rather than exotic — and splicing over it would move somebody's data.
+    #[test]
+    fn a_string_value_spelled_like_the_key_is_not_mistaken_for_the_key() {
+        let contents = r#"{
+  "lastOnboardingVersion": "projects",
+  "projects": {"/Users/someone/work": {}}
+}"#;
+
+        assert_eq!(
+            value_at(contents, "projects"),
+            Some(r#"{"/Users/someone/work": {}}"#),
+            "the member is the one a `:` follows"
+        );
+    }
+
+    /// A document that stops part way through a value: the scan runs off the end
+    /// and answers nothing, rather than splicing over the span it guessed.
+    #[test]
+    fn a_document_that_stops_part_way_through_a_value_has_no_value_to_read() {
+        for truncated in [
+            r#"{"projects": {"/Users/someone/work": {}"#,
+            r#"{"projects": ["one", "two""#,
+            r#"{"projects": "unterminated"#,
+        ] {
+            assert_eq!(value_at(truncated, "projects"), None, "{truncated}");
+            assert_eq!(
+                text_at(truncated, "projects", "{}"),
+                None,
+                "and there is nowhere to write one either: {truncated}"
+            );
+        }
+    }
+
+    /// Two names one map cannot hold. Refused rather than taking the last,
+    /// which is `serde_json`'s default and would drop an Account silently — and
+    /// what the object had to be is said, for a value that is no object at all.
+    #[test]
+    fn an_object_with_a_name_twice_is_refused_and_so_is_one_that_is_not_an_object() {
+        #[derive(Debug, serde::Deserialize)]
+        struct Keyed {
+            #[serde(deserialize_with = "unique_map")]
+            accounts: std::collections::BTreeMap<String, u8>,
+        }
+
+        let read = |text: &str| serde_json::from_str::<Keyed>(text);
+
+        assert_eq!(
+            read(r#"{"accounts": {"one": 1, "two": 2}}"#)
+                .expect("two names is two entries")
+                .accounts
+                .len(),
+            2
+        );
+        assert!(
+            read(r#"{"accounts": {"one": 1, "one": 2}}"#)
+                .expect_err("one name twice")
+                .to_string()
+                .contains("duplicate object name")
+        );
+        assert!(
+            read(r#"{"accounts": 5}"#)
+                .expect_err("a number is no object")
+                .to_string()
+                .contains("an object with unique names")
         );
     }
 }

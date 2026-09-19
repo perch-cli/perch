@@ -12,7 +12,6 @@ mod common;
 
 use chrono::Duration;
 use common::*;
-use perch::anthropic::{PROFILE_URL, USAGE_URL};
 use perch::error::{
     EXIT_HELD, EXIT_INVALID, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NO_CANDIDATE, EXIT_NOT_FOUND,
     EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO, EXIT_OK,
@@ -78,7 +77,7 @@ fn one_check_switches_and_reports_it_in_the_exit_code() {
         "and nothing a scheduler could have read off the guide (ADR perch-says-what-it-did): \
          {decision}"
     );
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY));
     assert!(
         waits(&host).is_empty(),
         "it exits rather than waiting for anything: scheduling is the \
@@ -108,7 +107,7 @@ fn a_check_under_the_threshold_exits_fifteen_and_changes_nothing() {
         "and the whole of it, because a round that did what it was asked to do \
          has nothing to explain"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
     assert_eq!(
         host.sent_to(USAGE_URL).len(),
         1,
@@ -129,7 +128,7 @@ fn a_check_with_nowhere_to_go_exits_seventeen() {
     let decision = decision(&printed);
     assert!(decision.contains("nowhere"), "{decision}");
     assert!(decision.contains("exhausted"), "and why: {decision}");
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 #[test]
@@ -157,7 +156,7 @@ fn a_check_that_could_not_read_a_current_figure_exits_twenty() {
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing was switched on a figure Perch already had"
     );
 }
@@ -176,7 +175,7 @@ fn a_check_on_a_quarantined_account_holds_and_names_the_repair() {
         decision.contains("perch relogin"),
         "and the line says what repairs it: {decision}"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 #[test]
@@ -222,7 +221,7 @@ fn a_grant_said_about_a_group_leaves_the_ungrouped_accounts_alone() {
     );
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing moved underneath them, at 99% used and an empty Account \
          beside it (ADR a-group-is-a-declaration)"
     );
@@ -249,7 +248,7 @@ fn a_check_on_ungrouped_accounts_declared_interchangeable_still_needs_the_watche
             .contains("perch config set ungrouped watcher-may-act true"),
         "and the Scope is addressed the way every other one is: {refusal}"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 #[test]
@@ -272,7 +271,7 @@ fn a_check_switches_among_ungrouped_accounts_once_both_declarations_are_made() {
         EXIT_OK
     );
     assert!(decision(&printed).contains("switched"), "{printed}");
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -298,7 +297,7 @@ fn a_check_among_ungrouped_accounts_paces_the_next_one() {
         EXIT_NOTHING_TO_DO
     );
     assert!(decision(&printed).contains("cooling"), "{printed}");
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY));
 }
 
 #[test]
@@ -323,7 +322,7 @@ fn the_cooldown_holds_between_one_check_and_the_next() {
 
     let (first, _) = run_watch_once(&host);
     assert_eq!(first.expect("it switched"), EXIT_OK);
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(SECOND_KEY));
 
     // Cron comes back five minutes later, well inside the fifteen.
     host.set_now(host.now() + Duration::minutes(5));
@@ -344,7 +343,7 @@ fn the_cooldown_holds_between_one_check_and_the_next() {
     assert!(decision.contains("15 minutes"), "{decision}");
     assert_eq!(
         active(&host).as_deref(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "and nothing moved: {printed}"
     );
 
@@ -354,7 +353,7 @@ fn the_cooldown_holds_between_one_check_and_the_next() {
 
     assert_eq!(third.expect("it switched"), EXIT_OK);
     assert!(printed.contains("switched"), "{printed}");
-    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(active(&host).as_deref(), Some(KEY));
 }
 
 #[test]
@@ -366,14 +365,14 @@ fn a_check_records_when_it_switched() {
 
     run_watch_once(&host).0.expect("nothing to do");
     assert!(
-        registry_of(&host).checks.is_empty(),
+        registry_of(&host).state().checks.is_empty(),
         "a check that changed nothing paces nothing"
     );
 
     host.set_now(switched_at + Duration::minutes(30));
     run_watch_once(&host).0.expect("it switched");
 
-    let checks = registry_of(&host).checks;
+    let checks = registry_of(&host).state().checks.clone();
     let recorded = checks.get("work").expect("the Group it Switched within");
     assert_eq!(recorded.switched_at, switched_at + Duration::minutes(30));
 }
@@ -396,7 +395,7 @@ fn a_switch_the_machine_turned_away_exits_fifteen_and_says_so() {
     assert!(decision.contains("86% used"), "{decision}");
     assert_eq!(
         active(&host).as_deref(),
-        Some(EMAIL),
+        Some(KEY),
         "and nothing was changed"
     );
     assert_eq!(
@@ -426,7 +425,7 @@ fn a_check_stopped_by_something_that_will_not_clear_itself_exits_on_it() {
         "the code the failure earned, not the one that means come back in five \
          minutes: {failed}"
     );
-    assert_eq!(active(&host).as_deref(), Some(EMAIL), "and nothing moved");
+    assert_eq!(active(&host).as_deref(), Some(KEY), "and nothing moved");
     assert!(
         !printed.contains("refused"),
         "a decision line would say the check had decided something: {printed}"
@@ -457,8 +456,11 @@ fn a_check_with_nobody_active_says_there_is_nothing_to_watch() {
 
 #[test]
 fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed() {
-    let host =
-        checked(&[95.0], &[10.0]).with_a_path_refusing(REGISTRY_PATH, Refusing::Write, "read-only");
+    let host = checked(&[95.0], &[10.0]).with_a_path_refusing(
+        "/Users/someone/.config/perch/providers/claude/state.json",
+        Refusing::Write,
+        "read-only",
+    );
 
     let (result, printed) = run_watch_once(&host);
 
@@ -472,7 +474,10 @@ fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed()
     let failed = result.expect_err("a record that will not take the Switch stops the check");
     // Rendered as the Host built it rather than as the constant spells it: the Registry
     // is reached by joining, so the separators are the platform's.
-    let registry = perch::holdings::registry_path(&host).expect("home is known");
+    let registry = perch::providers::provider::Id::Claude
+        .home(&host)
+        .map(|home| home.join("state.json"))
+        .expect("home is known");
     assert!(
         failed.to_string().contains(&registry.display().to_string()),
         "and what could not be written is named: {failed}"
@@ -492,11 +497,11 @@ fn a_check_that_switched_and_then_failed_still_paces_the_next_one() {
     result.expect_err("the Switch went live and then could not be finished");
     assert_eq!(
         active(&host).as_deref(),
-        Some(SECOND_EMAIL),
+        Some(SECOND_KEY),
         "the Credential moved, so which Account is active moved with it"
     );
 
-    let checks = registry_of(&host).checks;
+    let checks = registry_of(&host).state().checks.clone();
     let recorded = checks
         .get("work")
         .expect("a check that moved records that it moved");

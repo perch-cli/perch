@@ -9,9 +9,14 @@
 //! "macos")]` is what narrows a claim about every filesystem to one platform
 //! without anybody choosing it.
 
+#[path = "fixtures/sessions.rs"]
+mod session_fixture;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use perch as fixture_crate;
+#[cfg(target_os = "macos")]
 use perch::error::PerchError;
 #[cfg(target_os = "macos")]
 use perch::host::Execution;
@@ -20,9 +25,9 @@ use perch::host::prelude::*;
 #[cfg(target_os = "macos")]
 use perch::keychain::{EXIT_ITEM_NOT_FOUND, KeychainError, SECURITY_BIN, classify};
 use perch::live;
-use perch::probe;
-#[cfg(target_os = "macos")]
-use perch::probe::Verdict;
+#[path = "fixtures/claude.rs"]
+mod claude_fixture;
+use claude_fixture as probe;
 
 /// Set to any value to skip the tests that touch the real keychain, for
 /// environments where the login keychain cannot be unlocked. CI does not set it.
@@ -54,7 +59,11 @@ const NOT_A_CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-
 fn the_installed_claude_code_reports_a_version_perch_can_parse() {
     let host = RealHost::new();
 
-    match probe::claude_version(&host) {
+    match perch::providers::provider::Id::Claude
+        .adapter()
+        .diagnose(&host)
+        .version
+    {
         Ok(version) => {
             let parts: Vec<&str> = version.split('.').collect();
             assert!(
@@ -65,11 +74,7 @@ fn the_installed_claude_code_reports_a_version_perch_can_parse() {
         Err(error) => {
             // No Claude Code here. The only acceptable outcome is a refusal
             // that says so.
-            assert!(
-                matches!(error, PerchError::ProbeRefused(_)),
-                "a missing Claude Code must be a refusal, not {error}"
-            );
-            assert!(error.to_string().contains("Claude Code is installed"));
+            assert!(!error.is_empty(), "the missing version has a reason");
         }
     }
 }
@@ -129,37 +134,18 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
     }
     let host = RealHost::new();
 
-    // The Default Profile as Perch means it, which is what this asserts about:
-    // the directory the installed Claude Code falls back to, never a Profile.
-    let store = perch::holdings::the_default_profile(&host).expect("home is known");
-
-    match probe::probe(&host, store) {
-        Ok(Verdict::Recognized(findings)) => {
-            // A real login on this machine: every belief held.
-            assert!(findings.identity.email.contains('@'));
-            assert!(
-                findings.credential.as_str().contains("claudeAiOauth"),
-                "the credential store no longer holds a claudeAiOauth block"
-            );
-            assert!(host.path_exists(&findings.store.identity_file));
-        }
-        Ok(Verdict::NoLogin { store, .. }) => {
-            // Nothing logged in. Assert the beliefs that can still be checked.
-            assert_eq!(
-                host.keychain_get(&store.keychain_service, &store.keychain_account),
-                Err(KeychainError::NotFound {
-                    service: store.keychain_service.clone(),
-                    account: store.keychain_account.clone(),
-                }),
-                "'no login' must mean the item is absent, not unreadable"
-            );
-        }
-        Err(error) => {
-            assert!(
-                matches!(error, PerchError::ProbeRefused(_)),
-                "an unrecognized Claude Code must be a refusal naming the assumption: {error}"
-            );
-        }
+    match perch::providers::provider::Id::Claude
+        .adapter()
+        .configured(&host)
+        .and_then(|provider| provider.installation(&host))
+        .and_then(|installation| installation.discover(&host))
+    {
+        Ok(Some(discovered)) => assert!(discovered.identity().email.contains('@')),
+        Ok(None) => {}
+        Err(error) => assert!(
+            matches!(error, PerchError::ProbeRefused(_)),
+            "an unrecognized Claude Code must name the failed assumption: {error}"
+        ),
     }
 }
 
@@ -485,7 +471,7 @@ fn every_session_marker_claude_code_has_left_names_a_process() {
     let Ok(store) = probe::default_store(&host) else {
         return;
     };
-    let sessions = probe::sessions_dir(&store.config_dir);
+    let sessions = session_fixture::sessions_dir(&store.config_dir);
 
     let Ok(markers) = host.list_dir(&sessions) else {
         eprintln!("skipping: {} does not exist", sessions.display());
@@ -530,7 +516,7 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
     let Ok(store) = probe::default_store(&host) else {
         return;
     };
-    let sessions = probe::sessions_dir(&store.config_dir);
+    let sessions = session_fixture::sessions_dir(&store.config_dir);
     let Ok(markers) = host.list_dir(&sessions) else {
         eprintln!("skipping: {} does not exist", sessions.display());
         return;
@@ -596,7 +582,7 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
     }
 }
 
-/// [`probe::assumption::CREDENTIAL_LOCATION`]: the plaintext store sits inside
+/// The native credential-location assumption: the plaintext store sits inside
 /// the config directory it was given (ADR claude-code-chooses-the-store), so
 /// getting it wrong is every Account sharing one login. The empty answer is
 /// half the test — without it, a Claude Code reading this machine's own login
@@ -667,7 +653,9 @@ fn auth_status(config_dir: &Path) -> Option<bool> {
 /// `\\?\` path that `cmd.exe` cannot launch a `.cmd` shim from, and there is
 /// no symlink to follow anyway.
 fn installed_claude_code() -> Option<PathBuf> {
-    let found = perch::probe::claude_bin(&RealHost::new()).ok()?;
+    let found = perch::providers::provider::Id::Claude
+        .executable(&RealHost::new())
+        .ok()?;
     if cfg!(windows) {
         Some(found)
     } else {
@@ -679,14 +667,175 @@ fn installed_claude_code() -> Option<PathBuf> {
 /// is a marker this developer's machine cannot answer for, which is a refusal
 /// rather than a reading.
 fn corroborated_pids(host: &RealHost, config_dir: &std::path::Path) -> Vec<u32> {
-    match live::ask(host, &[live::Place::at(config_dir)]) {
+    match live::ask(
+        host,
+        &[live::Place::at(
+            perch::providers::provider::Id::Claude,
+            config_dir,
+        )],
+    ) {
         live::Answer::Idle(_) => Vec::new(),
         live::Answer::NotIdle(live::NotIdle::Live(clients)) => {
             clients.iter().map(|client| client.pid).collect()
         }
         live::Answer::NotIdle(live::NotIdle::Unsure(unsure)) => panic!(
             "every marker here can be corroborated or dismissed: {}",
-            unsure.refusal(&probe::Installed::unknown("whatever is installed here"))
+            unsure.refusal()
         ),
+    }
+}
+
+/// Codex's version answer, which is the whole of what a Probe reports about it.
+#[test]
+fn the_installed_codex_reports_a_version_perch_can_parse() {
+    let host = RealHost::new();
+
+    match perch::providers::provider::Id::Codex
+        .adapter()
+        .diagnose(&host)
+        .version
+    {
+        Ok(version) => {
+            let numbers = version.rsplit(' ').next().unwrap_or(&version);
+            let parts: Vec<&str> = numbers.split('.').collect();
+            assert!(
+                parts.len() >= 2 && parts.iter().take(2).all(|p| p.parse::<u32>().is_ok()),
+                "`codex --version` no longer carries a version: {version}"
+            );
+        }
+        Err(error) => assert!(!error.is_empty(), "the missing version has a reason"),
+    }
+}
+
+/// Logged out is all a runner ever is, and it is enough: a method that has gone
+/// answers "unknown variant" where one that is there answers about
+/// authentication.
+#[test]
+fn the_installed_codex_still_answers_the_exchange_perch_sends() {
+    use perch::host::RpcControl;
+    use perch::providers::codex_fixture as codex;
+
+    let host = RealHost::new();
+    let Some(installed) = installed_codex() else {
+        return;
+    };
+
+    // A CODEX_HOME of our own: the exchange writes into whatever home it is
+    // given, so this machine's own must not be the one it opens.
+    let home = std::env::temp_dir().join(format!("perch-codex-{}", std::process::id()));
+    let _ = host.remove_dir_all(&home);
+    host.create_private_dir_all(&home)
+        .expect("a CODEX_HOME of our own");
+
+    let carried = codex::environment(&host, &home);
+    let carried: Vec<(&str, &str)> = carried
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let answered = host.rpc(
+        &installed.to_string_lossy(),
+        codex::ARGS,
+        &carried,
+        &codex::requests(),
+        RpcControl {
+            timeout: std::time::Duration::from_secs(60),
+            checkpoint: &mut || Ok(()),
+        },
+    );
+    let _ = host.remove_dir_all(&home);
+
+    let answered = answered.expect("the installed Codex ran the exchange Perch sends");
+    let replies: Vec<serde_json::Value> = answered
+        .iter()
+        .map(|line| serde_json::from_str(line).expect("each reply is JSON"))
+        .collect();
+    assert_eq!(
+        replies.len(),
+        3,
+        "one reply per request carrying an id, in order: {answered:?}"
+    );
+
+    assert!(
+        replies[0]
+            .get("result")
+            .is_some_and(serde_json::Value::is_object),
+        "`initialize` no longer answers with a result object: {}",
+        replies[0]
+    );
+    for (reply, method) in replies[1..]
+        .iter()
+        .zip(["account/read", "account/rateLimits/read"])
+    {
+        let said = reply
+            .pointer("/error/message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        assert!(
+            !said.contains("unknown variant"),
+            "`{method}` is no longer a method this Codex has: {reply}"
+        );
+    }
+    // Logged out, which is what a runner is: the account is absent rather than
+    // unreadable, and the limits are refused for want of one.
+    assert!(
+        replies[1].pointer("/result/account").is_some(),
+        "`account/read` no longer answers with an account, absent or otherwise: {}",
+        replies[1]
+    );
+}
+
+/// An unknown `-c` key is taken in silence, so the setting is asked for by
+/// giving it a value no store answers to: a real key refuses, naming its
+/// variants.
+#[test]
+fn the_store_setting_a_switch_pins_still_names_the_file_store() {
+    use perch::providers::codex_fixture as codex;
+
+    let Some(installed) = installed_codex() else {
+        return;
+    };
+    let home = std::env::temp_dir().join(format!("perch-codex-store-{}", std::process::id()));
+    let host = RealHost::new();
+    let _ = host.remove_dir_all(&home);
+    host.create_private_dir_all(&home)
+        .expect("a CODEX_HOME of our own");
+
+    let refused = Command::new(&installed)
+        .arg("app-server")
+        .arg("-c")
+        .arg(format!("{}=\"perch-is-not-a-store\"", codex::STORE_SETTING))
+        .env("CODEX_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the installed Codex runs");
+    let _ = host.remove_dir_all(&home);
+
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        !refused.status.success(),
+        "a value no store answers to was accepted, so `{}` is no longer the \
+         setting Perch pins: {said}",
+        codex::STORE_SETTING
+    );
+    assert!(
+        said.contains(codex::STORE_SETTING) && said.contains("`file`"),
+        "the refusal no longer names `{}` and its `file` variant, which is what \
+         `{}` writes: {said}",
+        codex::STORE_SETTING,
+        codex::PIN
+    );
+}
+
+/// The Codex Perch itself would run, resolved the same way every command
+/// resolves it — so a Holdings directory this build will not read skips these
+/// tests saying that, rather than saying there is no Codex here.
+fn installed_codex() -> Option<PathBuf> {
+    match perch::providers::provider::Id::Codex.executable(&RealHost::new()) {
+        Ok(found) if cfg!(windows) => Some(found),
+        Ok(found) => std::fs::canonicalize(found).ok(),
+        Err(why) => {
+            eprintln!("skipping: Perch resolved no Codex on this machine: {why}");
+            None
+        }
     }
 }

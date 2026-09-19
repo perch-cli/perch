@@ -10,7 +10,7 @@ arrangements, and the policy is this record.
 Five numbers pace it — the interval between Refreshes, the Back-off after a
 Refresh that could not be read, the Cooldown between two Switches, the Margin
 under the Threshold, and the Threshold itself. **The Threshold and the Margin
-are the two anyone sets.** The other three are arithmetic, about Anthropic's
+are the two anyone sets.** The other three are arithmetic, about the provider's
 allowance or about how fast a Quota Window moves, and a Setting is where
 somebody's preference enters rather than where a derivation is retyped. A Group
 that could poll every ten seconds would be a Group configured to be refused.
@@ -22,6 +22,12 @@ and a half minutes is twenty-four of them, which leaves room for the
 `perch status --refresh` somebody types while the Watcher is running: a loop
 that spent the whole allowance would answer the user's own question with a
 throttle.
+
+One interval serves every Provider, derived from the tightest allowance Perch
+knows of. A Provider whose reads cost less is therefore polled less often than
+it could be, which costs a little freshness; a number per Provider would cost a
+derivation to keep true for each one, and nothing in the loop gets better by
+spending an allowance faster.
 
 **The room is guarded rather than merely left.** Four to six reads an hour is
 thin, and the failure runs the wrong way: a person refreshing the Account they
@@ -247,7 +253,7 @@ was for is kept here instead, at no surface at all:
 
 ## The Threshold is the preference the Margin is measured from
 
-How full is too full cannot be derived from Anthropic's allowance or from the
+How full is too full cannot be derived from a provider's allowance or from the
 length of a window. Somebody who never wants to hit a wall mid-task sets 60;
 somebody squeezing every drop sets 95; both are coherent, and nothing in the
 endpoint's behavior prefers either. It is the one place a person's appetite for
@@ -339,9 +345,9 @@ failed has left the machine part way through, and a Watcher that carried on
 polling would be deciding what to do next about a machine nobody has looked at.
 
 Everything the Watcher does when it acts is a Switch, whole: the outgoing
-Credential is Captured first (ADR a-switch-is-written-down-first), Claude Code's
-locks are taken, and a Live Profile's token is never Renewed. Running while
-Claude Code is working is the normal case rather than the exception.
+Credential is Captured first (ADR a-switch-is-written-down-first), the client's
+locks are taken where it has any, and a Live Profile's token is never Renewed.
+Running while a client is working is the normal case rather than the exception.
 
 `perch config` carries three Watcher Settings — `watcher-may-act`,
 `watcher-threshold-percent` and `watcher-margin-percent` — beside `strategy`,

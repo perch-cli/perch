@@ -341,4 +341,43 @@ mod tests {
     fn hex_that_is_not_text_is_returned_as_it_came() {
         assert_eq!(decode_password_output("FFFE\n"), "FFFE");
     }
+
+    /// The one distinction that matters, and what is said when `security` will
+    /// not say: exit 44 is the item not being there, anything else is the
+    /// keychain being unavailable, and a failure that said nothing is reported
+    /// by its status rather than as an empty detail.
+    #[test]
+    fn a_security_that_failed_without_a_word_is_reported_by_its_exit_status() {
+        let failed = |status: i32, stderr: &str| {
+            classify(
+                &Execution {
+                    status,
+                    stdout: String::new(),
+                    stderr: stderr.to_string(),
+                },
+                "Claude Code-credentials",
+                "someone",
+            )
+        };
+
+        assert_eq!(
+            failed(EXIT_ITEM_NOT_FOUND, ""),
+            KeychainError::NotFound {
+                service: "Claude Code-credentials".to_string(),
+                account: "someone".to_string(),
+            }
+        );
+        assert_eq!(
+            failed(1, "  \n"),
+            KeychainError::Unavailable {
+                detail: "security exited 1".to_string()
+            }
+        );
+        assert_eq!(
+            failed(51, "User interaction is not allowed.\n"),
+            KeychainError::Unavailable {
+                detail: "User interaction is not allowed.".to_string()
+            }
+        );
+    }
 }

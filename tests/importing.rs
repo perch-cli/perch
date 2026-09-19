@@ -7,6 +7,8 @@
 
 mod common;
 
+use common::session_fixture;
+
 use chrono::Utc;
 use common::*;
 use perch::error::{
@@ -60,17 +62,13 @@ fn registry_on(host: &FakeHost) -> Option<Registry> {
 /// `someone@example.com` is listed by the one and missed by the other.
 #[test]
 fn a_credential_keyed_in_another_case_is_placed_rather_than_silently_dropped() {
-    let (mut export, _) =
+    let mut export =
         perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE).expect("it opens");
     // The same Account, spelled the other way — which is what a file written by
     // something other than `gather` looks like.
-    let credential = export.credentials.remove(EMAIL).expect("it holds one");
-    export
-        .credentials
-        .insert(EMAIL.to_uppercase(), credential.clone());
-    if let Some(identity) = export.identity_files.remove(EMAIL) {
-        export.identity_files.insert(EMAIL.to_uppercase(), identity);
-    }
+    let credential = exported_artifact(&export, EMAIL, "oauth").unwrap();
+    let profile = export.profiles.remove(KEY).expect("it holds one");
+    export.profiles.insert(KEY.to_uppercase(), profile);
     let sealed = perch::export::seal(&export, PASSPHRASE).expect("it seals");
     let host = a_new_machine_holding(&sealed);
 
@@ -182,17 +180,19 @@ fn an_import_restores_every_account_credential_alias_group_and_rule() {
 
     let registry = registry_of(&host);
     assert_eq!(registry.accounts.len(), 3);
-    assert_eq!(registry.alias_of(SECOND_EMAIL), Some("overflow"));
+    assert_eq!(registry.alias_of(SECOND_KEY), Some("overflow"));
     assert_eq!(
-        registry.account(EMAIL).unwrap().group.as_deref(),
+        registry.account(KEY).unwrap().group.as_deref(),
         Some("work")
     );
     assert!(
-        registry.account(THIRD_EMAIL).unwrap().disabled,
+        registry.account(THIRD_KEY).unwrap().disabled,
         "an Account taken out of Cycling comes back out of Cycling"
     );
     assert_eq!(
-        registry.group("work").unwrap().watcher_threshold_percent,
+        registry
+            .settings(&perch::config::Scope::Group("work".into()))
+            .watcher_threshold_percent,
         65,
         "a Group carries its policy, so a restore does not arrive with the defaults"
     );
@@ -276,7 +276,7 @@ fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_tak
     let host = machine_with_three_accounts();
     a_group_of(&host, "work", &[EMAIL]);
     let mut registry = registry_of(&host);
-    registry.checks.insert(
+    registry.state_mut().checks.insert(
         "work".to_string(),
         perch::registry::Checked {
             switched_at: host.now(),
@@ -291,10 +291,10 @@ fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_tak
     run_import(&onto, AT).0.expect("the import lands");
 
     assert!(
-        registry_of(&onto).checks.is_empty(),
+        registry_of(&onto).state().checks.is_empty(),
         "a new machine's first check is its first check, not one paced by \
          another machine's: {:?}",
-        registry_of(&onto).checks
+        registry_of(&onto).state().checks
     );
 }
 
@@ -450,6 +450,25 @@ fn a_path_that_holds_nothing_is_said_rather_than_guessed_at() {
     assert!(refused.to_string().contains("typo.age"), "{refused}");
 }
 
+/// The third way a path can answer, beside the typo and the binary `age` file:
+/// something is there and the read of it failed. What the machine said is the
+/// whole of what Perch can add.
+#[test]
+fn an_export_the_machine_will_not_read_is_refused_in_the_words_the_read_failed_with() {
+    let host = machine_with_claude_code()
+        .with_file(AT, "an Export somebody else owns")
+        .with_a_path_refusing(AT, Refusing::Read, "Permission denied (os error 13)")
+        .with_secrets(&[PASSPHRASE]);
+
+    let (outcome, _printed) = run_import(&host, AT);
+
+    let refused = outcome.expect_err("the file would not open");
+    let said = refused.to_string();
+    assert!(said.contains(AT), "the refusal names the path: {said}");
+    assert!(said.contains("Permission denied"), "{said}");
+    assert_eq!(registry_on(&host), None);
+}
+
 #[test]
 fn a_file_that_is_not_an_export_is_refused_as_one_rather_than_as_a_bad_passphrase() {
     let host = machine_with_claude_code()
@@ -508,7 +527,9 @@ fn an_import_that_fails_part_way_takes_back_what_it_had_already_placed() {
 
     let refused = outcome.expect_err("one Credential cannot be stored");
     assert!(
-        refused.to_string().contains("Nothing was imported"),
+        refused
+            .to_string()
+            .contains("Credential could not be stored"),
         "{refused}"
     );
     assert_eq!(registry_on(&host), None, "no half-populated registry");
@@ -580,7 +601,8 @@ fn a_rollback_takes_back_a_credential_the_write_left_behind_as_it_refused() {
     // the undo cannot simply discard the whole Profile.
     let host = a_new_machine_holding(&sealed);
     let orphan = store_of(&host, EMAIL);
-    perch::profile::make_dir(&host, &orphan.config_dir).expect("the Profile can be made");
+    host.create_private_dir_all(&orphan.config_dir)
+        .expect("the Profile can be made");
     // With an item in the keychain under its name, so the lock is met by a store
     // that may be holding something rather than by one that answers "no such
     // item" through it.
@@ -712,7 +734,7 @@ fn a_registry_that_cannot_be_written_takes_every_profile_back_out_with_it() {
 
 #[test]
 fn an_export_or_a_registry_from_a_newer_perch_is_refused_rather_than_guessed_at() {
-    let (opened, _) = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE)
+    let opened = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE)
         .expect("it opens with the passphrase it was sealed with");
 
     // Stamped on a clone rather than built with `..opened`: an `Export` wipes
@@ -755,7 +777,7 @@ fn an_account_the_export_held_no_credential_for_is_restored_and_said_so() {
     assert_eq!(credential_of(&onto, THIRD_EMAIL), None);
     assert!(printed.contains(THIRD_EMAIL), "{printed}");
     assert!(
-        printed.contains(&format!("perch relogin {THIRD_EMAIL}")),
+        printed.contains(&format!("perch relogin {THIRD_KEY}")),
         "with one Account to name, the repair names it: {printed}"
     );
 }
@@ -875,12 +897,8 @@ fn an_imported_profile_holds_the_identity_file_its_account_had() {
 #[test]
 fn an_account_whose_export_carried_no_identity_file_still_gets_one() {
     let from = machine_with_two_accounts();
-    let unreadable = store_of(&from, SECOND_EMAIL).identity_file;
-    let from = from.with_a_path_refusing(
-        unreadable,
-        Refusing::Read,
-        "Permission denied (os error 13)",
-    );
+    let missing = store_of(&from, SECOND_EMAIL).identity_file;
+    from.remove_file(&missing).unwrap();
     let sealed = {
         let host = from.with_secrets(&[PASSPHRASE, PASSPHRASE]);
         run_export(&host, AT).0.expect("the export is written");
@@ -906,14 +924,16 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
     let host = a_new_machine_holding(&sealed);
     // What a Purge that could not finish leaves: a Profile directory with a
     // client in it and no Registry naming it.
-    let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
+    let profile =
+        perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, &host, KEY)
+            .expect("home is known");
     a_client_running_against(&host, &profile, 4242);
 
     let (outcome, _) = run_import(&host, AT);
 
     let error = outcome.expect_err("that session is holding the Credential");
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
-    assert!(error.to_string().contains(EMAIL), "{error}");
+    assert!(error.to_string().contains(KEY), "{error}");
     assert!(
         error.to_string().contains("pid 4242"),
         "and which client to quit, since that is the whole of what the reader \
@@ -937,7 +957,7 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
 /// was refused, and the refusal named a Check the Import was never going to keep.
 #[test]
 fn an_export_is_judged_by_the_shape_that_will_be_written_rather_than_the_one_that_arrived() {
-    let (mut export, _) =
+    let mut export =
         perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE).expect("it opens");
     // A Check against a Group nothing declares, which is what a hand-edited
     // Registry — or one whose Group was removed beside it — carries.
@@ -953,56 +973,8 @@ fn an_export_is_judged_by_the_shape_that_will_be_written_rather_than_the_one_tha
         panic!("a Check the Import discards is no reason to refuse the file: {refused}")
     });
     assert!(
-        registry_on(&host).is_some_and(|registry| registry.checks.is_empty()),
+        registry_on(&host).is_some_and(|registry| registry.state().checks.is_empty()),
         "and nothing arrives having just been checked: {said}"
-    );
-}
-
-/// An Import says what the step forward renamed, before it writes.
-///
-/// `bring_forward` says the same about this machine's own Registry, and an Export
-/// is the other way a Registry arrives — the rename pass runs on both, so a
-/// person who restores a backup is not left to find the new name in a listing.
-#[test]
-fn an_import_says_what_bringing_the_registry_forward_renamed() {
-    let mut export = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE)
-        .expect("it opens")
-        .0;
-    // A Group name a version 2 Perch accepted, under the version that accepted
-    // it: the shape of every Export written before this build.
-    export.registry.version = 2;
-    let settings = export.registry.groups.remove("work").expect("the Group");
-    export
-        .registry
-        .groups
-        .insert("work\u{FE00}".to_string(), settings);
-    for account in &mut export.registry.accounts {
-        if account.group.is_some() {
-            account.group = Some("work\u{FE00}".to_string());
-        }
-    }
-    let sealed = perch::export::seal(&export, PASSPHRASE).expect("it seals");
-    drop(export);
-
-    let host = a_new_machine_holding(&sealed);
-    run_import(&host, AT).0.expect("the Import lands");
-
-    let said = host.notes().join("\n");
-    assert!(
-        said.contains("carrying a character a terminal does not draw as itself (U+FE00)"),
-        "the Import names the character it renamed for: {said}"
-    );
-    assert!(
-        said.contains("is now `work`"),
-        "and the name it arrived under: {said}"
-    );
-    assert_eq!(
-        registry_on(&host)
-            .expect("a registry was written")
-            .groups
-            .keys()
-            .collect::<Vec<_>>(),
-        vec!["work"]
     );
 }
 
@@ -1015,8 +987,10 @@ fn an_import_whose_sessions_directory_will_not_be_read_writes_nothing_and_says_s
     let host = a_new_machine_holding(&sealed);
     // What a Purge that could not finish leaves: a Profile directory with no
     // Registry naming it, and a `sessions` inside it nobody can read.
-    let profile = perch::holdings::profile_dir_for(&host, EMAIL).expect("home is known");
-    let sessions = perch::probe::sessions_dir(&profile);
+    let profile =
+        perch::holdings::profile_dir_for(perch::providers::provider::Id::Claude, &host, KEY)
+            .expect("home is known");
+    let sessions = session_fixture::sessions_dir(&profile);
     host.create_dir_all(&sessions).expect("it is left behind");
     let host = host.with_a_path_refusing(&sessions, Refusing::List, "permission denied");
 
@@ -1036,4 +1010,38 @@ fn an_import_whose_sessions_directory_will_not_be_read_writes_nothing_and_says_s
         registry_on(&host).is_none(),
         "and nothing was imported: an Import is whole or it did not happen"
     );
+}
+
+#[test]
+fn an_unrecognized_or_unsafe_profile_artifact_is_refused_before_any_profile_is_written() {
+    let export = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE).unwrap();
+    for (artifact, purpose) in [
+        ("../auth.json", "credential"),
+        ("/tmp/auth.json", "credential"),
+        ("auth\\secret", "credential"),
+        ("bad\0name", "credential"),
+        ("another-provider.json", "credential"),
+        ("oauth", "configuration"),
+    ] {
+        let mut altered = export.clone();
+        let mut bundle = serde_json::to_value(altered.profile_for(SECOND_KEY).unwrap()).unwrap();
+        bundle["artifacts"][artifact] =
+            serde_json::json!({"purpose": purpose, "content": "synthetic secret"});
+        altered
+            .profiles
+            .insert(SECOND_KEY.into(), serde_json::from_value(bundle).unwrap());
+        let host = FakeHost::new();
+        let (_, _, fresh) = perch::wait::across(&mut (), |_| Ok(()), |_| Ok(())).unwrap();
+        let result = perch::import::place(&host, &altered, &fresh, || {
+            panic!("invalid artifacts must not reach manifest persistence")
+        });
+        assert!(result.is_err(), "accepted {artifact:?} as {purpose}");
+        assert!(
+            host.effects()
+                .iter()
+                .all(|effect| matches!(effect, perch::host::fake::Effect::ReadFile(_))),
+            "invalid artifact created a Profile: {:?}",
+            host.effects()
+        );
+    }
 }

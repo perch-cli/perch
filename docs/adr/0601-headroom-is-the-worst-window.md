@@ -1,13 +1,20 @@
 # Headroom is the worst window
 
-An Account has several Quota Windows at once — five-hour, seven-day, and a
-weekly window per model — and they disagree. One Account can sit at 10% on its
-five-hour window and 95% on its seven-day while another is the reverse, so the
-two rank in opposite orders depending on which window is read.
+An Account has several Quota Windows at once — a Claude Account a five-hour, a
+seven-day and a weekly window per model — and they disagree. One Account can sit
+at 10% on its five-hour window and 95% on its seven-day while another is the
+reverse, so the two rank in opposite orders depending on which window is read.
 
 Perch takes each Account's worst window and picks the Account whose worst is
 best. When Perch reports 40% Headroom, that is true of every window, and nothing
 surprising blocks you five minutes later.
+
+**A comparison holds within one Provider's Accounts and nowhere else.** Which
+windows exist, what they are called and what a percentage of one buys are the
+Provider's, so a percentage from one says nothing about a percentage from
+another, and every caller narrows to one Provider before it ranks. A pooled
+figure across Providers would be the same lie as a pooled figure across
+Accounts, arriving one level up.
 
 **This is deliberately pessimistic rather than exact.** A per-model window meters
 one model, and the work about to run may never touch it, so an Account held back

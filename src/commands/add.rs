@@ -10,21 +10,21 @@
 
 use std::io::Write;
 
-use crate::adopt;
 use crate::ask;
+use crate::domain::Identity;
 use crate::error::{PerchError, Result};
 use crate::holdings;
 use crate::host::Host;
-use crate::login::{self, Produced};
 use crate::name;
 use crate::name::NO_GROUP;
-use crate::probe::Identity;
-use crate::profile;
+use crate::providers::provider::{Authenticated, InstallMode};
 use crate::registry::{self, Account, Registry};
 use crate::say;
 
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct AddArgs {
+    #[command(flatten)]
+    pub provider: super::selection::Selection,
     /// The Group for the new Account
     #[arg(long, value_name = "NAME")]
     pub group: Option<String>,
@@ -41,7 +41,10 @@ pub struct AddArgs {
 pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // Read rather than held: holding the Registry lock across a browser round
     // trip would block every other Perch for as long as the login takes.
-    let registry = adopt::ensure_adopted(host)?;
+    let provider = args.provider.explicit().unwrap_or_default();
+    let installation = provider.adapter().configured(host)?.installation(host)?;
+    let mut registry = crate::adopt::ensure_adopted(host)?;
+    registry.select_provider(provider);
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
@@ -57,16 +60,21 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         ));
     }
 
-    let pending = login::perform(host, out, &announcement())?;
-    refuse_an_account_perch_already_holds(&registry, &pending.identity)?;
-    let group = resolve_group(host, out, &registry, &args, &pending.identity)?;
+    say::line(out, &announcement())?;
+    if let Some(quit) = installation.provider().adapter().login_instruction() {
+        say::line(out, quit)?;
+    }
+    let pending = installation.authenticate(host)?;
+    refuse_an_account_perch_already_holds(&registry, provider, &pending)?;
+    let group = resolve_group(host, out, &registry, &args, pending.identity())?;
     drop(registry);
 
     // Decided against the Registry as it is *now*: the copy above was read
     // before a login that may have taken minutes, and writing it back would
     // revert whatever ran meanwhile (ADR a-switch-is-written-down-first).
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
-    refuse_an_account_perch_already_holds(&registry, &pending.identity)?;
+    let mut perch = holdings::lock(host)?;
+    let mut registry = registry::load(host)?.unwrap_or_default();
+    refuse_an_account_perch_already_holds(&registry, provider, &pending)?;
     registry.refuse(registry::Claim::Adding {
         alias: args.alias.as_deref(),
         group: group.as_deref(),
@@ -80,11 +88,25 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         None => None,
     };
 
-    let (account, placed) = settle_into_a_profile(host, pending, group.clone())?;
-    let email = account.email().to_string();
+    let account = Account {
+        storage_key: None,
+        provider,
+        provider_identity: pending.subject().clone(),
+        identity: pending.identity().clone(),
+        plan: pending.plan().clone(),
+        disabled: false,
+        quarantine: None,
+        group: group.clone(),
+        utilization: None,
+    };
+    let placed =
+        provider
+            .adapter()
+            .install(host, &account.profile(host)?, &pending, InstallMode::New)?;
+    let email = account.key().to_string();
 
     // A Profile nothing records is worse than none: it holds a live refresh
-    // token that `reap_abandoned` never walks, since that only walks `pending/`.
+    // token no reaper walks, since the reaper only walks `pending/`.
     // Every step from here to the save is inside the undo, not the save alone.
     let recorded = (|registry: &mut Registry| {
         registry.upsert(account);
@@ -97,11 +119,15 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     })(&mut registry);
 
     if let Err(error) = recorded {
-        placed.take_back(host);
+        if let Err(cleanup) = placed.rollback() {
+            return Err(error.with_note(&format!("Rollback incomplete: {cleanup}")));
+        }
         return Err(error.with_note(&format!(
             "Nothing was added. The login as {email} worked, so run `perch add` again."
         )));
     }
+
+    placed.commit();
 
     // On disk by here, so an unnoted failure sends a script back to log in
     // again as an Account Perch already holds.
@@ -119,67 +145,44 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     })
 }
 
-/// Gives the Account a Profile of its own and returns the entry that records
-/// it, alongside the ledger the caller needs precisely in order to undo this.
-fn settle_into_a_profile(
-    host: &dyn Host,
-    pending: Produced,
-    group: Option<String>,
-) -> Result<(Account, profile::Placed)> {
-    let dir = holdings::profile_dir_for(host, &pending.identity.email)?;
-    // The file the login wrote is already exactly what belongs in the Account's
-    // own directory.
-    let placed = profile::place(
-        host,
-        &dir,
-        Some(pending.credential.as_str()),
-        Some(&pending.identity_json),
-        profile::IfItFails::TakeBack,
-    )?;
-
-    Ok((
-        Account {
-            identity: pending.identity,
-            plan: pending.credential.subscription_type.clone(),
-            disabled: false,
-            quarantine: None,
-            group,
-            utilization: None,
-        },
-        placed,
-    ))
-}
-
 /// Refuses a login whose Credential would land in a Profile Perch already holds
 /// one in.
 ///
 /// The question is which *Profile*, not which address: two addresses that
 /// flatten to one slug are one Profile (ADR claude-code-chooses-the-store).
-fn refuse_an_account_perch_already_holds(registry: &Registry, identity: &Identity) -> Result<()> {
-    let Some(existing) = registry
-        .accounts
-        .iter()
-        .find(|held| holdings::same_profile(held.email(), &identity.email))
-    else {
+fn refuse_an_account_perch_already_holds(
+    registry: &Registry,
+    provider: crate::providers::provider::Id,
+    pending: &Authenticated,
+) -> Result<()> {
+    let identity = pending.identity();
+    let Some(existing) = registry.accounts.iter().find(|held| {
+        held.provider() == provider
+            && match pending.subject() {
+                Some(subject) => held.provider_identity.as_ref() == Some(subject),
+                None => holdings::same_profile(held.key(), &identity.email),
+            }
+    }) else {
         return Ok(());
     };
 
     // Over the whole of Unicode, because the collision that got here was:
     // `same_profile` compares slugs and `slug` lowercases first, so an ASCII
     // comparison would make one Profile look like two Accounts.
-    let same_account = name::same_name(existing.email(), &identity.email);
-    let named = registry.named_for_the_user(existing.email());
+    let same_account =
+        pending.subject().is_some() || name::same_name(existing.key(), &identity.email);
+    let named = registry.named_for_the_user(existing.key());
     Err(PerchError::Conflict(if same_account {
         format!(
             "Perch already holds {named}. `perch relogin {}` repairs it.",
-            existing.email()
+            registry.target_of(existing.key())
         )
     } else {
         format!(
             "Perch already holds {named}, and {} would share its Profile. \
              `perch remove {}` first.",
             identity.email,
-            existing.email(),
+            registry.target_of(existing.key()),
         )
     }))
 }
@@ -273,7 +276,7 @@ fn report(
 ) -> Result<()> {
     let added = registry.account(email).expect("the Account was just added");
     let description = say::described(
-        email,
+        added.email(),
         added.identity.organization_name.as_deref(),
         added.plan.as_deref(),
     );
@@ -290,5 +293,70 @@ fn report(
     match crate::config::what_the_scope_still_needs(registry, &registry.scope_of(added)) {
         Some(line) => say::line(out, &line),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::{Execution, FakeHost, fake::Effect};
+
+    /// A writer that is not there — the ordinary closed pipe.
+    struct Closed;
+
+    impl Write for Closed {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the pipe closed",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn a_machine_with_claude_code() -> FakeHost {
+        FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "")
+            .with_exec(
+                "/usr/bin/claude",
+                &["--version"],
+                Execution {
+                    status: 0,
+                    stdout: "2.1.221 (Claude Code)\n".to_string(),
+                    stderr: String::new(),
+                },
+            )
+    }
+
+    /// A closed pipe is the failure that needs no arranging: it lands between
+    /// making the directory and discarding it.
+    #[test]
+    fn a_login_that_cannot_be_announced_never_starts_the_client() {
+        let host = a_machine_with_claude_code();
+
+        assert!(
+            run(
+                &host,
+                AddArgs {
+                    no_group: true,
+                    ..Default::default()
+                },
+                &mut Closed
+            )
+            .is_err(),
+            "the line before the browser could not be written"
+        );
+
+        assert!(
+            host.effects()
+                .iter()
+                .all(|effect| !matches!(effect, Effect::ExecInteractive { .. })),
+            "announcement fails before native login starts: {:?}",
+            host.effects()
+        );
     }
 }

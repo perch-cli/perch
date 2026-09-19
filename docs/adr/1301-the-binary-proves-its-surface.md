@@ -49,20 +49,20 @@ proved.
 
 ## What the suite reaches, and why it stops there
 
-Everything reachable on a machine with no Claude Code installed, no keychain
+Everything reachable on a machine with no client installed, no keychain
 consulted and no network answered — which happens to be nearly all of the
-residue rather than a compromise. `PERCH_HOME` and `CLAUDE_CONFIG_DIR` are
-ordinary user-facing environment variables, so a scratch home costs no
-test-only escape hatch and no `#[cfg]`: point them at a temporary directory and
-the binary keeps its own state there, exactly as it would for somebody who set
-them deliberately. The commands that never ask what Claude Code is installed
-carry most of the exit codes worth claiming — `EXIT_NOT_FOUND` for a target
-that is not there, `EXIT_INVALID` for a threshold that is not a percentage,
-`EXIT_CONFLICT` for a name already spoken for.
+residue rather than a compromise. `PERCH_HOME`, `CLAUDE_CONFIG_DIR` and
+`CODEX_HOME` are ordinary user-facing environment variables, so a scratch home
+costs no test-only escape hatch and no `#[cfg]`: point them at a temporary
+directory and the binary keeps its own state there, exactly as it would for
+somebody who set them deliberately. The commands that never ask what client is
+installed carry most of the exit codes worth claiming — `EXIT_NOT_FOUND` for a
+target that is not there, `EXIT_INVALID` for a threshold that is not a
+percentage, `EXIT_CONFLICT` for a name already spoken for.
 
-The arms it does not reach are the ones that ask `claude --version` first:
-`switch`, `add`, `run`, `relogin`, `watch`. Reaching them means a real Claude
-Code on the machine running the tests, which means a feature gate, which means
+The arms it does not reach are the ones that ask a client for its version
+first: `switch`, `add`, `run`, `relogin`, `watch`. Reaching them means a real
+client on the machine running the tests, which means a feature gate, which means
 a suite only CI runs — proving behavior that the ungated suites already prove,
 at a level where a failure reports an exit code and a blob of stdout instead of
 naming the assertion that broke. A stand-in loses to what it stands in for, and
@@ -71,16 +71,16 @@ faster, hermetic, runs on every platform, and says what it means when it fails.
 
 **So the line is: this suite asserts the surface, never the behavior behind
 it.** The operational form, the one to hold against the pressure to extend it:
-**if it needs a real Claude Code installed, it has crossed.** The probe is not
-an incidental obstacle to be worked around with a fixture or a stub binary on
-`PATH`; it is the boundary marker. A command that must be told what Claude Code
-is has behavior to prove, and behavior is proved with the fakes.
+**if it needs a real client installed, it has crossed.** The probe is not an
+incidental obstacle to be worked around with a fixture or a stub binary on
+`PATH`; it is the boundary marker. A command that must be told what client is
+there has behavior to prove, and behavior is proved with the fakes.
 
 ## The observer may be replaced; the subject may not
 
 The rejected shape is the hermetic end-to-end suite: a scratch `PERCH_HOME`, a
 stub on `PERCH_CLAUDE_BIN`, a planted Credential, a recorded transcript instead
-of Anthropic. The stub is why it is rejected. A suite that replaces `claude`
+of the service. The stub is why it is rejected. A suite that replaces a client
 with a script printing a version string has rebuilt `FakeHost` at a higher
 price and in a worse language.
 

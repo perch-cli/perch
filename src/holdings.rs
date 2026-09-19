@@ -16,6 +16,7 @@ use chrono::{DateTime, Utc};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::{self, LockSpec};
+use crate::providers::provider::Id;
 
 /// `$PERCH_HOME`, or `~/.config/perch` — an error when neither is knowable,
 /// rather than a Registry written into the filesystem root.
@@ -75,42 +76,27 @@ fn home_dir(host: &dyn Host) -> Result<PathBuf> {
 }
 
 pub fn registry_path(host: &dyn Host) -> Result<PathBuf> {
-    Ok(perch_home(host)?.join("registry.json"))
+    Ok(perch_home(host)?.join("config.json"))
 }
 
-pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
-    Ok(perch_home(host)?.join("profiles"))
+pub fn profiles_dir(provider: Id, host: &dyn Host) -> Result<PathBuf> {
+    Ok(perch_home(host)?
+        .join("providers")
+        .join(provider.word())
+        .join("profiles"))
 }
 
-/// The Default Profile, as everything reading or writing the live Credential
-/// means it: the directory Claude Code falls back to, and never a Profile.
-///
-/// `CLAUDE_CONFIG_DIR` is honored, but no directory under Perch's own home is
-/// ever the Default Profile — and both a Run and a login point it at one.
-pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
-    let told = crate::probe::default_store(host)?;
-    let home = perch_home(host)?;
-    if crate::host::is_inside(host, &told.config_dir, &home) {
-        return crate::probe::default_profile_store(host);
-    }
-    Ok(told)
-}
-
-/// The Profile directory for an Account. The email is slugged because the path is
-/// hashed into a keychain service name and has to be stable and printable.
-///
-/// An address that slugs to nothing is refused here, at the one place every store
-/// is derived from.
-pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
-    let profiles = profiles_dir(host)?;
-    let slugged = slug(email);
+/// Storage keys produce one stable child directory inside their provider's Profiles.
+pub fn profile_dir_for(provider: Id, host: &dyn Host, key: &str) -> Result<PathBuf> {
+    let profiles = profiles_dir(provider, host)?;
+    let slugged = slug(key);
     let dir = profiles.join(&slugged);
 
     // Two ways of asking one question, because the answer is the whole machine:
     // an empty slug, and a path that is not one directory below `profiles/`.
     if slugged.is_empty() || dir.parent() != Some(profiles.as_path()) {
         return Err(PerchError::Invalid(format!(
-            "`{email}` has no character a Profile directory can be named after.\n\
+            "`{key}` has no character a Profile directory can be named after.\n\
              Remove that Account from {} by hand.",
             registry_path(host)?.display(),
         )));
@@ -123,14 +109,21 @@ pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
 /// Named after the moment it started, because a Profile is named after the
 /// Account it holds and which Account that is only becomes knowable once the
 /// login has finished (ADR a-login-perch-does-not-need).
-pub fn pending_login_dir(host: &dyn Host, started_at: DateTime<Utc>) -> Result<PathBuf> {
-    Ok(pending_logins_dir(host)?.join(format!("login-{}", started_at.timestamp_millis())))
+pub fn pending_login_dir(
+    provider: Id,
+    host: &dyn Host,
+    started_at: DateTime<Utc>,
+) -> Result<PathBuf> {
+    Ok(
+        pending_logins_dir(provider, host)?
+            .join(format!("login-{}", started_at.timestamp_millis())),
+    )
 }
 
 /// Where every pending login lives, so the ones nobody came back from can be
 /// found again.
-pub fn pending_logins_dir(host: &dyn Host) -> Result<PathBuf> {
-    Ok(perch_home(host)?.join("pending"))
+pub fn pending_logins_dir(provider: Id, host: &dyn Host) -> Result<PathBuf> {
+    Ok(provider.home(host)?.join("pending"))
 }
 
 /// When the login that made this directory started, as its name records.
@@ -211,9 +204,7 @@ pub(crate) fn slug_into(slugged: &mut String, email: &str) {
 
 /// How long a Perch that died holding the Registry lock keeps it.
 ///
-/// Longer than the Claude Code locks a Switch takes, because it is the outer
-/// lock; short enough that a killed Perch leaves a usable machine within a
-/// minute.
+/// Longer than the native locks a Switch takes, because it is the outer lock.
 pub(crate) const REGISTRY_STALE_MILLIS: i64 = 90_000;
 
 const REGISTRY_UPDATE_MILLIS: i64 = 5_000;
@@ -221,8 +212,7 @@ const REGISTRY_UPDATE_MILLIS: i64 = 5_000;
 /// The lock one Perch takes so that no other Perch is changing the Registry at
 /// the same time.
 ///
-/// A directory, taken with the same `mkdir`-or-fail primitive the Claude Code
-/// locks use: the call both asks and answers, with nothing in between.
+/// An exclusive directory creation makes acquisition atomic.
 pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
     Ok(LockSpec {
         name: "the Perch Registry lock",
@@ -312,17 +302,23 @@ mod tests {
     #[test]
     fn an_address_that_names_no_directory_is_refused_rather_than_naming_them_all() {
         let host = crate::host::FakeHost::new();
-        let profiles = profiles_dir(&host).unwrap();
+        let profiles = profiles_dir(crate::providers::provider::Id::Claude, &host).unwrap();
 
         for degenerate in ["@", "-", "...", "@.-@"] {
             assert_eq!(slug(degenerate), "", "the case this is about: {degenerate}");
             let refused =
-                profile_dir_for(&host, degenerate).expect_err("no Profile can be named after this");
+                profile_dir_for(crate::providers::provider::Id::Claude, &host, degenerate)
+                    .expect_err("no Profile can be named after this");
             assert!(refused.to_string().contains(degenerate), "{refused}");
         }
 
         assert_eq!(
-            profile_dir_for(&host, "someone@example.com").unwrap(),
+            profile_dir_for(
+                crate::providers::provider::Id::Claude,
+                &host,
+                "someone@example.com"
+            )
+            .unwrap(),
             profiles.join("someone-example-com"),
             "and an ordinary address is unaffected"
         );
@@ -361,38 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn a_profile_reached_through_a_link_is_still_not_the_default_profile() {
-        let home = "/Users/someone/.config/perch";
-        let host = crate::host::FakeHost::new()
-            // How somebody comes to have this: a shorter name for the Profiles
-            // directory, and a `CLAUDE_CONFIG_DIR` pointing inside it.
-            .with_link(
-                crate::host::Link::Symbolic,
-                format!("{home}/profiles"),
-                "/Users/someone/claude",
-            )
-            .with_env("CLAUDE_CONFIG_DIR", "/Users/someone/claude/work");
-
-        let store = the_default_profile(&host).expect("a Default Profile is known");
-
-        assert!(
-            !crate::host::is_inside(
-                &host,
-                &store.config_dir,
-                std::path::Path::new("/Users/someone/claude")
-            ),
-            "a Profile is never the Default Profile, whichever name reaches it: {:?}",
-            store.config_dir
-        );
-        assert_eq!(
-            store.config_dir,
-            crate::probe::default_profile_store(&host)
-                .expect("the real Default Profile")
-                .config_dir,
-        );
-    }
-
-    #[test]
     fn perch_home_is_taken_from_the_environment_verbatim_when_it_is_set() {
         let host = crate::host::FakeHost::new()
             .with_env("HOME", "/Users/someone")
@@ -404,7 +368,7 @@ mod tests {
         );
         assert_eq!(
             registry_path(&host).unwrap(),
-            std::path::PathBuf::from("/tmp/somewhere-else/registry.json"),
+            std::path::PathBuf::from("/tmp/somewhere-else/config.json"),
             "and everything under it moves with it"
         );
     }
@@ -475,5 +439,26 @@ mod tests {
             perch_home(&host).unwrap(),
             std::path::PathBuf::from("/Users/someone/.config/perch")
         );
+    }
+
+    /// The claim kept beside the derivation, asserted against it: two keys share
+    /// a Profile exactly where the directory they derive is one directory.
+    #[test]
+    fn two_keys_that_slug_alike_derive_one_profile() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let dir = |key: &str| {
+            profile_dir_for(crate::providers::provider::Id::Claude, &host, key)
+                .expect("a Profile can be named after it")
+        };
+
+        assert!(same_profile("some.one@example.com", "SOME-ONE@example.com"));
+        assert_eq!(
+            dir("some.one@example.com"),
+            dir("SOME-ONE@example.com"),
+            "which is the hazard the predicate exists for"
+        );
+
+        assert!(!same_profile("one@example.com", "two@example.com"));
+        assert_ne!(dir("one@example.com"), dir("two@example.com"));
     }
 }

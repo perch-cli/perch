@@ -26,8 +26,8 @@ back. That is the correct trade for one file holding every Credential at once.
 ## The format is `age`, and it is armored
 
 `age` is taken as a crate. Encryption sits on neither of Perch's seams — it is
-not an effect the Host port carries, and it is not shared with Claude Code, so
-nothing here has to be bug-compatible with anything, which is the test
+not an effect the Host port carries, and it is shared with no client, so nothing
+here has to be bug-compatible with anything, which is the test
 ADR a-crate-must-not-cost-a-seam sets. The alternative was three crates and a
 header format Perch would version itself, for a bundle written perhaps twice a
 year.
@@ -84,11 +84,12 @@ refusal names `age -d`, which will open it.
 
 The whole Registry — every Account, its Alias, its Group, whether Cycling may
 choose it, why it is Quarantined, and what each Group carries — alongside every
-Credential and each Profile's own `.claude.json`. Restoring the Credentials
-alone would leave a new machine holding working Accounts stripped of every name
-and rule their owner gave them, and restoring without the identity files would
-put every Account into the degraded state adoption goes out of its way to keep
-the first one out of, with nothing for a Run to Carry from
+Credential and each Profile's own native configuration, taken as a bundle of
+named artifacts the Provider hands over and nothing shared interprets. Restoring
+the Credentials alone would leave a new machine holding working Accounts
+stripped of every name and rule their owner gave them, and restoring without the
+identity files would put every Account into the degraded state adoption goes out
+of its way to keep the first one out of, with nothing for a Run to Carry from
 (ADR everything-but-the-account).
 
 A per-Account form is refused. A selective Export is a partial restore, which is
@@ -153,7 +154,7 @@ Registry that is there and holds nothing — what a Purge leaves — is as empty
 machine Perch has never run on.
 
 **An Import adopts nothing.** Every other command reads the Registry through
-adoption, which takes the existing Claude Code login over the first time Perch
+adoption, which takes each Provider's existing login over the first time Perch
 runs (ADR a-login-perch-does-not-need). Doing that here would make the machine
 hold one Account on the way to refusing itself for holding one. So an Import
 reads the Registry directly, and the login on the machine is left exactly where
@@ -230,8 +231,8 @@ running it again finds what it already deleted already gone and finishes — and
 home left behind holding no Registry, which is what a Purge interrupted in its
 last step leaves, is taken by the next one rather than reported as nothing to do.
 
-What a Purge does not touch is the Credential in the Default Profile. That is
-Claude Code's own login rather than a copy Perch holds — the same line
+What a Purge does not touch is the Credential in any Provider's Default Profile.
+That is the client's own login rather than a copy Perch holds — the same line
 `perch remove` draws when it gives up the last Account — and a Purge that logged
 somebody out of the tool they are using would be doing more than giving the
 machine back.

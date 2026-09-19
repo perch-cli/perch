@@ -120,7 +120,7 @@ fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_jso
                 // display name with no id behind it, so a script matches on
                 // `group` (ADR a-window-comes-from-limits).
                 "window": window.window,
-                "group": crate::anthropic::group_of(&window.window),
+                "group": window.group,
                 "used_percent": window.used_percent,
                 "resets_at": window.resets_at.map(|at| at.to_rfc3339()),
                 "observed_at": cached.observed_at.to_rfc3339(),
@@ -313,6 +313,7 @@ mod tests {
         account.utilization.as_mut().expect("observed").windows = ["5-hour", "7-day-sonnet"]
             .into_iter()
             .map(|window| crate::registry::WindowUtilization {
+                group: None,
                 window: window.to_string(),
                 used_percent: 7.0,
                 resets_at: None,
@@ -489,7 +490,10 @@ mod tests {
 
     fn observed_at_the_edges() -> Account {
         let mut account = Account {
-            identity: crate::probe::Identity {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: crate::domain::Identity {
                 email: "someone@example.com".to_string(),
                 account_uuid: None,
                 organization_name: None,
@@ -505,12 +509,14 @@ mod tests {
             observed_at: at(12, 0),
             windows: vec![
                 crate::registry::WindowUtilization {
+                    group: None,
                     window: "5-hour".to_string(),
                     // Not exhausted, and the watcher is still deciding about it.
                     used_percent: 99.6,
                     resets_at: None,
                 },
                 crate::registry::WindowUtilization {
+                    group: None,
                     window: "7-day".to_string(),
                     used_percent: 0.4,
                     resets_at: None,

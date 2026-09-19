@@ -1,8 +1,8 @@
 //! Failures Perch reports, and the exit codes they map to.
 //!
 //! Exit codes are part of the interface: a shell prompt or a script needs to
-//! tell "this account is gone" from "the keychain is locked" from "Perch does
-//! not recognize this Claude Code" without parsing prose.
+//! tell "this account is gone" from "the keychain is locked" from "Perch
+//! cannot establish that an operation is safe" without parsing prose.
 
 use std::path::PathBuf;
 
@@ -17,7 +17,7 @@ pub const EXIT_GENERAL: i32 = 1;
 /// rejects are the same failure to the script wrapping it, and two codes for it
 /// would be a distinction nobody could act on.
 pub const EXIT_NOT_UNDERSTOOD: i32 = 2;
-/// Exit code for a refused operation: an assumption about Claude Code failed.
+/// Exit code for a refused operation: required evidence could not be established.
 pub const EXIT_PROBE_REFUSED: i32 = 10;
 /// Exit code for a keychain that is locked, denied, or otherwise unavailable.
 pub const EXIT_KEYCHAIN_UNAVAILABLE: i32 = 11;
@@ -57,14 +57,13 @@ pub const EXIT_QUARANTINED: i32 = 19;
 /// of them resolves itself.
 pub const EXIT_HELD: i32 = 20;
 
-/// What a [`PerchError::ProbeRefused`] carries: which belief about the installed
-/// Claude Code failed, and which Claude Code it was read from.
+/// A failed assumption and optional context supplied by its source.
 #[derive(Debug, thiserror::Error)]
-#[error("Perch declined to act: {assumption} ({detail}), Claude Code {version}{}", note.as_deref().unwrap_or(""))]
+#[error("Perch declined to act: {assumption} ({detail}){}{}", context.as_ref().map(|context| format!(", {context}")).unwrap_or_default(), note.as_deref().unwrap_or(""))]
 pub struct ProbeRefusal {
     pub assumption: String,
     pub detail: String,
-    pub version: String,
+    pub context: Option<String>,
     /// What the sequence around the failure left behind, said after the whole
     /// sentence. Its own field because `detail` is rendered inside a
     /// parenthetical: a note appended there lands mid-sentence, and this is the
@@ -74,8 +73,7 @@ pub struct ProbeRefusal {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
-    /// The probe does not recognize the installed Claude Code well enough to
-    /// touch anything. Names the assumption that failed
+    /// Required evidence is missing or unrecognized. Names the failed assumption
     /// (ADR an-assumption-is-probed). Boxed, so the widest variant is not the
     /// width of every `Result` in the crate: a refusal is the rare path, and
     /// pays an allocation every other path is spared.
@@ -341,7 +339,7 @@ mod tests {
                 PerchError::ProbeRefused(Box::new(ProbeRefusal {
                     assumption: "the credential lives in the keychain".to_string(),
                     detail: "it does not".to_string(),
-                    version: "2.1.221".to_string(),
+                    context: Some("Claude Code 2.1.221".to_string()),
                     note: None,
                 })),
             ),
@@ -583,5 +581,22 @@ mod tests {
         assert!(said.contains("version 4"), "{said}");
         assert!(said.contains("reads 2"), "{said}");
         assert!(said.contains("Upgrade Perch."), "{said}");
+    }
+
+    /// The version is read ahead of the parse, so it answers about documents
+    /// this build has no variant for — and a document that claims none is not a
+    /// document from the future. What to make of that is the caller's, about
+    /// its own file.
+    #[test]
+    fn a_document_claims_a_version_only_where_it_carries_a_whole_number() {
+        assert_eq!(
+            claimed_version(r#"{"version": 7, "unreadable": {}}"#),
+            Some(7)
+        );
+        assert_eq!(claimed_version("{}"), None, "no version is no claim");
+        assert_eq!(claimed_version(r#"{"version": null}"#), None);
+        assert_eq!(claimed_version(r#"{"version": "7"}"#), None);
+        assert_eq!(claimed_version(r#"{"version": 7.5}"#), None);
+        assert_eq!(claimed_version("not json at all"), None);
     }
 }

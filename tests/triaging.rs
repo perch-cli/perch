@@ -95,7 +95,7 @@ fn a_triage_writes_the_playbook_and_both_readings_of_the_probe() {
     let raw = written(&host, RAW);
     let redacted = written(&host, REDACTED);
     assert!(
-        raw.contains(EMAIL),
+        raw.contains(KEY),
         "the agent investigates from names: {raw}"
     );
     assert!(
@@ -127,7 +127,7 @@ fn raw_writes_the_names_into_the_copy_that_would_be_pasted() {
     );
 
     assert_eq!(written(&host, REDACTED), written(&host, RAW));
-    assert!(written(&host, REDACTED).contains(EMAIL));
+    assert!(written(&host, REDACTED).contains(KEY));
 }
 
 #[test]
@@ -372,6 +372,30 @@ fn only_the_newest_three_runs_are_kept() {
             "{newest} is one of the newest: {held:?}"
         );
     }
+}
+
+/// Housekeeping rather than the job: a triage directory that will not list is
+/// still a machine somebody is trying to get help about, so the evidence this
+/// run wrote is there and the older runs are left where they are.
+#[test]
+fn a_triage_directory_that_will_not_list_leaves_the_evidence_this_run_wrote() {
+    let host = at_a_fixed_moment(machine_with_two_accounts());
+    let runs = triage_dir(&host);
+    let older = runs.join("run-1");
+    host.create_private_dir_all(&older).expect("an older run");
+    let host = host.with_a_path_refusing(&runs, Refusing::List, "Permission denied (os error 13)");
+
+    let (code, _) = triaged(&host);
+
+    assert_eq!(code, EXIT_OK);
+    assert!(
+        host.file(run_dir(&host).join(PROMPT)).is_some(),
+        "the evidence this run wrote is there"
+    );
+    assert!(
+        host.path_exists(&older),
+        "and nothing older was taken away on a directory nothing could walk"
+    );
 }
 
 /// A Triage adopts nothing and saves nothing. On a machine Perch holds nothing

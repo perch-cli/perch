@@ -1,21 +1,29 @@
 # A Switch is written down first
 
 A Switch leaves two copies of one Credential: the one in the Account's Profile
-and the live one on the Default Profile. Only the live copy is used, and Claude
-Code Rotates it whenever it likes — so by the time you switch away, the copy in
-the outgoing Account's Profile can be several Rotations behind, and a retired
+and the live one on the Default Profile. Only the live copy is used, and the
+client Rotates it whenever it likes — so by the time you switch away, the copy
+in the outgoing Account's Profile can be several Rotations behind, and a retired
 refresh token is dead.
 
 So a Switch is three steps, not one. Perch Captures the live Credential back
 into the outgoing Account's Profile, writes the incoming Account's Credential to
-the live store, and patches `oauthAccount` to match. Skipping the Capture means
-every Switch quietly poisons the Account being left behind, with the damage
-surfacing only when you switch back to it. All three steps run under Claude
-Code's own OAuth refresh locks, which is what stops a Refresh landing between
-the Capture and the write. They are taken in Claude Code's order — the refresh
-lock, the legacy config-home lock, then the config file lock — so the two never
-deadlock each other. A lock somebody is holding is waited on and then given up
-on; one whose holder has died is taken over.
+the live store, and makes the Identity the client reads match. Skipping the
+Capture means every Switch quietly poisons the Account being left behind, with
+the damage surfacing only when you switch back to it.
+
+Those three steps are every Provider's; what each step is made of is the
+Provider's own. For Claude Code the Identity is `oauthAccount` in
+`.claude.json`, a third file beside the Credential, and all three steps run
+under Claude Code's own OAuth refresh locks, which is what stops a Refresh
+landing between the Capture and the write. They are taken in Claude Code's
+order — the refresh lock, the legacy config-home lock, then the config file
+lock — so the two never deadlock each other. A lock somebody is holding is
+waited on and then given up on; one whose holder has died is taken over. For
+Codex the Identity travels inside the Credential, so there is no third write and
+no third file to disagree, and Codex publishes no lock protocol to take: the
+write is atomic, and a `codex` already open keeps the Account it started with
+until it is restarted.
 
 One precondition stands over the three: **Perch does not move the live
 Credential until it has written down that it is about to.** What it writes is a
@@ -24,11 +32,14 @@ Landing, and the rest of this document is what that is for.
 ## Nothing here commits as one, and the live Credential carries no owner
 
 A Switch writes to three places: the outgoing Account's Credential Store, the
-Default Profile's Credential Store, and `.claude.json`. On macOS the second is a
-keychain and the third is a file, and nothing makes a keychain write and a file
-write atomic together. Recording which Account is active writes a fourth place,
-the Registry. **There is no arrangement of these that commits as one.** Every
-alternative that begins "write X first" only moves which pair can disagree.
+Default Profile's Credential Store, and the Identity the client reads —
+`.claude.json` for Claude Code, and for Codex the Credential file itself, which
+makes three into two without making two into one. On macOS Claude Code's second
+is a keychain and its third is a file, and nothing makes a keychain write and a
+file write atomic together. Recording which Account is active writes one more
+place, the Registry. **There is no arrangement of these that commits as one.**
+Every alternative that begins "write X first" only moves which pair can
+disagree.
 
 The second constraint is sharper, and it closes off the escape the first
 question reaches for. **The live Credential carries no owner.** `claudeAiOauth`
@@ -36,6 +47,14 @@ is an access token, a refresh token, an expiry, a scope list and a subscription
 type — no address, no uuid. Deriving the outgoing Account from the live
 Credential is therefore never inspection; it is only ever byte-equality against
 copies Perch already holds, and a Rotation defeats it by construction.
+
+That is Claude Code's shape rather than every Provider's. Codex's `auth.json`
+carries the id token whose claims name the user and the Workspace, so there the
+outgoing Account is inspectable and a Rotation does not defeat it. Both get a
+Landing anyway. What makes one necessary is the first constraint, which no
+Provider escapes, and a Switch that wrote its intent down only for the Providers
+whose Credentials are anonymous would be an exception to maintain at the one
+place a machine is recovered from.
 
 So the question is not whether the window can be closed. It is whether every
 state the window leaves behind can be **recovered from** — and, where it cannot,
@@ -102,6 +121,13 @@ prompt each, and it is reached only where a Landing says a Switch was in flight.
 On the ordinary path the two named Accounts answer first and nobody pays for the
 rest.
 
+Where the live Credential names its own Account, resolution asks it instead of
+walking the ladder. Codex reads the identity out of the live file and settles on
+the Account holding it, whichever Rotation that file is, and answers the same
+refusal where it names nobody Perch holds. One read rather than several, and the
+same three outcomes: settled, settled on the outgoing Account because nothing is
+live, or refused.
+
 **The Capture gains no branch from any of this.** It answers *is there a
 Rotation to save*; resolution answers *who is active*. Those are different
 questions, and a Capture's declines about ownership are what it looks like when
@@ -109,11 +135,13 @@ one function is made to answer both. Against a settled Registry the Capture is
 the function it was written to be, and the Landing pays for itself by making the
 *next* special case unnecessary rather than by adding one.
 
-Everything reading the live Credential to settle a Landing reads it under Claude
-Code's own locks, and saves inside them too, so the window they close is the
-whole of read-decide-record rather than the read alone. A Rotation *since the
-interruption* defeats resolution and is accepted; one Perch could have locked
-out is not.
+Everything reading the live Credential to settle a Landing reads it under the
+locks that Switch already holds, and saves inside them too, so the window they
+close is the whole of read-decide-record rather than the read alone. For Claude
+Code those are Claude Code's own; Codex publishes none, so the perch lock is the
+whole of it and a `codex` started mid-resolution is not shut out. A Rotation
+*since the interruption* defeats resolution and is accepted; one Perch could
+have locked out is not.
 
 ## Both doors, not one
 

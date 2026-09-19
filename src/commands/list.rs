@@ -33,11 +33,14 @@ use crate::utilization;
 /// under is answered with what *was* declared.
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct ListArgs {
+    #[command(flatten)]
+    pub provider: crate::commands::selection::Selection,
+
     /// A Group by name, or `ungrouped`
     #[arg(value_name = "SCOPE")]
     pub scope: Option<String>,
 
-    /// Read Utilization from Anthropic first
+    /// Read Utilization from each provider first
     #[arg(long)]
     pub refresh: bool,
 
@@ -80,7 +83,7 @@ impl Scope {
     fn emails(&self, registry: &Registry) -> Vec<String> {
         self.accounts(registry)
             .iter()
-            .map(|account| account.email().to_string())
+            .map(|account| account.key().to_string())
             .collect()
     }
 
@@ -130,7 +133,7 @@ fn group_heading(name: &str) -> String {
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
-    let mut viewing = crate::commands::Viewing::opened(host, args.refresh)?;
+    let mut viewing = crate::commands::Viewing::opened(host, args.refresh, args.provider)?;
 
     let scope = match &args.scope {
         Some(name) => narrowed(viewing.registry(), name)?,
@@ -233,9 +236,19 @@ impl Drawn {
 /// What those columns hold for one Account: the name you reach it by, what it
 /// is interchangeable with, whether it is any use, and how much of it is left.
 fn columns(alias_of: &registry::AliasOf<'_>, account: &Account) -> Drawn {
+    let label = match &account.provider_identity {
+        Some(identity) if identity.workspace_id.is_some() => format!(
+            "{} [{}: {}]",
+            account.email(),
+            account.provider().word(),
+            identity.workspace_id.as_deref().unwrap()
+        ),
+        Some(_) => format!("{} [{}]", account.email(), account.provider().word()),
+        None => account.email().to_string(),
+    };
     Drawn::of([
-        Shown::of(account.email()),
-        Shown::of(alias_of.account(account.email()).unwrap_or(NOTHING_TO_SAY)),
+        Shown::of(&label),
+        Shown::of(alias_of.account(account.key()).unwrap_or(NOTHING_TO_SAY)),
         Shown::of(account.group.as_deref().unwrap_or(name::NO_GROUP)),
         Shown::of(&state_of(account)),
         Shown::of(&cycle::headroom_phrase(account)),
@@ -283,7 +296,7 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
     accounts
         .iter()
         .map(|account| Row {
-            active: registry.active().is_active(account.email()),
+            active: registry.active().is_active(account.key()),
             cells: columns(&alias_of, account),
             figures: utilization::lines(account, now, width),
         })
@@ -320,8 +333,8 @@ fn what_is_broken(registry: &Registry, accounts: &[&Account]) -> Vec<String> {
     let mut broken = Vec::new();
     for account in accounts {
         if let Some(why) = account.quarantine {
-            said.push(why.shown_of(&registry.named_for_the_user(account.email())));
-            broken.push(account.email());
+            said.push(why.shown_of(&registry.named_for_the_user(account.key())));
+            broken.push(account.key());
         }
     }
     said.extend(registry::how_to_repair_them(&broken));
@@ -552,7 +565,10 @@ mod tests {
 
     fn account_in(disabled: bool, quarantine: Option<Quarantine>) -> Account {
         Account {
-            identity: crate::probe::Identity {
+            storage_key: None,
+            provider: crate::providers::provider::Id::Claude,
+            provider_identity: None,
+            identity: crate::domain::Identity {
                 email: "someone@example.com".to_string(),
                 account_uuid: None,
                 organization_name: None,

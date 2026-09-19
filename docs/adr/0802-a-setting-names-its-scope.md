@@ -1,5 +1,8 @@
 # A Setting names its Scope
 
+This decision governs Cycling Settings. The Run-wide provider preference has
+an application owner (ADR run-has-a-provider-preference).
+
 **A Scope — each Group, and the Accounts in no Group taken together — holds its
 own full Settings. There is nothing above it. Defaults are compiled-in
 constants.**

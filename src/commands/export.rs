@@ -33,16 +33,7 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    let installed = crate::probe::Installed::for_a_report(host);
-
-    let written = write_the_export(
-        host,
-        &mut perch,
-        &mut registry,
-        &mut destination,
-        &installed,
-        out,
-    );
+    let written = write_the_export(host, &mut perch, &mut registry, &mut destination, out);
     match (written, destination.landed()) {
         // The bytes land before the report, so a terminal that has gone away
         // fails a command whose file is there — and a re-run is refused for the
@@ -65,7 +56,6 @@ pub fn write_the_export(
     perch: &mut crate::lock::Held<'_>,
     registry: &mut Registry,
     destination: &mut Destination,
-    installed: &crate::probe::Installed,
     out: &mut dyn Write,
 ) -> Result<()> {
     // Before a Credential Store is read: during a Landing the live one may be
@@ -93,7 +83,7 @@ pub fn write_the_export(
         perch,
         |_| {
             let passphrase = agreed_passphrase(host, out)?;
-            let export = export::gather(host, registry, installed)?;
+            let export = export::gather(host, registry)?;
             let sealed = export::seal(&export, &passphrase)?;
             Ok((export, sealed))
         },
@@ -141,10 +131,6 @@ impl Destination {
             .map_err(|err| PerchError::file_write(self.path.clone(), err))?;
         self.landed = true;
         Ok(())
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// Where the bytes are, once they are: recorded the instant they land,
@@ -250,9 +236,17 @@ fn report(out: &mut dyn Write, export: &Export) -> Result<()> {
             &format!(
                 "Note: the Export holds no Credential for {}. `perch relogin {}` \
                  logs it in again.",
-                bare.join(", "),
+                bare.iter()
+                    .map(|key| {
+                        export
+                            .registry
+                            .account(key)
+                            .map_or_else(|| key.to_string(), |account| account.email().to_string())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 match bare.len() {
-                    1 => bare[0],
+                    1 => export.registry.target_of(bare[0]),
                     _ => "<target>",
                 },
             ),

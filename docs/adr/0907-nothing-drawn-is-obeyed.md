@@ -2,10 +2,10 @@
 
 **Text on its way to a terminal goes through `host::Shown`, which takes out
 whatever a terminal acts on rather than draws. The writers that lay out a column
-— `utilization::cells`, `padded` and `write_labeled` — take one instead of a
+— `column::cells`, `padded` and `Labeled::write` — take one instead of a
 `&str`, so a surface cannot render a value without having asked. The three that
-write a sentence — `commands::say`, `Terminal::note` and the refusal `main`
-prints — put what they are handed through `Shown::in_prose` themselves.**
+write a sentence — `say::line`, `Terminal::note` and the refusal `main` prints —
+put what they are handed through `Shown::in_prose` themselves.**
 
 ## What went wrong
 
@@ -21,7 +21,7 @@ Three more reached `perch list` and `perch status` with nothing asked at all:
 
 | value | where it comes from |
 | --- | --- |
-| a Quota Window's name | the usage endpoint, by way of `anthropic::windows_in` |
+| a Quota Window's name | the usage endpoint, by way of the Claude adapter's `service::windows_in` |
 | an Account's plan | `subscriptionType`, out of a Credential file |
 | an organization name | the Registry, which `read_identity` does not guard |
 
@@ -30,7 +30,9 @@ The third is the one that says the shape rather than the oversight. The rule
 is read, and nowhere on the Registry path, so an Import or a hand edit walks past
 it. `registry::validate` is public *because* an Import writes a Registry without
 reading one and what it accepts must not differ; a guard on one of the two routes
-in is a guard on neither.
+in is a guard on neither. Every module named in this section is the Claude
+adapter's, because the values are: another Provider's identity reader guards its
+own the same way, at the same boundary.
 
 A `window` of `5-hour\u{1b}[2K\u{1b}[31mALL QUOTA GONE` is accepted by `save` and
 by `load`, and both surfaces write it exactly as they hold it.
@@ -46,9 +48,12 @@ three: a refusal in `validate` is met at `load`, and `load` is every command.
 A Registry v0.2.0 wrote holding `wo\u{1b}rk@example.com` — an address that build
 accepted, its whole rule being one alphanumeric and an `@` — answers every
 command with a refusal naming the file to edit, and `perch remove`, which is the
-only way such an Account could ever go, is one of them. `migration::forward`
-cannot carry it: an address is what the Profile directory, the keychain
-namespace and every Alias are keyed on, so there is no rename to make.
+only way such an Account could ever go, is one of them. A step forward could
+not have carried it either: an address was what the Profile directory, the
+keychain namespace and every Alias were keyed on, so there was no rename to
+make. Layout 9 keys a Profile on a stable identity instead
+(ADR an-account-has-a-workspace), which is what took the hazard out rather than
+a guard.
 
 What it buys is narrower than the other three: an address a terminal would obey
 is still one nobody can type as a Target. It has an Alias, `perch list` draws it
@@ -92,10 +97,9 @@ column to hang the question on:
 
 | what it says | the value nobody chose |
 | --- | --- |
-| `adopt::report` | `subscriptionType`, out of a Credential file |
-| `adopt::report` | the leading token of `claude --version` |
-| every `probe::refusal` | the same version, quoted back |
-| `anthropic::drifted`, `went_missing` | a key out of the usage reply |
+| the Adoption notice | `subscriptionType`, out of a Credential file |
+| every `probe::refusal` | the client version, quoted back |
+| `service::drifted`, `went_missing` | a key out of the usage reply |
 | `perch watcher status` | a path read out of the installed unit |
 
 The first is the one that says the shape. `perch status` draws that plan
@@ -253,8 +257,10 @@ code in one file rather than a rule about which sink a caller reached for.
   organization on `Cc` alone, because it is drawn and never typed.
   `registry::validate` refuses neither.
 - The unshowable set moving is a name rule moving, so it moves the Registry
-  version with it and owes a step. `migration::forward` chains from whichever
-  version a document claims, and every step lands on the rename pass.
+  version with it. Under the prelaunch reset that is a layout this build refuses
+  rather than a step it takes (ADR a-fresh-provider-layout); the rule itself is
+  still frozen per version, in `name::Rule`, because what a published Perch
+  accepted is not this build's to change.
 
 ## The glossary
 

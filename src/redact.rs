@@ -60,8 +60,20 @@ impl Redaction {
                 stands_for: stands_for.clone(),
                 kind: Kind::Email,
             });
+            if let Some(identity) = &account.provider_identity {
+                for raw in [&identity.key, &identity.user_id]
+                    .into_iter()
+                    .chain(identity.workspace_id.as_ref())
+                {
+                    named.push(Named {
+                        raw: raw.clone(),
+                        stands_for: stands_for.clone(),
+                        kind: Kind::Email,
+                    });
+                }
+            }
             for (alias, email) in &registry.aliases {
-                if email == &account.identity.email {
+                if email == account.key() {
                     named.push(Named {
                         raw: alias.clone(),
                         stands_for: stands_for.clone(),
@@ -102,7 +114,7 @@ impl Redaction {
         }
         let mut said = text.to_owned();
         // Before the names, so a home directory carrying an Alias is not left
-        // half replaced: `/home/you/.config/perch/profiles/work`.
+        // half replaced: `/home/you/.config/perch/providers/claude/profiles/work`.
         if let Some(home) = &self.home {
             said = said.replace(home.as_str(), "<home>");
         }
@@ -210,13 +222,16 @@ fn anything_else_that_is_an_address(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::probe::Identity;
+    use crate::domain::Identity;
     use crate::registry::{Account, Registry};
 
     fn holding(emails: &[&str], aliases: &[(&str, &str)], groups: &[&str]) -> Registry {
         let mut registry = Registry::default();
         for email in emails {
             registry.accounts.push(Account {
+                storage_key: None,
+                provider: crate::providers::provider::Id::Claude,
+                provider_identity: None,
                 identity: Identity {
                     email: (*email).to_string(),
                     account_uuid: None,

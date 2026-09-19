@@ -1,21 +1,25 @@
 # A Profile is Live by evidence
 
 Reading an Account's Utilization needs a valid access token for it, so ranking
-Cycle candidates means Renewing Credentials for Accounts nobody is using.
-Anthropic Rotates refresh tokens — a Refresh may return a new one, retiring the
-family — so Renewing a Credential a running Claude Code still holds in memory
-logs that session out, silently, mid-task.
+Cycle candidates means Renewing Credentials for Accounts nobody is using. A
+provider Rotates refresh tokens — a Refresh may return a new one, retiring the
+family — so Renewing a Credential a running client still holds in memory logs
+that session out, silently, mid-task.
 
 Perch therefore Renews only Profiles with no client running, and writes the
-Rotated Credential back under the locks Claude Code takes. Nothing is lost:
+Rotated Credential back under whatever locks that client takes. Nothing is lost:
 Cycle candidates are idle by definition, and an Account actually in use has a
 fresh access token already, so its Utilization is readable without Renewing
-anything.
+anything. The rule outlives who does the Renewing: where the Provider owns that
+work, as Codex does (ADR codex-owns-its-renewal), the thing refused is pointing
+its client at a Live Profile, for the same reason and with the same evidence.
 
 ## A Marker is evidence, and a pid alone is not
 
 Claude Code records each running client as `sessions/<pid>.json` in the config
-directory it was launched against, and leaves the Marker behind when it dies. A
+directory it was launched against, and leaves the Marker behind when it dies.
+Codex records nothing, so a Codex Profile's evidence is what Perch wrote there
+and nothing else, and Markers it did not write are not read back. A
 pid on its own therefore proves nothing: operating systems hand pids out again,
 aggressively on Windows, so a dead session's Marker beside a reassigned pid
 would make Perch declare a Profile Live and refuse a Switch with exit 16 —
@@ -40,7 +44,7 @@ piece of platform-specific code in Perch, for a correctness problem that is
 acute on one platform and merely rare on the others. Checking the executable
 name of the live pid instead is cheaper and Windows-only, and is refused for
 being asymmetric about a hazard that is universal, and for still misfiring where
-the recycled pid belongs to another `claude`.
+the recycled pid belongs to another client of the same name.
 
 The comparison allows five seconds of slack, because the two clocks it reads are
 not one clock on every platform. On macOS and Windows a process's start is fixed
@@ -100,8 +104,9 @@ Live when something says so, not when nothing does. That a Marker names its
 process and when it started is a named assumption, and it fails the way the
 others do, loudly and by name (ADR an-assumption-is-probed).
 
-Perch writes Markers as well as reading them, in the shape it reads, because it
-makes Profiles Live too: a Run does (ADR a-run-is-one-shot), and so does a login
+Perch writes Markers as well as reading them, in the shape it reads and into
+whichever Provider's Profile it is driving, because it makes Profiles Live too:
+a Run does (ADR a-run-is-one-shot), and so does a login
 (ADR a-login-perch-does-not-need).
 
 ## Writing into a Live Profile is refused, reading out of one is not
@@ -173,8 +178,9 @@ only one of them that no permission stands in front of.
 
 The rule that a Marker which cannot be read or understood is no evidence at all
 therefore lives beside the ask rather than inside the module that reads Markers.
-What Claude Code invented — where the directory is, what a Marker holds, how one
-is written — stays there (ADR an-assumption-is-probed); the five-second margin,
+What a client invented — where the directory is, what a Marker holds, how one is
+written, and whether Markers it did not write count — stays with the Provider
+(ADR an-assumption-is-probed); the five-second margin,
 the direction doubt resolves in, and what a refusal says are judgments made
 above it (ADR code-lives-where-it-reaches).
 
@@ -186,18 +192,20 @@ the first of those is true of a doubt as well, so a doubt keeps the promise and
 drops the advice; there is no client for it to name and no session to quit
 (ADR a-refusal-is-a-promise).
 
-The liveness ask is taken under Claude Code's locks rather than ahead of them.
-It is a statement about a moment and taking a lock can take seconds, so a
-`claude` started during that wait is one an earlier answer never saw.
+The liveness ask is taken under the client's locks rather than ahead of them,
+where the client has any. It is a statement about a moment and taking a lock can
+take seconds, so a client started during that wait is one an earlier answer
+never saw.
 
 A `sessions` directory that is there and will not be read — the root-owned one a
 `sudo claude` leaves — establishes nothing, which is not the same as nothing
 running against the Profile. It is told apart from Live by name, because a
 caller deciding what to do next has to tell them apart.
 
-Perch writes into a directory Claude Code owns. A Marker Perch wrote carries the
+Perch writes into a directory the client owns. A Marker Perch wrote carries the
 two fields that make it evidence and one saying who wrote it; it invents no
-`sessionId` and no version, because a file claiming to be a Claude Code session
-when it is not is worse than one that is plainly Perch's. If a future Claude
-Code reads these files for anything beyond liveness, that is the assumption that
-breaks.
+`sessionId` and no version, because a file claiming to be a client's session
+when it is not is worse than one that is plainly Perch's. That field is also
+what a Provider whose client writes no Markers of its own reads on: Codex trusts
+only the ones marked Perch's. If a future client reads these files for anything
+beyond liveness, that is the assumption that breaks.
