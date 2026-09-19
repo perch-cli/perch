@@ -360,6 +360,22 @@ fn a_claude_cycle_never_selects_a_codex_account_in_the_same_group() {
 }
 
 #[test]
+fn a_group_holding_one_providers_accounts_is_switched_within_without_a_flag() {
+    let host = common::three_accounts_in_one_group();
+    let document = credential("personal", EMAIL);
+    let host = host.with_file(CODEX, "").with_login(move |host, at| {
+        host.set_file(at.join("auth.json"), &document);
+        0
+    });
+    add_account(&host, "personal");
+
+    let (switched, printed) = common::run_switch(&host, "work");
+
+    switched.expect("`work` holds only Claude Accounts, so nothing is ambiguous");
+    assert!(printed.contains("Switched"), "{printed}");
+}
+
+#[test]
 fn an_export_carries_the_codex_credential_and_config() {
     let host = machine("personal");
     add_account(&host, "personal");
